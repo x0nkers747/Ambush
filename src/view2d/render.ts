@@ -1,5 +1,13 @@
-import { TRAINEE_SIDE, type SoldierPlan } from '#exercise';
-import type { DeepReadonly, Soldier, TerrainDataset, Vec2 } from '#sim';
+import { polygonCentroid, TRAINEE_SIDE, type PlannedRoute, type SoldierPlan } from '#exercise';
+import type {
+  DeepReadonly,
+  LosResult,
+  RoadClass,
+  Soldier,
+  TerrainDataset,
+  VegetationKind,
+  Vec2,
+} from '#sim';
 import { formatBearing } from './bearing';
 import {
   screenToWorld,
@@ -36,6 +44,21 @@ const COLORS = {
   killZoneLabel: '#9c1c16',
   opforRoute: 'rgba(122, 22, 40, 0.8)',
   trigger: '#d6301f',
+  woodlandFill: 'rgba(70, 125, 60, 0.42)',
+  woodlandEdge: 'rgba(36, 82, 32, 0.85)',
+  treeLineFill: 'rgba(52, 106, 46, 0.6)',
+  scrubFill: 'rgba(122, 152, 82, 0.3)',
+  scrubEdge: 'rgba(80, 112, 50, 0.75)',
+  roadCasing: '#6f5b3b',
+  roadFill: '#ecdfbf',
+  track: 'rgba(110, 86, 52, 0.9)',
+  building: '#4b4b4b',
+  buildingEdge: '#191919',
+  featureLabel: 'rgba(20, 24, 28, 0.85)',
+  losClear: '#1f9d55',
+  losBlocked: '#d6301f',
+  losObserver: '#0d5c2f',
+  generatedTurn: '#ffffff',
 } as const;
 
 const MINOR_CONTOUR_INTERVAL_M = 2;
@@ -44,6 +67,8 @@ const SOLDIER_RADIUS_PX = 6;
 const FACING_TICK_PX = 14;
 /** Soldier labels appear once soldiers are far enough apart to read them. */
 const LABEL_MAX_METERS_PER_PIXEL = 0.45;
+/** Building and vegetation ids appear from this zoom. */
+const FEATURE_LABEL_MAX_METERS_PER_PIXEL = 0.6;
 
 /** Canvas objects for one terrain, built once. */
 export interface TerrainLayer {
@@ -52,6 +77,25 @@ export interface TerrainLayer {
   readonly image: HTMLCanvasElement;
   readonly minorContours: Path2D;
   readonly indexContours: Path2D;
+  /** Environment features as map-coordinate paths, with label anchors. */
+  readonly vegetation: readonly { id: string; kind: VegetationKind; path: Path2D; anchor: Vec2 }[];
+  readonly roads: readonly {
+    id: string;
+    roadClass: RoadClass;
+    widthMeters: number;
+    path: Path2D;
+  }[];
+  readonly buildings: readonly { id: string; path: Path2D; anchor: Vec2 }[];
+}
+
+function polygonPath(points: readonly Vec2[]): Path2D {
+  const path = new Path2D();
+  points.forEach((p, i) => {
+    if (i === 0) path.moveTo(p.x, p.y);
+    else path.lineTo(p.x, p.y);
+  });
+  path.closePath();
+  return path;
 }
 
 export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
@@ -75,7 +119,33 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
       path.lineTo(segments[i + 2] ?? 0, segments[i + 3] ?? 0);
     }
   }
-  return { terrain, bounds: terrainBounds(terrain), image, minorContours, indexContours };
+  const { roads, buildings, vegetation } = terrain.features;
+  return {
+    terrain,
+    bounds: terrainBounds(terrain),
+    image,
+    minorContours,
+    indexContours,
+    vegetation: vegetation.map((v) => ({
+      id: v.id,
+      kind: v.kind,
+      path: polygonPath(v.boundary),
+      anchor: polygonCentroid(v.boundary) ?? v.boundary[0] ?? { x: 0, y: 0 },
+    })),
+    roads: roads.map((r) => {
+      const path = new Path2D();
+      r.centerline.forEach((p, i) => {
+        if (i === 0) path.moveTo(p.x, p.y);
+        else path.lineTo(p.x, p.y);
+      });
+      return { id: r.id, roadClass: r.roadClass, widthMeters: r.widthMeters, path };
+    }),
+    buildings: buildings.map((b) => ({
+      id: b.id,
+      path: polygonPath(b.footprint),
+      anchor: polygonCentroid(b.footprint) ?? b.footprint[0] ?? { x: 0, y: 0 },
+    })),
+  };
 }
 
 /** Draws the whole map. `ctx` must already be scaled for the device pixel ratio. */
@@ -85,14 +155,15 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
   ctx.fillRect(0, 0, width, height);
 
   drawTerrain(ctx, scene, layer);
+  drawEnvironment(ctx, scene, layer);
   drawGrid(ctx, scene, layer.bounds);
   drawKillZone(ctx, scene);
-  for (const { route, start } of scene.opforRoutes)
-    drawOpforRoute(ctx, scene, start, route.waypoints);
+  for (const { path } of scene.opforRoutes) drawOpforRoute(ctx, scene, path);
   for (const plan of scene.plans) {
     if (plan.soldierId !== scene.selectedId) drawOtherRoute(ctx, scene, plan);
   }
   drawSelectedRoute(ctx, scene);
+  drawLos(ctx, scene);
   for (const soldier of scene.soldiers) drawSoldier(ctx, scene, soldier);
   drawFacingArrow(ctx, scene);
   drawTrigger(ctx, scene);
@@ -143,6 +214,82 @@ function drawTerrain(ctx: CanvasRenderingContext2D, scene: MapScene, layer: Terr
   ctx.restore();
 }
 
+/** Sets the context to draw in map coordinates (metres), keeping the device pixel ratio. */
+function useMapTransform(ctx: CanvasRenderingContext2D, scene: MapScene, dpr: number): void {
+  const [a, b, c, d, e, f] = worldToScreenTransform(scene.camera, scene.viewport);
+  ctx.setTransform(a * dpr, b * dpr, c * dpr, d * dpr, e * dpr, f * dpr);
+}
+
+/** Vegetation, then roads, then buildings: a topographic-map look, not imagery. */
+function drawEnvironment(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const dpr = ctx.getTransform().a;
+  ctx.save();
+  useMapTransform(ctx, scene, dpr);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  for (const v of layer.vegetation) {
+    ctx.fillStyle =
+      v.kind === 'scrub'
+        ? COLORS.scrubFill
+        : v.kind === 'treeLine'
+          ? COLORS.treeLineFill
+          : COLORS.woodlandFill;
+    ctx.fill(v.path);
+    ctx.strokeStyle = v.kind === 'scrub' ? COLORS.scrubEdge : COLORS.woodlandEdge;
+    ctx.lineWidth = 1.2 * mpp;
+    ctx.setLineDash(v.kind === 'scrub' ? [4 * mpp, 3 * mpp] : []);
+    ctx.stroke(v.path);
+  }
+  ctx.setLineDash([]);
+  for (const r of layer.roads) {
+    if (r.roadClass === 'track') {
+      ctx.strokeStyle = COLORS.track;
+      ctx.lineWidth = Math.max(r.widthMeters, 1.5 * mpp);
+      ctx.setLineDash([6 * mpp, 4 * mpp]);
+      ctx.stroke(r.path);
+      ctx.setLineDash([]);
+      continue;
+    }
+    ctx.strokeStyle = COLORS.roadCasing;
+    ctx.lineWidth = Math.max(r.widthMeters, 3 * mpp) + 2 * mpp;
+    ctx.stroke(r.path);
+    ctx.strokeStyle = COLORS.roadFill;
+    ctx.lineWidth = Math.max(r.widthMeters, 3 * mpp);
+    ctx.stroke(r.path);
+  }
+  for (const b of layer.buildings) {
+    ctx.fillStyle = COLORS.building;
+    ctx.fill(b.path);
+    ctx.strokeStyle = COLORS.buildingEdge;
+    ctx.lineWidth = 1 * mpp;
+    ctx.stroke(b.path);
+  }
+  ctx.restore();
+
+  // Feature ids, once zoomed in far enough to read them.
+  if (mpp > FEATURE_LABEL_MAX_METERS_PER_PIXEL) return;
+  ctx.save();
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const label = (text: string, at: Vec2, color: string) => {
+    const p = worldToScreen(scene.camera, scene.viewport, at);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.strokeText(text, p.x, p.y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, p.x, p.y);
+  };
+  for (const v of layer.vegetation) label(v.id, v.anchor, COLORS.woodlandEdge);
+  for (const b of layer.buildings) label(b.id, b.anchor, COLORS.featureLabel);
+  ctx.restore();
+}
+
 function drawGrid(ctx: CanvasRenderingContext2D, scene: MapScene, bounds: Bounds): void {
   const { camera, viewport } = scene;
   const spacing = gridSpacing(camera.metersPerPixel);
@@ -189,16 +336,17 @@ export function gridSpacing(metersPerPixel: number): number {
   return 10000;
 }
 
-function routePoints(scene: MapScene, plan: SoldierPlan): Vec2[] | undefined {
-  const soldier = scene.soldiers.find((s) => s.id === plan.soldierId);
-  if (!soldier) return undefined;
-  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
-  return [toScreen(soldier.position), ...plan.waypoints.map(toScreen)];
+/** A planned route as walked: start, then each leg's generated turns and its waypoint. */
+function walkedPoints(route: PlannedRoute): Vec2[] {
+  return [route.start, ...route.legs.flatMap((leg) => [...(leg.turns ?? []), leg.to])];
 }
 
 function drawOtherRoute(ctx: CanvasRenderingContext2D, scene: MapScene, plan: SoldierPlan): void {
-  const points = routePoints(scene, plan);
-  if (!points || points.length < 2) return;
+  const route = scene.routes.get(plan.soldierId);
+  if (!route) return;
+  const points = walkedPoints(route).map((p) => worldToScreen(scene.camera, scene.viewport, p));
+  if (points.length < 2) return;
+  const waypoints = plan.waypoints.map((p) => worldToScreen(scene.camera, scene.viewport, p));
   ctx.save();
   ctx.strokeStyle = COLORS.otherRoute;
   ctx.fillStyle = COLORS.otherRoute;
@@ -206,7 +354,7 @@ function drawOtherRoute(ctx: CanvasRenderingContext2D, scene: MapScene, plan: So
   ctx.setLineDash([5, 4]);
   polyline(ctx, points);
   ctx.setLineDash([]);
-  for (const p of points.slice(1)) {
+  for (const p of waypoints) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
     ctx.fill();
@@ -217,25 +365,40 @@ function drawOtherRoute(ctx: CanvasRenderingContext2D, scene: MapScene, plan: So
 function drawSelectedRoute(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const route = routeGeometry(scene);
   if (!route) return;
-  const { points } = route;
+  const { points, legs, impossible } = route;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (!scene.editable) ctx.setLineDash([8, 5]);
-  ctx.strokeStyle = COLORS.routeHalo;
-  ctx.lineWidth = 5;
-  polyline(ctx, points);
-  ctx.strokeStyle = COLORS.route;
-  ctx.lineWidth = 2.5;
-  polyline(ctx, points);
+  legs.forEach((leg, i) => {
+    const bad = impossible[i] === true;
+    ctx.setLineDash(bad ? [4, 4] : scene.editable ? [] : [8, 5]);
+    ctx.strokeStyle = COLORS.routeHalo;
+    ctx.lineWidth = 5;
+    polyline(ctx, leg);
+    ctx.strokeStyle = bad ? COLORS.losBlocked : COLORS.route;
+    ctx.lineWidth = 2.5;
+    polyline(ctx, leg);
+  });
   ctx.setLineDash([]);
 
-  // A chevron at the middle of each leg shows the direction of travel.
+  // Generated turn points: small hollow dots, distinct from numbered trainee waypoints.
+  for (const leg of legs) {
+    for (const p of leg.slice(1, -1)) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+      ctx.fillStyle = COLORS.generatedTurn;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = COLORS.route;
+      ctx.stroke();
+    }
+  }
+
+  // A chevron at the middle of each straight piece shows the direction of travel.
   ctx.fillStyle = COLORS.route;
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1];
-    const b = points[i];
-    if (!a || !b || Math.hypot(b.x - a.x, b.y - a.y) < 4 * WAYPOINT_RADIUS_PX) continue;
+  const pieces = legs.flatMap((leg) => leg.slice(1).map((b, k) => [leg[k], b] as const));
+  for (const [a, b] of pieces) {
+    if (!a || Math.hypot(b.x - a.x, b.y - a.y) < 4 * WAYPOINT_RADIUS_PX) continue;
     const angle = Math.atan2(b.y - a.y, b.x - a.x);
     ctx.save();
     ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2);
@@ -253,14 +416,15 @@ function drawSelectedRoute(ctx: CanvasRenderingContext2D, scene: MapScene): void
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   points.slice(1).forEach((p, i) => {
+    const bad = impossible[i] === true;
     ctx.beginPath();
     ctx.arc(p.x, p.y, WAYPOINT_RADIUS_PX, 0, 2 * Math.PI);
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = COLORS.route;
+    ctx.strokeStyle = bad ? COLORS.losBlocked : COLORS.route;
     ctx.stroke();
-    ctx.fillStyle = COLORS.route;
+    ctx.fillStyle = bad ? COLORS.losBlocked : COLORS.route;
     ctx.fillText(String(i + 1), p.x, p.y + 0.5);
   });
   ctx.restore();
@@ -422,13 +586,9 @@ function drawKillZone(ctx: CanvasRenderingContext2D, scene: MapScene): void {
 }
 
 /** Scenario information: the expected enemy route, distinct from trainee plans. */
-function drawOpforRoute(
-  ctx: CanvasRenderingContext2D,
-  scene: MapScene,
-  start: Vec2,
-  waypoints: readonly Vec2[],
-): void {
-  const points = [start, ...waypoints].map((p) => worldToScreen(scene.camera, scene.viewport, p));
+function drawOpforRoute(ctx: CanvasRenderingContext2D, scene: MapScene, path: PlannedRoute): void {
+  const points = walkedPoints(path).map((p) => worldToScreen(scene.camera, scene.viewport, p));
+  const waypoints = path.legs.map((leg) => worldToScreen(scene.camera, scene.viewport, leg.to));
   ctx.save();
   ctx.strokeStyle = COLORS.opforRoute;
   ctx.fillStyle = COLORS.opforRoute;
@@ -437,7 +597,7 @@ function drawOpforRoute(
   ctx.setLineDash([12, 4, 2, 4]);
   polyline(ctx, points);
   ctx.setLineDash([]);
-  for (const p of points.slice(1)) ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+  for (const p of waypoints) ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1];
     const b = points[i];
@@ -453,6 +613,83 @@ function drawOpforRoute(
     ctx.fill();
     ctx.restore();
   }
+  ctx.restore();
+}
+
+/** Trainee-facing text for a sight-line result. */
+export function losLabel(result: LosResult): string {
+  const cause = result.obstruction?.cause;
+  if (!cause) return 'CLEAR LOS';
+  return cause.kind === 'terrain'
+    ? 'BLOCKED — TERRAIN'
+    : `BLOCKED — ${cause.kind === 'building' ? 'BUILDING' : 'VEGETATION'} ${cause.featureId}`;
+}
+
+/** CHECK LOS: the observer, sight lines (clear part green, obstructed part red) and obstruction points. */
+function drawLos(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const los = scene.los;
+  if (!los) return;
+  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
+  const observer = toScreen(los.observer);
+  const sightLine = (result: LosResult, width: number) => {
+    const target = toScreen(result.to);
+    const stop = result.obstruction ? toScreen(result.obstruction.point) : target;
+    ctx.lineWidth = width;
+    ctx.strokeStyle = COLORS.losClear;
+    polyline(ctx, [observer, stop]);
+    if (result.obstruction) {
+      ctx.strokeStyle = COLORS.losBlocked;
+      ctx.setLineDash([4, 4]);
+      polyline(ctx, [stop, target]);
+      ctx.setLineDash([]);
+    }
+    return { stop, target };
+  };
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const sample of los.killZone?.samples ?? []) {
+    const { target } = sightLine(sample.result, 1.5);
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, 4, 0, 2 * Math.PI);
+    ctx.fillStyle = sample.result.clear ? COLORS.losClear : COLORS.losBlocked;
+    ctx.fill();
+  }
+  if (los.ray) {
+    const { stop, target } = sightLine(los.ray, 3);
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, 5, 0, 2 * Math.PI);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = los.ray.clear ? COLORS.losClear : COLORS.losBlocked;
+    ctx.stroke();
+    if (los.ray.obstruction) {
+      // An X where the sight line is first obstructed.
+      ctx.strokeStyle = COLORS.losBlocked;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(stop.x - 6, stop.y - 6);
+      ctx.lineTo(stop.x + 6, stop.y + 6);
+      ctx.moveTo(stop.x + 6, stop.y - 6);
+      ctx.lineTo(stop.x - 6, stop.y + 6);
+      ctx.stroke();
+    }
+    const text = losLabel(los.ray);
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.strokeText(text, target.x + 10, target.y - 12);
+    ctx.fillStyle = los.ray.clear ? COLORS.losObserver : COLORS.losBlocked;
+    ctx.fillText(text, target.x + 10, target.y - 12);
+  }
+  // The observation point: a ring, dashed when it is only the current position.
+  ctx.beginPath();
+  ctx.arc(observer.x, observer.y, 9, 0, 2 * Math.PI);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = COLORS.losObserver;
+  ctx.setLineDash(los.planned ? [] : [3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
   ctx.restore();
 }
 

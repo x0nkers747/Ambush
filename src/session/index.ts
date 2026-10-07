@@ -4,6 +4,8 @@ export {
   clearSelection,
   createSession,
   selectSoldier,
+  setLosKillZone,
+  setLosTarget,
   setTimeScale,
   stepTimeScale,
   setTool,

@@ -15,6 +15,8 @@ export interface TacticalMapOptions {
   readonly exercise: Exercise;
   readonly getSession: () => Session;
   readonly setSession: (session: Session) => void;
+  /** Shows the trainee why a map edit was refused. */
+  readonly notify?: (message: string) => void;
 }
 
 /** Map point under the pointer, for a coordinate readout. */
@@ -39,6 +41,7 @@ export function createTacticalMap({
   exercise,
   getSession,
   setSession,
+  notify,
 }: TacticalMapOptions): TacticalMap {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D is not available');
@@ -52,9 +55,14 @@ export function createTacticalMap({
 
   const scene = (): MapScene => buildScene(exercise, getSession(), camera, viewport);
 
-  const actions = createMapActions(exercise, { get: getSession, set: setSession }, (next) => {
-    camera = next;
-  });
+  const actions = createMapActions(
+    exercise,
+    { get: getSession, set: setSession },
+    (next) => {
+      camera = next;
+    },
+    notify,
+  );
   const controller = createMapController(scene, actions);
 
   const local = (event: MouseEvent): Vec2 => {

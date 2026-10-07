@@ -2,13 +2,15 @@ import {
   azimuthFromDegrees,
   createSimulation,
   engagementAreaId,
-  isOnTerrain,
+  lineOfSight,
   normalizeAzimuth,
+  pointProblem,
   soldierId,
   waypointId,
   type Azimuth,
   type EngagementAreaEnteredEvent,
   type EngagementAreaId,
+  type LosResult,
   type Side,
   type SimConfig,
   type SimEvent,
@@ -23,10 +25,18 @@ import {
   insertVertex,
   KillZoneEditError,
   killZoneProblems,
+  killZoneSamplePoints,
   moveVertex,
   type KillZone,
 } from './kill-zone';
 import { remainingPlan, samePlan, validatePlan, type SoldierPlan } from './plan';
+import {
+  createPathCache,
+  describePathProblem,
+  planRoute,
+  type PlannedLeg,
+  type PlannedRoute,
+} from './routes';
 import { createFixedStepRunner, type FixedStepRunner } from './runner';
 
 // The ambush exercise (docs/adr/0009, docs/adr/0010): phases, the trainee's
@@ -128,6 +138,14 @@ export class ExerciseError extends Error {
   override name = 'ExerciseError';
 }
 
+/** Line of sight from one observation point to each kill-zone sample point. */
+export interface KillZoneVisibility {
+  readonly observer: Vec2;
+  readonly planned: boolean;
+  readonly samples: readonly { readonly point: Vec2; readonly result: LosResult }[];
+  readonly clearCount: number;
+}
+
 export interface ExerciseOptions {
   readonly config: SimConfig;
   readonly scenario: AmbushScenario;
@@ -166,6 +184,27 @@ export interface Exercise {
   displayedPlan(soldierId: SoldierId): SoldierPlan | undefined;
   /** Whether any draft differs from what the soldiers are doing (edits not yet executed). */
   readonly hasUncommittedChanges: boolean;
+  /**
+   * The displayed plan with the walkable path of each leg: generated turn points
+   * (not trainee intent) between the trainee's waypoints, from the soldier's
+   * current position.
+   */
+  displayedRoute(soldierId: SoldierId): PlannedRoute | undefined;
+  /** The walkable path of each scenario OPFOR route, by route id, from its soldier's start. */
+  readonly opforRoutePaths: ReadonlyMap<string, PlannedRoute>;
+
+  /**
+   * Where a trainee soldier will observe from: its planned final position (the
+   * last waypoint of the displayed plan), or where it stands if it has none.
+   */
+  observer(soldierId: SoldierId): { readonly point: Vec2; readonly planned: boolean } | undefined;
+  /** Line of sight from the soldier's observation point (see `observer`) to a map point. */
+  lineOfSightFrom(soldierId: SoldierId, target: Vec2): LosResult | undefined;
+  /**
+   * Line of sight from the soldier's observation point to the kill zone's sample
+   * points (see `killZoneSamplePoints`), or `undefined` without a complete kill zone.
+   */
+  killZoneVisibility(soldierId: SoldierId): KillZoneVisibility | undefined;
 
   addWaypoint(soldierId: SoldierId, point: Vec2, index?: number): WaypointId;
   moveWaypoint(soldierId: SoldierId, waypoint: WaypointId, point: Vec2): void;
@@ -215,6 +254,7 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
   validateOpforRoutes(scenario, TRAINEE_SIDE);
   const sim = createSimulation(config, scenario);
   const terrain = sim.world.terrain;
+  const pathFor = createPathCache(terrain);
 
   let phase: ExercisePhase = 'bluforPlanning';
   let paused = false;
@@ -228,6 +268,21 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
   const starts = new Map<string, Vec2>(
     sim.state.soldiers.map((s) => [s.id, Object.freeze({ x: s.position.x, y: s.position.y })]),
   );
+  const opforRoutePaths = new Map<string, PlannedRoute>();
+  for (const route of scenario.opforRoutes) {
+    const planned = planRoute(
+      pathFor,
+      starts.get(route.soldierId) ?? { x: 0, y: 0 },
+      route.waypoints,
+    );
+    const bad = planned.legs.find((l) => l.problem !== null);
+    if (bad) {
+      throw new Error(
+        `Scenario "${scenario.id}": route waypoint "${bad.waypointId}" is ${bad.problem ?? ''}`,
+      );
+    }
+    opforRoutePaths.set(route.id, planned);
+  }
   const trainee = sim.state.soldiers.filter((s) => s.side === TRAINEE_SIDE).map((s) => s.id);
   const traineeIds = new Set<SoldierId>(trainee);
   /** Next number for generated waypoint ids, per soldier; never reused. */
@@ -339,9 +394,40 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     if (!draft) throw new ExerciseError(`soldier "${id}" cannot be planned for`);
     return draft;
   };
-  const checkPoint = ({ x, y }: Vec2) => {
-    if (!isOnTerrain(terrain, x, y))
-      throw new ExerciseError(`(${String(x)}, ${String(y)}) is off the map`);
+  const position = (id: SoldierId): Vec2 => {
+    const { x, y } = soldierState(id).position;
+    return { x, y };
+  };
+  /** The soldier's planned final position, or where it stands if it has no waypoints. */
+  const observer = (id: SoldierId) => {
+    if (!traineeIds.has(id)) return undefined;
+    const plan = editable() ? drafts.get(id) : currentPlan(id);
+    const last = plan?.waypoints.at(-1);
+    return last
+      ? { point: { x: last.x, y: last.y }, planned: true }
+      : { point: position(id), planned: false };
+  };
+
+  /**
+   * Refuses a waypoint at `point` that is not a place to stand or that cannot be
+   * walked to from the point before it, or on to the point after it. `index` is
+   * the waypoint's position in the route; `replacing` when it moves an existing one.
+   */
+  const checkPlacement = (draft: SoldierPlan, index: number, point: Vec2, replacing: boolean) => {
+    const problem = pointProblem(terrain, point);
+    if (problem) throw new ExerciseError(`Waypoint not placed: ${describePathProblem(problem)}.`);
+    const before = index === 0 ? position(draft.soldierId) : draft.waypoints[index - 1];
+    const after = draft.waypoints[replacing ? index + 1 : index];
+    for (const [a, b] of [
+      [before, point],
+      [point, after],
+    ] as const) {
+      if (a && b && !pathFor(a, b).ok) {
+        throw new ExerciseError(
+          `Waypoint not placed: ${describePathProblem({ kind: 'unreachable' })}.`,
+        );
+      }
+    }
   };
   const indexOf = (draft: SoldierPlan, waypoint: WaypointId) => {
     const index = draft.waypoints.findIndex((w) => w.id === waypoint);
@@ -368,9 +454,14 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
 
   const commit = (trigger: PlanRevision['trigger']): CommitResult => {
     const plans = trainee.map((id) => drafts.get(id) ?? currentPlan(id));
-    const problems = plans.flatMap((plan) =>
-      validatePlan(plan, terrain).map((problem) => ({ soldierId: plan.soldierId, problem })),
-    );
+    const problems = plans.flatMap((plan) => [
+      ...validatePlan(plan, terrain).map((problem) => ({ soldierId: plan.soldierId, problem })),
+      ...planRoute(pathFor, position(plan.soldierId), plan.waypoints).legs.flatMap((leg, i) =>
+        leg.problem === null
+          ? []
+          : [{ soldierId: plan.soldierId, problem: `waypoint ${String(i + 1)} is ${leg.problem}` }],
+      ),
+    ]);
     if (problems.length > 0) return { ok: false, problems };
 
     const changed = plans.filter((plan) => !samePlan(plan, currentPlan(plan.soldierId)));
@@ -465,14 +556,61 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     get hasUncommittedChanges() {
       return uncommittedChanges();
     },
+    displayedRoute(id) {
+      if (!traineeIds.has(id)) return undefined;
+      const soldier = soldierState(id);
+      const plan = editable() ? drafts.get(id) : currentPlan(id);
+      if (!plan) return undefined;
+      const active = soldier.orders;
+      const pending = revisions.at(-1)?.tick === sim.tick;
+      // While the plan is what the soldier is already doing, show the paths it is
+      // actually walking; otherwise plan them as the simulation will on commit.
+      if (active && !pending && samePlan(plan, remainingPlan(soldier))) {
+        const legs: PlannedLeg[] = active.orders.waypoints
+          .slice(active.nextWaypointIndex)
+          .map((w, k) => {
+            const turns = active.legPaths[active.nextWaypointIndex + k] ?? [];
+            return {
+              waypointId: w.id,
+              to: { x: w.x, y: w.y },
+              turns: k === 0 ? turns.slice(active.nextTurnIndex) : turns,
+              problem: null,
+            };
+          });
+        return { start: position(id), legs, ok: true };
+      }
+      return planRoute(pathFor, position(id), plan.waypoints);
+    },
+    opforRoutePaths,
+
+    observer,
+    lineOfSightFrom(id, target) {
+      const from = observer(id);
+      if (!from || pointProblem(terrain, target)?.kind === 'offTerrain') return undefined;
+      return lineOfSight(terrain, from.point, target);
+    },
+    killZoneVisibility(id) {
+      const from = observer(id);
+      if (!from || !killZone || killZoneProblems(killZone, []).length > 0) return undefined;
+      const samples = killZoneSamplePoints(killZone).map((point) => ({
+        point,
+        result: lineOfSight(terrain, from.point, point),
+      }));
+      return {
+        observer: from.point,
+        planned: from.planned,
+        samples,
+        clearCount: samples.filter((s) => s.result.clear).length,
+      };
+    },
 
     addWaypoint(id, point, index) {
       const draft = editableDraft(id);
-      checkPoint(point);
       const at = index ?? draft.waypoints.length;
       if (!Number.isInteger(at) || at < 0 || at > draft.waypoints.length) {
         throw new ExerciseError(`waypoint index ${String(at)} is out of range`);
       }
+      checkPlacement(draft, at, point, false);
       const n = waypointCounters.get(id) ?? 1;
       waypointCounters.set(id, n + 1);
       const newId = waypointId(`${id}.${String(n)}`);
@@ -481,8 +619,8 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     },
     moveWaypoint(id, waypoint, point) {
       const draft = editableDraft(id);
-      checkPoint(point);
       const index = indexOf(draft, waypoint);
+      checkPlacement(draft, index, point, true);
       replaceWaypoints(draft, (w) => {
         w[index] = { id: waypoint, x: point.x, y: point.y };
       });

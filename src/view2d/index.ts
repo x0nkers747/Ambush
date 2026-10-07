@@ -11,6 +11,7 @@ export {
   type Camera,
   type Viewport,
 } from './camera';
+export { losLabel } from './render';
 export {
   createTacticalMap,
   type PointerReadout,

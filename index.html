@@ -117,8 +117,22 @@
         border-color: var(--danger);
         background: rgba(60, 12, 10, 0.9);
       }
-      .banner[hidden] {
+      .banner[hidden],
+      .toast[hidden] {
         display: none;
+      }
+      .toast {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 70%;
+        padding: 8px 16px;
+        border-radius: 6px;
+        background: rgba(60, 12, 10, 0.92);
+        border: 1px solid var(--danger);
+        color: #fff;
+        pointer-events: none;
       }
       .banner-title {
         font-size: 22px;

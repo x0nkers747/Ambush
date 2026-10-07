@@ -4,8 +4,9 @@ import type { SimState, Soldier, SoldierId } from './state';
 import { heightAt } from './terrain';
 import type { SimWorld } from './world';
 
-// Movement system (docs/adr/0008). Soldiers travel in straight lines between
-// waypoints at constant ground speed. The path depends only on the waypoints and
+// Movement system (docs/adr/0008, docs/adr/0011). Soldiers travel at constant
+// ground speed in straight lines between waypoints, or between the turn points
+// navigation generated to take a leg around buildings. The path depends only on the waypoints and
 // on simulation time, never on the tick length: each tick is split at every
 // waypoint arrival, and the remaining time carries on to the next leg.
 // Facing turns toward the direction of travel at a limited rate but does not
@@ -76,9 +77,12 @@ function moveSoldier(
       active.behavior = 'facing';
       break;
     }
+    // Walk the leg's generated turn points first; only the waypoint itself is trainee intent.
+    const turn = active.legPaths[active.nextWaypointIndex]?.[active.nextTurnIndex];
+    const target = turn ?? waypoint;
     const remaining = time.dtSeconds - elapsed;
-    const dx = waypoint.x - soldier.position.x;
-    const dy = waypoint.y - soldier.position.y;
+    const dx = target.x - soldier.position.x;
+    const dy = target.y - soldier.position.y;
     const distance = Math.hypot(dx, dy);
     const legSeconds = distance / speed;
     const arrives = legSeconds <= remaining + COMPLETION_EPSILON_SECONDS;
@@ -101,11 +105,16 @@ function moveSoldier(
       return;
     }
 
-    // Arrive exactly on the waypoint and carry the rest of the tick forward.
-    placeOnTerrain(soldier, world, waypoint.x, waypoint.y);
+    // Arrive exactly on the point and carry the rest of the tick forward.
+    placeOnTerrain(soldier, world, target.x, target.y);
     elapsed += seconds;
     record(path, soldier, from, start, time.startSeconds + elapsed);
+    if (turn) {
+      active.nextTurnIndex += 1;
+      continue;
+    }
     active.nextWaypointIndex += 1;
+    active.nextTurnIndex = 0;
     if (active.nextWaypointIndex === waypoints.length) active.behavior = 'facing';
     events.push({
       type: 'waypointReached',

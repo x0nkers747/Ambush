@@ -1,3 +1,4 @@
+import { NO_FEATURES, type EnvironmentFeatures } from './environment';
 import type { TerrainDataset } from './terrain';
 
 // Synthetic terrain for tests and early scenarios: a heightfield sampled from
@@ -17,6 +18,7 @@ export type ElevationFunction = (x: number, y: number) => number;
 export function createSyntheticTerrain(
   grid: TerrainGrid,
   elevationAt: ElevationFunction,
+  features: EnvironmentFeatures = NO_FEATURES,
 ): TerrainDataset {
   const { originX, originY, cellSize, columns, rows } = grid;
   const elevations: number[] = [];
@@ -26,9 +28,10 @@ export function createSyntheticTerrain(
     }
   }
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     georef: null,
     heightfield: { originX, originY, cellSize, columns, rows, elevations },
+    features,
   };
 }
 

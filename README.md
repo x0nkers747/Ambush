@@ -4,9 +4,9 @@ Interactive training simulation for planning, executing and reviewing
 squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
-Status: **Phase 3.5**: ambush exercise flow. The trainee plans BLUEFOR positions and a kill
-zone, occupies the ambush position, presses START OPFOR, and the ambush triggers when OPFOR
-enters the kill zone. No combat, 3D or perception yet.
+Status: **Phase 3.6**: tactical environment and planning tools. The demo map has relief, roads,
+buildings and vegetation; routes bend around buildings; CHECK LOS shows what a planned position
+can see. The ambush flow runs through AMBUSH TRIGGERED. No combat, 3D or GIS import yet.
 
 ## Requirements
 
@@ -27,6 +27,9 @@ Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or 
 1. **BLUEFOR planning.** Select soldiers and plan their routes and final facings. Press **K** to
    switch to the kill zone and draw it across the expected enemy route (the dark-red dashed
    line).
+   Use **L** (CHECK LOS) to see what a soldier can see from their planned final position: click a
+   point, or use _LOS to kill zone_. Routes bend around buildings automatically; waypoints cannot
+   be placed in or against a building.
 2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change the
    remaining routes, then Resume.
 3. **BLUEFOR ready.** When every soldier is in position the exercise stops and waits.
@@ -43,6 +46,7 @@ Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or 
 | Right-click waypoint/corner   | Delete it                                       |
 | Drag the yellow arrow handle  | Set the final facing (shown as 000°–359°)       |
 | K                             | Switch between editing routes and the kill zone |
+| L                             | CHECK LOS: click a point to inspect the view    |
 | Backspace / Delete            | Delete the last waypoint                        |
 | Drag the map / middle-drag    | Pan                                             |
 | Mouse wheel                   | Zoom at the cursor                              |
@@ -95,3 +99,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 8. [Terrain heightfield and waypoint movement](docs/adr/0008-terrain-and-movement.md)
 9. [Exercise phases, plan revisions and the 2D planning view](docs/adr/0009-exercise-and-planning-view.md)
 10. [Ambush exercise flow, kill zone and trigger](docs/adr/0010-ambush-exercise-flow.md)
+11. [Tactical environment, path planning and line of sight](docs/adr/0011-tactical-environment.md)

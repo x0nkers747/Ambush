@@ -1,13 +1,16 @@
 import type { Exercise } from '#exercise';
-import type { SoldierId } from '#sim';
+import type { SoldierId, Vec2 } from '#sim';
 
 // Ephemeral UI state (docs/adr/0004): never recorded, never seen by the simulation.
 
 export const TIME_SCALES = [1, 8, 16] as const;
 export type TimeScale = (typeof TIME_SCALES)[number];
 
-/** What map clicks edit: the selected soldier's route, or the kill zone. */
-export type MapTool = 'routes' | 'killZone';
+/**
+ * What map clicks do: edit the selected soldier's route, edit the kill zone,
+ * or inspect line of sight from the selected soldier (CHECK LOS).
+ */
+export type MapTool = 'routes' | 'killZone' | 'los';
 
 export interface Session {
   /** The trainee soldier whose plan is being viewed and edited, if any. */
@@ -15,10 +18,20 @@ export interface Session {
   /** Ratio of simulation time to real time while executing. */
   readonly timeScale: TimeScale;
   readonly tool: MapTool;
+  /** The map point being inspected with CHECK LOS. */
+  readonly losTarget: Vec2 | null;
+  /** Whether CHECK LOS also assesses the whole kill zone. */
+  readonly losKillZone: boolean;
 }
 
 export function createSession(): Session {
-  return { selectedSoldierId: null, timeScale: 1, tool: 'routes' };
+  return {
+    selectedSoldierId: null,
+    timeScale: 1,
+    tool: 'routes',
+    losTarget: null,
+    losKillZone: false,
+  };
 }
 
 /**
@@ -46,4 +59,12 @@ export function stepTimeScale(session: Session, direction: 1 | -1): Session {
 
 export function setTool(session: Session, tool: MapTool): Session {
   return { ...session, tool };
+}
+
+export function setLosTarget(session: Session, losTarget: Vec2 | null): Session {
+  return { ...session, losTarget };
+}
+
+export function setLosKillZone(session: Session, losKillZone: boolean): Session {
+  return { ...session, losKillZone };
 }

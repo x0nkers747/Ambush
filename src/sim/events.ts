@@ -22,7 +22,12 @@ export interface CommandRejectedEvent {
   readonly type: 'commandRejected';
   readonly tick: number;
   readonly command: SimCommand;
-  readonly reason: 'unknownSoldier' | 'waypointOffTerrain' | 'areaOffTerrain';
+  readonly reason:
+    | 'unknownSoldier'
+    | 'waypointOffTerrain'
+    | 'waypointBlocked'
+    | 'waypointUnreachable'
+    | 'areaOffTerrain';
 }
 
 /** A soldier arrived at one of its waypoints. */

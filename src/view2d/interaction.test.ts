@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
 import { createSession, setTool, type Session } from '#session';
-import { createSyntheticTerrain, flatElevation, soldierId } from '#sim';
+import { createSyntheticTerrain, flatElevation, rectangle, soldierId } from '#sim';
 import { createMapActions } from './actions';
 import { formatBearing } from './bearing';
 import { screenToWorld, type Camera } from './camera';
@@ -19,6 +19,12 @@ const SCENARIO: AmbushScenario = {
   terrain: createSyntheticTerrain(
     { originX: -150, originY: -150, cellSize: 30, columns: 11, rows: 11 },
     flatElevation(0),
+    // A building well away from the routes the other tests draw.
+    {
+      roads: [],
+      buildings: [{ id: 'B-9', footprint: rectangle(100, -100, 20, 20), heightMeters: 6 }],
+      vegetation: [],
+    },
   ),
   movement: { speed: 2, maxTurnRate: Math.PI / 2 },
   units: [
@@ -75,7 +81,9 @@ function setup() {
     (next) => {
       camera = next;
     },
+    (message) => notices.push(message),
   );
+  const notices: string[] = [];
   const scene = () => buildScene(exercise, session, camera, viewport);
   const controller = createMapController(scene, actions);
 
@@ -103,6 +111,10 @@ function setup() {
       controller.pointerUp({ x: start.x + dx, y: start.y + dy, button: 0 });
     },
     route: () => exercise.draft(A)?.waypoints.map((w) => [w.x, w.y]),
+    notices,
+    useTool(tool: 'routes' | 'killZone' | 'los') {
+      session = setTool(session, tool);
+    },
     useKillZoneTool() {
       session = setTool(session, 'killZone');
     },
@@ -372,5 +384,59 @@ describe('kill-zone editing', () => {
     ui.dragPixels(-60, 30, 10, 10);
     expect(ui.corners()).toHaveLength(4);
     expect(ui.corners()?.[0]).toEqual([-60, 30]);
+  });
+});
+
+describe('refused waypoints', () => {
+  it('tells the trainee why a waypoint inside a building was not placed', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.click(100, -100);
+    expect(ui.route()).toEqual([]);
+    expect(ui.notices).toEqual([
+      'Waypoint not placed: inside building B-9; soldiers cannot enter buildings.',
+    ]);
+  });
+});
+
+describe('CHECK LOS', () => {
+  it('inspects the clicked map point from the selected soldier', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.useTool('los');
+    ui.click(40, 60);
+    expect(ui.session.losTarget).toEqual({ x: 40, y: 60 });
+    expect(ui.route()).toEqual([]); // no waypoint added
+    const los = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los;
+    expect(los?.observer).toEqual({ x: 0, y: 0 });
+    expect(los?.planned).toBe(false);
+    expect(los?.ray?.clear).toBe(true);
+  });
+
+  it('reports a building in the way', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.useTool('los');
+    ui.click(140, -140); // beyond B-9 as seen from (0, 0)
+    const los = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los;
+    expect(los?.ray?.obstruction?.cause).toEqual({ kind: 'building', featureId: 'B-9' });
+  });
+
+  it('switches the observer by clicking another BLUEFOR soldier', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.useTool('los');
+    ui.click(50, 0);
+    expect(ui.session.selectedSoldierId).toBe('B');
+    expect(ui.session.losTarget).toBeNull();
+  });
+
+  it('shows nothing until a soldier is selected', () => {
+    const ui = setup();
+    ui.useTool('los');
+    ui.click(40, 60);
+    expect(
+      buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los,
+    ).toBeNull();
   });
 });

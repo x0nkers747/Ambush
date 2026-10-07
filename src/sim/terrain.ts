@@ -1,5 +1,8 @@
-// Runtime terrain format (docs/adr/0006, docs/adr/0008). Immutable reference
-// data: it is not part of SimState, is never mutated, and is not snapshotted.
+import { validateFeatures, type EnvironmentFeatures } from './environment';
+
+// Runtime terrain format (docs/adr/0006, docs/adr/0008, docs/adr/0011).
+// Immutable reference data: it is not part of SimState, is never mutated, and
+// is not snapshotted.
 
 /** Relates the simulation frame to a projected CRS. `null` for synthetic terrain. */
 export interface GeoReference {
@@ -34,11 +37,13 @@ export interface Heightfield {
   readonly elevations: readonly number[];
 }
 
-/** Terrain features (roads, buildings, vegetation) are added when they are needed. */
+/** Elevation plus the environment features standing on it. */
 export interface TerrainDataset {
-  readonly formatVersion: 1;
+  /** 2 added `features`. */
+  readonly formatVersion: 2;
   readonly georef: GeoReference | null;
   readonly heightfield: Heightfield;
+  readonly features: EnvironmentFeatures;
 }
 
 /** Throws a RangeError describing the first invalid field. */
@@ -61,6 +66,7 @@ export function validateTerrain(terrain: TerrainDataset): void {
     );
   }
   if (!elevations.every(Number.isFinite)) throw new RangeError('terrain elevations must be finite');
+  validateFeatures(terrain.features, ({ x, y }) => isOnTerrain(terrain, x, y));
 }
 
 /** Whether (x, y) lies on the terrain, boundaries included. */

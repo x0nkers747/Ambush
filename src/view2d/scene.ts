@@ -1,8 +1,17 @@
-import type { AmbushTrigger, Exercise, KillZone, OpforRoute, SoldierPlan } from '#exercise';
+import type {
+  AmbushTrigger,
+  Exercise,
+  KillZone,
+  KillZoneVisibility,
+  OpforRoute,
+  PlannedRoute,
+  SoldierPlan,
+} from '#exercise';
 import type { MapTool, Session } from '#session';
 import {
   isOnTerrain,
   type DeepReadonly,
+  type LosResult,
   type Soldier,
   type SoldierId,
   type Vec2,
@@ -30,12 +39,27 @@ export interface MapScene {
   readonly killZone: KillZone | null;
   /** Whether the kill zone can be edited now (kill-zone tool). */
   readonly killZoneEditable: boolean;
-  /** Scenario OPFOR routes the trainee may see, each from its soldier's starting position. */
-  readonly opforRoutes: readonly { readonly route: OpforRoute; readonly start: Vec2 }[];
+  /** Walkable routes of trainee soldiers (generated turn points between waypoints). */
+  readonly routes: ReadonlyMap<SoldierId, PlannedRoute>;
+  /** Scenario OPFOR routes the trainee may see, with their walkable paths. */
+  readonly opforRoutes: readonly { readonly route: OpforRoute; readonly path: PlannedRoute }[];
+  /** CHECK LOS results for the selected soldier, while that tool is active. */
+  readonly los: LosView | null;
   /** The ambush trigger, once it has happened. */
   readonly trigger: AmbushTrigger | null;
   /** Whether a map point lies on the terrain. */
   isOnMap(point: Vec2): boolean;
+}
+
+/** What CHECK LOS shows for the selected soldier. */
+export interface LosView {
+  /** Where the soldier observes from: its planned final position, or where it stands. */
+  readonly observer: Vec2;
+  readonly planned: boolean;
+  /** Sight line to the inspected point, once one is chosen. */
+  readonly ray: LosResult | null;
+  /** Sight lines to the kill zone's sample points, when requested and the zone is complete. */
+  readonly killZone: KillZoneVisibility | null;
 }
 
 /** The scene for the current exercise and session state. */
@@ -59,12 +83,32 @@ export function buildScene(
     tool: session.tool,
     killZone: exercise.killZone,
     killZoneEditable: exercise.canEditPlans && session.tool === 'killZone',
+    routes: new Map(
+      plans.flatMap((p) => {
+        const route = exercise.displayedRoute(p.soldierId);
+        return route ? [[p.soldierId, route] as const] : [];
+      }),
+    ),
     opforRoutes: exercise.opforRoutes.flatMap((route) => {
-      const start = exercise.scenarioStart(route.soldierId);
-      return route.shownToTrainee && start ? [{ route, start }] : [];
+      const path = exercise.opforRoutePaths.get(route.id);
+      return route.shownToTrainee && path ? [{ route, path }] : [];
     }),
+    los: losView(exercise, session),
     trigger: exercise.trigger,
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
+  };
+}
+
+function losView(exercise: Exercise, session: Session): LosView | null {
+  const id = session.selectedSoldierId;
+  if (session.tool !== 'los' || id === null) return null;
+  const observer = exercise.observer(id);
+  if (!observer) return null;
+  return {
+    observer: observer.point,
+    planned: observer.planned,
+    ray: session.losTarget ? (exercise.lineOfSightFrom(id, session.losTarget) ?? null) : null,
+    killZone: session.losKillZone ? (exercise.killZoneVisibility(id) ?? null) : null,
   };
 }
 
@@ -78,8 +122,15 @@ export const FACING_HANDLE_HIT_RADIUS_PX = 10;
 export const KILL_ZONE_VERTEX_HIT_RADIUS_PX = 9;
 
 export interface RouteGeometry {
-  /** Route start (the soldier) followed by each waypoint, in screen pixels. */
+  /** Route start (the soldier) followed by each trainee waypoint, in screen pixels. */
   readonly points: readonly Vec2[];
+  /**
+   * Each leg as walked, in screen pixels: from the previous point through the
+   * generated turn points to its waypoint. A leg that cannot be walked is a
+   * straight line flagged in `impossible`.
+   */
+  readonly legs: readonly (readonly Vec2[])[];
+  readonly impossible: readonly boolean[];
   /** Where the final facing arrow starts: the last waypoint, or the soldier. */
   readonly facingAnchor: Vec2;
   /** Tip of the final facing arrow (the drag handle). */
@@ -98,8 +149,16 @@ export function routeGeometry(scene: MapScene): RouteGeometry | undefined {
   const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
   const points = [toScreen(soldier.position), ...plan.waypoints.map(toScreen)];
   const facingAnchor = points[points.length - 1] ?? toScreen(soldier.position);
+  const route = scene.routes.get(soldier.id);
+  const legs = plan.waypoints.map((_, i) => [
+    points[i] ?? facingAnchor,
+    ...(route?.legs[i]?.turns ?? []).map(toScreen),
+    points[i + 1] ?? facingAnchor,
+  ]);
   return {
     points,
+    legs,
+    impossible: plan.waypoints.map((_, i) => route?.legs[i]?.turns === null),
     facingAnchor,
     facingTip: {
       x: facingAnchor.x + Math.sin(plan.finalFacing) * FACING_ARROW_PX,
@@ -143,23 +202,26 @@ export function waypointAt(scene: MapScene, screen: Vec2): WaypointId | undefine
 
 /**
  * The index at which a waypoint placed at `screen` would be inserted if it lies
- * on a leg of the selected route (leg i ends at waypoint i), or `undefined`.
+ * on a leg of the selected route as walked (leg i ends at waypoint i), or `undefined`.
  */
 export function insertionIndexAt(scene: MapScene, screen: Vec2): number | undefined {
   const route = routeGeometry(scene);
   if (!route) return undefined;
   let best: number | undefined;
   let bestDistance = SEGMENT_HIT_DISTANCE_PX;
-  for (let i = 1; i < route.points.length; i += 1) {
-    const a = route.points[i - 1];
-    const b = route.points[i];
-    if (!a || !b) continue;
-    const d = distanceToSegment(screen, a, b);
-    if (d <= bestDistance) {
-      best = i - 1;
-      bestDistance = d;
+  // Any piece of a leg as walked counts, including around generated turns.
+  route.legs.forEach((leg, i) => {
+    for (let k = 1; k < leg.length; k += 1) {
+      const a = leg[k - 1];
+      const b = leg[k];
+      if (!a || !b) continue;
+      const d = distanceToSegment(screen, a, b);
+      if (d <= bestDistance) {
+        best = i;
+        bestDistance = d;
+      }
     }
-  }
+  });
   return best;
 }
 

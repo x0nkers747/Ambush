@@ -25,7 +25,40 @@ export {
   type Vec2,
   type Vec3,
 } from './geometry';
+export {
+  boundsOf,
+  NO_FEATURES,
+  rectangle,
+  validateFeatures,
+  type Box,
+  type Building,
+  type EnvironmentFeatures,
+  type Road,
+  type RoadClass,
+  type VegetationArea,
+  type VegetationKind,
+} from './environment';
 export { fingerprintWorld, hashSimState } from './hash';
+export {
+  buildingRoofElevations,
+  lineOfSight,
+  STANDING_EYE_HEIGHT_M,
+  STANDING_TARGET_HEIGHT_M,
+  type LosCause,
+  type LosObstruction,
+  type LosOptions,
+  type LosResult,
+} from './los';
+export {
+  isSegmentWalkable,
+  NAV_CELL_M,
+  OBSTACLE_CLEARANCE_M,
+  planPath,
+  pointProblem,
+  stringPull,
+  type PathResult,
+  type PointProblem,
+} from './navigation';
 export { MAX_SEED, type RngState } from './rng';
 export {
   createInitialState,

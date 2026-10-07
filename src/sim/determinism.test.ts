@@ -254,5 +254,5 @@ describe('snapshot world compatibility', () => {
 });
 
 const PINNED_INITIAL_HASH = '18235a8ab57f44c1';
-const PINNED_SCRIPTED_HASH = '1293d57925393f30';
-const PINNED_TEST_WORLD_FINGERPRINT = '4f82fb1a6731093f';
+const PINNED_SCRIPTED_HASH = 'b8a396b56b4fa8c0';
+const PINNED_TEST_WORLD_FINGERPRINT = '703a0d35e7aa6b71';

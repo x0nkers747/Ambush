@@ -31,10 +31,28 @@ describe('remainingPlan', () => {
   it('drops the waypoints already reached and keeps their ids', () => {
     const orders = { waypoints: plan().waypoints, finalFacing: 1 };
     expect(
-      remainingPlan({ ...base, orders: { orders, nextWaypointIndex: 1, behavior: 'moving' } }),
+      remainingPlan({
+        ...base,
+        orders: {
+          orders,
+          nextWaypointIndex: 1,
+          behavior: 'moving',
+          legPaths: [[], []],
+          nextTurnIndex: 0,
+        },
+      }),
     ).toEqual({ soldierId: S, waypoints: [wp('S.2', 5, 20)], finalFacing: 1 });
     expect(
-      remainingPlan({ ...base, orders: { orders, nextWaypointIndex: 2, behavior: 'inPosition' } }),
+      remainingPlan({
+        ...base,
+        orders: {
+          orders,
+          nextWaypointIndex: 2,
+          behavior: 'inPosition',
+          legPaths: [[], []],
+          nextTurnIndex: 0,
+        },
+      }),
     ).toEqual({ soldierId: S, waypoints: [], finalFacing: 1 });
   });
 });

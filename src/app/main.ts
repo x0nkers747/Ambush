@@ -9,6 +9,7 @@ import {
 import {
   clearSelection,
   createSession,
+  setLosKillZone,
   setTimeScale,
   setTool,
   stepTimeScale,
@@ -17,7 +18,7 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, polygonArea, type SimEvent, type SoldierId } from '#sim';
-import { createTacticalMap, formatBearing } from '#view2d';
+import { createTacticalMap, formatBearing, losLabel } from '#view2d';
 
 // Composition root for the ambush slice: the demo scenario, the exercise, the
 // session, the tactical map and the controls around them.
@@ -52,6 +53,7 @@ app.innerHTML = `
   <main>
     <canvas id="map" aria-label="Tactical map"></canvas>
     <div class="banner" data-ui="banner" hidden></div>
+    <div class="toast" data-ui="toast" hidden></div>
   </main>
   <aside>
     <h2>Ambush status</h2>
@@ -59,6 +61,8 @@ app.innerHTML = `
     <div data-ui="start-check" class="start-check"></div>
     <h2>Kill zone</h2>
     <div data-ui="kill-zone"></div>
+    <h2>Check LOS</h2>
+    <div data-ui="los"></div>
     <h2>Selected soldier</h2>
     <div data-ui="selection"></div>
     <div data-ui="problems" class="problems"></div>
@@ -82,6 +86,16 @@ app.innerHTML = `
       <dt>Drag corner</dt><dd>Move it (it cannot cross itself)</dd>
       <dt>Right-click corner</dt><dd>Delete it</dd>
     </dl>
+    <h2>Controls: check LOS (L)</h2>
+    <dl class="help">
+      <dt>L</dt><dd>Turn CHECK LOS on or off</dd>
+      <dt>Click soldier</dt><dd>Choose who is looking</dd>
+      <dt>Click map</dt><dd>Check the sight line to that point</dd>
+      <dt>LOS to kill zone</dt><dd>Check sight lines to points across the kill zone</dd>
+    </dl>
+    <p class="muted">Lines of sight are checked from the soldier's planned final position (or where
+    they stand if they have no route), standing, to a standing person. Terrain, buildings and
+    vegetation can block them.</p>
     <h2>Controls: map and time</h2>
     <dl class="help">
       <dt>Drag map</dt><dd>Pan (left or middle button)</dd>
@@ -93,8 +107,9 @@ app.innerHTML = `
       <dt>Esc</dt><dd>Clear selection</dd>
     </dl>
     <p class="muted">Routes and the kill zone can be edited during planning, while occupation is
-    paused, and once BLUEFOR is ready. The dashed dark-red line is the OPFOR route given by the
-    scenario; it cannot be edited.</p>
+    paused, and once BLUEFOR is ready. Routes bend around buildings automatically (small white
+    dots); waypoints cannot be placed in or against a building. The dashed dark-red line is the
+    OPFOR route given by the scenario; it cannot be edited.</p>
   </aside>
   <footer data-ui="pointer"></footer>
 `;
@@ -120,7 +135,22 @@ const map = createTacticalMap({
   setSession: (next) => {
     session = next;
   },
+  notify: (message) => {
+    showToast(message);
+  },
 });
+
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+/** Shows a short message over the map, e.g. why a waypoint was refused. */
+function showToast(message: string): void {
+  const toast = ui('toast');
+  toast.textContent = message;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.hidden = true;
+  }, 3500);
+}
 
 const speedButtons = TIME_SCALES.map((scale) => {
   const speedButton = document.createElement('button');
@@ -132,8 +162,12 @@ const speedButtons = TIME_SCALES.map((scale) => {
   return { scale, speedButton };
 });
 
-const TOOL_LABELS: Record<MapTool, string> = { routes: 'Routes', killZone: 'Kill zone' };
-const toolButtons = (['routes', 'killZone'] as const).map((tool) => {
+const TOOL_LABELS: Record<MapTool, string> = {
+  routes: 'Routes',
+  killZone: 'Kill zone',
+  los: 'Check LOS',
+};
+const toolButtons = (['routes', 'killZone', 'los'] as const).map((tool) => {
   const toolButton = document.createElement('button');
   toolButton.textContent = TOOL_LABELS[tool];
   toolButton.addEventListener('click', () => {
@@ -195,6 +229,10 @@ window.addEventListener('keydown', (event) => {
     case 'k':
     case 'K':
       session = setTool(session, session.tool === 'killZone' ? 'routes' : 'killZone');
+      break;
+    case 'l':
+    case 'L':
+      session = setTool(session, session.tool === 'los' ? 'routes' : 'los');
       break;
     case 'Escape':
       session = clearSelection(session);
@@ -311,16 +349,41 @@ function routeTable(plan: SoldierPlan, start: { x: number; y: number }, editable
       ? '<p class="muted">No waypoints. Click the map to add one.</p>'
       : '<p class="muted">No waypoints.</p>';
   }
+  // Distances follow the walked path, including detours around buildings.
+  const route = exercise.displayedRoute(plan.soldierId);
   let previous = start;
   let total = 0;
+  let detours = 0;
   const rows = plan.waypoints.map((w, i) => {
-    const leg = Math.hypot(w.x - previous.x, w.y - previous.y);
-    total += leg;
+    const leg = route?.legs[i];
+    const points = [previous, ...(leg?.turns ?? []), w];
+    const length = points
+      .slice(1)
+      .reduce(
+        (sum, p, k) => sum + Math.hypot(p.x - (points[k]?.x ?? p.x), p.y - (points[k]?.y ?? p.y)),
+        0,
+      );
+    total += length;
     previous = w;
-    return `<tr><td>${String(i + 1)}</td><td>${w.x.toFixed(0)}</td><td>${w.y.toFixed(0)}</td><td>${leg.toFixed(0)} m</td></tr>`;
+    const note = leg?.problem
+      ? ' <span class="alert">✕</span>'
+      : (leg?.turns?.length ?? 0) > 0
+        ? ' <span class="muted" title="Detours around buildings">↷</span>'
+        : '';
+    if ((leg?.turns?.length ?? 0) > 0) detours += 1;
+    return `<tr><td>${String(i + 1)}</td><td>${w.x.toFixed(0)}</td><td>${w.y.toFixed(0)}</td><td>${length.toFixed(0)} m${note}</td></tr>`;
   });
+  const problems = (route?.legs ?? [])
+    .flatMap((leg, i) => (leg.problem ? [`Waypoint ${String(i + 1)} is ${leg.problem}.`] : []))
+    .map((text) => `<p class="alert">${escapeHtml(text)}</p>`)
+    .join('');
+  const detourText =
+    detours > 0
+      ? ` · ${String(detours)} leg${detours === 1 ? '' : 's'} detour around buildings (↷)`
+      : '';
   return `<table><tr><th>#</th><th>East</th><th>North</th><th>Leg</th></tr>${rows.join('')}</table>
-    <p class="muted">Total ${total.toFixed(0)} m · about ${clock(total / exercise.simulation.world.movement.speed)} at ${String(exercise.simulation.world.movement.speed)} m/s</p>`;
+    ${problems}
+    <p class="muted">Total ${total.toFixed(0)} m · about ${clock(total / exercise.simulation.world.movement.speed)} at ${String(exercise.simulation.world.movement.speed)} m/s${detourText}</p>`;
 }
 
 function selectionHtml(): string {
@@ -389,6 +452,39 @@ function startCheckHtml(): string {
     .map((b) => `<li>${escapeHtml(b)}</li>`)
     .join('')}</ul>`;
 }
+
+function losHtml(): string {
+  const id = session.selectedSoldierId;
+  if (session.tool !== 'los') {
+    return '<p class="muted">Press <b>L</b> or choose <b>Edit: Check LOS</b>, then click the map to see what the selected soldier can see.</p>';
+  }
+  if (id === null) return '<p class="muted">Click a blue soldier to check what they can see.</p>';
+  const observer = exercise.observer(id);
+  if (!observer) return '';
+  const from = observer.planned
+    ? `From ${escapeHtml(id)}'s planned final position.`
+    : `From ${escapeHtml(id)}'s <b>current</b> position: no planned final position.`;
+  const ray = session.losTarget ? exercise.lineOfSightFrom(id, session.losTarget) : undefined;
+  const rayText = ray
+    ? `<p class="${ray.clear ? 'ok' : 'alert'}">${escapeHtml(losLabel(ray))}</p>
+       <p class="muted">${ray.obstruction ? `Obstructed ${ray.obstruction.distance.toFixed(0)} m from the observer; ` : ''}target ${ray.distance.toFixed(0)} m away.</p>`
+    : '<p class="muted">Click the map to check a sight line.</p>';
+  const zone = session.losKillZone ? exercise.killZoneVisibility(id) : undefined;
+  const zoneText = session.losKillZone
+    ? zone
+      ? `<p><b>LOS TO KILL ZONE: ${String(zone.clearCount)} / ${String(zone.samples.length)}</b> sample points clear</p>`
+      : '<p class="muted">Draw a complete kill zone first.</p>'
+    : '';
+  return `<p>${from}</p>${rayText}
+    <p><button data-action="los-kill-zone" aria-pressed="${String(session.losKillZone)}">LOS to kill zone</button></p>
+    ${zoneText}`;
+}
+
+ui('los').addEventListener('click', (event) => {
+  if (event.target instanceof HTMLElement && event.target.dataset['action'] === 'los-kill-zone') {
+    session = setLosKillZone(session, !session.losKillZone);
+  }
+});
 
 function killZoneHtml(): string {
   const zone = exercise.killZone;
@@ -462,6 +558,7 @@ function updatePanels(): void {
   setHtml('status', statusHtml());
   setHtml('start-check', startCheckHtml());
   setHtml('kill-zone', killZoneHtml());
+  setHtml('los', losHtml());
   setHtml('selection', selectionHtml());
   ui('problems').textContent = problems.join('\n');
   setHtml(

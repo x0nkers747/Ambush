@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NO_FEATURES } from './environment';
 import { createRngState, nextFloat } from './rng';
 import {
   createSyntheticTerrain,
@@ -16,8 +17,9 @@ import {
 
 /** One 10 m cell: SW = 0, SE = 10, NW = 20, NE = 40 (not planar). */
 const ONE_CELL: TerrainDataset = {
-  formatVersion: 1,
+  formatVersion: 2,
   georef: null,
+  features: NO_FEATURES,
   heightfield: {
     originX: 0,
     originY: 0,
@@ -30,8 +32,9 @@ const ONE_CELL: TerrainDataset = {
 
 /** Irregular 4 × 3-sample terrain with a non-zero origin. */
 const BUMPY: TerrainDataset = {
-  formatVersion: 1,
+  formatVersion: 2,
   georef: null,
+  features: NO_FEATURES,
   heightfield: {
     originX: -15,
     originY: 40,

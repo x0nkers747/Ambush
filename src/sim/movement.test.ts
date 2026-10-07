@@ -116,7 +116,13 @@ describe('moving toward a waypoint', () => {
     ]);
     order(sim, given);
     runSeconds(sim, 1.2);
-    expect(soldier().orders).toEqual({ orders: given, nextWaypointIndex: 2, behavior: 'moving' });
+    expect(soldier().orders).toEqual({
+      orders: given,
+      nextWaypointIndex: 2,
+      behavior: 'moving',
+      legPaths: [[], [], []], // open terrain: every leg is straight
+      nextTurnIndex: 0,
+    });
   });
 });
 

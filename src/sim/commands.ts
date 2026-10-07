@@ -1,5 +1,6 @@
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
+import { planPath } from './navigation';
 import { isSimplePolygon } from './polygon';
 import {
   findSoldier,
@@ -8,6 +9,7 @@ import {
   type SimState,
   type SoldierId,
 } from './state';
+import type { Vec2 } from './geometry';
 import { isOnTerrain } from './terrain';
 import type { SimWorld } from './world';
 
@@ -120,23 +122,37 @@ function applySetOrders(
     return;
   }
   const { orders } = command;
-  if (orders?.waypoints.some(({ x, y }) => !isOnTerrain(world.terrain, x, y))) {
-    events.push({
-      type: 'commandRejected',
-      tick: state.tick,
-      command,
-      reason: 'waypointOffTerrain',
-    });
+  if (orders === null) {
+    soldier.orders = null;
+    events.push({ type: 'ordersChanged', tick: state.tick, soldierId: soldier.id, orders });
     return;
   }
-  soldier.orders =
-    orders === null
-      ? null
-      : {
-          orders: clonePlainData(orders),
-          nextWaypointIndex: 0,
-          behavior: orders.waypoints.length > 0 ? 'moving' : 'facing',
-        };
+  // Plan every leg now, from where the soldier stands: the route is fixed when
+  // the orders are given (docs/adr/0011).
+  const legPaths: Vec2[][] = [];
+  let from: Vec2 = { x: soldier.position.x, y: soldier.position.y };
+  for (const waypoint of orders.waypoints) {
+    const path = planPath(world.terrain, from, waypoint);
+    if (!path.ok) {
+      const reason =
+        path.problem.kind === 'offTerrain'
+          ? 'waypointOffTerrain'
+          : path.problem.kind === 'unreachable'
+            ? 'waypointUnreachable'
+            : 'waypointBlocked';
+      events.push({ type: 'commandRejected', tick: state.tick, command, reason });
+      return;
+    }
+    legPaths.push(path.turns.map((p) => ({ x: p.x, y: p.y })));
+    from = waypoint;
+  }
+  soldier.orders = {
+    orders: clonePlainData(orders),
+    nextWaypointIndex: 0,
+    behavior: orders.waypoints.length > 0 ? 'moving' : 'facing',
+    legPaths,
+    nextTurnIndex: 0,
+  };
   events.push({ type: 'ordersChanged', tick: state.tick, soldierId: soldier.id, orders });
 }
 

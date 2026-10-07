@@ -15,7 +15,13 @@ const exercise = createExercise({ config: { tickRateHz: 30, seed: 0 }, scenario:
 
 describe('session', () => {
   it('starts with no selection at 1×', () => {
-    expect(createSession()).toEqual({ selectedSoldierId: null, timeScale: 1, tool: 'routes' });
+    expect(createSession()).toEqual({
+      selectedSoldierId: null,
+      timeScale: 1,
+      tool: 'routes',
+      losTarget: null,
+      losKillZone: false,
+    });
   });
 
   it('selects BLUEFOR soldiers, one at a time', () => {

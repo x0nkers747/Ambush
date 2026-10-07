@@ -1,4 +1,5 @@
 import { azimuthFromDegrees, type Vec2 } from './geometry';
+import { pointProblem } from './navigation';
 import { clonePlainData } from './plain-data';
 import { createRngState } from './rng';
 import {
@@ -96,6 +97,10 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
       fail(`soldier "${soldier.id}" has a non-finite position or azimuth`);
     }
     if (!isOnTerrain(terrain, x, y)) fail(`soldier "${soldier.id}" is off the terrain`);
+    const blocked = pointProblem(terrain, { x, y });
+    if (blocked && blocked.kind !== 'offTerrain') {
+      fail(`soldier "${soldier.id}" stands in or against building "${blocked.buildingId}"`);
+    }
   }
 
   for (const unit of scenario.units) {

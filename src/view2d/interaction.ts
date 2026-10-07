@@ -32,6 +32,9 @@ import {
 //   Left click on a side              insert a corner into that side
 //   Left drag a corner                move it
 //   Right click a corner              delete it
+//
+// With CHECK LOS, a click on the map inspects the line of sight to that point
+// (a click on a BLUEFOR soldier still selects it; dragging still pans).
 
 export interface MapActions {
   select(id: SoldierId): void;
@@ -42,6 +45,7 @@ export interface MapActions {
   addKillZoneVertex(point: Vec2, index?: number): void;
   moveKillZoneVertex(index: number, point: Vec2): void;
   deleteKillZoneVertex(index: number): void;
+  setLosTarget(point: Vec2): void;
   setCamera(camera: Camera): void;
 }
 
@@ -86,6 +90,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
   const toWorld = (s: MapScene, p: Vec2) => screenToWorld(s.camera, s.viewport, p);
 
   const hoverCursor = (s: MapScene, p: Vec2): MapCursor => {
+    if (s.tool === 'los') return soldierAt(s, p)?.side === TRAINEE_SIDE ? 'pointer' : 'crosshair';
     if (s.tool === 'killZone') {
       if (!s.killZoneEditable) return 'grab';
       return killZoneVertexAt(s, p) !== undefined ? 'move' : 'crosshair';
@@ -97,6 +102,12 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
   };
 
   const click = (s: MapScene, p: Vec2) => {
+    if (s.tool === 'los') {
+      const soldier = soldierAt(s, p);
+      if (soldier?.side === TRAINEE_SIDE) actions.select(soldier.id);
+      else if (s.isOnMap(toWorld(s, p))) actions.setLosTarget(toWorld(s, p));
+      return;
+    }
     if (s.tool === 'killZone') {
       // Soldiers are not selected with the kill-zone tool, so corners can go anywhere.
       const point = toWorld(s, p);
