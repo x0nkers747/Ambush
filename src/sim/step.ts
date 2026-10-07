@@ -1,4 +1,5 @@
 import { applyCommands, type SimCommand } from './commands';
+import { monitorEngagementAreas } from './engagement-areas';
 import type { SimEvent } from './events';
 import { moveSoldiers } from './movement';
 import type { SimState } from './state';
@@ -30,8 +31,9 @@ export function stepState(
 
   // 2. Systems, as free functions in fixed order. They work in seconds, never
   //    in ticks, so behavior does not depend on the tick rate (docs/adr/0003).
-  //    Perception and combat follow movement in later phases.
-  moveSoldiers(state, world, time, events);
+  //    Perception and combat follow in later phases.
+  const path = moveSoldiers(state, world, time, events);
+  monitorEngagementAreas(state, path, time, events);
 
   // 3. Advance the clock.
   state.tick += 1;

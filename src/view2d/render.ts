@@ -31,6 +31,11 @@ const COLORS = {
   selection: '#f2c230',
   label: '#15191d',
   labelHalo: 'rgba(255, 255, 255, 0.8)',
+  killZoneFill: 'rgba(214, 48, 39, 0.16)',
+  killZoneEdge: 'rgba(176, 30, 24, 0.9)',
+  killZoneLabel: '#9c1c16',
+  opforRoute: 'rgba(122, 22, 40, 0.8)',
+  trigger: '#d6301f',
 } as const;
 
 const MINOR_CONTOUR_INTERVAL_M = 2;
@@ -81,12 +86,16 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
 
   drawTerrain(ctx, scene, layer);
   drawGrid(ctx, scene, layer.bounds);
+  drawKillZone(ctx, scene);
+  for (const { route, start } of scene.opforRoutes)
+    drawOpforRoute(ctx, scene, start, route.waypoints);
   for (const plan of scene.plans) {
     if (plan.soldierId !== scene.selectedId) drawOtherRoute(ctx, scene, plan);
   }
   drawSelectedRoute(ctx, scene);
   for (const soldier of scene.soldiers) drawSoldier(ctx, scene, soldier);
   drawFacingArrow(ctx, scene);
+  drawTrigger(ctx, scene);
   drawNorthArrow(ctx, width);
   drawScaleBar(ctx, scene, height);
 }
@@ -363,6 +372,125 @@ function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.fillStyle = COLORS.label;
   ctx.fillText(label, lx, ly);
   ctx.restore();
+}
+
+/** The trainee's kill zone: translucent so the terrain stays readable, corners shown while editing. */
+function drawKillZone(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const zone = scene.killZone;
+  if (!zone || zone.vertices.length === 0) return;
+  const points = zone.vertices.map((v) => worldToScreen(scene.camera, scene.viewport, v));
+  const closed = points.length >= 3;
+  ctx.save();
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  if (closed) {
+    ctx.closePath();
+    ctx.fillStyle = COLORS.killZoneFill;
+    ctx.fill();
+  }
+  ctx.strokeStyle = COLORS.killZoneEdge;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(closed ? [10, 4] : [4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (scene.killZoneEditable) {
+    for (const p of points) {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = COLORS.killZoneEdge;
+      ctx.lineWidth = 2;
+      ctx.fillRect(p.x - 5, p.y - 5, 10, 10);
+      ctx.strokeRect(p.x - 5, p.y - 5, 10, 10);
+    }
+  }
+
+  if (closed) {
+    const c = centroid(points);
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.strokeText('KILL ZONE', c.x, c.y);
+    ctx.fillStyle = COLORS.killZoneLabel;
+    ctx.fillText('KILL ZONE', c.x, c.y);
+  }
+  ctx.restore();
+}
+
+/** Scenario information: the expected enemy route, distinct from trainee plans. */
+function drawOpforRoute(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  start: Vec2,
+  waypoints: readonly Vec2[],
+): void {
+  const points = [start, ...waypoints].map((p) => worldToScreen(scene.camera, scene.viewport, p));
+  ctx.save();
+  ctx.strokeStyle = COLORS.opforRoute;
+  ctx.fillStyle = COLORS.opforRoute;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.setLineDash([12, 4, 2, 4]);
+  polyline(ctx, points);
+  ctx.setLineDash([]);
+  for (const p of points.slice(1)) ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (!a || !b || Math.hypot(b.x - a.x, b.y - a.y) < 40) continue;
+    ctx.save();
+    ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2);
+    ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+    ctx.beginPath();
+    ctx.moveTo(5, 0);
+    ctx.lineTo(-4, -4);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** Marks where the ambush was sprung. */
+function drawTrigger(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  if (!scene.trigger) return;
+  const p = worldToScreen(scene.camera, scene.viewport, scene.trigger.point);
+  ctx.save();
+  ctx.strokeStyle = COLORS.trigger;
+  ctx.lineWidth = 3;
+  for (const r of [10, 18]) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function centroid(points: readonly Vec2[]): Vec2 {
+  // Area-weighted centroid; falls back to the vertex mean for degenerate shapes.
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  points.forEach((a, i) => {
+    const b = points[(i + 1) % points.length] ?? a;
+    const cross = a.x * b.y - b.x * a.y;
+    area += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  });
+  if (area === 0) {
+    const n = points.length || 1;
+    return {
+      x: points.reduce((s, p) => s + p.x, 0) / n,
+      y: points.reduce((s, p) => s + p.y, 0) / n,
+    };
+  }
+  return { x: cx / (3 * area), y: cy / (3 * area) };
 }
 
 function drawNorthArrow(ctx: CanvasRenderingContext2D, width: number): void {

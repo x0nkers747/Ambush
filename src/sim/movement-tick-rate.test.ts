@@ -157,7 +157,12 @@ function eventIdentity(event: SimEvent): string {
 function bySoldier(events: SimEvent[]): Map<string, SimEvent[]> {
   const groups = new Map<string, SimEvent[]>();
   for (const event of events) {
-    const id = 'soldierId' in event ? event.soldierId : event.command.soldierId;
+    const id =
+      'soldierId' in event
+        ? event.soldierId
+        : event.type === 'commandRejected' && event.command.type === 'setOrders'
+          ? event.command.soldierId
+          : '';
     groups.set(id, [...(groups.get(id) ?? []), event]);
   }
   return groups;

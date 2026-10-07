@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState, heightAt } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
+import { createExercise } from './exercise';
 
 describe('DEMO_SCENARIO', () => {
   const state = createInitialState(DEMO_SCENARIO, 0);
@@ -37,6 +38,43 @@ describe('DEMO_SCENARIO', () => {
     const opfor = state.soldiers.filter((s) => s.side === 'OPFOR');
     expect(opfor).toHaveLength(3);
     for (const s of opfor) expect(s.position.y).toBeGreaterThan(150);
+  });
+
+  it('gives every OPFOR soldier a visible route down the draw, with stable ids', () => {
+    expect(DEMO_SCENARIO.opforRoutes.map((r) => [r.id, r.soldierId, r.shownToTrainee])).toEqual([
+      ['EN-1-patrol', 'EN-1', true],
+      ['EN-2-patrol', 'EN-2', true],
+      ['EN-3-patrol', 'EN-3', true],
+    ]);
+    const [first] = DEMO_SCENARIO.opforRoutes;
+    expect(first?.waypoints[0]).toEqual({ id: 'EN-1-patrol.1', x: 40, y: 180 });
+    // The route crosses the middle of the map from north to south.
+    const ys = first?.waypoints.map((w) => w.y) ?? [];
+    expect(Math.max(...ys)).toBeGreaterThan(150);
+    expect(Math.min(...ys)).toBeLessThan(-150);
+  });
+
+  it('springs an ambush on a kill zone drawn across the draw', () => {
+    const exercise = createExercise({
+      config: { tickRateHz: 30, seed: 0 },
+      scenario: DEMO_SCENARIO,
+    });
+    for (const v of [
+      { x: -40, y: -20 },
+      { x: 40, y: -20 },
+      { x: 40, y: 30 },
+      { x: -40, y: 30 },
+    ]) {
+      exercise.addKillZoneVertex(v);
+    }
+    exercise.execute();
+    exercise.advance(1 / 30);
+    expect(exercise.startOpfor().ok).toBe(true);
+    for (let i = 0; i < 30 * 300 && exercise.phase !== 'ambushTriggered'; i += 1)
+      exercise.advance(1 / 30);
+    expect(exercise.trigger?.soldierId).toBe('EN-1');
+    // EN-1 enters through the north edge, y = 30.
+    expect(exercise.trigger?.point.y).toBeCloseTo(30, 6);
   });
 
   it('starts everyone without orders, standing on the terrain', () => {

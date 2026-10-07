@@ -1,6 +1,13 @@
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
-import { findSoldier, type Orders, type SimState, type SoldierId } from './state';
+import { isSimplePolygon } from './polygon';
+import {
+  findSoldier,
+  type EngagementArea,
+  type Orders,
+  type SimState,
+  type SoldierId,
+} from './state';
 import { isOnTerrain } from './terrain';
 import type { SimWorld } from './world';
 
@@ -19,7 +26,17 @@ export interface SetOrdersCommand {
   readonly orders: Orders | null;
 }
 
-export type SimCommand = SetOrdersCommand;
+/**
+ * Adds an engagement area, or replaces the one with the same id. Soldiers
+ * already inside it when it is set have not entered it (docs/adr/0010).
+ */
+export interface SetEngagementAreaCommand {
+  readonly type: 'setEngagementArea';
+  readonly tick: number;
+  readonly area: EngagementArea;
+}
+
+export type SimCommand = SetOrdersCommand | SetEngagementAreaCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -32,8 +49,29 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
       `command tick must be an integer >= the current tick ${String(currentTick)}, got ${String(command.tick)}`,
     );
   }
-  // Only one command type exists; dispatch on `command.type` when a second is added.
-  const { orders } = command;
+  switch (command.type) {
+    case 'setOrders':
+      validateOrders(command.orders);
+      return;
+    case 'setEngagementArea': {
+      const { id, vertices } = command.area;
+      if (typeof id !== 'string' || id === '') {
+        throw new RangeError('engagement area id must be a non-empty string');
+      }
+      if (!vertices.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))) {
+        throw new RangeError('engagement area vertices must be finite');
+      }
+      if (!isSimplePolygon(vertices)) {
+        throw new RangeError(
+          `engagement area "${id}" must be a simple polygon of at least 3 vertices`,
+        );
+      }
+      return;
+    }
+  }
+}
+
+function validateOrders(orders: Orders | null): void {
   if (orders === null) return;
   const { finalFacing } = orders;
   if (!(finalFacing >= 0 && finalFacing < 2 * Math.PI)) {
@@ -58,7 +96,16 @@ export function applyCommands(
   commands: readonly SimCommand[],
   events: SimEvent[],
 ): void {
-  for (const command of commands) applySetOrders(state, world, command, events);
+  for (const command of commands) {
+    switch (command.type) {
+      case 'setOrders':
+        applySetOrders(state, world, command, events);
+        break;
+      case 'setEngagementArea':
+        applySetEngagementArea(state, world, command, events);
+        break;
+    }
+  }
 }
 
 function applySetOrders(
@@ -67,17 +114,19 @@ function applySetOrders(
   command: SetOrdersCommand,
   events: SimEvent[],
 ): void {
-  const reject = (reason: 'unknownSoldier' | 'waypointOffTerrain') => {
-    events.push({ type: 'commandRejected', tick: state.tick, command, reason });
-  };
   const soldier = findSoldier(state, command.soldierId);
   if (!soldier) {
-    reject('unknownSoldier');
+    events.push({ type: 'commandRejected', tick: state.tick, command, reason: 'unknownSoldier' });
     return;
   }
   const { orders } = command;
   if (orders?.waypoints.some(({ x, y }) => !isOnTerrain(world.terrain, x, y))) {
-    reject('waypointOffTerrain');
+    events.push({
+      type: 'commandRejected',
+      tick: state.tick,
+      command,
+      reason: 'waypointOffTerrain',
+    });
     return;
   }
   soldier.orders =
@@ -89,4 +138,22 @@ function applySetOrders(
           behavior: orders.waypoints.length > 0 ? 'moving' : 'facing',
         };
   events.push({ type: 'ordersChanged', tick: state.tick, soldierId: soldier.id, orders });
+}
+
+function applySetEngagementArea(
+  state: SimState,
+  world: SimWorld,
+  command: SetEngagementAreaCommand,
+  events: SimEvent[],
+): void {
+  const { area } = command;
+  if (area.vertices.some(({ x, y }) => !isOnTerrain(world.terrain, x, y))) {
+    events.push({ type: 'commandRejected', tick: state.tick, command, reason: 'areaOffTerrain' });
+    return;
+  }
+  const copy = clonePlainData(area);
+  const index = state.engagementAreas.findIndex((a) => a.id === area.id);
+  if (index >= 0) state.engagementAreas[index] = copy;
+  else state.engagementAreas.push(copy);
+  events.push({ type: 'engagementAreaChanged', tick: state.tick, area });
 }

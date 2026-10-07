@@ -6,15 +6,19 @@ import type { SoldierId } from '#sim';
 export const TIME_SCALES = [1, 2, 4] as const;
 export type TimeScale = (typeof TIME_SCALES)[number];
 
+/** What map clicks edit: the selected soldier's route, or the kill zone. */
+export type MapTool = 'routes' | 'killZone';
+
 export interface Session {
   /** The trainee soldier whose plan is being viewed and edited, if any. */
   readonly selectedSoldierId: SoldierId | null;
   /** Ratio of simulation time to real time while executing. */
   readonly timeScale: TimeScale;
+  readonly tool: MapTool;
 }
 
 export function createSession(): Session {
-  return { selectedSoldierId: null, timeScale: 1 };
+  return { selectedSoldierId: null, timeScale: 1, tool: 'routes' };
 }
 
 /**
@@ -31,4 +35,8 @@ export function clearSelection(session: Session): Session {
 
 export function setTimeScale(session: Session, timeScale: TimeScale): Session {
   return { ...session, timeScale };
+}
+
+export function setTool(session: Session, tool: MapTool): Session {
+  return { ...session, tool };
 }

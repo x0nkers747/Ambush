@@ -5,6 +5,8 @@ import { panBy, screenToWorld, zoomAt, type Camera } from './camera';
 import {
   insertionIndexAt,
   isOnFacingHandle,
+  killZoneInsertionIndexAt,
+  killZoneVertexAt,
   selectedSoldier,
   soldierAt,
   waypointAt,
@@ -23,6 +25,13 @@ import {
 //   Right click a waypoint            delete it
 //   Left drag the map / middle drag   pan
 //   Mouse wheel                       zoom at the cursor
+//
+// With the kill-zone tool, clicks edit the kill zone instead of routes:
+//
+//   Left click the map                add a corner after the last one
+//   Left click on a side              insert a corner into that side
+//   Left drag a corner                move it
+//   Right click a corner              delete it
 
 export interface MapActions {
   select(id: SoldierId): void;
@@ -30,6 +39,9 @@ export interface MapActions {
   moveWaypoint(id: WaypointId, point: Vec2): void;
   deleteWaypoint(id: WaypointId): void;
   setFinalFacing(azimuth: Azimuth): void;
+  addKillZoneVertex(point: Vec2, index?: number): void;
+  moveKillZoneVertex(index: number, point: Vec2): void;
+  deleteKillZoneVertex(index: number): void;
   setCamera(camera: Camera): void;
 }
 
@@ -52,7 +64,8 @@ type Mode =
   | { readonly kind: 'press'; readonly start: Vec2 }
   | { readonly kind: 'pan'; readonly last: Vec2 }
   | { readonly kind: 'waypoint'; readonly id: WaypointId }
-  | { readonly kind: 'facing' };
+  | { readonly kind: 'facing' }
+  | { readonly kind: 'killZoneVertex'; readonly index: number };
 
 export type MapCursor = 'default' | 'pointer' | 'crosshair' | 'grab' | 'grabbing' | 'move';
 
@@ -73,6 +86,10 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
   const toWorld = (s: MapScene, p: Vec2) => screenToWorld(s.camera, s.viewport, p);
 
   const hoverCursor = (s: MapScene, p: Vec2): MapCursor => {
+    if (s.tool === 'killZone') {
+      if (!s.killZoneEditable) return 'grab';
+      return killZoneVertexAt(s, p) !== undefined ? 'move' : 'crosshair';
+    }
     if (s.editable && (isOnFacingHandle(s, p) || waypointAt(s, p) !== undefined)) return 'move';
     const soldier = soldierAt(s, p);
     if (soldier?.side === TRAINEE_SIDE) return 'pointer';
@@ -80,6 +97,15 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
   };
 
   const click = (s: MapScene, p: Vec2) => {
+    if (s.tool === 'killZone') {
+      // Soldiers are not selected with the kill-zone tool, so corners can go anywhere.
+      const point = toWorld(s, p);
+      if (!s.killZoneEditable || !s.isOnMap(point)) return;
+      const index = killZoneInsertionIndexAt(s, p);
+      if (index === undefined) actions.addKillZoneVertex(point);
+      else actions.addKillZoneVertex(point, index);
+      return;
+    }
     const soldier = soldierAt(s, p);
     if (soldier) {
       actions.select(soldier.id);
@@ -104,8 +130,17 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       if (input.button === 1) {
         mode = { kind: 'pan', last: p };
       } else if (input.button === 2) {
-        const id = s.editable ? waypointAt(s, p) : undefined;
-        if (id !== undefined) actions.deleteWaypoint(id);
+        if (s.tool === 'killZone') {
+          const index = s.killZoneEditable ? killZoneVertexAt(s, p) : undefined;
+          if (index !== undefined) actions.deleteKillZoneVertex(index);
+        } else {
+          const id = s.editable ? waypointAt(s, p) : undefined;
+          if (id !== undefined) actions.deleteWaypoint(id);
+        }
+      } else if (input.button === 0 && s.tool === 'killZone') {
+        const index = s.killZoneEditable ? killZoneVertexAt(s, p) : undefined;
+        mode =
+          index === undefined ? { kind: 'press', start: p } : { kind: 'killZoneVertex', index };
       } else if (input.button === 0) {
         const waypoint = s.editable ? waypointAt(s, p) : undefined;
         if (s.editable && isOnFacingHandle(s, p)) mode = { kind: 'facing' };
@@ -143,6 +178,12 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
           const anchor = s.selectedPlan?.waypoints.at(-1) ?? soldier.position;
           const azimuth = facingToward(anchor, toWorld(s, p));
           if (azimuth !== undefined) actions.setFinalFacing(azimuth);
+          return;
+        }
+        case 'killZoneVertex': {
+          // Positions the zone would refuse (crossing itself, off the map) are skipped.
+          const point = toWorld(s, p);
+          if (s.killZoneEditable && s.isOnMap(point)) actions.moveKillZoneVertex(mode.index, point);
           return;
         }
       }

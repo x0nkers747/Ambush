@@ -1,8 +1,10 @@
-import { createSyntheticTerrain, type Scenario, type ScenarioSoldier } from '#sim';
+import { createSyntheticTerrain, type ScenarioSoldier } from '#sim';
+import type { AmbushScenario, OpforRoute } from './ambush-scenario';
 
-// Development content for the interactive vertical slice (Phase 3): a BLUEFOR
-// rifle squad and a small OPFOR team on 800 m × 600 m of synthetic terrain.
-// Not the doctrinal ambush scenario.
+// Development content for the interactive ambush slice (Phases 3–3.5): a
+// BLUEFOR rifle squad in the south, a three-soldier OPFOR file in the north
+// whose route follows the central draw south through the likely ambush area,
+// on 800 m × 600 m of synthetic terrain. Not the doctrinal ambush scenario.
 
 /** Smooth bump of `height` metres centred on (cx, cy) with spread `sigma` metres. */
 function bump(x: number, y: number, cx: number, cy: number, height: number, sigma: number): number {
@@ -44,7 +46,31 @@ const opfor = (id: string, x: number, y: number, azimuthDeg: number): ScenarioSo
   posture: 'standing',
 });
 
-export const DEMO_SCENARIO: Scenario = {
+/** The OPFOR patrol's route down the draw: shared by the file, each soldier with its own copy. */
+const PATROL_ROUTE: readonly [number, number][] = [
+  [40, 180],
+  [35, 120],
+  [21, 60],
+  [0, 0],
+  [-21, -60],
+  [-28, -110],
+  [20, -160],
+  [120, -170],
+];
+
+const patrolRoute = (soldierId: string): OpforRoute => ({
+  id: `${soldierId}-patrol`,
+  soldierId,
+  waypoints: PATROL_ROUTE.map(([x, y], i) => ({
+    id: `${soldierId}-patrol.${String(i + 1)}`,
+    x,
+    y,
+  })),
+  finalFacingDeg: 90,
+  shownToTrainee: true,
+});
+
+export const DEMO_SCENARIO: AmbushScenario = {
   id: 'phase3-demo',
   terrain: createSyntheticTerrain(
     { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
@@ -67,8 +93,10 @@ export const DEMO_SCENARIO: Scenario = {
     blufor('B-AR', 'B-TM', -32, -232),
     blufor('B-GR', 'B-TM', -46, -234),
     blufor('B-RFL', 'B-TM', -38, -241),
-    opfor('EN-1', 30, 210, 180),
-    opfor('EN-2', 38, 202, 160),
-    opfor('EN-3', 22, 202, 200),
+    // A file 10 m apart, heading south down the draw.
+    opfor('EN-1', 40, 215, 180),
+    opfor('EN-2', 41, 225, 180),
+    opfor('EN-3', 42, 235, 180),
   ],
+  opforRoutes: [patrolRoute('EN-1'), patrolRoute('EN-2'), patrolRoute('EN-3')],
 };

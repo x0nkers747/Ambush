@@ -1,6 +1,6 @@
 # ADR 0009: Exercise phases, plan revisions and the 2D planning view
 
-- Status: Accepted
+- Status: Accepted; the phase model is extended by ADR 0010
 - Date: 2026-10-07
 
 ## Context
@@ -15,6 +15,9 @@ this ADR makes that separation concrete.
 ### Exercise phases
 
 `Planning → Executing ⇄ Paused`, owned by the `exercise` layer (no DOM).
+ADR 0010 refines this into the ambush sequence (BLUEFOR Planning → Occupation
+⇄ paused → Ready → OPFOR Approach → Ambush Triggered); the rules below still
+apply to BLUEFOR Occupation.
 
 - The exercise owns the simulation and the fixed-step runner. `advance(realDt,
 timeScale)` steps the simulation only while Executing, so it is frozen while

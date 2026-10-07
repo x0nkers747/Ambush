@@ -1,6 +1,6 @@
 import type { SimEvent } from './events';
-import { azimuthDelta, azimuthOf, turnToward } from './geometry';
-import type { SimState, Soldier } from './state';
+import { azimuthDelta, azimuthOf, turnToward, type Vec2 } from './geometry';
+import type { SimState, Soldier, SoldierId } from './state';
 import { heightAt } from './terrain';
 import type { SimWorld } from './world';
 
@@ -30,16 +30,38 @@ export interface TickTime {
   readonly dtSeconds: number;
 }
 
+/** A straight piece of a soldier's path during one tick, at constant speed. */
+export interface PathSegment {
+  readonly soldierId: SoldierId;
+  readonly from: Vec2;
+  readonly to: Vec2;
+  readonly startSeconds: number;
+  readonly endSeconds: number;
+}
+
+/**
+ * Moves every soldier through the tick and returns the straight pieces they
+ * travelled, in soldier order then time order, so later systems can find what
+ * happened between the start and end of the tick.
+ */
 export function moveSoldiers(
   state: SimState,
   world: SimWorld,
   time: TickTime,
   events: SimEvent[],
-): void {
-  for (const soldier of state.soldiers) moveSoldier(soldier, world, time, events);
+): PathSegment[] {
+  const path: PathSegment[] = [];
+  for (const soldier of state.soldiers) moveSoldier(soldier, world, time, events, path);
+  return path;
 }
 
-function moveSoldier(soldier: Soldier, world: SimWorld, time: TickTime, events: SimEvent[]): void {
+function moveSoldier(
+  soldier: Soldier,
+  world: SimWorld,
+  time: TickTime,
+  events: SimEvent[],
+  path: PathSegment[],
+): void {
   const active = soldier.orders;
   if (active === null || active.behavior === 'inPosition') return;
 
@@ -65,6 +87,8 @@ function moveSoldier(soldier: Soldier, world: SimWorld, time: TickTime, events: 
     if (distance > 0) {
       soldier.azimuth = turnToward(soldier.azimuth, azimuthOf(dx, dy), maxTurnRate * seconds);
     }
+    const from = { x: soldier.position.x, y: soldier.position.y };
+    const start = time.startSeconds + elapsed;
     if (!arrives) {
       const fraction = (speed * seconds) / distance;
       placeOnTerrain(
@@ -73,12 +97,14 @@ function moveSoldier(soldier: Soldier, world: SimWorld, time: TickTime, events: 
         soldier.position.x + dx * fraction,
         soldier.position.y + dy * fraction,
       );
+      record(path, soldier, from, start, time.startSeconds + time.dtSeconds);
       return;
     }
 
     // Arrive exactly on the waypoint and carry the rest of the tick forward.
     placeOnTerrain(soldier, world, waypoint.x, waypoint.y);
     elapsed += seconds;
+    record(path, soldier, from, start, time.startSeconds + elapsed);
     active.nextWaypointIndex += 1;
     if (active.nextWaypointIndex === waypoints.length) active.behavior = 'facing';
     events.push({
@@ -105,6 +131,18 @@ function moveSoldier(soldier: Soldier, world: SimWorld, time: TickTime, events: 
     soldierId: soldier.id,
     atSeconds: time.startSeconds + elapsed + Math.min(turnSeconds, remaining),
   });
+}
+
+function record(
+  path: PathSegment[],
+  soldier: Soldier,
+  from: Vec2,
+  startSeconds: number,
+  endSeconds: number,
+): void {
+  const to = { x: soldier.position.x, y: soldier.position.y };
+  if (to.x === from.x && to.y === from.y) return;
+  path.push({ soldierId: soldier.id, from, to, startSeconds, endSeconds });
 }
 
 function placeOnTerrain(soldier: Soldier, world: SimWorld, x: number, y: number): void {

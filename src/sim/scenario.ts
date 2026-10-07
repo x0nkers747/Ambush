@@ -130,7 +130,7 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     orders: null,
   }));
 
-  return { tick: 0, rng: createRngState(seed), units, soldiers };
+  return { tick: 0, rng: createRngState(seed), units, soldiers, engagementAreas: [] };
 }
 
 /**

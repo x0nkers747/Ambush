@@ -62,14 +62,99 @@
         text-transform: uppercase;
         color: #0f1215;
       }
-      .phase[data-phase='planning'] {
+      .phase {
+        min-width: 150px;
+      }
+      .phase[data-phase='bluforPlanning'] {
         background: var(--planning);
       }
-      .phase[data-phase='executing'] {
+      .phase[data-phase='bluforOccupation'] {
         background: var(--executing);
       }
       .phase[data-phase='paused'] {
         background: var(--paused);
+      }
+      .phase[data-phase='bluforReady'] {
+        background: #9fd17a;
+      }
+      .phase[data-phase='opforApproach'] {
+        background: #e07a3a;
+      }
+      .phase[data-phase='ambushTriggered'] {
+        background: var(--danger);
+        color: #fff;
+      }
+      button.start-opfor {
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+      button.start-opfor.armed {
+        background: #b3261e;
+        border-color: #ff8a80;
+        color: #fff;
+        box-shadow: 0 0 0 2px rgba(255, 138, 128, 0.35);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% {
+          box-shadow: 0 0 0 6px rgba(255, 138, 128, 0.12);
+        }
+      }
+      .banner {
+        position: absolute;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 80%;
+        padding: 10px 22px;
+        border-radius: 6px;
+        text-align: center;
+        background: rgba(20, 24, 28, 0.88);
+        border: 2px solid #9fd17a;
+        pointer-events: none;
+      }
+      .banner[data-kind='triggered'] {
+        border-color: var(--danger);
+        background: rgba(60, 12, 10, 0.9);
+      }
+      .banner[hidden] {
+        display: none;
+      }
+      .banner-title {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        color: #ff8a80;
+      }
+      .banner-title.ready {
+        color: #9fd17a;
+      }
+      dl.status {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 3px 10px;
+        margin: 0 0 6px;
+      }
+      dl.status dt {
+        color: var(--muted);
+      }
+      dl.status dd {
+        margin: 0;
+      }
+      .ok {
+        color: #9fd17a;
+      }
+      .warn {
+        color: var(--paused);
+      }
+      .alert {
+        color: #ff8a80;
+        font-weight: 700;
+      }
+      ul.blockers {
+        margin: 4px 0;
+        padding-left: 18px;
+        color: var(--paused);
       }
       .clock {
         font-variant-numeric: tabular-nums;

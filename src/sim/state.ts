@@ -11,10 +11,12 @@ type Brand<T, B extends string> = T & { readonly [brand]: B };
 export type SoldierId = Brand<string, 'SoldierId'>;
 export type OrgUnitId = Brand<string, 'OrgUnitId'>;
 export type WaypointId = Brand<string, 'WaypointId'>;
+export type EngagementAreaId = Brand<string, 'EngagementAreaId'>;
 
 export const soldierId = (id: string): SoldierId => id as SoldierId;
 export const orgUnitId = (id: string): OrgUnitId => id as OrgUnitId;
 export const waypointId = (id: string): WaypointId => id as WaypointId;
+export const engagementAreaId = (id: string): EngagementAreaId => id as EngagementAreaId;
 
 export type Side = 'BLUEFOR' | 'OPFOR';
 
@@ -89,12 +91,26 @@ export interface OrgUnit {
   leaderId: SoldierId | null;
 }
 
+/**
+ * A map polygon watched for soldiers of one side entering it (docs/adr/0010).
+ * Geometry and monitoring only: what an entry means (e.g. springing an ambush)
+ * is decided outside the simulation.
+ */
+export interface EngagementArea {
+  readonly id: EngagementAreaId;
+  /** A simple polygon of at least three map points; the boundary belongs to the area. */
+  readonly vertices: readonly Vec2[];
+  /** Soldiers of this side entering the area produce `engagementAreaEntered` events. */
+  readonly monitoredSide: Side;
+}
+
 export interface SimState {
   /** Number of completed ticks. Simulation time is `tick / tickRateHz`. */
   tick: number;
   rng: RngState;
   units: OrgUnit[];
   soldiers: Soldier[];
+  engagementAreas: EngagementArea[];
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

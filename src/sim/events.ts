@@ -1,5 +1,6 @@
 import type { SimCommand } from './commands';
-import type { Orders, SoldierId, WaypointId } from './state';
+import type { Vec2 } from './geometry';
+import type { EngagementArea, EngagementAreaId, Orders, SoldierId, WaypointId } from './state';
 
 // Domain events: plain, tick-stamped facts about what happened during a tick.
 // `Simulation.step()` returns the events of that tick; there is no event bus.
@@ -21,7 +22,7 @@ export interface CommandRejectedEvent {
   readonly type: 'commandRejected';
   readonly tick: number;
   readonly command: SimCommand;
-  readonly reason: 'unknownSoldier' | 'waypointOffTerrain';
+  readonly reason: 'unknownSoldier' | 'waypointOffTerrain' | 'areaOffTerrain';
 }
 
 /** A soldier arrived at one of its waypoints. */
@@ -41,5 +42,31 @@ export interface SoldierInPositionEvent {
   readonly atSeconds: number;
 }
 
+/** An engagement area was added or replaced. */
+export interface EngagementAreaChangedEvent {
+  readonly type: 'engagementAreaChanged';
+  readonly tick: number;
+  readonly area: EngagementArea;
+}
+
+/**
+ * A soldier of the area's monitored side passed from outside an engagement
+ * area onto its boundary (docs/adr/0010). `atSeconds` and `point` are the exact
+ * moment and place of entry along the soldier's path within the tick.
+ */
+export interface EngagementAreaEnteredEvent {
+  readonly type: 'engagementAreaEntered';
+  readonly tick: number;
+  readonly areaId: EngagementAreaId;
+  readonly soldierId: SoldierId;
+  readonly atSeconds: number;
+  readonly point: Vec2;
+}
+
 export type SimEvent =
-  OrdersChangedEvent | CommandRejectedEvent | WaypointReachedEvent | SoldierInPositionEvent;
+  | OrdersChangedEvent
+  | CommandRejectedEvent
+  | WaypointReachedEvent
+  | SoldierInPositionEvent
+  | EngagementAreaChangedEvent
+  | EngagementAreaEnteredEvent;

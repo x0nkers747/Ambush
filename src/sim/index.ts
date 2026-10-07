@@ -1,5 +1,5 @@
 // Public API of the simulation layer. Other layers import only from here (`#sim`).
-export type { SetOrdersCommand, SimCommand } from './commands';
+export type { SetEngagementAreaCommand, SetOrdersCommand, SimCommand } from './commands';
 export {
   DEFAULT_TICK_RATE_HZ,
   MAX_TICK_RATE_HZ,
@@ -9,6 +9,8 @@ export {
 } from './config';
 export type {
   CommandRejectedEvent,
+  EngagementAreaChangedEvent,
+  EngagementAreaEnteredEvent,
   OrdersChangedEvent,
   SimEvent,
   SoldierInPositionEvent,
@@ -34,6 +36,15 @@ export {
 } from './scenario';
 export { createSimulation, type SimSnapshot, type Simulation } from './simulation';
 export {
+  isOnPolygonBoundary,
+  isSimplePolygon,
+  pointInPolygon,
+  polygonArea,
+  segmentIntersectionParams,
+  segmentPolygonEntries,
+} from './polygon';
+export {
+  engagementAreaId,
   findSoldier,
   orgUnitId,
   soldierId,
@@ -41,6 +52,8 @@ export {
   type ActiveOrders,
   type DeepReadonly,
   type Echelon,
+  type EngagementArea,
+  type EngagementAreaId,
   type OrgUnit,
   type OrgUnitId,
   type Orders,

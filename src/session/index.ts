@@ -5,7 +5,9 @@ export {
   createSession,
   selectSoldier,
   setTimeScale,
+  setTool,
   TIME_SCALES,
+  type MapTool,
   type Session,
   type TimeScale,
 } from './session';

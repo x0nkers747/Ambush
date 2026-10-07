@@ -1,5 +1,5 @@
-import type { Exercise, SoldierPlan } from '#exercise';
-import type { Session } from '#session';
+import type { AmbushTrigger, Exercise, KillZone, OpforRoute, SoldierPlan } from '#exercise';
+import type { MapTool, Session } from '#session';
 import {
   isOnTerrain,
   type DeepReadonly,
@@ -22,8 +22,18 @@ export interface MapScene {
   readonly plans: readonly SoldierPlan[];
   /** The selected soldier's entry in `plans`. */
   readonly selectedPlan: SoldierPlan | undefined;
-  /** Whether the selected soldier's plan can be edited now. */
+  /** Whether the selected soldier's plan can be edited now (route tool). */
   readonly editable: boolean;
+  /** What map clicks edit. */
+  readonly tool: MapTool;
+  /** The trainee's kill zone as drawn so far. */
+  readonly killZone: KillZone | null;
+  /** Whether the kill zone can be edited now (kill-zone tool). */
+  readonly killZoneEditable: boolean;
+  /** Scenario OPFOR routes the trainee may see, each from its soldier's starting position. */
+  readonly opforRoutes: readonly { readonly route: OpforRoute; readonly start: Vec2 }[];
+  /** The ambush trigger, once it has happened. */
+  readonly trigger: AmbushTrigger | null;
   /** Whether a map point lies on the terrain. */
   isOnMap(point: Vec2): boolean;
 }
@@ -45,7 +55,15 @@ export function buildScene(
     selectedId: session.selectedSoldierId,
     plans,
     selectedPlan,
-    editable: exercise.canEditPlans && selectedPlan !== undefined,
+    editable: exercise.canEditPlans && selectedPlan !== undefined && session.tool === 'routes',
+    tool: session.tool,
+    killZone: exercise.killZone,
+    killZoneEditable: exercise.canEditPlans && session.tool === 'killZone',
+    opforRoutes: exercise.opforRoutes.flatMap((route) => {
+      const start = exercise.scenarioStart(route.soldierId);
+      return route.shownToTrainee && start ? [{ route, start }] : [];
+    }),
+    trigger: exercise.trigger,
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
   };
 }
@@ -57,6 +75,7 @@ export const WAYPOINT_HIT_RADIUS_PX = 10;
 export const SEGMENT_HIT_DISTANCE_PX = 6;
 export const FACING_ARROW_PX = 42;
 export const FACING_HANDLE_HIT_RADIUS_PX = 10;
+export const KILL_ZONE_VERTEX_HIT_RADIUS_PX = 9;
 
 export interface RouteGeometry {
   /** Route start (the soldier) followed by each waypoint, in screen pixels. */
@@ -160,4 +179,43 @@ export function distanceToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   const t =
     lengthSq === 0 ? 0 : Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq, 0), 1);
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** The kill-zone corner drawn nearest to `screen`, within the hit radius. */
+export function killZoneVertexAt(scene: MapScene, screen: Vec2): number | undefined {
+  let best: number | undefined;
+  let bestDistance = KILL_ZONE_VERTEX_HIT_RADIUS_PX;
+  scene.killZone?.vertices.forEach((v, i) => {
+    const d = distance(worldToScreen(scene.camera, scene.viewport, v), screen);
+    if (d <= bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  });
+  return best;
+}
+
+/**
+ * The index at which a corner placed at `screen` would be inserted if it lies on
+ * a side of the kill zone (side i runs from corner i to corner i + 1, the last
+ * side back to corner 0), or `undefined`.
+ */
+export function killZoneInsertionIndexAt(scene: MapScene, screen: Vec2): number | undefined {
+  const vertices = scene.killZone?.vertices ?? [];
+  if (vertices.length < 2) return undefined;
+  const points = vertices.map((v) => worldToScreen(scene.camera, scene.viewport, v));
+  const sides = vertices.length >= 3 ? points.length : 1;
+  let best: number | undefined;
+  let bestDistance = SEGMENT_HIT_DISTANCE_PX;
+  for (let i = 0; i < sides; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    if (!a || !b) continue;
+    const d = distanceToSegment(screen, a, b);
+    if (d <= bestDistance) {
+      best = i + 1;
+      bestDistance = d;
+    }
+  }
+  return best;
 }

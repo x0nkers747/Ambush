@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createExercise, DEMO_SCENARIO } from '#exercise';
 import { soldierId } from '#sim';
-import { clearSelection, createSession, selectSoldier, setTimeScale } from './session';
+import { clearSelection, createSession, selectSoldier, setTimeScale, setTool } from './session';
 
 const exercise = createExercise({ config: { tickRateHz: 30, seed: 0 }, scenario: DEMO_SCENARIO });
 
 describe('session', () => {
   it('starts with no selection at 1×', () => {
-    expect(createSession()).toEqual({ selectedSoldierId: null, timeScale: 1 });
+    expect(createSession()).toEqual({ selectedSoldierId: null, timeScale: 1, tool: 'routes' });
   });
 
   it('selects BLUEFOR soldiers, one at a time', () => {
@@ -28,5 +28,11 @@ describe('session', () => {
     const tick = exercise.simulation.tick;
     expect(setTimeScale(createSession(), 4).timeScale).toBe(4);
     expect(exercise.simulation.tick).toBe(tick);
+  });
+
+  it('switches between route and kill-zone editing', () => {
+    const session = setTool(createSession(), 'killZone');
+    expect(session.tool).toBe('killZone');
+    expect(setTool(session, 'routes').tool).toBe('routes');
   });
 });

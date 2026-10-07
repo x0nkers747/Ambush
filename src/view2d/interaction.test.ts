@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createExercise, type Exercise } from '#exercise';
-import { createSession, type Session } from '#session';
-import { createSyntheticTerrain, flatElevation, soldierId, type Scenario } from '#sim';
+import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
+import { createSession, setTool, type Session } from '#session';
+import { createSyntheticTerrain, flatElevation, soldierId } from '#sim';
 import { createMapActions } from './actions';
 import { formatBearing } from './bearing';
 import { screenToWorld, type Camera } from './camera';
@@ -14,7 +14,7 @@ import { buildScene, FACING_ARROW_PX } from './scene';
 
 const A = soldierId('A');
 
-const SCENARIO: Scenario = {
+const SCENARIO: AmbushScenario = {
   id: 'interaction-test',
   terrain: createSyntheticTerrain(
     { originX: -150, originY: -150, cellSize: 30, columns: 11, rows: 11 },
@@ -51,6 +51,7 @@ const SCENARIO: Scenario = {
       posture: 'standing',
     },
   ],
+  opforRoutes: [],
 };
 
 const screen = (x: number, y: number) => ({ x: 200 + x, y: 200 - y });
@@ -102,6 +103,10 @@ function setup() {
       controller.pointerUp({ x: start.x + dx, y: start.y + dy, button: 0 });
     },
     route: () => exercise.draft(A)?.waypoints.map((w) => [w.x, w.y]),
+    useKillZoneTool() {
+      session = setTool(session, 'killZone');
+    },
+    corners: () => exercise.killZone?.vertices.map((v) => [v.x, v.y]),
   };
   return ui;
 }
@@ -281,5 +286,91 @@ describe('cursor', () => {
     expect(move(0, FACING_ARROW_PX)).toBe('move');
     ui.click(30, 30);
     expect(move(30, 30)).toBe('move');
+  });
+});
+
+describe('kill-zone editing', () => {
+  function withZone() {
+    const ui = setup();
+    ui.useKillZoneTool();
+    ui.click(-60, 30);
+    ui.click(60, 30);
+    ui.click(60, 90);
+    ui.click(-60, 90);
+    return ui;
+  }
+
+  it('adds corners where the map is clicked, ignoring soldiers', () => {
+    const ui = withZone();
+    expect(ui.corners()).toEqual([
+      [-60, 30],
+      [60, 30],
+      [60, 90],
+      [-60, 90],
+    ]);
+    expect(ui.session.selectedSoldierId).toBeNull();
+    const fresh = setup();
+    fresh.useKillZoneTool();
+    fresh.click(50, 0); // on soldier B: a corner, not a selection
+    expect(fresh.session.selectedSoldierId).toBeNull();
+    expect(fresh.corners()).toEqual([[50, 0]]);
+  });
+
+  it('inserts a corner when a side is clicked', () => {
+    const ui = withZone();
+    ui.click(0, 91); // 1 px from the north side, which runs from corner 2 to corner 3
+    expect(ui.corners()).toEqual([
+      [-60, 30],
+      [60, 30],
+      [60, 90],
+      [0, 91],
+      [-60, 90],
+    ]);
+    ui.click(-61, 60); // the closing side, from the last corner back to the first
+    expect(ui.corners()?.at(-1)).toEqual([-61, 60]);
+  });
+
+  it('moves a corner by dragging it, and stops where the zone would cross itself', () => {
+    const ui = withZone();
+    ui.dragPixels(60, 90, 10, -10); // to (70, 100)
+    expect(ui.corners()?.[2]).toEqual([70, 100]);
+    // Dragging corner 0 (−60, 30) to (80, 60) would make it cross itself; it stays at the last valid point.
+    const start = screen(-60, 30);
+    ui.controller.pointerDown({ ...start, button: 0 });
+    ui.controller.pointerMove({ ...screen(-50, 35), button: 0 });
+    ui.controller.pointerMove({ ...screen(80, 60), button: 0 });
+    ui.controller.pointerUp({ ...screen(80, 60), button: 0 });
+    expect(ui.corners()?.[0]).toEqual([-50, 35]);
+  });
+
+  it('deletes a corner with a right click', () => {
+    const ui = withZone();
+    ui.click(60, 90, 2);
+    expect(ui.corners()).toEqual([
+      [-60, 30],
+      [60, 30],
+      [-60, 90],
+    ]);
+  });
+
+  it('does not edit routes with the kill-zone tool, nor the kill zone with the route tool', () => {
+    const ui = withZone();
+    expect(ui.route()).toEqual([]);
+    const ui2 = setup();
+    ui2.click(0, 0);
+    ui2.click(-60, 30);
+    expect(ui2.exercise.killZone).toBeNull();
+    expect(ui2.route()).toEqual([[-60, 30]]);
+  });
+
+  it('is read-only while BLUEFOR is moving', () => {
+    const ui = withZone();
+    ui.exercise.addWaypoint(A, { x: 0, y: 140 });
+    ui.exercise.execute();
+    ui.click(0, -50);
+    ui.click(60, 90, 2);
+    ui.dragPixels(-60, 30, 10, 10);
+    expect(ui.corners()).toHaveLength(4);
+    expect(ui.corners()?.[0]).toEqual([-60, 30]);
   });
 });
