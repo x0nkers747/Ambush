@@ -86,7 +86,7 @@ const soldier = (exercise: Exercise, id: string) => {
 
 /**
  * Advances `seconds` of simulation time at 1×, one tick per call like successive
- * frames (a single `advance` is capped at 10 ticks to protect the frame rate).
+ * frames (one `advance` steps at most 100 ms of real time's worth of ticks).
  */
 function run(exercise: Exercise, seconds: number): SimEvent[] {
   const events: SimEvent[] = [];
@@ -174,10 +174,13 @@ describe('phases', () => {
     exercise.execute();
     run(exercise, 1);
     expect(exercise.simulation.tick).toBe(10);
-    exercise.advance(0.2, 4); // 0.8 s of simulation time
+    exercise.advance(0.1, 4); // two frames of 0.4 s of simulation time each
+    exercise.advance(0.1, 4);
     expect(exercise.simulation.tick).toBe(18);
-    exercise.advance(5, 4); // a long frame is capped at 10 ticks
-    expect(exercise.simulation.tick).toBe(28);
+    expect(exercise.droppedSeconds).toBe(0);
+    exercise.advance(5, 4); // a 5 s stall: only 100 ms of real time at 4× (4 ticks) is simulated
+    expect(exercise.simulation.tick).toBe(22);
+    expect(exercise.droppedSeconds).toBeCloseTo((200 - 4) / TICK_RATE, 9);
     exercise.pause();
     const tick = exercise.simulation.tick;
     expect(exercise.advance(5, 4)).toEqual([]);
@@ -189,7 +192,8 @@ describe('phases', () => {
     const exercise = setup();
     exercise.addWaypoint(A, { x: 0, y: 150 });
     exercise.execute();
-    exercise.advance(0.25); // 2.5 ticks: 2 stepped, half a tick pending
+    exercise.advance(0.1);
+    exercise.advance(0.15); // 2.5 ticks in all: 2 stepped, half a tick pending
     expect(exercise.simulation.tick).toBe(2);
     exercise.pause();
     exercise.resume();

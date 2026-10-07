@@ -30,6 +30,8 @@ export {
 export { remainingPlan, samePlan, validatePlan, type SoldierPlan } from './plan';
 export {
   createFixedStepRunner,
+  DEFAULT_MAX_CATCH_UP_SECONDS,
+  maxTicksPerAdvance,
   type FixedStepRunner,
   type FixedStepRunnerOptions,
   type Steppable,

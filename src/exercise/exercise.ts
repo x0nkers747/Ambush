@@ -147,6 +147,11 @@ export interface Exercise {
   readonly opforStart: OpforStart | null;
   readonly trigger: AmbushTrigger | null;
   readonly timeline: readonly ExerciseEvent[];
+  /**
+   * Simulation seconds skipped because a frame exceeded the runner's catch-up
+   * budget (docs/adr/0003), e.g. after the browser stalled. Diagnostic only.
+   */
+  readonly droppedSeconds: number;
 
   /** Whether the soldier belongs to the trainee and so can be planned for. */
   isPlannable(soldierId: SoldierId): boolean;
@@ -319,9 +324,12 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     },
   };
   let runner: FixedStepRunner = createFixedStepRunner(stepper);
+  /** Dropped time of runners already replaced. */
+  let droppedBefore = 0;
   /** Starts the simulation running with no partial tick carried over from before. */
   const run = () => {
     paused = false;
+    droppedBefore += runner.droppedSeconds;
     runner = createFixedStepRunner(stepper);
   };
 
@@ -441,6 +449,9 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
       return trigger;
     },
     timeline,
+    get droppedSeconds() {
+      return droppedBefore + runner.droppedSeconds;
+    },
 
     isPlannable: (id) => traineeIds.has(id),
     get canEditPlans() {

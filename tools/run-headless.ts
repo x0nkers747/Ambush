@@ -39,7 +39,7 @@ const sim = createSimulation(
     soldiers: [],
   },
 );
-const runner = createFixedStepRunner(sim, { maxTicksPerAdvance: Number.POSITIVE_INFINITY });
+const runner = createFixedStepRunner(sim, { maxCatchUpSeconds: Number.POSITIVE_INFINITY });
 
 const startMs = performance.now();
 runner.advance(seconds);
