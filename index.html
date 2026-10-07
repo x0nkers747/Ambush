@@ -7,33 +7,213 @@
     <style>
       :root {
         color-scheme: dark;
-        font-family: system-ui, sans-serif;
-        background: #14171a;
-        color: #d8dde2;
+        font-family: system-ui, 'Segoe UI', sans-serif;
+        font-size: 13px;
+        --bg: #14171a;
+        --panel: #1c2024;
+        --line: #2c3238;
+        --text: #d8dde2;
+        --muted: #8a949e;
+        --accent: #f2c230;
+        --friendly: #4f8fe0;
+        --planning: #4f8fe0;
+        --executing: #3fae6a;
+        --paused: #e0a63a;
+        --danger: #e06a5a;
       }
+      * {
+        box-sizing: border-box;
+      }
+      html,
       body {
+        height: 100%;
         margin: 0;
-        padding: 2rem;
+        background: var(--bg);
+        color: var(--text);
       }
-      h1 {
-        margin: 0 0 0.25rem;
-      }
-      dl {
+      #app {
         display: grid;
-        grid-template-columns: max-content max-content;
-        gap: 0.35rem 1.5rem;
+        grid-template-rows: auto 1fr auto;
+        grid-template-columns: 1fr 300px;
+        height: 100%;
+      }
+      header {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 8px 12px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 {
+        margin: 0 8px 0 0;
+        font-size: 15px;
+        letter-spacing: 0.04em;
+      }
+      .phase {
+        min-width: 92px;
+        padding: 3px 10px;
+        border-radius: 3px;
+        font-weight: 700;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-align: center;
+        text-transform: uppercase;
+        color: #0f1215;
+      }
+      .phase[data-phase='planning'] {
+        background: var(--planning);
+      }
+      .phase[data-phase='executing'] {
+        background: var(--executing);
+      }
+      .phase[data-phase='paused'] {
+        background: var(--paused);
+      }
+      .clock {
+        font-variant-numeric: tabular-nums;
+        font-size: 14px;
+        min-width: 80px;
+      }
+      .group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .group .label {
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .spacer {
+        flex: 1;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: #2a3036;
+        border: 1px solid #3a424a;
+        border-radius: 3px;
+        padding: 5px 12px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        background: #343b42;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      button.primary {
+        background: #2f6a46;
+        border-color: #3f8a5c;
+        font-weight: 600;
+      }
+      button.primary:hover:not(:disabled) {
+        background: #387c52;
+      }
+      button[aria-pressed='true'] {
+        background: #3a4652;
+        border-color: var(--accent);
+        color: #fff;
+      }
+      main {
+        position: relative;
+        min-height: 0;
+      }
+      #map {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        user-select: none;
+      }
+      aside {
+        grid-row: 2 / 4;
+        grid-column: 2;
+        overflow-y: auto;
+        background: var(--panel);
+        border-left: 1px solid var(--line);
+        padding: 12px;
+      }
+      aside h2 {
+        margin: 14px 0 6px;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      aside h2:first-child {
+        margin-top: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .soldier-title {
+        font-size: 15px;
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
         font-variant-numeric: tabular-nums;
       }
-      dt {
-        color: #8a949e;
+      td,
+      th {
+        padding: 2px 4px;
+        text-align: right;
       }
-      dd {
+      th {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      td:first-child,
+      th:first-child {
+        text-align: left;
+      }
+      .facing {
+        font-size: 18px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .problems {
+        color: var(--danger);
+      }
+      .events {
         margin: 0;
+        padding: 0;
+        list-style: none;
+        font-variant-numeric: tabular-nums;
+      }
+      .events li {
+        padding: 1px 0;
+      }
+      dl.help {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 3px 10px;
+        margin: 0;
+      }
+      dl.help dt {
+        color: var(--accent);
+        white-space: nowrap;
+      }
+      dl.help dd {
+        margin: 0;
+      }
+      footer {
+        grid-column: 1;
+        padding: 4px 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        min-height: 24px;
       }
     </style>
   </head>
   <body>
-    <main id="app"></main>
+    <div id="app"></div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

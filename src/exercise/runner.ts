@@ -1,7 +1,9 @@
-import type { Simulation } from '#sim';
-
-/** The part of a simulation the runner drives. */
-export type Steppable = Pick<Simulation, 'step' | 'dtSeconds'>;
+/** What the runner drives: anything with a fixed tick duration and a step. */
+export interface Steppable {
+  readonly dtSeconds: number;
+  /** Advances one tick. Any return value (e.g. simulation events) is ignored. */
+  step(): unknown;
+}
 
 export interface FixedStepRunnerOptions {
   /**

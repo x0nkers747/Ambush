@@ -4,8 +4,8 @@ Interactive training simulation for planning, executing and reviewing
 squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
-Status: **Phase 2**: simulation kernel, synthetic terrain and deterministic waypoint
-movement. No UI or gameplay yet.
+Status: **Phase 3**: interactive 2D planning slice. Plan BLUEFOR routes and final facings on
+a tactical map, Execute, Pause, re-plan and Resume. No 3D, perception or combat yet.
 
 ## Requirements
 
@@ -18,6 +18,29 @@ movement. No UI or gameplay yet.
 npm install
 npm run dev
 ```
+
+## Using the planning map
+
+Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge.
+
+| Action                       | Effect                                    |
+| ---------------------------- | ----------------------------------------- |
+| Click a blue soldier         | Select it (OPFOR cannot be selected)      |
+| Click the map                | Add a waypoint at the end of the route    |
+| Click a route leg            | Insert a waypoint into that leg           |
+| Drag a waypoint              | Move it                                   |
+| Right-click a waypoint       | Delete it                                 |
+| Drag the yellow arrow handle | Set the final facing (shown as 000°–359°) |
+| Backspace / Delete           | Delete the last waypoint                  |
+| Drag the map / middle-drag   | Pan                                       |
+| Mouse wheel                  | Zoom at the cursor                        |
+| F                            | Fit the whole map                         |
+| Space                        | Pause / Resume                            |
+| 1 · 2 · 4                    | Time scale                                |
+| Esc                          | Clear the selection                       |
+
+Routes can be edited while Planning or Paused. Execute and Resume commit the
+plans; while executing they are read-only.
 
 ## Scripts
 
@@ -42,7 +65,7 @@ ESLint. Other layers are imported only through their alias (`#sim`, `#exercise`,
 
 ```
 src/sim       simulation (no DOM, no Node, no Three.js, deterministic)
-src/exercise  plan, phases, fixed-step runner, recording   -> sim
+src/exercise  phases, plans, revisions, runner, demo scenario -> sim
 src/session   ephemeral UI state                           -> sim, exercise
 src/view2d    2D tactical view                             -> sim, exercise, session
 src/view3d    3D observer view (Three.js)                  -> sim, exercise, session
@@ -60,3 +83,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 6. [Terrain dataset and georeference](docs/adr/0006-terrain-dataset-and-georeference.md)
 7. [Simulation kernel](docs/adr/0007-simulation-kernel.md)
 8. [Terrain heightfield and waypoint movement](docs/adr/0008-terrain-and-movement.md)
+9. [Exercise phases, plan revisions and the 2D planning view](docs/adr/0009-exercise-and-planning-view.md)
