@@ -1,5 +1,6 @@
 import { canonicalEncode } from './plain-data';
 import type { DeepReadonly, SimState } from './state';
+import type { SimWorld } from './world';
 
 /**
  * Stable hash of simulation state for determinism and regression tests
@@ -8,6 +9,15 @@ import type { DeepReadonly, SimState } from './state';
  */
 export function hashSimState(state: SimState | DeepReadonly<SimState>): string {
   return fnv1a64(utf16leBytes(canonicalEncode(state)));
+}
+
+/**
+ * Content fingerprint of a simulation's immutable world (terrain and movement
+ * parameters): the same hash as `hashSimState`, over the world instead of the
+ * state. Identifies the context a snapshot belongs to (docs/adr/0008).
+ */
+export function fingerprintWorld(world: SimWorld): string {
+  return fnv1a64(utf16leBytes(canonicalEncode(world)));
 }
 
 const FNV64_OFFSET = 0xcbf2_9ce4_8422_2325n;

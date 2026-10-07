@@ -23,7 +23,7 @@ export {
   type Vec2,
   type Vec3,
 } from './geometry';
-export { hashSimState } from './hash';
+export { fingerprintWorld, hashSimState } from './hash';
 export { MAX_SEED, type RngState } from './rng';
 export {
   createInitialState,

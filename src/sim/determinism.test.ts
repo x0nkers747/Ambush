@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SimCommand } from './commands';
 import type { SimEvent } from './events';
-import { hashSimState } from './hash';
+import { fingerprintWorld, hashSimState } from './hash';
 import { clonePlainData } from './plain-data';
-import { createSimulation, type Simulation } from './simulation';
+import type { Scenario } from './scenario';
+import { createSimulation, type SimSnapshot, type Simulation } from './simulation';
 import { soldierId, waypointId } from './state';
 import { TEST_SCENARIO } from './test-scenario';
 
@@ -165,5 +166,93 @@ describe('snapshot and restore', () => {
   });
 });
 
+describe('snapshot world compatibility', () => {
+  const { terrain } = TEST_SCENARIO;
+  const elevations = [...terrain.heightfield.elevations];
+  elevations[123] = (elevations[123] ?? 0) + 0.01;
+
+  /** A snapshot of the test scenario taken while soldiers are moving. */
+  function movingSnapshot() {
+    const { sim } = scriptedRun(5, 30, 1);
+    return { sim, snapshot: sim.snapshot() };
+  }
+
+  function restoreInto(scenario: Scenario, snapshot: SimSnapshot): Simulation {
+    const sim = createSimulation({ tickRateHz: 30, seed: 0 }, scenario);
+    sim.restore(snapshot);
+    return sim;
+  }
+
+  it('carries the fingerprint computed when the simulation was created', () => {
+    const { sim, snapshot } = movingSnapshot();
+    expect(snapshot.worldFingerprint).toBe(sim.worldFingerprint);
+    expect(sim.worldFingerprint).toBe(fingerprintWorld(sim.world));
+    expect(sim.worldFingerprint).toBe(PINNED_TEST_WORLD_FINGERPRINT);
+    expect(JSON.stringify(snapshot)).not.toContain('"elevations"');
+  });
+
+  it('restores into a simulation of an equal but separately built world', () => {
+    const { sim, snapshot } = movingSnapshot();
+    const copy = clonePlainData({ ...TEST_SCENARIO, terrain, movement: TEST_SCENARIO.movement });
+    const other = restoreInto(copy, snapshot);
+    expect(other.worldFingerprint).toBe(sim.worldFingerprint);
+    expect(hashSimState(other.state)).toBe(hashSimState(sim.state));
+    // Seed and initial soldiers are not part of the world: the snapshot replaces them.
+    const reseeded = createSimulation({ tickRateHz: 30, seed: 99 }, TEST_SCENARIO);
+    reseeded.restore(snapshot);
+    expect(hashSimState(reseeded.state)).toBe(hashSimState(sim.state));
+  });
+
+  it.each<[string, Scenario]>([
+    [
+      'one terrain elevation',
+      {
+        ...TEST_SCENARIO,
+        terrain: { ...terrain, heightfield: { ...terrain.heightfield, elevations } },
+      },
+    ],
+    [
+      'the terrain origin',
+      {
+        ...TEST_SCENARIO,
+        terrain: { ...terrain, heightfield: { ...terrain.heightfield, originX: -101 } },
+      },
+    ],
+    [
+      'the terrain georeference',
+      {
+        ...TEST_SCENARIO,
+        terrain: {
+          ...terrain,
+          georef: {
+            crs: 'EPSG:32633',
+            falseEasting: 500000,
+            falseNorthing: 0,
+            verticalDatum: 'EGM2008',
+          },
+        },
+      },
+    ],
+    [
+      'the movement speed',
+      { ...TEST_SCENARIO, movement: { ...TEST_SCENARIO.movement, speed: 1.6 } },
+    ],
+    [
+      'the maximum turn rate',
+      { ...TEST_SCENARIO, movement: { ...TEST_SCENARIO.movement, maxTurnRate: 1 } },
+    ],
+  ])('refuses to restore into a world with a different %s', (_label, changed) => {
+    const { sim, snapshot } = movingSnapshot();
+    const other = createSimulation({ tickRateHz: 30, seed: 0 }, changed);
+    expect(other.worldFingerprint).not.toBe(sim.worldFingerprint);
+    const before = hashSimState(other.state);
+    expect(() => {
+      other.restore(snapshot);
+    }).toThrow(/different world/);
+    expect(hashSimState(other.state)).toBe(before);
+  });
+});
+
 const PINNED_INITIAL_HASH = 'b404a3ad5a8eca80';
 const PINNED_SCRIPTED_HASH = '2f3891faddd80a69';
+const PINNED_TEST_WORLD_FINGERPRINT = '4f82fb1a6731093f';

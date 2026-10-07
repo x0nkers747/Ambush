@@ -59,7 +59,7 @@ states. Tests pin the reference output and seeded sequences, so an accidental
 change to the generator is caught.
 
 **Snapshots contain simulation state, not queued commands.**
-`Simulation.snapshot()` returns `{ tickRateHz, state }`, a deep copy of the
+`Simulation.snapshot()` returns `{ tickRateHz, worldFingerprint, state }`, a deep copy of the
 complete mutable simulation state. Commands queued for future ticks are inputs,
 not state, and are never part of a snapshot. `restore` replaces the state with a
 copy and discards all pending commands; the caller resubmits them (a replay
@@ -67,7 +67,9 @@ resubmits them from the command log, ADR 0005). A future exercise save/resume
 format, owned by the `exercise` layer, may store a snapshot _and_ the pending
 commands side by side. Copies are made by a small plain-data cloner rather than
 `structuredClone`, which is a host API not available in `sim`. The cloner
-rejects anything that is not plain data.
+rejects anything that is not plain data. Snapshots also carry the tick rate and
+a fingerprint of the immutable world, and can only be restored into a matching
+simulation (ADR 0008).
 
 **The seed is run configuration, not scenario content.** `SimConfig` holds the
 tick rate and the PRNG seed. A scenario describes the starting situation; the

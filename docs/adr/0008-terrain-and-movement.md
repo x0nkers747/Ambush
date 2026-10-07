@@ -1,7 +1,7 @@
 # ADR 0008: Terrain heightfield and waypoint movement
 
 - Status: Accepted
-- Date: 2026-10-07
+- Date: 2026-10-07 (decisions 1–3 below confirmed at Phase 2 approval)
 
 ## Context
 
@@ -10,6 +10,37 @@ deterministically and independently of the tick rate (ADR 0003). This ADR makes
 the runtime terrain format of ADR 0006 concrete, and defines the movement model.
 
 ## Decision
+
+### Approved decisions
+
+1. **Heading does not steer the path.** Soldiers follow deterministic,
+   straight segments between waypoints; their facing turns toward the
+   direction of travel at the maximum turn rate. After a sharp change of
+   direction a soldier may briefly move somewhat sideways. This is accepted.
+2. **Movement settings are scenario-wide defaults.** Speed and turn rate are
+   fixed scenario data shared by all soldiers. They are the defaults of the
+   current simplified movement model, not an architectural commitment: movement
+   characteristics may become per-soldier (role, load, posture, …) later if
+   needed.
+3. **Terrain belongs to the immutable context, not to `SimState`.** Terrain and
+   movement settings form the simulation's `SimWorld`. They are never part of
+   simulation state and never copied into snapshots.
+
+### Snapshot and world compatibility
+
+A snapshot is only meaningful in the world it was taken in, so it carries the
+world's **content fingerprint**: `fingerprintWorld`, the 64-bit FNV-1a hash of
+the canonical encoding of `SimWorld` (terrain, including georeference and every
+elevation, and movement settings), the same encoding as the state hash
+(ADR 0007). It is computed once when the simulation is created. `restore`
+throws a `RangeError` if the snapshot's fingerprint (or tick rate) differs from
+the simulation's.
+
+The fingerprint covers exactly the immutable inputs that affect results after
+a restore. The scenario id, seed and initial soldiers and units are not
+included: the restored state replaces them. Anything later added to `SimWorld`
+is covered automatically. This is a guard against mistakes, not an asset
+versioning scheme.
 
 ### Terrain
 
@@ -98,7 +129,7 @@ In practice, runs at 10, 20, 30, 60 and 120 Hz agree to within 5e-11 m,
 1e-6 rad and 1e-6 s.
 
 **Parameters.** `MovementParams { speed, maxTurnRate }` in SI units, given by the
-scenario and shared by all soldiers.
+scenario and shared by all soldiers (decision 2).
 
 ### Deferred
 
