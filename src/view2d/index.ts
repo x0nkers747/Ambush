@@ -11,9 +11,12 @@ export {
   type Camera,
   type Viewport,
 } from './camera';
-export { losLabel } from './render';
+export { type VisibilityView } from './scene';
+export { createViewshedService, type ViewshedService } from './viewshed-service';
 export {
   createTacticalMap,
+  VIEWSHED_CELL_M,
+  VIEWSHED_PREVIEW_CELL_M,
   type PointerReadout,
   type TacticalMap,
   type TacticalMapOptions,

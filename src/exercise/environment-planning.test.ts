@@ -4,13 +4,14 @@ import {
   flatElevation,
   pointInPolygon,
   rectangle,
+  computeViewshed,
   soldierId,
+  viewshedGrid,
   type SimEvent,
   type Vec2,
 } from '#sim';
 import type { AmbushScenario } from './ambush-scenario';
 import { createExercise, ExerciseError, type Exercise } from './exercise';
-import { killZoneSamplePoints } from './kill-zone';
 
 // Planning against the environment (docs/adr/0011): routes around buildings,
 // refused waypoints, and line of sight from planned positions.
@@ -199,33 +200,14 @@ describe('line of sight from planned positions', () => {
     expect(exercise.simulation.state.soldiers[0]?.position.y).toBe(-40);
   });
 
-  it('assesses the kill zone deterministically from the planned position', () => {
+  it('needs a complete kill zone for kill-zone coverage', () => {
     const exercise = setup();
-    for (const v of [
-      { x: -30, y: 40 },
-      { x: 30, y: 40 },
-      { x: 30, y: 70 },
-      { x: -30, y: 70 },
-    ]) {
-      exercise.addKillZoneVertex(v);
-    }
-    const fromStart = exercise.killZoneVisibility(A);
-    expect(fromStart?.samples).toHaveLength(9);
-    expect(fromStart?.planned).toBe(false);
-    exercise.addWaypoint(A, { x: 60, y: -10 });
-    const fromPlan = exercise.killZoneVisibility(A);
-    expect(fromPlan?.planned).toBe(true);
-    expect(fromPlan?.observer).toEqual({ x: 60, y: -10 });
-    expect(fromPlan?.clearCount).toBeGreaterThan(fromStart?.clearCount ?? 0);
-    expect(exercise.killZoneVisibility(A)).toEqual(fromPlan);
-  });
-
-  it('needs a complete kill zone', () => {
-    const exercise = setup();
-    expect(exercise.killZoneVisibility(A)).toBeUndefined();
+    const terrain = exercise.simulation.world.terrain;
+    const viewshed = computeViewshed(terrain, { x: 0, y: -40 }, viewshedGrid(terrain, 4));
+    expect(exercise.killZoneCoverage(viewshed)).toBeUndefined();
     exercise.addKillZoneVertex({ x: -30, y: 40 });
     exercise.addKillZoneVertex({ x: 30, y: 40 });
-    expect(exercise.killZoneVisibility(A)).toBeUndefined();
+    expect(exercise.killZoneCoverage(viewshed)).toBeUndefined();
   });
 
   it('is not offered for OPFOR', () => {
@@ -233,40 +215,72 @@ describe('line of sight from planned positions', () => {
   });
 });
 
-describe('killZoneSamplePoints', () => {
-  it('samples corners, side midpoints and the centroid, in corner order', () => {
-    const zone = {
-      id: 'KZ' as never,
-      vertices: [
-        { x: 0, y: 0 },
-        { x: 20, y: 0 },
-        { x: 20, y: 10 },
-        { x: 0, y: 10 },
-      ],
-    };
-    expect(killZoneSamplePoints(zone)).toEqual([
-      { x: 0, y: 0 },
-      { x: 10, y: 0 },
-      { x: 20, y: 0 },
-      { x: 20, y: 5 },
-      { x: 20, y: 10 },
-      { x: 10, y: 10 },
-      { x: 0, y: 10 },
-      { x: 0, y: 5 },
-      { x: 10, y: 5 },
-    ]);
+describe('visibility from planned positions', () => {
+  /** The viewshed from where the soldier would observe, as the planning display computes it. */
+  const viewshedOf = (exercise: Exercise, id = A) => {
+    const observer = exercise.observer(id);
+    if (!observer) throw new Error('no observer');
+    const terrain = exercise.simulation.world.terrain;
+    return computeViewshed(terrain, observer.point, viewshedGrid(terrain, 4));
+  };
+  const zone = (exercise: Exercise, corners: Vec2[]) => {
+    for (const c of corners) exercise.addKillZoneVertex(c);
+  };
+  // North of the barn: hidden from A's start, open from east of the barn.
+  const NORTH = [
+    { x: -15, y: 30 },
+    { x: 15, y: 30 },
+    { x: 15, y: 60 },
+    { x: -15, y: 60 },
+  ];
+
+  it('is computed from the planned final position, not where the soldier stands', () => {
+    const exercise = setup();
+    zone(exercise, NORTH);
+    const fromStart = exercise.killZoneCoverage(viewshedOf(exercise));
+    expect(fromStart?.percent).toBe(0); // the barn hides it completely
+    exercise.addWaypoint(A, { x: 60, y: -10 });
+    expect(exercise.observer(A)).toEqual({ point: { x: 60, y: -10 }, planned: true });
+    const fromPlan = exercise.killZoneCoverage(viewshedOf(exercise));
+    expect(fromPlan?.percent).toBe(100);
+    expect(fromPlan?.cells).toBe(fromStart?.cells);
+    expect(exercise.simulation.state.soldiers[0]?.position.y).toBe(-40); // nobody moved
   });
 
-  it('leaves out the centroid when it falls outside a concave zone', () => {
-    const vee = {
-      id: 'KZ' as never,
-      vertices: [
-        { x: 0, y: 0 },
-        { x: 10, y: 30 },
-        { x: 0, y: 4 },
-        { x: -10, y: 30 },
-      ],
-    };
-    expect(killZoneSamplePoints(vee)).toHaveLength(8);
+  it('changes as the planned position moves', () => {
+    const exercise = setup();
+    zone(exercise, NORTH);
+    const id = exercise.addWaypoint(A, { x: 60, y: -10 });
+    const open = viewshedOf(exercise);
+    exercise.moveWaypoint(A, id, { x: 0, y: -15 }); // right behind the barn
+    const hidden = viewshedOf(exercise);
+    expect(hidden).not.toEqual(open);
+    expect(exercise.killZoneCoverage(hidden)?.percent).toBe(0);
+  });
+
+  it('follows the selected soldier', () => {
+    const exercise = setup();
+    const opfor = soldierId('E');
+    expect(exercise.observer(opfor)).toBeUndefined();
+    const viewA = viewshedOf(exercise, A);
+    exercise.addWaypoint(A, { x: 60, y: -10 });
+    expect(viewshedOf(exercise, A)).not.toEqual(viewA);
+  });
+
+  it('gives a deterministic, partial kill-zone percentage', () => {
+    const exercise = setup();
+    // Straddling the barn's shadow as seen from the start.
+    zone(exercise, [
+      { x: -100, y: 30 },
+      { x: 100, y: 30 },
+      { x: 100, y: 60 },
+      { x: -100, y: 60 },
+    ]);
+    const coverage = exercise.killZoneCoverage(viewshedOf(exercise));
+    expect(coverage?.cells).toBe(400); // 50 × 8 cells of 4 m
+    expect(coverage?.percent).toBeGreaterThan(0);
+    expect(coverage?.percent).toBeLessThan(100);
+    expect(coverage?.percent).toBe((100 * (coverage?.visibleCells ?? 0)) / 400);
+    expect(exercise.killZoneCoverage(viewshedOf(exercise))).toEqual(coverage);
   });
 });

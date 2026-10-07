@@ -114,23 +114,6 @@ export function killZoneProblems(
   return problems;
 }
 
-/**
- * Representative points for judging what can be seen of a kill zone: every
- * corner, the middle of every side, and the area centroid when it lies inside
- * the zone (2n + 1 points for a convex n-gon). Deterministic, in corner order.
- */
-export function killZoneSamplePoints(zone: KillZone): Vec2[] {
-  const corners = zone.vertices;
-  const points: Vec2[] = [];
-  corners.forEach((a, i) => {
-    const b = corners[(i + 1) % corners.length] ?? a;
-    points.push({ x: a.x, y: a.y }, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  });
-  const centroid = polygonCentroid(corners);
-  if (centroid && pointInPolygon(centroid, corners)) points.push(centroid);
-  return points;
-}
-
 /** Area-weighted centroid, or `undefined` for a degenerate polygon. */
 export function polygonCentroid(vertices: readonly Vec2[]): Vec2 | undefined {
   let area = 0;

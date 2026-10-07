@@ -5,6 +5,7 @@ import {
   lineOfSight,
   normalizeAzimuth,
   pointProblem,
+  visibleCellsIn,
   soldierId,
   waypointId,
   type Azimuth,
@@ -17,6 +18,7 @@ import {
   type Simulation,
   type SoldierId,
   type Vec2,
+  type Viewshed,
   type WaypointId,
 } from '#sim';
 import { validateOpforRoutes, type AmbushScenario, type OpforRoute } from './ambush-scenario';
@@ -25,7 +27,6 @@ import {
   insertVertex,
   KillZoneEditError,
   killZoneProblems,
-  killZoneSamplePoints,
   moveVertex,
   type KillZone,
 } from './kill-zone';
@@ -138,12 +139,15 @@ export class ExerciseError extends Error {
   override name = 'ExerciseError';
 }
 
-/** Line of sight from one observation point to each kill-zone sample point. */
-export interface KillZoneVisibility {
-  readonly observer: Vec2;
-  readonly planned: boolean;
-  readonly samples: readonly { readonly point: Vec2; readonly result: LosResult }[];
-  readonly clearCount: number;
+/**
+ * The share of the kill zone a viewshed sees: of the viewshed grid cells whose
+ * centres lie inside or on the kill-zone polygon, the number visible.
+ */
+export interface KillZoneCoverage {
+  readonly cells: number;
+  readonly visibleCells: number;
+  /** `visibleCells / cells × 100`. */
+  readonly percent: number;
 }
 
 export interface ExerciseOptions {
@@ -201,10 +205,11 @@ export interface Exercise {
   /** Line of sight from the soldier's observation point (see `observer`) to a map point. */
   lineOfSightFrom(soldierId: SoldierId, target: Vec2): LosResult | undefined;
   /**
-   * Line of sight from the soldier's observation point to the kill zone's sample
-   * points (see `killZoneSamplePoints`), or `undefined` without a complete kill zone.
+   * How much of the kill zone a viewshed sees (see `KillZoneCoverage`), or
+   * `undefined` without a complete kill zone or when no viewshed cell centre
+   * lies inside it.
    */
-  killZoneVisibility(soldierId: SoldierId): KillZoneVisibility | undefined;
+  killZoneCoverage(viewshed: Viewshed): KillZoneCoverage | undefined;
 
   addWaypoint(soldierId: SoldierId, point: Vec2, index?: number): WaypointId;
   moveWaypoint(soldierId: SoldierId, waypoint: WaypointId, point: Vec2): void;
@@ -589,19 +594,12 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
       if (!from || pointProblem(terrain, target)?.kind === 'offTerrain') return undefined;
       return lineOfSight(terrain, from.point, target);
     },
-    killZoneVisibility(id) {
-      const from = observer(id);
-      if (!from || !killZone || killZoneProblems(killZone, []).length > 0) return undefined;
-      const samples = killZoneSamplePoints(killZone).map((point) => ({
-        point,
-        result: lineOfSight(terrain, from.point, point),
-      }));
-      return {
-        observer: from.point,
-        planned: from.planned,
-        samples,
-        clearCount: samples.filter((s) => s.result.clear).length,
-      };
+    killZoneCoverage(viewshed) {
+      if (!killZone || killZoneProblems(killZone, []).length > 0) return undefined;
+      const { cells, visible } = visibleCellsIn(viewshed, killZone.vertices);
+      return cells === 0
+        ? undefined
+        : { cells, visibleCells: visible, percent: (100 * visible) / cells };
     },
 
     addWaypoint(id, point, index) {

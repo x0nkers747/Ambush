@@ -5,7 +5,12 @@ import { fitBounds, screenToWorld, type Camera, type Viewport } from './camera';
 import { createMapActions } from './actions';
 import { createMapController } from './interaction';
 import { createTerrainLayer, drawMap } from './render';
-import { buildScene, type MapScene } from './scene';
+import { buildScene, type MapScene, type VisibilityView } from './scene';
+import { createViewshedService } from './viewshed-service';
+
+/** Viewshed resolution in metres: full detail, and a quicker preview while dragging. */
+export const VIEWSHED_CELL_M = 4;
+export const VIEWSHED_PREVIEW_CELL_M = 8;
 
 // The tactical map widget: owns the canvas, the camera and pointer handling,
 // and edits the exercise's draft plans and the session's selection.
@@ -33,6 +38,8 @@ export interface TacticalMap {
   fitView(): void;
   /** Map point under the pointer, or `null` when the pointer is off the terrain. */
   readonly pointer: PointerReadout | null;
+  /** The visibility overlay as last drawn, or `null` when it is off or nothing is selected. */
+  readonly visibility: VisibilityView | null;
   dispose(): void;
 }
 
@@ -53,7 +60,30 @@ export function createTacticalMap({
   let fitted = false;
   let pointer: PointerReadout | null = null;
 
-  const scene = (): MapScene => buildScene(exercise, getSession(), camera, viewport);
+  const viewsheds = createViewshedService(world.terrain);
+  let visibility: VisibilityView | null = null;
+  const scene = (): MapScene => buildScene(exercise, getSession(), camera, viewport, visibility);
+
+  /**
+   * The selected soldier's viewshed from its planned final position (or where it
+   * stands): a coarser preview while that final waypoint is being dragged, full
+   * detail otherwise. Computed in the background; the previous result is shown
+   * until the new one is ready.
+   */
+  const updateVisibility = () => {
+    const session = getSession();
+    const id = session.selectedSoldierId;
+    const observer = session.showVisibility && id !== null ? exercise.observer(id) : undefined;
+    if (!observer || id === null) {
+      visibility = null;
+      return;
+    }
+    const finalWaypoint = exercise.draft(id)?.waypoints.at(-1)?.id;
+    const dragging = finalWaypoint !== undefined && controller.draggedWaypoint === finalWaypoint;
+    const cellSize = dragging ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
+    const { viewshed, pending } = viewsheds.request(observer.point, cellSize);
+    visibility = { observer: observer.point, planned: observer.planned, viewshed, pending };
+  };
 
   const actions = createMapActions(
     exercise,
@@ -121,6 +151,7 @@ export function createTacticalMap({
   canvas.addEventListener('contextmenu', onContextMenu);
 
   const draw = () => {
+    updateVisibility();
     const dpr = canvas.width / viewport.width;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawMap(ctx, scene(), layer);
@@ -155,7 +186,11 @@ export function createTacticalMap({
     get pointer() {
       return pointer;
     },
+    get visibility() {
+      return visibility;
+    },
     dispose() {
+      viewsheds.dispose();
       observer.disconnect();
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);

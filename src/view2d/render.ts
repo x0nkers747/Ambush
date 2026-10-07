@@ -1,12 +1,12 @@
 import { polygonCentroid, TRAINEE_SIDE, type PlannedRoute, type SoldierPlan } from '#exercise';
 import type {
   DeepReadonly,
-  LosResult,
   RoadClass,
   Soldier,
   TerrainDataset,
   VegetationKind,
   Vec2,
+  Viewshed,
 } from '#sim';
 import { formatBearing } from './bearing';
 import {
@@ -55,9 +55,8 @@ const COLORS = {
   building: '#4b4b4b',
   buildingEdge: '#191919',
   featureLabel: 'rgba(20, 24, 28, 0.85)',
-  losClear: '#1f9d55',
-  losBlocked: '#d6301f',
-  losObserver: '#0d5c2f',
+  impossible: '#d6301f',
+  visibleEdge: '#0d6b30',
   generatedTurn: '#ffffff',
 } as const;
 
@@ -69,6 +68,9 @@ const FACING_TICK_PX = 14;
 const LABEL_MAX_METERS_PER_PIXEL = 0.45;
 /** Building and vegetation ids appear from this zoom. */
 const FEATURE_LABEL_MAX_METERS_PER_PIXEL = 0.6;
+/** Opacity (0–255) of the visibility overlay, inside the visible area and along its edge. */
+const VISIBLE_ALPHA = 80;
+const VISIBLE_EDGE_ALPHA = 150;
 
 /** Canvas objects for one terrain, built once. */
 export interface TerrainLayer {
@@ -163,7 +165,7 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
     if (plan.soldierId !== scene.selectedId) drawOtherRoute(ctx, scene, plan);
   }
   drawSelectedRoute(ctx, scene);
-  drawLos(ctx, scene);
+  drawObserver(ctx, scene);
   for (const soldier of scene.soldiers) drawSoldier(ctx, scene, soldier);
   drawFacingArrow(ctx, scene);
   drawTrigger(ctx, scene);
@@ -200,6 +202,8 @@ function drawTerrain(ctx: CanvasRenderingContext2D, scene: MapScene, layer: Terr
     layer.image.width * cellSize * scale,
     layer.image.height * cellSize * scale,
   );
+  // The visibility overlay goes on the shaded terrain, beneath contours and features.
+  drawViewshed(ctx, scene);
 
   const dpr = ctx.getTransform().a;
   const [a, b, c, d, e, f] = worldToScreenTransform(scene.camera, scene.viewport);
@@ -375,7 +379,7 @@ function drawSelectedRoute(ctx: CanvasRenderingContext2D, scene: MapScene): void
     ctx.strokeStyle = COLORS.routeHalo;
     ctx.lineWidth = 5;
     polyline(ctx, leg);
-    ctx.strokeStyle = bad ? COLORS.losBlocked : COLORS.route;
+    ctx.strokeStyle = bad ? COLORS.impossible : COLORS.route;
     ctx.lineWidth = 2.5;
     polyline(ctx, leg);
   });
@@ -422,9 +426,9 @@ function drawSelectedRoute(ctx: CanvasRenderingContext2D, scene: MapScene): void
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = bad ? COLORS.losBlocked : COLORS.route;
+    ctx.strokeStyle = bad ? COLORS.impossible : COLORS.route;
     ctx.stroke();
-    ctx.fillStyle = bad ? COLORS.losBlocked : COLORS.route;
+    ctx.fillStyle = bad ? COLORS.impossible : COLORS.route;
     ctx.fillText(String(i + 1), p.x, p.y + 0.5);
   });
   ctx.restore();
@@ -616,80 +620,85 @@ function drawOpforRoute(ctx: CanvasRenderingContext2D, scene: MapScene, path: Pl
   ctx.restore();
 }
 
-/** Trainee-facing text for a sight-line result. */
-export function losLabel(result: LosResult): string {
-  const cause = result.obstruction?.cause;
-  if (!cause) return 'CLEAR LOS';
-  return cause.kind === 'terrain'
-    ? 'BLOCKED — TERRAIN'
-    : `BLOCKED — ${cause.kind === 'building' ? 'BUILDING' : 'VEGETATION'} ${cause.featureId}`;
+/** The observation point of the visibility overlay: a ring, dashed when it is only the current position. */
+function drawObserver(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const visibility = scene.visibility;
+  if (!visibility) return;
+  const p = worldToScreen(scene.camera, scene.viewport, visibility.observer);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 10, 0, 2 * Math.PI);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.labelHalo;
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLORS.visibleEdge;
+  ctx.setLineDash(visibility.planned ? [] : [3, 3]);
+  ctx.stroke();
+  ctx.restore();
 }
 
-/** CHECK LOS: the observer, sight lines (clear part green, obstructed part red) and obstruction points. */
-function drawLos(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const los = scene.los;
-  if (!los) return;
-  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
-  const observer = toScreen(los.observer);
-  const sightLine = (result: LosResult, width: number) => {
-    const target = toScreen(result.to);
-    const stop = result.obstruction ? toScreen(result.obstruction.point) : target;
-    ctx.lineWidth = width;
-    ctx.strokeStyle = COLORS.losClear;
-    polyline(ctx, [observer, stop]);
-    if (result.obstruction) {
-      ctx.strokeStyle = COLORS.losBlocked;
-      ctx.setLineDash([4, 4]);
-      polyline(ctx, [stop, target]);
-      ctx.setLineDash([]);
+/** Translucent green over visible cells, a little stronger along the edge of the visible area. */
+export function viewshedPixels(viewshed: Viewshed): Uint8ClampedArray {
+  const { grid, visible } = viewshed;
+  const { columns, rows } = grid;
+  const data = new Uint8ClampedArray(columns * rows * 4);
+  const at = (c: number, r: number) =>
+    c < 0 || r < 0 || c >= columns || r >= rows ? 1 : (visible[r * columns + c] ?? 0);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      if (!at(c, r)) continue;
+      const edge = !at(c - 1, r) || !at(c + 1, r) || !at(c, r - 1) || !at(c, r + 1);
+      // Image row 0 is the northernmost grid row.
+      const i = ((rows - 1 - r) * columns + c) * 4;
+      data[i] = 40;
+      data[i + 1] = edge ? 130 : 170;
+      data[i + 2] = 60;
+      data[i + 3] = edge ? VISIBLE_EDGE_ALPHA : VISIBLE_ALPHA;
     }
-    return { stop, target };
-  };
+  }
+  return data;
+}
+
+const overlayCache = new WeakMap<Viewshed, HTMLCanvasElement>();
+
+function overlayImage(viewshed: Viewshed): HTMLCanvasElement {
+  let canvas = overlayCache.get(viewshed);
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.width = viewshed.grid.columns;
+    canvas.height = viewshed.grid.rows;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const pixels = ctx.createImageData(canvas.width, canvas.height);
+      pixels.data.set(viewshedPixels(viewshed));
+      ctx.putImageData(pixels, 0, 0);
+    }
+    overlayCache.set(viewshed, canvas);
+  }
+  return canvas;
+}
+
+/** Draws the viewshed over the terrain shading, beneath contours and everything else. */
+function drawViewshed(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const viewshed = scene.visibility?.viewshed;
+  if (!viewshed) return;
+  const { grid } = viewshed;
+  const topLeft = worldToScreen(scene.camera, scene.viewport, {
+    x: grid.originX,
+    y: grid.originY + grid.rows * grid.cellSize,
+  });
+  const size = grid.cellSize / scene.camera.metersPerPixel;
   ctx.save();
-  ctx.lineCap = 'round';
-  for (const sample of los.killZone?.samples ?? []) {
-    const { target } = sightLine(sample.result, 1.5);
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, 4, 0, 2 * Math.PI);
-    ctx.fillStyle = sample.result.clear ? COLORS.losClear : COLORS.losBlocked;
-    ctx.fill();
-  }
-  if (los.ray) {
-    const { stop, target } = sightLine(los.ray, 3);
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, 5, 0, 2 * Math.PI);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = los.ray.clear ? COLORS.losClear : COLORS.losBlocked;
-    ctx.stroke();
-    if (los.ray.obstruction) {
-      // An X where the sight line is first obstructed.
-      ctx.strokeStyle = COLORS.losBlocked;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(stop.x - 6, stop.y - 6);
-      ctx.lineTo(stop.x + 6, stop.y + 6);
-      ctx.moveTo(stop.x + 6, stop.y - 6);
-      ctx.lineTo(stop.x - 6, stop.y + 6);
-      ctx.stroke();
-    }
-    const text = losLabel(los.ray);
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = COLORS.labelHalo;
-    ctx.strokeText(text, target.x + 10, target.y - 12);
-    ctx.fillStyle = los.ray.clear ? COLORS.losObserver : COLORS.losBlocked;
-    ctx.fillText(text, target.x + 10, target.y - 12);
-  }
-  // The observation point: a ring, dashed when it is only the current position.
-  ctx.beginPath();
-  ctx.arc(observer.x, observer.y, 9, 0, 2 * Math.PI);
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = COLORS.losObserver;
-  ctx.setLineDash(los.planned ? [] : [3, 3]);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'low';
+  ctx.drawImage(
+    overlayImage(viewshed),
+    topLeft.x,
+    topLeft.y,
+    grid.columns * size,
+    grid.rows * size,
+  );
   ctx.restore();
 }
 

@@ -44,10 +44,12 @@ export {
   lineOfSight,
   STANDING_EYE_HEIGHT_M,
   STANDING_TARGET_HEIGHT_M,
+  traceSightLine,
   type LosCause,
   type LosObstruction,
   type LosOptions,
   type LosResult,
+  type SightLineHit,
 } from './los';
 export {
   isSegmentWalkable,
@@ -118,3 +120,12 @@ export {
   type TerrainDataset,
 } from './terrain';
 export type { MovementParams, SimWorld } from './world';
+export {
+  cellCentre,
+  computeViewshed,
+  computeViewshedRows,
+  viewshedGrid,
+  visibleCellsIn,
+  type Viewshed,
+  type ViewshedGrid,
+} from './viewshed';

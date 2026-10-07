@@ -16,7 +16,7 @@ export {
   type Exercise,
   type ExerciseEvent,
   type ExerciseOptions,
-  type KillZoneVisibility,
+  type KillZoneCoverage,
   type ExercisePhase,
   type OpforStart,
   type PlanRevision,
@@ -24,7 +24,6 @@ export {
 } from './exercise';
 export {
   killZoneProblems,
-  killZoneSamplePoints,
   polygonCentroid,
   MIN_KILL_ZONE_AREA_M2,
   MIN_VERTEX_SPACING_M,

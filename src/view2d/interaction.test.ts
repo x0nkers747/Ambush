@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
-import { createSession, setTool, type Session } from '#session';
+import { createSession, setShowVisibility, setTool, type Session } from '#session';
 import { createSyntheticTerrain, flatElevation, rectangle, soldierId } from '#sim';
 import { createMapActions } from './actions';
 import { formatBearing } from './bearing';
@@ -112,7 +112,10 @@ function setup() {
     },
     route: () => exercise.draft(A)?.waypoints.map((w) => [w.x, w.y]),
     notices,
-    useTool(tool: 'routes' | 'killZone' | 'los') {
+    setSession(next: Session) {
+      session = next;
+    },
+    useTool(tool: 'routes' | 'killZone') {
       session = setTool(session, tool);
     },
     useKillZoneTool() {
@@ -399,44 +402,36 @@ describe('refused waypoints', () => {
   });
 });
 
-describe('CHECK LOS', () => {
-  it('inspects the clicked map point from the selected soldier', () => {
+describe('visibility overlay', () => {
+  const viewport = { width: 400, height: 400 };
+
+  it('is shown only when switched on, for the selected trainee soldier', () => {
     const ui = setup();
+    const view = { observer: { x: 0, y: 0 }, planned: false, viewshed: null, pending: true };
     ui.click(0, 0);
-    ui.useTool('los');
-    ui.click(40, 60);
-    expect(ui.session.losTarget).toEqual({ x: 40, y: 60 });
-    expect(ui.route()).toEqual([]); // no waypoint added
-    const los = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los;
-    expect(los?.observer).toEqual({ x: 0, y: 0 });
-    expect(los?.planned).toBe(false);
-    expect(los?.ray?.clear).toBe(true);
+    expect(buildScene(ui.exercise, ui.session, ui.camera, viewport, view).visibility).toBeNull();
+    const on = setShowVisibility(ui.session, true);
+    expect(buildScene(ui.exercise, on, ui.camera, viewport, view).visibility).toEqual(view);
   });
 
-  it('reports a building in the way', () => {
+  it('does not take map clicks: route editing works as usual', () => {
     const ui = setup();
     ui.click(0, 0);
-    ui.useTool('los');
-    ui.click(140, -140); // beyond B-9 as seen from (0, 0)
-    const los = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los;
-    expect(los?.ray?.obstruction?.cause).toEqual({ kind: 'building', featureId: 'B-9' });
+    ui.setSession(setShowVisibility(ui.session, true));
+    ui.click(-40, 40);
+    expect(ui.route()).toEqual([[-40, 40]]);
   });
 
-  it('switches the observer by clicking another BLUEFOR soldier', () => {
+  it('reports which waypoint is being dragged, for the quick preview', () => {
     const ui = setup();
     ui.click(0, 0);
-    ui.useTool('los');
-    ui.click(50, 0);
-    expect(ui.session.selectedSoldierId).toBe('B');
-    expect(ui.session.losTarget).toBeNull();
-  });
-
-  it('shows nothing until a soldier is selected', () => {
-    const ui = setup();
-    ui.useTool('los');
-    ui.click(40, 60);
-    expect(
-      buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 }).los,
-    ).toBeNull();
+    ui.click(-40, 40);
+    const id = ui.exercise.draft(A)?.waypoints[0]?.id;
+    const start = screen(-40, 40);
+    ui.controller.pointerDown({ ...start, button: 0 });
+    ui.controller.pointerMove({ x: start.x + 10, y: start.y, button: 0 });
+    expect(ui.controller.draggedWaypoint).toBe(id);
+    ui.controller.pointerUp({ x: start.x + 10, y: start.y, button: 0 });
+    expect(ui.controller.draggedWaypoint).toBeNull();
   });
 });

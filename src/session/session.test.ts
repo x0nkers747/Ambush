@@ -5,6 +5,7 @@ import {
   clearSelection,
   createSession,
   selectSoldier,
+  setShowVisibility,
   setTimeScale,
   setTool,
   stepTimeScale,
@@ -19,8 +20,7 @@ describe('session', () => {
       selectedSoldierId: null,
       timeScale: 1,
       tool: 'routes',
-      losTarget: null,
-      losKillZone: false,
+      showVisibility: false,
     });
   });
 
@@ -57,6 +57,13 @@ describe('session', () => {
       seen.push(session.timeScale);
     }
     expect(seen).toEqual([1, 8, 16, 16, 8, 1, 1]);
+  });
+
+  it('turns the visibility overlay on and off', () => {
+    expect(setShowVisibility(createSession(), true).showVisibility).toBe(true);
+    expect(setShowVisibility(setShowVisibility(createSession(), true), false).showVisibility).toBe(
+      false,
+    );
   });
 
   it('switches between route and kill-zone editing', () => {

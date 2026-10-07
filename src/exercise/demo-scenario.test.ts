@@ -9,7 +9,6 @@ import {
 } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
 import { createExercise } from './exercise';
-import { killZoneSamplePoints } from './kill-zone';
 
 describe('DEMO_SCENARIO', () => {
   const state = createInitialState(DEMO_SCENARIO, 0);
@@ -122,9 +121,15 @@ describe('DEMO_SCENARIO', () => {
         { x: 0, y: 45 },
       ],
     };
+    // Corners, side midpoints and the (inside) centroid of the zone.
+    const samples: Vec2[] = zone.vertices.flatMap((a, i) => {
+      const b = zone.vertices[(i + 1) % zone.vertices.length] ?? a;
+      return [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }];
+    });
+    samples.push({ x: 7.946, y: 10.524 });
     const tally = (from: Vec2) => {
       const counts: Record<string, number> = {};
-      for (const point of killZoneSamplePoints(zone)) {
+      for (const point of samples) {
         const { obstruction } = lineOfSight(terrain, from, point);
         const key =
           obstruction === null

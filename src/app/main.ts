@@ -9,7 +9,7 @@ import {
 import {
   clearSelection,
   createSession,
-  setLosKillZone,
+  setShowVisibility,
   setTimeScale,
   setTool,
   stepTimeScale,
@@ -18,7 +18,7 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, polygonArea, type SimEvent, type SoldierId } from '#sim';
-import { createTacticalMap, formatBearing, losLabel } from '#view2d';
+import { createTacticalMap, formatBearing } from '#view2d';
 
 // Composition root for the ambush slice: the demo scenario, the exercise, the
 // session, the tactical map and the controls around them.
@@ -47,6 +47,10 @@ app.innerHTML = `
     </div>
     <div class="group" data-ui="speeds"><span class="label">Speed</span></div>
     <div class="group" data-ui="tools"><span class="label">Edit</span></div>
+    <div class="group">
+      <span class="label">View</span>
+      <button data-ui="visibility" title="Show what the selected soldier can see (V)">Visibility</button>
+    </div>
     <span class="spacer"></span>
     <button data-ui="fit" title="Fit the whole map (F)">Fit map</button>
   </header>
@@ -61,8 +65,8 @@ app.innerHTML = `
     <div data-ui="start-check" class="start-check"></div>
     <h2>Kill zone</h2>
     <div data-ui="kill-zone"></div>
-    <h2>Check LOS</h2>
-    <div data-ui="los"></div>
+    <h2>Visibility</h2>
+    <div data-ui="visibility-panel"></div>
     <h2>Selected soldier</h2>
     <div data-ui="selection"></div>
     <div data-ui="problems" class="problems"></div>
@@ -86,16 +90,15 @@ app.innerHTML = `
       <dt>Drag corner</dt><dd>Move it (it cannot cross itself)</dd>
       <dt>Right-click corner</dt><dd>Delete it</dd>
     </dl>
-    <h2>Controls: check LOS (L)</h2>
+    <h2>Controls: visibility (V)</h2>
     <dl class="help">
-      <dt>L</dt><dd>Turn CHECK LOS on or off</dd>
-      <dt>Click soldier</dt><dd>Choose who is looking</dd>
-      <dt>Click map</dt><dd>Check the sight line to that point</dd>
-      <dt>LOS to kill zone</dt><dd>Check sight lines to points across the kill zone</dd>
+      <dt>V</dt><dd>Show or hide what the selected soldier can see</dd>
+      <dt>Click soldier</dt><dd>Show that soldier's visible area</dd>
+      <dt>Drag last waypoint</dt><dd>Compare positions: the green area follows</dd>
     </dl>
-    <p class="muted">Lines of sight are checked from the soldier's planned final position (or where
-    they stand if they have no route), standing, to a standing person. Terrain, buildings and
-    vegetation can block them.</p>
+    <p class="muted">Green is the ground a standing soldier at the planned final position (or where
+    they stand, if they have no route) can see a standing person on. Terrain, buildings and
+    vegetation block the view.</p>
     <h2>Controls: map and time</h2>
     <dl class="help">
       <dt>Drag map</dt><dd>Pan (left or middle button)</dd>
@@ -162,12 +165,8 @@ const speedButtons = TIME_SCALES.map((scale) => {
   return { scale, speedButton };
 });
 
-const TOOL_LABELS: Record<MapTool, string> = {
-  routes: 'Routes',
-  killZone: 'Kill zone',
-  los: 'Check LOS',
-};
-const toolButtons = (['routes', 'killZone', 'los'] as const).map((tool) => {
+const TOOL_LABELS: Record<MapTool, string> = { routes: 'Routes', killZone: 'Kill zone' };
+const toolButtons = (['routes', 'killZone'] as const).map((tool) => {
   const toolButton = document.createElement('button');
   toolButton.textContent = TOOL_LABELS[tool];
   toolButton.addEventListener('click', () => {
@@ -230,9 +229,9 @@ window.addEventListener('keydown', (event) => {
     case 'K':
       session = setTool(session, session.tool === 'killZone' ? 'routes' : 'killZone');
       break;
-    case 'l':
-    case 'L':
-      session = setTool(session, session.tool === 'los' ? 'routes' : 'los');
+    case 'v':
+    case 'V':
+      session = setShowVisibility(session, !session.showVisibility);
       break;
     case 'Escape':
       session = clearSelection(session);
@@ -453,37 +452,41 @@ function startCheckHtml(): string {
     .join('')}</ul>`;
 }
 
-function losHtml(): string {
-  const id = session.selectedSoldierId;
-  if (session.tool !== 'los') {
-    return '<p class="muted">Press <b>L</b> or choose <b>Edit: Check LOS</b>, then click the map to see what the selected soldier can see.</p>';
+function visibilityHtml(): string {
+  if (!session.showVisibility) {
+    return '<p class="muted">Press <b>V</b> or <b>View: Visibility</b> to see what the selected soldier can see.</p>';
   }
-  if (id === null) return '<p class="muted">Click a blue soldier to check what they can see.</p>';
-  const observer = exercise.observer(id);
-  if (!observer) return '';
-  const from = observer.planned
-    ? `From ${escapeHtml(id)}'s planned final position.`
-    : `From ${escapeHtml(id)}'s <b>current</b> position: no planned final position.`;
-  const ray = session.losTarget ? exercise.lineOfSightFrom(id, session.losTarget) : undefined;
-  const rayText = ray
-    ? `<p class="${ray.clear ? 'ok' : 'alert'}">${escapeHtml(losLabel(ray))}</p>
-       <p class="muted">${ray.obstruction ? `Obstructed ${ray.obstruction.distance.toFixed(0)} m from the observer; ` : ''}target ${ray.distance.toFixed(0)} m away.</p>`
-    : '<p class="muted">Click the map to check a sight line.</p>';
-  const zone = session.losKillZone ? exercise.killZoneVisibility(id) : undefined;
-  const zoneText = session.losKillZone
-    ? zone
-      ? `<p><b>LOS TO KILL ZONE: ${String(zone.clearCount)} / ${String(zone.samples.length)}</b> sample points clear</p>`
-      : '<p class="muted">Draw a complete kill zone first.</p>'
-    : '';
-  return `<p>${from}</p>${rayText}
-    <p><button data-action="los-kill-zone" aria-pressed="${String(session.losKillZone)}">LOS to kill zone</button></p>
-    ${zoneText}`;
+  const id = session.selectedSoldierId;
+  const view = map.visibility;
+  if (id === null || !view)
+    return '<p class="muted">Click a blue soldier to see their visible area.</p>';
+  const from = view.planned
+    ? `From ${escapeHtml(id)}'s <b>PLANNED POSITION</b>.`
+    : `From ${escapeHtml(id)}'s <b>CURRENT POSITION</b> (no planned final position).`;
+  // The viewshed shown may still be the previous one while the new one is computed.
+  const shown = view.viewshed;
+  const current =
+    shown !== null && shown.observer.x === view.observer.x && shown.observer.y === view.observer.y
+      ? shown
+      : null;
+  const resolution = shown ? `${String(shown.grid.cellSize)} m` : '';
+  const status = view.pending
+    ? `<p class="muted">Calculating…${shown ? ` (showing ${current ? `${resolution} preview` : `${resolution} result for the previous position`})` : ''}</p>`
+    : `<p class="muted">Ground sampled every ${resolution}.</p>`;
+  const coverage = current ? exercise.killZoneCoverage(current) : undefined;
+  const zone = exercise.killZone
+    ? coverage
+      ? `<p><b>KILL ZONE VISIBLE: ${coverage.percent.toFixed(0)}%</b></p>
+         <p class="muted">${String(coverage.visibleCells)} of the ${String(coverage.cells)} sample points (${resolution} grid) inside the kill zone can be seen.</p>`
+      : view.pending
+        ? ''
+        : '<p class="muted">Complete the kill zone to see how much of it is visible.</p>'
+    : '<p class="muted">Draw a kill zone to see how much of it is visible.</p>';
+  return `<p>${from}</p>${status}${zone}`;
 }
 
-ui('los').addEventListener('click', (event) => {
-  if (event.target instanceof HTMLElement && event.target.dataset['action'] === 'los-kill-zone') {
-    session = setLosKillZone(session, !session.losKillZone);
-  }
+ui('visibility').addEventListener('click', () => {
+  session = setShowVisibility(session, !session.showVisibility);
 });
 
 function killZoneHtml(): string {
@@ -558,7 +561,8 @@ function updatePanels(): void {
   setHtml('status', statusHtml());
   setHtml('start-check', startCheckHtml());
   setHtml('kill-zone', killZoneHtml());
-  setHtml('los', losHtml());
+  setHtml('visibility-panel', visibilityHtml());
+  ui('visibility').setAttribute('aria-pressed', String(session.showVisibility));
   setHtml('selection', selectionHtml());
   ui('problems').textContent = problems.join('\n');
   setHtml(

@@ -76,99 +76,204 @@ export function lineOfSight(
   const a: Vec3 = { x: from.x, y: from.y, z: heightAt(terrain, from.x, from.y) + eye };
   const b: Vec3 = { x: to.x, y: to.y, z: heightAt(terrain, to.x, to.y) + aim };
   const distance = Math.hypot(b.x - a.x, b.y - a.y);
-  const result = (obstruction: LosObstruction | null): LosResult => ({
+  const hit = distance === 0 ? null : traceSightLine(terrain, a, b);
+  return {
     from: a,
     to: b,
     distance,
-    clear: obstruction === null,
-    obstruction,
-  });
-  if (distance === 0) return result(null);
-
-  const at = (t: number): Vec2 => ({ x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) });
-  const lineZ = (t: number) => a.z + t * (b.z - a.z);
-  const ground = (t: number) => {
-    const p = at(t);
-    return heightAt(terrain, p.x, p.y);
+    clear: hit === null,
+    obstruction: hit && {
+      cause: hit.cause,
+      point: {
+        x: a.x + hit.t * (b.x - a.x),
+        y: a.y + hit.t * (b.y - a.y),
+        z: a.z + hit.t * (b.z - a.z),
+      },
+      distance: hit.t * distance,
+    },
   };
-  const obstructionAt = (t: number, cause: LosCause): LosObstruction => {
-    const p = at(t);
-    return { cause, point: { x: p.x, y: p.y, z: lineZ(t) }, distance: t * distance };
+}
+
+/** The first obstruction on a sight line: where (as a fraction t of the line) and what. */
+export interface SightLineHit {
+  readonly t: number;
+  readonly cause: LosCause;
+}
+
+/** Reused scratch space for the cut parameters of one sight line. */
+let cutBuffer = new Float64Array(1024);
+
+/**
+ * The shared core of `lineOfSight` and `computeViewshed`: traces the sight
+ * line from eye point `a` to target point `b` (map coordinates and
+ * elevations, distinct in X/Y) and returns its first obstruction, or `null`.
+ * Allocation-light so it can be called tens of thousands of times per viewshed.
+ */
+export function traceSightLine(terrain: TerrainDataset, a: Vec3, b: Vec3): SightLineHit | null {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dz = b.z - a.z;
+  const distance = Math.hypot(dx, dy);
+  const features = queryFeatures(terrain);
+  const minX = Math.min(a.x, b.x);
+  const maxX = Math.max(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxY = Math.max(a.y, b.y);
+  const near = (box: Box) =>
+    box.minX <= maxX && minX <= box.maxX && box.minY <= maxY && minY <= box.maxY;
+  const buildings = features.buildings.filter((f) => near(f.box));
+  const vegetation = features.vegetation.filter((f) => near(f.box));
+
+  // Cut points: the ends, terrain slope changes, and feature edge crossings.
+  let n = 0;
+  const push = (t: number) => {
+    if (n === cutBuffer.length) {
+      const bigger = new Float64Array(cutBuffer.length * 2);
+      bigger.set(cutBuffer);
+      cutBuffer = bigger;
+    }
+    cutBuffer[n] = t;
+    n += 1;
   };
+  push(0);
+  push(1);
+  const { originX, originY, cellSize } = terrain.heightfield;
+  const gx0 = (a.x - originX) / cellSize;
+  const gy0 = (a.y - originY) / cellSize;
+  const gx1 = (b.x - originX) / cellSize;
+  const gy1 = (b.y - originY) / cellSize;
+  const crossings = (v0: number, v1: number) => {
+    if (v0 === v1) return;
+    const lo = Math.min(v0, v1);
+    const hi = Math.max(v0, v1);
+    for (let k = Math.ceil(lo); k <= Math.floor(hi); k += 1) {
+      const t = (k - v0) / (v1 - v0);
+      if (t > 0 && t < 1) push(t);
+    }
+  };
+  crossings(gx0, gx1);
+  crossings(gy0, gy1);
+  crossings(gx0 - gy0, gx1 - gy1); // the SW–NE diagonals (docs/adr/0008)
+  for (const { polygon } of buildings) addEdgeCrossings(a, b, polygon, push);
+  for (const { polygon } of vegetation) addEdgeCrossings(a, b, polygon, push);
+  const cuts = cutBuffer.subarray(0, n).sort();
 
-  const box = boundsOf([a, b]);
-  const buildings = queryFeatures(terrain).buildings.filter((f) => overlaps(f.box, box));
-  const vegetation = queryFeatures(terrain).vegetation.filter((f) => overlaps(f.box, box));
+  const groundAt = (t: number) => heightAt(terrain, a.x + t * dx, a.y + t * dy);
+  const inside = (f: { box: Box; polygon: readonly Vec2[] }, x: number, y: number) =>
+    x >= f.box.minX &&
+    x <= f.box.maxX &&
+    y >= f.box.minY &&
+    y <= f.box.maxY &&
+    pointInPolygon({ x, y }, f.polygon);
 
-  const cuts = new Set<number>([0, 1]);
-  for (const t of terrainBreaks(terrain, a, b)) cuts.add(t);
-  for (const { polygon } of [...buildings, ...vegetation]) {
-    for (const [p, q] of edges(polygon))
-      for (const t of segmentIntersectionParams(a, b, p, q)) cuts.add(t);
-  }
-  const pieces = mergeClose([...cuts].sort((x, y) => x - y));
-
+  const parts: number[] = [];
+  const inBuildings: PreparedBuilding[] = [];
+  const inVegetation: PreparedVegetation[] = [];
+  const anyFeatures = buildings.length + vegetation.length > 0;
   let obscuration = 0;
-  for (let i = 0; i + 1 < pieces.length; i += 1) {
-    const t0 = pieces[i] ?? 0;
-    const t1 = pieces[i + 1] ?? 1;
-    const mid = at((t0 + t1) / 2);
-    const inBuildings = buildings.filter((f) => pointInPolygon(mid, f.polygon));
-    const inVegetation = vegetation.filter((f) => pointInPolygon(mid, f.polygon));
+  let t0 = cuts[0] ?? 0;
+  let c0 = a.z + t0 * dz - groundAt(t0);
+  for (let i = 1; i < n; i += 1) {
+    const t1 = cuts[i] ?? 1;
+    // Cuts closer than 1e-12 to the previous one are the same point.
+    if (!(t1 - (cuts[i - 1] ?? t1) > 1e-12)) continue;
+    const c1 = a.z + t1 * dz - groundAt(t1);
+    inBuildings.length = 0;
+    inVegetation.length = 0;
+    if (anyFeatures) {
+      const mx = a.x + ((t0 + t1) / 2) * dx;
+      const my = a.y + ((t0 + t1) / 2) * dy;
+      for (const f of buildings) if (inside(f, mx, my)) inBuildings.push(f);
+      for (const f of vegetation) if (inside(f, mx, my)) inVegetation.push(f);
+    }
+    // Fast path: with no feature on this piece and the line at or above the ground
+    // at both ends, nothing here can obstruct it (a linear interpolation of two
+    // non-negative values stays non-negative in floating point).
+    if (inBuildings.length + inVegetation.length === 0 && c0 >= 0 && c1 >= 0) {
+      t0 = t1;
+      c0 = c1;
+      continue;
+    }
 
     // Clearance of the sight line above the ground is linear on this piece.
-    const c0 = lineZ(t0) - ground(t0);
-    const c1 = lineZ(t1) - ground(t1);
-    const clearance = (t: number) => c0 + ((t - t0) / (t1 - t0)) * (c1 - c0);
+    const ct0 = t0;
+    const cc0 = c0;
+    const clearance = (t: number) => cc0 + ((t - ct0) / (t1 - ct0)) * (c1 - cc0);
     const crossing = (level: number): number | undefined =>
-      (c0 - level) * (c1 - level) < 0 ? t0 + ((c0 - level) / (c0 - c1)) * (t1 - t0) : undefined;
+      (cc0 - level) * (c1 - level) < 0
+        ? ct0 + ((cc0 - level) / (cc0 - c1)) * (t1 - ct0)
+        : undefined;
+    const lineZ = (t: number) => a.z + t * dz;
 
     // Split the piece where the line crosses the ground, a roof, or a canopy top.
-    const sub = new Set<number>([t0, t1]);
+    parts.length = 0;
+    parts.push(t0, t1);
     const terrainCut = crossing(0);
-    if (terrainCut !== undefined) sub.add(terrainCut);
+    if (terrainCut !== undefined) parts.push(terrainCut);
     for (const f of inBuildings) {
       const tr = rootOfLinear(lineZ(t0) - f.roofZ, lineZ(t1) - f.roofZ, t0, t1);
-      if (tr !== undefined) sub.add(tr);
+      if (tr !== undefined) parts.push(tr);
     }
     for (const f of inVegetation) {
       const tc = crossing(f.canopy);
-      if (tc !== undefined) sub.add(tc);
+      if (tc !== undefined) parts.push(tc);
     }
-    const parts = [...sub].sort((x, y) => x - y);
+    if (parts.length > 2) parts.sort((x, y) => x - y);
 
     for (let j = 0; j + 1 < parts.length; j += 1) {
       const s0 = parts[j] ?? t0;
       const s1 = parts[j + 1] ?? t1;
       if (s1 <= s0) continue;
       const sm = (s0 + s1) / 2;
-      if (clearance(sm) < 0) return result(obstructionAt(s0, { kind: 'terrain' }));
+      if (clearance(sm) < 0) return { t: s0, cause: TERRAIN };
       const building = inBuildings.find((f) => lineZ(sm) < f.roofZ);
-      if (building) return result(obstructionAt(s0, { kind: 'building', featureId: building.id }));
+      if (building) return { t: s0, cause: building.cause };
+      if (inVegetation.length === 0) continue;
 
       // Vegetation obscuration accumulates at a constant rate on this part.
-      const contributions = inVegetation
-        .filter((f) => clearance(sm) < f.canopy)
-        .map((f) => ({ id: f.id, rate: 1 / f.seeThrough }));
-      const rate = contributions.reduce((sum, c) => sum + c.rate, 0);
+      let rate = 0;
+      let densest: PreparedVegetation | undefined;
+      for (const f of inVegetation) {
+        if (!(clearance(sm) < f.canopy)) continue;
+        const r = 1 / f.seeThrough;
+        rate += r;
+        const best = densest ? 1 / densest.seeThrough : -1;
+        if (!densest || r > best || (r === best && f.id < densest.id)) densest = f;
+      }
       const length = (s1 - s0) * distance;
-      if (rate > 0 && obscuration + rate * length >= 1) {
-        const t = s0 + (1 - obscuration) / rate / distance;
-        const densest = contributions.reduce((best, c) =>
-          c.rate > best.rate || (c.rate === best.rate && c.id < best.id) ? c : best,
-        );
-        return result(obstructionAt(t, { kind: 'vegetation', featureId: densest.id }));
+      if (densest && rate > 0 && obscuration + rate * length >= 1) {
+        return { t: s0 + (1 - obscuration) / rate / distance, cause: densest.cause };
       }
       obscuration += rate * length;
     }
+    t0 = t1;
+    c0 = c1;
   }
-  return result(null);
+  return null;
+}
+
+const TERRAIN: LosCause = { kind: 'terrain' };
+
+/** Pushes the parameters where segment a–b meets each polygon edge. */
+function addEdgeCrossings(
+  a: Vec2,
+  b: Vec2,
+  polygon: readonly Vec2[],
+  push: (t: number) => void,
+): void {
+  for (let k = 0; k < polygon.length; k += 1) {
+    const p = polygon[k];
+    const q = polygon[(k + 1) % polygon.length];
+    if (!p || !q) continue;
+    for (const t of segmentIntersectionParams(a, b, p, q)) push(t);
+  }
 }
 
 // --- Feature preparation -----------------------------------------------------------
 
 interface PreparedBuilding {
   readonly id: string;
+  readonly cause: LosCause;
   readonly polygon: readonly Vec2[];
   readonly box: Box;
   /** Flat roof elevation: height above the lowest ground at the footprint corners. */
@@ -177,6 +282,7 @@ interface PreparedBuilding {
 
 interface PreparedVegetation {
   readonly id: string;
+  readonly cause: LosCause;
   readonly polygon: readonly Vec2[];
   readonly box: Box;
   readonly canopy: number;
@@ -195,12 +301,14 @@ function queryFeatures(terrain: TerrainDataset) {
     features = {
       buildings: terrain.features.buildings.map((f) => ({
         id: f.id,
+        cause: { kind: 'building' as const, featureId: f.id },
         polygon: f.footprint,
         box: boundsOf(f.footprint),
         roofZ: Math.min(...f.footprint.map((p) => heightAt(terrain, p.x, p.y))) + f.heightMeters,
       })),
       vegetation: terrain.features.vegetation.map((f) => ({
         id: f.id,
+        cause: { kind: 'vegetation' as const, featureId: f.id },
         polygon: f.boundary,
         box: boundsOf(f.boundary),
         canopy: f.canopyHeightMeters,
@@ -219,44 +327,6 @@ export function buildingRoofElevations(terrain: TerrainDataset): ReadonlyMap<str
 
 // --- Geometry helpers --------------------------------------------------------------
 
-/**
- * Parameters t ∈ (0, 1) where the 2D segment a→b crosses a terrain grid line
- * or a cell diagonal: the only places the interpolated ground changes slope.
- */
-function terrainBreaks(terrain: TerrainDataset, a: Vec2, b: Vec2): number[] {
-  const { originX, originY, cellSize } = terrain.heightfield;
-  const gx0 = (a.x - originX) / cellSize;
-  const gy0 = (a.y - originY) / cellSize;
-  const gx1 = (b.x - originX) / cellSize;
-  const gy1 = (b.y - originY) / cellSize;
-  const out: number[] = [];
-  const crossings = (v0: number, v1: number) => {
-    if (v0 === v1) return;
-    const lo = Math.min(v0, v1);
-    const hi = Math.max(v0, v1);
-    for (let k = Math.ceil(lo); k <= Math.floor(hi); k += 1) {
-      const t = (k - v0) / (v1 - v0);
-      if (t > 0 && t < 1) out.push(t);
-    }
-  };
-  crossings(gx0, gx1);
-  crossings(gy0, gy1);
-  crossings(gx0 - gy0, gx1 - gy1); // the SW–NE diagonals (docs/adr/0008)
-  return out;
-}
-
 function rootOfLinear(v0: number, v1: number, t0: number, t1: number): number | undefined {
   return v0 * v1 < 0 ? t0 + (v0 / (v0 - v1)) * (t1 - t0) : undefined;
-}
-
-function mergeClose(sorted: number[]): number[] {
-  return sorted.filter((t, i) => i === 0 || t - (sorted[i - 1] ?? t) > 1e-12);
-}
-
-function edges(polygon: readonly Vec2[]): [Vec2, Vec2][] {
-  return polygon.map((p, i) => [p, polygon[(i + 1) % polygon.length] ?? p]);
-}
-
-function overlaps(a: Box, b: Box): boolean {
-  return a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
 }

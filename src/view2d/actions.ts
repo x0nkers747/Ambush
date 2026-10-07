@@ -1,12 +1,12 @@
 import { ExerciseError, type Exercise } from '#exercise';
-import { selectSoldier, setLosTarget, type Session } from '#session';
+import { selectSoldier, type Session } from '#session';
 import type { SoldierId } from '#sim';
 import type { Camera } from './camera';
 import type { MapActions } from './interaction';
 
 /**
  * Connects map interactions to the exercise (plan edits for the selected
- * soldier, kill-zone edits) and the session (selection, CHECK LOS target).
+ * soldier, kill-zone edits) and the session (selection).
  * Edits the exercise refuses (a waypoint inside a building, a kill zone that
  * would cross itself, …) change nothing and are reported through `notify`, so
  * a drag simply stops at the last acceptable position.
@@ -69,9 +69,6 @@ export function createMapActions(
       ignoreRefused(() => {
         exercise.deleteKillZoneVertex(index);
       });
-    },
-    setLosTarget: (point) => {
-      session.set(setLosTarget(session.get(), point));
     },
     setCamera,
   };

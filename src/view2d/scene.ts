@@ -2,7 +2,6 @@ import type {
   AmbushTrigger,
   Exercise,
   KillZone,
-  KillZoneVisibility,
   OpforRoute,
   PlannedRoute,
   SoldierPlan,
@@ -11,10 +10,10 @@ import type { MapTool, Session } from '#session';
 import {
   isOnTerrain,
   type DeepReadonly,
-  type LosResult,
   type Soldier,
   type SoldierId,
   type Vec2,
+  type Viewshed,
   type WaypointId,
 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
@@ -43,23 +42,23 @@ export interface MapScene {
   readonly routes: ReadonlyMap<SoldierId, PlannedRoute>;
   /** Scenario OPFOR routes the trainee may see, with their walkable paths. */
   readonly opforRoutes: readonly { readonly route: OpforRoute; readonly path: PlannedRoute }[];
-  /** CHECK LOS results for the selected soldier, while that tool is active. */
-  readonly los: LosView | null;
+  /** The selected soldier's visible area, while the visibility overlay is on. */
+  readonly visibility: VisibilityView | null;
   /** The ambush trigger, once it has happened. */
   readonly trigger: AmbushTrigger | null;
   /** Whether a map point lies on the terrain. */
   isOnMap(point: Vec2): boolean;
 }
 
-/** What CHECK LOS shows for the selected soldier. */
-export interface LosView {
+/** The visibility overlay for the selected soldier. */
+export interface VisibilityView {
   /** Where the soldier observes from: its planned final position, or where it stands. */
   readonly observer: Vec2;
   readonly planned: boolean;
-  /** Sight line to the inspected point, once one is chosen. */
-  readonly ray: LosResult | null;
-  /** Sight lines to the kill zone's sample points, when requested and the zone is complete. */
-  readonly killZone: KillZoneVisibility | null;
+  /** The viewshed to draw: from `observer` once ready, otherwise the previous one. */
+  readonly viewshed: Viewshed | null;
+  /** Whether the viewshed from `observer` is still being computed. */
+  readonly pending: boolean;
 }
 
 /** The scene for the current exercise and session state. */
@@ -68,6 +67,7 @@ export function buildScene(
   session: Session,
   camera: Camera,
   viewport: Viewport,
+  visibility: VisibilityView | null = null,
 ): MapScene {
   const { state, world } = exercise.simulation;
   const plans = state.soldiers.flatMap((s) => exercise.displayedPlan(s.id) ?? []);
@@ -93,22 +93,9 @@ export function buildScene(
       const path = exercise.opforRoutePaths.get(route.id);
       return route.shownToTrainee && path ? [{ route, path }] : [];
     }),
-    los: losView(exercise, session),
+    visibility: session.showVisibility ? visibility : null,
     trigger: exercise.trigger,
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
-  };
-}
-
-function losView(exercise: Exercise, session: Session): LosView | null {
-  const id = session.selectedSoldierId;
-  if (session.tool !== 'los' || id === null) return null;
-  const observer = exercise.observer(id);
-  if (!observer) return null;
-  return {
-    observer: observer.point,
-    planned: observer.planned,
-    ray: session.losTarget ? (exercise.lineOfSightFrom(id, session.losTarget) ?? null) : null,
-    killZone: session.losKillZone ? (exercise.killZoneVisibility(id) ?? null) : null,
   };
 }
 

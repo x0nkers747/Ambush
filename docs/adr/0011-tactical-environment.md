@@ -151,19 +151,60 @@ top. On every part, all levels are linear.
 
 Posture-specific heights are not modelled yet.
 
-### Planning tools
+### Planning tools: visibility (viewshed)
 
-- **CHECK LOS** (tool key L) looks from the selected BLUEFOR soldier's planned
-  final position: the last waypoint of the plan. With no waypoints it uses the
-  current position, and the UI says so. A click inspects the sight line to
-  that point; the map shows:
-  - the clear part in green, then the obstructed part in red;
-  - an X at the first obstruction;
-  - a label such as `BLOCKED — BUILDING B-2`.
-- **LOS to kill zone** checks sight lines to deterministic sample points. These
-  are every corner, the middle of every side, and the area centroid when it is
-  inside the zone: 2n + 1 points for a convex n-gon, in corner order. It
-  reports `LOS TO KILL ZONE: k / m sample points clear`.
+**VISIBILITY** (key V) shades green, on the tactical map, all the ground the
+selected BLUEFOR soldier can see. It looks from the soldier's planned final
+position (the last waypoint of the plan), or from where the soldier stands when
+there is no route; the side panel says which. Switching soldiers or moving the
+final waypoint updates it. The overlay does not take map clicks, so route and
+kill-zone editing work as usual. It replaced the Phase 3.6 point-click CHECK LOS
+tool. The exact point query `lineOfSight` remains the simulation's LOS API.
+
+- **Viewshed:** `computeViewshed(terrain, observer, grid)` (`sim/viewshed.ts`)
+  decides each cell of a regular grid with the same trace as `lineOfSight`.
+  The trace runs from the observer's eye (1.7 m) to a standing target (1.5 m) at
+  the cell centre. A viewshed therefore never disagrees with a point query; a
+  test checks every cell against `lineOfSight`. Rows are independent, so a
+  viewshed can be computed in bands, in any order, with an identical result.
+  The grid-in, field-out interface lets a dedicated viewshed algorithm replace
+  the per-cell trace for much larger maps.
+- **Shared, faster core:** `lineOfSight` and the viewshed both call
+  `traceSightLine`. This is the Phase 3.6 algorithm restructured to avoid
+  per-piece allocation, with a fast path for pieces that touch no feature and
+  stay above the ground. A test keeps the original implementation verbatim and
+  checks that results are identical on 4000 random sight lines across the demo
+  map and on grazing lines at every feature corner.
+- **Resolution:** 4 m cells (200 × 150 = 30 000 sight lines on the demo map).
+  While the final waypoint is being dragged, an 8 m preview (7 500 sight lines)
+  is shown instead. Measured cost, single-threaded through Vite's transform:
+  about 18 µs per sight line, so roughly 0.5 s for 4 m and 0.14 s for 8 m.
+  At 2.5 m it would take about 1.4 s, for little visible gain at map scales.
+- **Scheduling:** `createViewshedService` (`view2d`) splits the rows into bands
+  for a pool of up to four Web Workers running the simulation code, so the UI
+  thread never blocks. Results are cached by observer position and resolution
+  (48 kept).
+  - The latest request wins, but quick jobs (8 m previews) finish before the
+    next one starts. A continuous drag therefore yields a steady stream of
+    previews instead of cancelling every one.
+  - Until a new viewshed is ready, the previous one stays on screen and the
+    panel says so.
+  - In Chrome and Edge a full 4 m viewshed takes about 115–160 ms; the first
+    one takes about 350 ms, including starting the workers and passing them
+    the terrain.
+- **Rendering:**
+  - one translucent green pixel per visible cell (alpha 80 / 255), slightly
+    stronger along the edge of the visible area (alpha 150);
+  - drawn on the terrain shading, beneath contours, roads, vegetation,
+    buildings, routes, symbols, the kill zone and labels, so none of them is
+    obscured;
+  - ground that cannot be seen is left as it is (not painted red);
+  - scaled with low-quality smoothing: high-quality smoothing halved the frame
+    rate under software rendering.
+- **Kill-zone coverage:** `KILL ZONE VISIBLE: p%`, where p is the share of the
+  viewshed grid cells whose centres lie inside or on the kill-zone polygon that
+  are visible: `visibleCells / cells × 100`. It is computed from the viewshed
+  being shown, for the current observer only.
 
 These tools give information only. Nothing scores positions or recommends
 them, and tactically poor positions remain possible; only physically
@@ -180,6 +221,6 @@ impossible movement is prevented.
   - movement along turn points keeps the exact time splitting of ADR 0008, so
     tick-rate independence is unaffected.
 - Performance on the demo map (800 m × 600 m, 8 buildings):
-  - about 0.1 ms per sight line;
+  - about 18 µs per sight line (see the viewshed section);
   - a few milliseconds for a path that needs A\*;
   - straight legs are near-instant.
