@@ -11,6 +11,7 @@ import {
   createSession,
   setTimeScale,
   setTool,
+  stepTimeScale,
   TIME_SCALES,
   type MapTool,
   type Session,
@@ -87,7 +88,8 @@ app.innerHTML = `
       <dt>Wheel</dt><dd>Zoom at the cursor</dd>
       <dt>F</dt><dd>Fit the map</dd>
       <dt>Space</dt><dd>Pause / Resume</dd>
-      <dt>1 · 2 · 4</dt><dd>Time scale</dd>
+      <dt>1 · 8</dt><dd>Time scale 1× · 8×</dd>
+      <dt>+ / −</dt><dd>Faster / slower (1× · 8× · 16×)</dd>
       <dt>Esc</dt><dd>Clear selection</dd>
     </dl>
     <p class="muted">Routes and the kill zone can be edited during planning, while occupation is
@@ -198,9 +200,18 @@ window.addEventListener('keydown', (event) => {
       session = clearSelection(session);
       break;
     case '1':
-    case '2':
-    case '4':
-      session = setTimeScale(session, Number(event.key) as Session['timeScale']);
+      session = setTimeScale(session, 1);
+      break;
+    case '8':
+      session = setTimeScale(session, 8);
+      break;
+    case '+':
+    case '=':
+      session = stepTimeScale(session, 1);
+      break;
+    case '-':
+    case '_':
+      session = stepTimeScale(session, -1);
       break;
     case 'Backspace':
     case 'Delete': {

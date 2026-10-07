@@ -293,7 +293,11 @@
         border-top: 1px solid var(--line);
         color: var(--muted);
         font-variant-numeric: tabular-nums;
-        min-height: 24px;
+        /* Fixed height: the pointer readout appearing must not resize the map row above. */
+        height: 26px;
+        line-height: 17px;
+        white-space: nowrap;
+        overflow: hidden;
       }
     </style>
   </head>

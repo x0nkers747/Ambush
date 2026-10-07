@@ -3,7 +3,7 @@ import type { SoldierId } from '#sim';
 
 // Ephemeral UI state (docs/adr/0004): never recorded, never seen by the simulation.
 
-export const TIME_SCALES = [1, 2, 4] as const;
+export const TIME_SCALES = [1, 8, 16] as const;
 export type TimeScale = (typeof TIME_SCALES)[number];
 
 /** What map clicks edit: the selected soldier's route, or the kill zone. */
@@ -35,6 +35,13 @@ export function clearSelection(session: Session): Session {
 
 export function setTimeScale(session: Session, timeScale: TimeScale): Session {
   return { ...session, timeScale };
+}
+
+/** The next faster (`+1`) or slower (`-1`) time scale, staying at the ends. */
+export function stepTimeScale(session: Session, direction: 1 | -1): Session {
+  const index = TIME_SCALES.indexOf(session.timeScale) + direction;
+  const timeScale = TIME_SCALES[Math.min(Math.max(index, 0), TIME_SCALES.length - 1)];
+  return timeScale === undefined ? session : { ...session, timeScale };
 }
 
 export function setTool(session: Session, tool: MapTool): Session {

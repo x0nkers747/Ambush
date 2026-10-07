@@ -5,6 +5,7 @@ export {
   createSession,
   selectSoldier,
   setTimeScale,
+  stepTimeScale,
   setTool,
   TIME_SCALES,
   type MapTool,

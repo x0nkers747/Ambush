@@ -48,7 +48,8 @@ Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or 
 | Mouse wheel                   | Zoom at the cursor                              |
 | F                             | Fit the whole map                               |
 | Space                         | Pause / Resume                                  |
-| 1 · 2 · 4                     | Time scale                                      |
+| 1 · 8                         | Time scale 1× · 8×                              |
+| + / −                         | Faster / slower through 1× · 8× · 16×           |
 | Esc                           | Clear the selection                             |
 
 ## Scripts

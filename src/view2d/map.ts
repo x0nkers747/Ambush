@@ -112,27 +112,35 @@ export function createTacticalMap({
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('contextmenu', onContextMenu);
 
+  const draw = () => {
+    const dpr = canvas.width / viewport.width;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawMap(ctx, scene(), layer);
+  };
+
   const resize = () => {
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     viewport = { width: Math.max(rect.width, 1), height: Math.max(rect.height, 1) };
-    canvas.width = Math.round(viewport.width * dpr);
-    canvas.height = Math.round(viewport.height * dpr);
     if (!fitted && rect.width > 0 && rect.height > 0) {
       camera = fitBounds(layer.bounds, viewport);
       fitted = true;
     }
+    const width = Math.round(viewport.width * dpr);
+    const height = Math.round(viewport.height * dpr);
+    if (canvas.width === width && canvas.height === height) return;
+    // Setting the size clears the canvas, and resize observers run after this
+    // frame's animation callbacks: redraw now so a blank canvas is never shown.
+    canvas.width = width;
+    canvas.height = height;
+    draw();
   };
   const observer = new ResizeObserver(resize);
   observer.observe(canvas);
   resize();
 
   return {
-    render() {
-      const dpr = canvas.width / viewport.width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawMap(ctx, scene(), layer);
-    },
+    render: draw,
     fitView() {
       camera = fitBounds(layer.bounds, viewport);
     },

@@ -24,7 +24,7 @@ timeScale)` steps the simulation only while Executing, so it is frozen while
   Planning and Paused.
 - `advance` steps whole ticks, so Pause always lands on a tick boundary. Any
   fraction of a tick accumulated before Pause is discarded on Resume.
-- The time scale (1×, 2×, 4×) is session state, passed to `advance` each frame.
+- The time scale (1×, 8×, 16×) is session state, passed to `advance` each frame.
   The simulation never sees it.
 - Ended/Review are not built yet.
 
