@@ -4,8 +4,8 @@ Interactive training simulation for planning, executing and reviewing
 squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
-Status: **Phase 1**: simulation kernel (state, organization, commands, events, seeded PRNG,
-snapshot/restore, state hashing). No movement or gameplay yet.
+Status: **Phase 2**: simulation kernel, synthetic terrain and deterministic waypoint
+movement. No UI or gameplay yet.
 
 ## Requirements
 
@@ -59,3 +59,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 5. [Recording-based replay and AAR](docs/adr/0005-recording-based-aar.md)
 6. [Terrain dataset and georeference](docs/adr/0006-terrain-dataset-and-georeference.md)
 7. [Simulation kernel](docs/adr/0007-simulation-kernel.md)
+8. [Terrain heightfield and waypoint movement](docs/adr/0008-terrain-and-movement.md)

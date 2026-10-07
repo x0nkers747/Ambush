@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, type Scenario, type ScenarioSoldier } from './scenario';
+import { createInitialState, createWorld, type Scenario, type ScenarioSoldier } from './scenario';
 import type { SimState } from './state';
-import { TEST_SCENARIO } from './test-scenario';
+import { createSyntheticTerrain, flatElevation } from './synthetic-terrain';
+import { EMPTY_TEST_SCENARIO, TEST_SCENARIO } from './test-scenario';
 
 function membersOf(state: SimState, unitId: string): string[] {
   const inUnit = (id: string): boolean => {
@@ -36,7 +37,7 @@ describe('createInitialState', () => {
       id: 'B-A-AR',
       side: 'BLUEFOR',
       unitId: 'B-A',
-      position: { x: -15, y: 5, z: 0 },
+      position: { x: -15, y: 5, z: 50 },
       azimuth: (3 * Math.PI) / 2,
       posture: 'prone',
       status: 'active',
@@ -75,8 +76,38 @@ describe('createInitialState', () => {
     expect(createInitialState(TEST_SCENARIO, 2).rng).not.toEqual(state.rng);
   });
 
+  it('places soldiers at the terrain elevation', () => {
+    const moved: Record<string, { x: number; y: number }> = {
+      'O-TL': { x: 3, y: 100 }, // ridge crest: 50 + 10
+      'O-R': { x: 3, y: 125 }, // half-way down the north slope: 50 + 5
+    };
+    const onRidge = createInitialState(
+      {
+        ...TEST_SCENARIO,
+        soldiers: TEST_SCENARIO.soldiers.map((s) => ({
+          ...s,
+          position: moved[s.id] ?? s.position,
+        })),
+      },
+      0,
+    );
+    expect(onRidge.soldiers.map((s) => s.position.z)).toEqual([50, 50, 50, 50, 50, 60, 55]);
+  });
+
   it('accepts an empty scenario', () => {
-    expect(createInitialState({ id: 'empty', units: [], soldiers: [] }, 0).soldiers).toEqual([]);
+    expect(createInitialState(EMPTY_TEST_SCENARIO, 0).soldiers).toEqual([]);
+  });
+});
+
+describe('createWorld', () => {
+  it('deep-freezes a copy of the terrain and movement parameters', () => {
+    const world = createWorld(TEST_SCENARIO);
+    expect(world.terrain).toEqual(TEST_SCENARIO.terrain);
+    expect(world.terrain).not.toBe(TEST_SCENARIO.terrain);
+    expect(world.movement).toEqual(TEST_SCENARIO.movement);
+    expect(Object.isFrozen(world.terrain.heightfield.elevations)).toBe(true);
+    expect(Object.isFrozen(world.movement)).toBe(true);
+    expect(Object.isFrozen(TEST_SCENARIO.terrain.heightfield.elevations)).toBe(false);
   });
 });
 
@@ -85,7 +116,7 @@ describe('createInitialState validation', () => {
     id: 'S1',
     side: 'BLUEFOR',
     unitId: 'U1',
-    position: { x: 0, y: 0, z: 0 },
+    position: { x: 0, y: 0 },
     azimuthDeg: 0,
     posture: 'standing',
     ...overrides,
@@ -96,76 +127,105 @@ describe('createInitialState validation', () => {
     parentId,
     leaderId,
   });
+  const terrain = createSyntheticTerrain(
+    { originX: -10, originY: -10, cellSize: 10, columns: 3, rows: 3 },
+    flatElevation(0),
+  );
+  const scenario = (overrides: Partial<Scenario>): Scenario => ({
+    id: 't',
+    terrain,
+    movement: { speed: 1, maxTurnRate: 1 },
+    units: [unit('U1')],
+    soldiers: [],
+    ...overrides,
+  });
+  const heightfield = terrain.heightfield;
 
   it.each<[string, Scenario, RegExp]>([
-    [
-      'duplicate unit',
-      { id: 't', units: [unit('U1'), unit('U1')], soldiers: [] },
-      /duplicate unit/,
-    ],
-    [
-      'duplicate soldier',
-      { id: 't', units: [unit('U1')], soldiers: [soldier(), soldier()] },
-      /duplicate soldier/,
-    ],
-    ['unknown parent', { id: 't', units: [unit('U1', 'X')], soldiers: [] }, /unknown parent/],
-    [
-      'parent cycle',
-      { id: 't', units: [unit('U1', 'U2'), unit('U2', 'U1')], soldiers: [] },
-      /cycle/,
-    ],
-    [
-      'unknown soldier unit',
-      { id: 't', units: [unit('U1')], soldiers: [soldier({ unitId: 'X' })] },
-      /unknown unit/,
-    ],
-    ['unknown leader', { id: 't', units: [unit('U1', null, 'X')], soldiers: [] }, /unknown leader/],
+    ['duplicate unit', scenario({ units: [unit('U1'), unit('U1')] }), /duplicate unit/],
+    ['duplicate soldier', scenario({ soldiers: [soldier(), soldier()] }), /duplicate soldier/],
+    ['unknown parent', scenario({ units: [unit('U1', 'X')] }), /unknown parent/],
+    ['parent cycle', scenario({ units: [unit('U1', 'U2'), unit('U2', 'U1')] }), /cycle/],
+    ['unknown soldier unit', scenario({ soldiers: [soldier({ unitId: 'X' })] }), /unknown unit/],
+    ['unknown leader', scenario({ units: [unit('U1', null, 'X')] }), /unknown leader/],
     [
       'leader outside the unit',
-      {
-        id: 't',
+      scenario({
         units: [unit('U1', null, 'S2'), unit('U2')],
         soldiers: [soldier(), soldier({ id: 'S2', unitId: 'U2' })],
-      },
+      }),
       /not a member/,
     ],
     [
       'mixed sides in one organization',
-      {
-        id: 't',
+      scenario({
         units: [unit('U1'), unit('U2', 'U1')],
         soldiers: [soldier(), soldier({ id: 'S2', unitId: 'U2', side: 'OPFOR' })],
-      },
+      }),
       /mixes BLUEFOR and OPFOR/,
     ],
     [
       'non-finite position',
-      {
-        id: 't',
-        units: [unit('U1')],
-        soldiers: [soldier({ position: { x: Number.NaN, y: 0, z: 0 } })],
-      },
+      scenario({ soldiers: [soldier({ position: { x: Number.NaN, y: 0 } })] }),
       /non-finite/,
     ],
     [
       'non-finite azimuth',
-      {
-        id: 't',
-        units: [unit('U1')],
-        soldiers: [soldier({ azimuthDeg: Number.POSITIVE_INFINITY })],
-      },
+      scenario({ soldiers: [soldier({ azimuthDeg: Number.POSITIVE_INFINITY })] }),
       /non-finite/,
     ],
-  ])('rejects %s', (_label, scenario, message) => {
-    expect(() => createInitialState(scenario, 0)).toThrow(message);
+    [
+      'a soldier off the terrain',
+      scenario({ soldiers: [soldier({ position: { x: 10.5, y: 0 } })] }),
+      /off the terrain/,
+    ],
+    [
+      'too few terrain samples',
+      scenario({
+        terrain: { ...terrain, heightfield: { ...heightfield, columns: 1, elevations: [0, 0, 0] } },
+      }),
+      /at least 2 × 2/,
+    ],
+    [
+      'a terrain elevation count mismatch',
+      scenario({ terrain: { ...terrain, heightfield: { ...heightfield, elevations: [0] } } }),
+      /expected 9/,
+    ],
+    [
+      'a non-positive cell size',
+      scenario({ terrain: { ...terrain, heightfield: { ...heightfield, cellSize: 0 } } }),
+      /cellSize/,
+    ],
+    [
+      'a non-finite elevation',
+      scenario({
+        terrain: {
+          ...terrain,
+          heightfield: { ...heightfield, elevations: [0, 0, 0, 0, Number.NaN, 0, 0, 0, 0] },
+        },
+      }),
+      /elevations must be finite/,
+    ],
+    ['a zero speed', scenario({ movement: { speed: 0, maxTurnRate: 1 } }), /speed/],
+    [
+      'an infinite turn rate',
+      scenario({ movement: { speed: 1, maxTurnRate: Number.POSITIVE_INFINITY } }),
+      /maxTurnRate/,
+    ],
+  ])('rejects %s', (_label, invalid, message) => {
+    expect(() => createInitialState(invalid, 0)).toThrow(message);
   });
 
   it('allows a leader from a subordinate unit', () => {
-    const scenario: Scenario = {
-      id: 't',
+    const valid = scenario({
       units: [unit('U1', null, 'S1'), unit('U2', 'U1')],
       soldiers: [soldier({ unitId: 'U2' })],
-    };
-    expect(() => createInitialState(scenario, 0)).not.toThrow();
+    });
+    expect(() => createInitialState(valid, 0)).not.toThrow();
+  });
+
+  it('accepts soldiers exactly on the terrain boundary', () => {
+    const valid = scenario({ soldiers: [soldier({ position: { x: 10, y: -10 } })] });
+    expect(() => createInitialState(valid, 0)).not.toThrow();
   });
 });

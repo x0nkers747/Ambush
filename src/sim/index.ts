@@ -7,9 +7,17 @@ export {
   validateSimConfig,
   type SimConfig,
 } from './config';
-export type { CommandRejectedEvent, OrdersChangedEvent, SimEvent } from './events';
+export type {
+  CommandRejectedEvent,
+  OrdersChangedEvent,
+  SimEvent,
+  SoldierInPositionEvent,
+  WaypointReachedEvent,
+} from './events';
 export {
+  azimuthDelta,
   azimuthFromDegrees,
+  azimuthOf,
   normalizeAzimuth,
   type Azimuth,
   type Vec2,
@@ -19,6 +27,7 @@ export { hashSimState } from './hash';
 export { MAX_SEED, type RngState } from './rng';
 export {
   createInitialState,
+  createWorld,
   type Scenario,
   type ScenarioSoldier,
   type ScenarioUnit,
@@ -28,15 +37,38 @@ export {
   findSoldier,
   orgUnitId,
   soldierId,
+  waypointId,
+  type ActiveOrders,
   type DeepReadonly,
   type Echelon,
   type OrgUnit,
   type OrgUnitId,
   type Orders,
+  type OrdersBehavior,
   type Posture,
   type Side,
   type SimState,
   type Soldier,
   type SoldierId,
   type SoldierStatus,
+  type Waypoint,
+  type WaypointId,
 } from './state';
+export {
+  createSyntheticTerrain,
+  flatElevation,
+  ridgeElevation,
+  slopeElevation,
+  type ElevationFunction,
+  type TerrainGrid,
+} from './synthetic-terrain';
+export {
+  heightAt,
+  isOnTerrain,
+  terrainTriangleIndices,
+  validateTerrain,
+  type GeoReference,
+  type Heightfield,
+  type TerrainDataset,
+} from './terrain';
+export type { MovementParams, SimWorld } from './world';

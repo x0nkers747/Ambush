@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { createSimulation } from '#sim';
+import { createSimulation, createSyntheticTerrain, flatElevation, type Scenario } from '#sim';
 import { createFixedStepRunner } from './runner';
 
+const EMPTY: Scenario = {
+  id: 'empty',
+  terrain: createSyntheticTerrain(
+    { originX: 0, originY: 0, cellSize: 100, columns: 2, rows: 2 },
+    flatElevation(0),
+  ),
+  movement: { speed: 1.5, maxTurnRate: Math.PI / 2 },
+  units: [],
+  soldiers: [],
+};
+
 function setup(tickRateHz: number, maxTicksPerAdvance?: number) {
-  const sim = createSimulation({ tickRateHz, seed: 0 }, { id: 'empty', units: [], soldiers: [] });
+  const sim = createSimulation({ tickRateHz, seed: 0 }, EMPTY);
   const runner = createFixedStepRunner(
     sim,
     maxTicksPerAdvance === undefined ? {} : { maxTicksPerAdvance },

@@ -10,9 +10,11 @@ type Brand<T, B extends string> = T & { readonly [brand]: B };
 
 export type SoldierId = Brand<string, 'SoldierId'>;
 export type OrgUnitId = Brand<string, 'OrgUnitId'>;
+export type WaypointId = Brand<string, 'WaypointId'>;
 
 export const soldierId = (id: string): SoldierId => id as SoldierId;
 export const orgUnitId = (id: string): OrgUnitId => id as OrgUnitId;
+export const waypointId = (id: string): WaypointId => id as WaypointId;
 
 export type Side = 'BLUEFOR' | 'OPFOR';
 
@@ -25,10 +27,36 @@ export type SoldierStatus = 'active' | 'wounded' | 'killed';
 /** Organizational echelons. Labels only: doctrine lives in scenario data, not here. */
 export type Echelon = 'squad' | 'fireTeam';
 
-/** A soldier's current orders. Phase 1 only stores them; movement executes them in Phase 2. */
+/** A map point of a soldier's route. Z always comes from the terrain. */
+export interface Waypoint extends Readonly<Vec2> {
+  /** Stable identifier, chosen by whoever authored the orders (e.g. the trainee's plan). */
+  readonly id: WaypointId;
+}
+
+/**
+ * Orders as given: the trainee's intent. Never modified by the simulation;
+ * progress is tracked separately in `ActiveOrders`.
+ */
 export interface Orders {
-  /** Map points to move through, in order. */
-  readonly waypoints: readonly Vec2[];
+  /** Points to move through, in order. May be empty (turn in place to `finalFacing`). */
+  readonly waypoints: readonly Waypoint[];
+  /** Azimuth to face once the last waypoint is reached. */
+  readonly finalFacing: Azimuth;
+}
+
+/**
+ * Behavior of a soldier with orders (a soldier without orders is idle):
+ * `moving` toward `waypoints[nextWaypointIndex]`, then `facing` (turning to
+ * `finalFacing`), then `inPosition`.
+ */
+export type OrdersBehavior = 'moving' | 'facing' | 'inPosition';
+
+/** Orders being executed, with progress. */
+export interface ActiveOrders {
+  readonly orders: Orders;
+  /** Index of the waypoint being moved to; equals `waypoints.length` once all are reached. */
+  nextWaypointIndex: number;
+  behavior: OrdersBehavior;
 }
 
 /** An individual soldier: the unit of simulation. */
@@ -37,11 +65,14 @@ export interface Soldier {
   readonly side: Side;
   /** The soldier's immediate unit (e.g. their fire team, or the squad for a squad leader). */
   readonly unitId: OrgUnitId;
+  /** Z is always the terrain elevation at (x, y). */
   position: Vec3;
+  /** Facing. While moving it turns toward the direction of travel at a limited rate. */
   azimuth: Azimuth;
   posture: Posture;
   status: SoldierStatus;
-  orders: Orders | null;
+  /** `null` while idle. */
+  orders: ActiveOrders | null;
 }
 
 /**

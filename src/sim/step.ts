@@ -1,6 +1,8 @@
 import { applyCommands, type SimCommand } from './commands';
 import type { SimEvent } from './events';
+import { moveSoldiers } from './movement';
 import type { SimState } from './state';
+import type { SimWorld } from './world';
 
 /**
  * Advances `state` by exactly one tick, in place, and returns the events of
@@ -10,16 +12,26 @@ import type { SimState } from './state';
  * Tick T runs from simulation time T / tickRateHz to (T + 1) / tickRateHz.
  * `commands` must be exactly the commands stamped with tick T, in submission order.
  */
-export function stepState(state: SimState, commands: readonly SimCommand[]): SimEvent[] {
+export function stepState(
+  state: SimState,
+  world: SimWorld,
+  tickRateHz: number,
+  commands: readonly SimCommand[],
+): SimEvent[] {
   const events: SimEvent[] = [];
+  const time = {
+    tick: state.tick,
+    startSeconds: state.tick / tickRateHz,
+    dtSeconds: 1 / tickRateHz,
+  };
 
   // 1. External input: commands take effect at the start of their tick.
-  applyCommands(state, commands, events);
+  applyCommands(state, world, commands, events);
 
-  // 2. Systems, as free functions in fixed order. Movement is added here in
-  //    Phase 2; perception and combat follow in later phases. Each system
-  //    receives the tick duration in seconds so behavior does not depend on
-  //    the tick rate (docs/adr/0003).
+  // 2. Systems, as free functions in fixed order. They work in seconds, never
+  //    in ticks, so behavior does not depend on the tick rate (docs/adr/0003).
+  //    Perception and combat follow movement in later phases.
+  moveSoldiers(state, world, time, events);
 
   // 3. Advance the clock.
   state.tick += 1;

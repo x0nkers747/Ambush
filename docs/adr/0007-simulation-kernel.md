@@ -1,7 +1,7 @@
 # ADR 0007: Simulation kernel: state, commands, events, PRNG, snapshots and hashing
 
 - Status: Accepted
-- Date: 2026-10-07
+- Date: 2026-10-07 (snapshot and seed decisions confirmed at Phase 1 approval)
 
 ## Context
 
@@ -35,10 +35,11 @@ if not, a `commandRejected` event records why. Phase 1 has one command,
 **Events** are plain, tick-stamped data returned by `Simulation.step()` for the
 tick just executed. There is no event bus. Events carry enough data to update a
 reconstructed state (ADR 0005). Phase 1 events: `ordersChanged`,
-`commandRejected`.
+`commandRejected`; Phase 2 adds `waypointReached` and `soldierInPosition`
+(ADR 0008).
 
 **Pipeline.** `stepState` is the whole pipeline: apply the tick's commands, run
-systems in a fixed order (none yet; movement arrives in Phase 2), then increment
+systems in a fixed order (currently only movement, ADR 0008), then increment
 `tick`. Systems are free functions that receive the tick duration in seconds.
 
 **PRNG: xoshiro128\*\*, seeded through SplitMix32.** The state is four unsigned
@@ -57,12 +58,22 @@ unnecessary. SplitMix32 spreads adjacent seeds (0, 1, 2, …) into unrelated
 states. Tests pin the reference output and seeded sequences, so an accidental
 change to the generator is caught.
 
-**Snapshots.** `Simulation.snapshot()` returns `{ tickRateHz, state }`, a deep
-copy of the complete mutable state. `restore` replaces the state with a copy and
-discards pending commands: commands are input, not state, and a replay
-resubmits them from the command log (ADR 0005). Copies are made by a small
-plain-data cloner rather than `structuredClone`, which is a host API not
-available in `sim`. The cloner rejects anything that is not plain data.
+**Snapshots contain simulation state, not queued commands.**
+`Simulation.snapshot()` returns `{ tickRateHz, state }`, a deep copy of the
+complete mutable simulation state. Commands queued for future ticks are inputs,
+not state, and are never part of a snapshot. `restore` replaces the state with a
+copy and discards all pending commands; the caller resubmits them (a replay
+resubmits them from the command log, ADR 0005). A future exercise save/resume
+format, owned by the `exercise` layer, may store a snapshot _and_ the pending
+commands side by side. Copies are made by a small plain-data cloner rather than
+`structuredClone`, which is a host API not available in `sim`. The cloner
+rejects anything that is not plain data.
+
+**The seed is run configuration, not scenario content.** `SimConfig` holds the
+tick rate and the PRNG seed. A scenario describes the starting situation; the
+scenario plus the run configuration (`SimConfig`) defines one particular
+simulation run. The same scenario can be run with different seeds, and both are
+recorded with every exercise.
 
 **State hash.** `hashSimState` is 64-bit FNV-1a over the UTF-16LE bytes of a
 canonical encoding. The encoding:

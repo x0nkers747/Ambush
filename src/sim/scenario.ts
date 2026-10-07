@@ -1,4 +1,5 @@
-import { azimuthFromDegrees, type Vec3 } from './geometry';
+import { azimuthFromDegrees, type Vec2 } from './geometry';
+import { clonePlainData } from './plain-data';
 import { createRngState } from './rng';
 import {
   orgUnitId,
@@ -10,6 +11,8 @@ import {
   type SimState,
   type Soldier,
 } from './state';
+import { heightAt, isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
+import { validateMovementParams, type MovementParams, type SimWorld } from './world';
 
 // Scenario: the human-authored, plain-data description of a simulation's
 // starting point. Ids are plain strings and angles are in degrees
@@ -26,7 +29,8 @@ export interface ScenarioSoldier {
   readonly id: string;
   readonly side: Side;
   readonly unitId: string;
-  readonly position: Readonly<Vec3>;
+  /** Map position; elevation comes from the terrain. */
+  readonly position: Readonly<Vec2>;
   /** Degrees clockwise from grid north. */
   readonly azimuthDeg: number;
   readonly posture: Posture;
@@ -34,6 +38,8 @@ export interface ScenarioSoldier {
 
 export interface Scenario {
   readonly id: string;
+  readonly terrain: TerrainDataset;
+  readonly movement: MovementParams;
   readonly units: readonly ScenarioUnit[];
   readonly soldiers: readonly ScenarioSoldier[];
 }
@@ -43,6 +49,13 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
   const fail = (message: string): never => {
     throw new Error(`Scenario "${scenario.id}": ${message}`);
   };
+  const { terrain } = scenario;
+  try {
+    validateTerrain(terrain);
+    validateMovementParams(scenario.movement);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
 
   const unitsById = new Map<string, ScenarioUnit>();
   for (const unit of scenario.units) {
@@ -78,10 +91,11 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     if (rootSide !== soldier.side) fail(`organization "${root}" mixes BLUEFOR and OPFOR soldiers`);
     sideByRoot.set(root, rootSide);
 
-    const { x, y, z } = soldier.position;
-    if (![x, y, z, soldier.azimuthDeg].every(Number.isFinite)) {
+    const { x, y } = soldier.position;
+    if (![x, y, soldier.azimuthDeg].every(Number.isFinite)) {
       fail(`soldier "${soldier.id}" has a non-finite position or azimuth`);
     }
+    if (!isOnTerrain(terrain, x, y)) fail(`soldier "${soldier.id}" is off the terrain`);
   }
 
   for (const unit of scenario.units) {
@@ -105,7 +119,11 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     id: soldierId(soldier.id),
     side: soldier.side,
     unitId: orgUnitId(soldier.unitId),
-    position: { x: soldier.position.x, y: soldier.position.y, z: soldier.position.z },
+    position: {
+      x: soldier.position.x,
+      y: soldier.position.y,
+      z: heightAt(terrain, soldier.position.x, soldier.position.y),
+    },
     azimuth: azimuthFromDegrees(soldier.azimuthDeg),
     posture: soldier.posture,
     status: 'active',
@@ -113,4 +131,21 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
   }));
 
   return { tick: 0, rng: createRngState(seed), units, soldiers };
+}
+
+/**
+ * Builds the immutable reference data for a simulation from a scenario
+ * already validated by `createInitialState`: a deep-frozen copy, so later
+ * changes to the scenario object cannot affect a running simulation.
+ */
+export function createWorld(scenario: Scenario): SimWorld {
+  return deepFreeze(clonePlainData({ terrain: scenario.terrain, movement: scenario.movement }));
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }

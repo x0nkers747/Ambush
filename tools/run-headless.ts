@@ -1,6 +1,12 @@
 import { parseArgs } from 'node:util';
 import { createFixedStepRunner } from '#exercise';
-import { createSimulation, DEFAULT_TICK_RATE_HZ, hashSimState } from '#sim';
+import {
+  createSimulation,
+  createSyntheticTerrain,
+  DEFAULT_TICK_RATE_HZ,
+  flatElevation,
+  hashSimState,
+} from '#sim';
 
 // Runs the simulation headless and faster than real time.
 // Usage: npm run sim:headless -- --rate 30 --seconds 10 --seed 0
@@ -22,7 +28,16 @@ if (!Number.isFinite(seconds) || seconds < 0) {
 
 const sim = createSimulation(
   { tickRateHz, seed: Number(values.seed) },
-  { id: 'empty', units: [], soldiers: [] },
+  {
+    id: 'empty',
+    terrain: createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 100, columns: 2, rows: 2 },
+      flatElevation(0),
+    ),
+    movement: { speed: 1.5, maxTurnRate: Math.PI / 2 },
+    units: [],
+    soldiers: [],
+  },
 );
 const runner = createFixedStepRunner(sim, { maxTicksPerAdvance: Number.POSITIVE_INFINITY });
 

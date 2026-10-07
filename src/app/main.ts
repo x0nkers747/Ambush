@@ -1,12 +1,26 @@
 import { createFixedStepRunner } from '#exercise';
-import { createSimulation, DEFAULT_TICK_RATE_HZ } from '#sim';
+import {
+  createSimulation,
+  createSyntheticTerrain,
+  DEFAULT_TICK_RATE_HZ,
+  flatElevation,
+} from '#sim';
 
 // Phase 0 composition root: drives a bare simulation from requestAnimationFrame
 // and shows its clock, proving the app → exercise → sim wiring and the fixed timestep.
 
 const sim = createSimulation(
   { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 0 },
-  { id: 'empty', units: [], soldiers: [] },
+  {
+    id: 'empty',
+    terrain: createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 100, columns: 2, rows: 2 },
+      flatElevation(0),
+    ),
+    movement: { speed: 1.5, maxTurnRate: Math.PI / 2 },
+    units: [],
+    soldiers: [],
+  },
 );
 const runner = createFixedStepRunner(sim);
 

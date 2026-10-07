@@ -27,3 +27,24 @@ export function normalizeAzimuth(radians: number): Azimuth {
 export function azimuthFromDegrees(degrees: number): Azimuth {
   return normalizeAzimuth((degrees * Math.PI) / 180);
 }
+
+/** Azimuth of the map vector (dx, dy); 0 for the zero vector. */
+export function azimuthOf(dx: number, dy: number): Azimuth {
+  return normalizeAzimuth(Math.atan2(dx, dy));
+}
+
+/**
+ * Signed shortest rotation from azimuth `from` to azimuth `to`, in (−π, π].
+ * Positive is clockwise. An exact reversal (π) turns clockwise.
+ */
+export function azimuthDelta(from: Azimuth, to: Azimuth): number {
+  const d = normalizeAzimuth(to - from);
+  return d > Math.PI ? d - TWO_PI : d;
+}
+
+/** Rotates `from` toward `to` by at most `maxRadians`, landing exactly on `to` when within reach. */
+export function turnToward(from: Azimuth, to: Azimuth, maxRadians: number): Azimuth {
+  const delta = azimuthDelta(from, to);
+  if (Math.abs(delta) <= maxRadians) return to;
+  return normalizeAzimuth(from + Math.sign(delta) * maxRadians);
+}

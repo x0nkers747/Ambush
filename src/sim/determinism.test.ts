@@ -4,10 +4,11 @@ import type { SimEvent } from './events';
 import { hashSimState } from './hash';
 import { clonePlainData } from './plain-data';
 import { createSimulation, type Simulation } from './simulation';
-import { soldierId } from './state';
+import { soldierId, waypointId } from './state';
 import { TEST_SCENARIO } from './test-scenario';
 
-// Determinism, snapshot/restore and tick-rate independence of the whole kernel.
+// Determinism and snapshot/restore of the whole kernel. Tick-rate independence
+// is tested in movement-tick-rate.test.ts.
 
 /** A command script authored in simulation seconds, converted to ticks per tick rate. */
 const SCRIPT: readonly {
@@ -39,7 +40,10 @@ function commandsAt(tickRateHz: number): SimCommand[] {
       type: 'setOrders',
       tick,
       soldierId: soldierId(soldier),
-      orders: waypoints && { waypoints: waypoints.map(([x, y]) => ({ x, y })) },
+      orders: waypoints && {
+        waypoints: waypoints.map(([x, y], i) => ({ id: waypointId(`W${String(i)}`), x, y })),
+        finalFacing: Math.PI / 2,
+      },
     };
   });
 }
@@ -77,7 +81,7 @@ describe('determinism', () => {
       type: 'setOrders',
       tick: 89,
       soldierId: soldierId('O-R'),
-      orders: { waypoints: [] },
+      orders: { waypoints: [], finalFacing: 0 },
     });
     runFor(sim, 90);
     expect(hashSimState(sim.state)).not.toBe(scriptedRun(1234).hash);
@@ -161,26 +165,5 @@ describe('snapshot and restore', () => {
   });
 });
 
-describe('tick-rate independence', () => {
-  const RATES = [10, 20, 30, 60, 120];
-
-  it.each(RATES)('matches the 30 Hz run in simulation time at %i Hz', (tickRateHz) => {
-    const reference = scriptedRun(42, 30);
-    const run = scriptedRun(42, tickRateHz);
-
-    expect(run.sim.timeSeconds).toBe(reference.sim.timeSeconds);
-    // Everything but the tick counter is tick-rate independent.
-    expect({ ...run.sim.state, tick: null }).toEqual({ ...reference.sim.state, tick: null });
-
-    const inSeconds = (events: SimEvent[], rate: number) =>
-      events.map(({ tick, ...event }) => ({
-        ...event,
-        atSeconds: tick / rate,
-        ...('command' in event ? { command: { ...event.command, tick: undefined } } : {}),
-      }));
-    expect(inSeconds(run.events, tickRateHz)).toEqual(inSeconds(reference.events, 30));
-  });
-});
-
-const PINNED_INITIAL_HASH = '932b8094360f012d';
-const PINNED_SCRIPTED_HASH = '92a6e995eed275a9';
+const PINNED_INITIAL_HASH = 'b404a3ad5a8eca80';
+const PINNED_SCRIPTED_HASH = '2f3891faddd80a69';

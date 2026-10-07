@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { SimCommand } from './commands';
 import { MAX_TICK_RATE_HZ, MIN_TICK_RATE_HZ } from './config';
-import type { Scenario } from './scenario';
 import { clonePlainData } from './plain-data';
 import { createSimulation } from './simulation';
-import { soldierId } from './state';
-import { TEST_SCENARIO } from './test-scenario';
+import { soldierId, waypointId, type Orders } from './state';
+import { EMPTY_TEST_SCENARIO as EMPTY, TEST_SCENARIO } from './test-scenario';
 
-const EMPTY: Scenario = { id: 'empty', units: [], soldiers: [] };
 const SL = soldierId('B-SL');
 
+const ordersTo = (x: number): Orders => ({
+  waypoints: [{ id: waypointId('W1'), x, y: 0 }],
+  finalFacing: 0,
+});
+
 function setOrders(tick: number, x: number, id = SL): SimCommand {
-  return { type: 'setOrders', tick, soldierId: id, orders: { waypoints: [{ x, y: 0 }] } };
+  return { type: 'setOrders', tick, soldierId: id, orders: ordersTo(x) };
 }
 
 describe('createSimulation', () => {
@@ -64,7 +67,7 @@ describe('createSimulation', () => {
 describe('command timing', () => {
   const create = () => createSimulation({ tickRateHz: 10, seed: 0 }, TEST_SCENARIO);
   const ordersOfSL = (sim: ReturnType<typeof create>) =>
-    sim.state.soldiers.find((s) => s.id === SL)?.orders;
+    sim.state.soldiers.find((s) => s.id === SL)?.orders?.orders ?? null;
 
   it('applies a command at the start of its tick, before that tick advances', () => {
     const sim = create();
@@ -76,9 +79,9 @@ describe('command timing', () => {
     expect(sim.tick).toBe(5);
     const events = sim.step();
     expect(events).toEqual([
-      { type: 'ordersChanged', tick: 5, soldierId: SL, orders: { waypoints: [{ x: 100, y: 0 }] } },
+      { type: 'ordersChanged', tick: 5, soldierId: SL, orders: ordersTo(100) },
     ]);
-    expect(ordersOfSL(sim)).toEqual({ waypoints: [{ x: 100, y: 0 }] });
+    expect(ordersOfSL(sim)).toEqual(ordersTo(100));
     expect(sim.tick).toBe(6);
   });
 
@@ -98,10 +101,23 @@ describe('command timing', () => {
     expect(ordersOfSL(sim)).toBeNull();
   });
 
+  const withOrders = (orders: Partial<Orders>): SimCommand => ({
+    type: 'setOrders',
+    tick: 4,
+    soldierId: SL,
+    orders: { ...ordersTo(0), ...orders },
+  });
+  const wp = (id: string) => ({ id: waypointId(id), x: 0, y: 0 });
+
   it.each([
     ['in the past', setOrders(2, 0)],
     ['with a fractional tick', setOrders(3.5, 0)],
     ['with a non-finite waypoint', setOrders(4, Number.NaN)],
+    ['with duplicate waypoint ids', withOrders({ waypoints: [wp('A'), wp('B'), wp('A')] })],
+    ['with an empty waypoint id', withOrders({ waypoints: [wp('')] })],
+    ['with a negative final facing', withOrders({ finalFacing: -0.1 })],
+    ['with a final facing of 2π', withOrders({ finalFacing: 2 * Math.PI })],
+    ['with a non-finite final facing', withOrders({ finalFacing: Number.NaN })],
   ])('rejects a command %s at submission', (_label, command) => {
     const sim = create();
     sim.step();
@@ -110,6 +126,18 @@ describe('command timing', () => {
     expect(() => {
       sim.submit(command);
     }).toThrow(RangeError);
+  });
+
+  it('rejects orders with a waypoint off the terrain, leaving current orders in place', () => {
+    const sim = create();
+    sim.submit(setOrders(0, 50));
+    const offTerrain = setOrders(1, 100.001);
+    sim.submit(offTerrain);
+    sim.step();
+    expect(sim.step()).toEqual([
+      { type: 'commandRejected', tick: 1, command: offTerrain, reason: 'waypointOffTerrain' },
+    ]);
+    expect(ordersOfSL(sim)).toEqual(ordersTo(50));
   });
 
   it('reports a command for an unknown soldier as rejected without changing state', () => {
@@ -129,12 +157,15 @@ describe('command timing', () => {
       type: 'setOrders' as const,
       tick: 0,
       soldierId: SL,
-      orders: { waypoints: [{ x: 1, y: 2 }] },
+      orders: { waypoints: [{ id: waypointId('W1'), x: 1, y: 2 }], finalFacing: 0 },
     };
     sim.submit(command);
-    command.orders.waypoints[0] = { x: 99, y: 99 };
+    command.orders.waypoints[0] = { id: waypointId('W1'), x: 99, y: 99 };
     sim.step();
-    expect(ordersOfSL(sim)).toEqual({ waypoints: [{ x: 1, y: 2 }] });
+    expect(ordersOfSL(sim)).toEqual({
+      waypoints: [{ id: waypointId('W1'), x: 1, y: 2 }],
+      finalFacing: 0,
+    });
   });
 });
 
@@ -150,7 +181,7 @@ describe('command ordering', () => {
     expect(
       events.map((e) => (e.type === 'ordersChanged' ? e.orders?.waypoints[0]?.x : null)),
     ).toEqual([1, 2, 3]);
-    expect(sim.state.soldiers[0]?.orders?.waypoints[0]?.x).toBe(3);
+    expect(sim.state.soldiers[0]?.orders?.orders.waypoints[0]?.x).toBe(3);
   });
 
   it('applies commands by tick regardless of the order they were submitted in', () => {
@@ -161,7 +192,7 @@ describe('command ordering', () => {
     const ticks: number[] = [];
     for (let i = 0; i < 4; i += 1) for (const e of sim.step()) ticks.push(e.tick);
     expect(ticks).toEqual([1, 2, 3]);
-    expect(sim.state.soldiers[0]?.orders?.waypoints[0]?.x).toBe(30);
+    expect(sim.state.soldiers[0]?.orders?.orders.waypoints[0]?.x).toBe(30);
   });
 
   it('gives the same result for the same submissions, interleaving soldiers and ticks', () => {
