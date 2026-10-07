@@ -1,0 +1,12 @@
+{
+  // 2D tactical view (Canvas2D).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/view2d"
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../sim" }, { "path": "../exercise" }, { "path": "../session" }]
+}

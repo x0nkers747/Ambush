@@ -1,0 +1,14 @@
+{
+  // Solution file: `tsc -b` builds every layer in dependency order.
+  "files": [],
+  "references": [
+    { "path": "./src/sim" },
+    { "path": "./src/exercise" },
+    { "path": "./src/session" },
+    { "path": "./src/view2d" },
+    { "path": "./src/view3d" },
+    { "path": "./src/app" },
+    { "path": "./tools" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}

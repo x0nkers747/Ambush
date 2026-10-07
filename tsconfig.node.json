@@ -1,0 +1,13 @@
+{
+  // Root-level config files (vite, vitest, eslint) run in Node.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "rootDir": ".",
+    "outDir": ".tsbuild/node"
+  },
+  "include": ["vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+}

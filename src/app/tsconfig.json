@@ -1,0 +1,18 @@
+{
+  // Composition root: browser bootstrap, frame loop, UI shell.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/app"
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    { "path": "../sim" },
+    { "path": "../exercise" },
+    { "path": "../session" },
+    { "path": "../view2d" },
+    { "path": "../view3d" }
+  ]
+}

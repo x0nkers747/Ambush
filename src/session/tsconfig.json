@@ -1,0 +1,12 @@
+{
+  // Session/UI state (selection, time scale, toggles): no DOM, no Node.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/session"
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../sim" }, { "path": "../exercise" }]
+}

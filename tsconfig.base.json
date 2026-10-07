@@ -1,0 +1,38 @@
+{
+  // Shared compiler settings for every layer. Each layer's tsconfig sets `lib`,
+  // `types` and `references`; those three settings are what enforce the
+  // layer boundaries at compile time (see docs/adr/0001).
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedSideEffectImports": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    // Type checking only: Vite bundles and tsx runs the sources directly.
+    // Declarations are emitted solely so project references can type-check
+    // consumers against a layer's public surface. A forbidden cross-layer
+    // import would otherwise emit stray .d.ts files beside the sources.
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noEmitOnError": true
+  }
+}

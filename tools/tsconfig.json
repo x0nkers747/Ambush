@@ -1,0 +1,12 @@
+{
+  // Node command-line tools (headless runner).
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../.tsbuild/tools"
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../src/sim" }, { "path": "../src/exercise" }]
+}

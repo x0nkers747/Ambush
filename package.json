@@ -1,0 +1,40 @@
+{
+  "name": "ambush",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ambush! — interactive military ambush training simulation",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "imports": {
+    "#sim": "./src/sim/index.ts",
+    "#exercise": "./src/exercise/index.ts",
+    "#session": "./src/session/index.ts",
+    "#view2d": "./src/view2d/index.ts",
+    "#view3d": "./src/view3d/index.ts"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run format:check",
+    "sim:headless": "tsx tools/run-headless.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.1",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3"
+  }
+}

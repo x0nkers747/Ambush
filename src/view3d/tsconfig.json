@@ -1,0 +1,12 @@
+{
+  // 3D observer view (Three.js, added in Phase 4).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/view3d"
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../sim" }, { "path": "../exercise" }, { "path": "../session" }]
+}

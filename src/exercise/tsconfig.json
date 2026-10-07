@@ -1,0 +1,12 @@
+{
+  // Exercise layer (plan, phases, runner, recording): no DOM, no Node. May use sim.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/exercise"
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../sim" }]
+}

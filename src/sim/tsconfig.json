@@ -1,0 +1,11 @@
+{
+  // Simulation layer: no DOM, no Node, no other layers.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/sim"
+  },
+  "include": ["**/*.ts"]
+}
