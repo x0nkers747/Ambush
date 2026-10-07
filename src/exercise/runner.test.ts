@@ -3,7 +3,7 @@ import { createSimulation } from '#sim';
 import { createFixedStepRunner } from './runner';
 
 function setup(tickRateHz: number, maxTicksPerAdvance?: number) {
-  const sim = createSimulation({ tickRateHz });
+  const sim = createSimulation({ tickRateHz, seed: 0 }, { id: 'empty', units: [], soldiers: [] });
   const runner = createFixedStepRunner(
     sim,
     maxTicksPerAdvance === undefined ? {} : { maxTicksPerAdvance },

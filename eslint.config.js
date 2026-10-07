@@ -147,7 +147,7 @@ export default defineConfig(
         {
           object: 'Math',
           property: 'random',
-          message: 'Use the seeded simulation PRNG (Phase 1), never Math.random.',
+          message: 'Use the seeded simulation PRNG (src/sim/rng.ts), never Math.random.',
         },
       ],
     },

@@ -4,7 +4,10 @@ import { createSimulation, DEFAULT_TICK_RATE_HZ } from '#sim';
 // Phase 0 composition root: drives a bare simulation from requestAnimationFrame
 // and shows its clock, proving the app → exercise → sim wiring and the fixed timestep.
 
-const sim = createSimulation({ tickRateHz: DEFAULT_TICK_RATE_HZ });
+const sim = createSimulation(
+  { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 0 },
+  { id: 'empty', units: [], soldiers: [] },
+);
 const runner = createFixedStepRunner(sim);
 
 const root = document.querySelector<HTMLElement>('#app');
