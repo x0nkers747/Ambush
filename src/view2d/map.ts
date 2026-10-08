@@ -1,7 +1,7 @@
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
 import { heightAt, isOnTerrain, type Vec2 } from '#sim';
-import { fitBounds, screenToWorld, type Camera, type Viewport } from './camera';
+import { fitBounds, screenToWorld, worldToScreen, type Camera, type Viewport } from './camera';
 import { createMapActions } from './actions';
 import { createMapController } from './interaction';
 import { createTerrainLayer, drawMap } from './render';
@@ -40,6 +40,10 @@ export interface TacticalMap {
   readonly pointer: PointerReadout | null;
   /** The visibility overlay as last drawn, or `null` when it is off or nothing is selected. */
   readonly visibility: VisibilityView | null;
+  /** Centres the view on a map point, keeping the zoom (e.g. a soldier chosen in the roster). */
+  centreOn(point: Vec2): void;
+  /** Whether a map point is currently on screen. */
+  isInView(point: Vec2): boolean;
   dispose(): void;
 }
 
@@ -65,10 +69,10 @@ export function createTacticalMap({
   const scene = (): MapScene => buildScene(exercise, getSession(), camera, viewport, visibility);
 
   /**
-   * The selected soldier's viewshed from its planned final position (or where it
-   * stands): a coarser preview while that final waypoint is being dragged, full
-   * detail otherwise. Computed in the background; the previous result is shown
-   * until the new one is ready.
+   * The selected soldier's viewshed from its destination (or where it stands): a
+   * coarser preview while the destination is being dragged, full detail
+   * otherwise. Computed in the background; the previous result is shown until
+   * the new one is ready.
    */
   const updateVisibility = () => {
     const session = getSession();
@@ -78,9 +82,7 @@ export function createTacticalMap({
       visibility = null;
       return;
     }
-    const finalWaypoint = exercise.draft(id)?.waypoints.at(-1)?.id;
-    const dragging = finalWaypoint !== undefined && controller.draggedWaypoint === finalWaypoint;
-    const cellSize = dragging ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
+    const cellSize = controller.draggingDestination ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
     const { viewshed, pending } = viewsheds.request(observer.point, cellSize);
     visibility = { observer: observer.point, planned: observer.planned, viewshed, pending };
   };
@@ -182,6 +184,13 @@ export function createTacticalMap({
     render: draw,
     fitView() {
       camera = fitBounds(layer.bounds, viewport);
+    },
+    centreOn(point) {
+      camera = { ...camera, centerX: point.x, centerY: point.y };
+    },
+    isInView(point) {
+      const p = worldToScreen(camera, viewport, point);
+      return p.x >= 0 && p.y >= 0 && p.x <= viewport.width && p.y <= viewport.height;
     },
     get pointer() {
       return pointer;

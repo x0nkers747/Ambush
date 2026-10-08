@@ -1,18 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
+import {
+  createExercise,
+  type AmbushScenario,
+  type Exercise,
+  type OrganizationTemplate,
+} from '#exercise';
 import { createSession, setShowVisibility, setTool, type Session } from '#session';
 import { createSyntheticTerrain, flatElevation, rectangle, soldierId } from '#sim';
 import { createMapActions } from './actions';
 import { formatBearing } from './bearing';
 import { screenToWorld, type Camera } from './camera';
 import { createMapController, DRAG_THRESHOLD_PX } from './interaction';
-import { buildScene, FACING_ARROW_PX } from './scene';
+import { buildScene, deploymentGeometry, FACING_ARROW_PX, symbolLayout } from './scene';
 
 // Pointer interaction driven through the real exercise, session and map
 // actions, with a camera of 1 m per pixel centred on the origin of a
 // 400 × 400 px viewport: map (x, y) is at screen (200 + x, 200 − y).
 
 const A = soldierId('A');
+
+/** A synthetic two-person team (represents no real organization). */
+const PAIR: OrganizationTemplate = {
+  schema: 'ambush.organization-template',
+  schemaVersion: 1,
+  id: 'interaction-pair',
+  version: '1.0.0',
+  name: 'Interaction test pair',
+  source: { kind: 'synthetic', title: 'Interaction test pair', notes: 'Test fixture.' },
+  conventions: [],
+  roles: [
+    {
+      id: 'member',
+      name: 'Member',
+      abbreviation: 'M',
+      symbology: { sidc: '10032700001101010000' },
+    },
+  ],
+  units: [
+    {
+      id: 'TM',
+      name: 'Team',
+      abbreviation: 'TM',
+      echelon: 'team',
+      parentId: null,
+      leaderSlotId: null,
+    },
+  ],
+  slots: [
+    { id: 'm1', unitId: 'TM', roleId: 'member', label: 'M1' },
+    { id: 'm2', unitId: 'TM', roleId: 'member', label: 'M2' },
+  ],
+};
 
 const SCENARIO: AmbushScenario = {
   id: 'interaction-test',
@@ -58,6 +96,20 @@ const SCENARIO: AmbushScenario = {
     },
   ],
   opforRoutes: [],
+  orp: {
+    id: 'ORP-I',
+    name: 'ORP',
+    centre: { east: 25, north: 0 },
+    shape: { kind: 'circle', radiusM: 30 },
+  },
+  organization: {
+    template: PAIR,
+    unitIdPrefix: '',
+    members: [
+      { soldierId: 'A', slotId: 'm1' },
+      { soldierId: 'B', slotId: 'm2' },
+    ],
+  },
 };
 
 const screen = (x: number, y: number) => ({ x: 200 + x, y: 200 - y });
@@ -110,12 +162,20 @@ function setup() {
       }
       controller.pointerUp({ x: start.x + dx, y: start.y + dy, button: 0 });
     },
-    route: () => exercise.draft(A)?.waypoints.map((w) => [w.x, w.y]),
+    destination: () => {
+      const d = exercise.draft(A)?.destination;
+      return d ? [d.east, d.north] : null;
+    },
+    facingTip: () => {
+      const tip = deploymentGeometry(scene())?.facingTip;
+      if (!tip) throw new Error('no facing arrow');
+      return tip;
+    },
     notices,
     setSession(next: Session) {
       session = next;
     },
-    useTool(tool: 'routes' | 'killZone') {
+    useTool(tool: 'deploy' | 'killZone') {
       session = setTool(session, tool);
     },
     useKillZoneTool() {
@@ -140,81 +200,84 @@ describe('selection', () => {
     ui.click(0, 100);
     expect(ui.session.selectedSoldierId).toBeNull();
     ui.click(0, 0);
-    ui.click(0, 100); // clicking OPFOR does not add a waypoint on top of it either
+    ui.click(0, 100); // clicking OPFOR does not set a destination on top of it either
     expect(ui.session.selectedSoldierId).toBe('A');
-    expect(ui.route()).toEqual([]);
+    expect(ui.destination()).toBeNull();
     expect(ui.exercise.draft(soldierId('E'))).toBeUndefined();
   });
 
   it('does nothing when clicking the map with no selection', () => {
     const ui = setup();
     ui.click(30, 30);
-    expect(ui.exercise.draft(A)?.waypoints).toEqual([]);
+    expect(ui.exercise.draft(A)?.destination).toBeNull();
   });
 });
 
-// With no waypoints the facing handle sits FACING_ARROW_PX (42 px) north of
-// the selected soldier at (0, 0), so the routes below avoid (0, 42).
-describe('waypoint editing', () => {
-  it('appends waypoints where the map is clicked', () => {
+// Without a destination the facing handle sits FACING_ARROW_PX (42 px) north
+// of the selected soldier at (0, 0), so the destinations below avoid (0, 42).
+describe('destination editing', () => {
+  it('sets the single destination where the map is clicked; a second click moves it', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-50, 40);
+    expect(ui.destination()).toEqual([-50, 40]);
     ui.click(30, 80);
-    expect(ui.route()).toEqual([
-      [-50, 40],
-      [30, 80],
-    ]);
+    expect(ui.destination()).toEqual([30, 80]);
   });
 
-  it('inserts a waypoint when a route leg is clicked', () => {
+  it('keeps an explicit facing when the destination moves', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-40, 40);
-    ui.click(40, 40);
-    ui.click(0, 41); // 1 px from the leg (−40, 40)–(40, 40)
-    expect(ui.route()).toEqual([
-      [-40, 40],
-      [0, 41],
-      [40, 40],
-    ]);
+    ui.exercise.setFacing(A, Math.PI / 2); // east, as the facing handle would set it
+    ui.click(30, 80);
+    expect(ui.exercise.draft(A)?.facingDegrees).toBeCloseTo(90, 9);
   });
 
-  it('moves a waypoint by dragging it, keeping its id', () => {
+  it('moves the destination by dragging its marker', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-40, 40);
-    const id = ui.exercise.draft(A)?.waypoints[0]?.id;
     ui.dragPixels(-40, 40, 25, -10); // +25 px right, −10 px up the screen = +10 m north
-    expect(ui.route()).toEqual([[-15, 50]]);
-    expect(ui.exercise.draft(A)?.waypoints[0]?.id).toBe(id);
+    expect(ui.destination()).toEqual([-15, 50]);
   });
 
-  it('deletes a waypoint with a right click', () => {
+  it('never offers generated path turns as handles', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.click(130, -130); // beyond building B-9: the path bends round it
+    const turn = ui.exercise.displayedRoute(A)?.legs[0]?.turns?.[0];
+    if (!turn) throw new Error('expected a generated turn');
+    const before = ui.camera.centerX;
+    ui.dragPixels(turn.x, turn.y, 15, 0); // pans the map, does not edit the path
+    expect(ui.destination()).toEqual([130, -130]);
+    expect(ui.camera.centerX).toBeCloseTo(before - 15, 9);
+  });
+
+  it('clears the destination with a right click on its marker', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-40, 40);
-    ui.click(40, 80);
-    ui.click(-40, 40, 2);
-    expect(ui.route()).toEqual([[40, 80]]);
     ui.click(60, 60, 2); // right click on empty map: nothing
-    expect(ui.route()).toEqual([[40, 80]]);
+    expect(ui.destination()).toEqual([-40, 40]);
+    ui.click(-40, 40, 2);
+    expect(ui.destination()).toBeNull();
   });
 
   it('ignores clicks off the terrain', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(0, 160);
-    expect(ui.route()).toEqual([]);
+    expect(ui.destination()).toBeNull();
   });
 
-  it('pans instead of adding a waypoint when the map is dragged', () => {
+  it('pans instead of setting a destination when the map is dragged', () => {
     const ui = setup();
     ui.click(0, 0);
     const viewport = { width: 400, height: 400 };
     const grabbed = screenToWorld(ui.camera, viewport, screen(60, 60));
     ui.dragPixels(60, 60, 30, 12);
-    expect(ui.route()).toEqual([]);
+    expect(ui.destination()).toBeNull();
     const under = screenToWorld(ui.camera, viewport, {
       x: screen(60, 60).x + 30,
       y: screen(60, 60).y + 12,
@@ -227,7 +290,7 @@ describe('waypoint editing', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.dragPixels(60, 60, DRAG_THRESHOLD_PX - 1, 0);
-    expect(ui.route()).toEqual([[60, 60]]);
+    expect(ui.destination()).toEqual([60, 60]);
   });
 
   it('is disabled while Executing, but selection and panning still work', () => {
@@ -237,39 +300,44 @@ describe('waypoint editing', () => {
     ui.exercise.execute();
     ui.click(40, 40);
     ui.click(-40, 40, 2);
-    ui.dragPixels(-40, 40, 20, 0); // on the waypoint: pans, does not move it
-    expect(ui.exercise.displayedPlan(A)?.waypoints.map((w) => [w.x, w.y])).toEqual([[-40, 40]]);
+    ui.dragPixels(-40, 40, 20, 0); // on the destination: pans, does not move it
+    expect(ui.exercise.displayedPlan(A)?.destination).toEqual({ east: -40, north: 40 });
     expect(ui.camera.centerX).toBeCloseTo(-20, 9);
     ui.click(50 + 20, 0); // B, now 20 px further right on screen
     expect(ui.session.selectedSoldierId).toBe('B');
   });
 });
 
-describe('final facing', () => {
-  it('rotates by dragging the arrow tip at the last waypoint', () => {
+describe('facing', () => {
+  it('rotates by dragging the arrow tip at the destination', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-40, 40);
-    // Facing starts at 000°: the tip is FACING_ARROW_PX north of the waypoint.
-    ui.dragPixels(-40, 40 + FACING_ARROW_PX, FACING_ARROW_PX, FACING_ARROW_PX); // to due east of it
-    expect(formatBearing(ui.exercise.draft(A)?.finalFacing ?? Number.NaN)).toBe('090°');
-    expect(ui.route()).toEqual([[-40, 40]]);
+    // The default facing points the way A walks, north-west: drag from wherever
+    // its tip is to due east of the destination.
+    const tip = ui.facingTip();
+    ui.controller.pointerDown({ ...tip, button: 0 });
+    ui.controller.pointerMove({ ...screen(-40 + FACING_ARROW_PX, 40), button: 0 });
+    ui.controller.pointerUp({ ...screen(-40 + FACING_ARROW_PX, 40), button: 0 });
+    expect(ui.exercise.draft(A)?.facingDegrees).toBeCloseTo(90, 9);
+    expect(ui.destination()).toEqual([-40, 40]);
   });
 
-  it('operates at the soldier when there are no waypoints', () => {
+  it('operates at the soldier when there is no destination', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.dragPixels(0, FACING_ARROW_PX, 0, 2 * FACING_ARROW_PX); // to due south of the soldier
-    expect(formatBearing(ui.exercise.draft(A)?.finalFacing ?? Number.NaN)).toBe('180°');
-    expect(ui.route()).toEqual([]);
+    expect(formatBearing(ui.exercise.displayedFacing(A)?.azimuth ?? Number.NaN)).toBe('180°');
+    expect(ui.exercise.draft(A)?.facingDegrees).toBe(180);
+    expect(ui.destination()).toBeNull();
   });
 
   it('ignores a click on the handle without dragging', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(0, FACING_ARROW_PX);
-    expect(ui.route()).toEqual([]);
-    expect(ui.exercise.draft(A)?.finalFacing).toBe(0);
+    expect(ui.destination()).toBeNull();
+    expect(ui.exercise.draft(A)?.facingDegrees).toBeNull();
   });
 });
 
@@ -368,19 +436,19 @@ describe('kill-zone editing', () => {
     ]);
   });
 
-  it('does not edit routes with the kill-zone tool, nor the kill zone with the route tool', () => {
+  it('does not set destinations with the kill-zone tool, nor edit the kill zone with the deployment tool', () => {
     const ui = withZone();
-    expect(ui.route()).toEqual([]);
+    expect(ui.destination()).toBeNull();
     const ui2 = setup();
     ui2.click(0, 0);
     ui2.click(-60, 30);
     expect(ui2.exercise.killZone).toBeNull();
-    expect(ui2.route()).toEqual([[-60, 30]]);
+    expect(ui2.destination()).toEqual([-60, 30]);
   });
 
   it('is read-only while BLUEFOR is moving', () => {
     const ui = withZone();
-    ui.exercise.addWaypoint(A, { x: 0, y: 140 });
+    ui.exercise.setDestination(A, { x: 0, y: 140 });
     ui.exercise.execute();
     ui.click(0, -50);
     ui.click(60, 90, 2);
@@ -390,15 +458,23 @@ describe('kill-zone editing', () => {
   });
 });
 
-describe('refused waypoints', () => {
-  it('tells the trainee why a waypoint inside a building was not placed', () => {
+describe('refused destinations', () => {
+  it('tells the trainee why a destination inside a building was not set', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(100, -100);
-    expect(ui.route()).toEqual([]);
+    expect(ui.destination()).toBeNull();
     expect(ui.notices).toEqual([
-      'Waypoint not placed: inside building B-9; soldiers cannot enter buildings.',
+      'Destination not set: inside building B-9; soldiers cannot enter buildings.',
     ]);
+  });
+
+  it('keeps the destination where it was when a drag enters a building', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.click(100, -60);
+    ui.dragPixels(100, -60, 0, 40); // 40 px down the screen: into B-9
+    expect(ui.destination()).toEqual([100, -80]); // the last point a soldier could stand on
   });
 });
 
@@ -414,24 +490,65 @@ describe('visibility overlay', () => {
     expect(buildScene(ui.exercise, on, ui.camera, viewport, view).visibility).toEqual(view);
   });
 
-  it('does not take map clicks: route editing works as usual', () => {
+  it('does not take map clicks: destination editing works as usual', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.setSession(setShowVisibility(ui.session, true));
     ui.click(-40, 40);
-    expect(ui.route()).toEqual([[-40, 40]]);
+    expect(ui.destination()).toEqual([-40, 40]);
   });
 
-  it('reports which waypoint is being dragged, for the quick preview', () => {
+  it('reports when the destination is being dragged, for the quick preview', () => {
     const ui = setup();
     ui.click(0, 0);
     ui.click(-40, 40);
-    const id = ui.exercise.draft(A)?.waypoints[0]?.id;
     const start = screen(-40, 40);
     ui.controller.pointerDown({ ...start, button: 0 });
     ui.controller.pointerMove({ x: start.x + 10, y: start.y, button: 0 });
-    expect(ui.controller.draggedWaypoint).toBe(id);
+    expect(ui.controller.draggingDestination).toBe(true);
     ui.controller.pointerUp({ x: start.x + 10, y: start.y, button: 0 });
-    expect(ui.controller.draggedWaypoint).toBeNull();
+    expect(ui.controller.draggingDestination).toBe(false);
+  });
+});
+
+describe('the ORP', () => {
+  it('is in the scene as a reference outline and never takes clicks', () => {
+    const ui = setup();
+    const scene = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 });
+    expect(scene.orp.name).toBe('ORP');
+    expect(scene.orp.outline.length).toBeGreaterThan(8);
+    ui.click(0, 0);
+    ui.click(25, 20); // inside the ORP, away from both soldiers: a destination like anywhere else
+    expect(ui.destination()).toEqual([25, 20]);
+  });
+});
+
+describe('symbol decluttering', () => {
+  const sceneAt = (ui: ReturnType<typeof setup>, metersPerPixel: number, selected?: string) =>
+    buildScene(
+      ui.exercise,
+      selected ? { ...ui.session, selectedSoldierId: soldierId(selected) } : ui.session,
+      { centerX: 0, centerY: 0, metersPerPixel },
+      { width: 400, height: 400 },
+    );
+
+  it('draws full symbols where they do not overlap, at the soldiers’ true positions', () => {
+    const ui = setup();
+    const layout = symbolLayout(sceneAt(ui, 1));
+    expect([...layout.values()].map((p) => p.mode)).toEqual(['full', 'full']);
+    expect(layout.get(A)?.at).toEqual(screen(0, 0));
+    expect(layout.get(soldierId('E'))).toBeUndefined(); // OPFOR is drawn separately
+  });
+
+  it('draws overlapping symbols compact, the selected soldier always in full with its label', () => {
+    const ui = setup();
+    const far = sceneAt(ui, 10, 'B'); // 50 m apart = 5 px: they overlap
+    const layout = symbolLayout(far);
+    expect(layout.get(soldierId('B'))).toMatchObject({ mode: 'full', showLabel: true });
+    expect(layout.get(A)).toMatchObject({ mode: 'compact', showLabel: false });
+    expect(layout.get(soldierId('B'))?.covered).toBe(1); // A is hidden under B: counted
+    // Positions are never moved to make room.
+    expect(layout.get(A)?.at.x).toBeCloseTo(200, 9);
+    expect(layout.get(soldierId('B'))?.at.x).toBeCloseTo(205, 9);
   });
 });

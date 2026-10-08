@@ -20,6 +20,14 @@ export function fingerprintWorld(world: SimWorld): string {
   return fnv1a64(utf16leBytes(canonicalEncode(world)));
 }
 
+/**
+ * Content fingerprint of any plain data (the same hash as `fingerprintWorld`),
+ * e.g. for a scenario's configuration outside the simulation (docs/adr/0012).
+ */
+export function fingerprintPlainData(value: unknown): string {
+  return fnv1a64(utf16leBytes(canonicalEncode(value)));
+}
+
 const FNV64_OFFSET = 0xcbf2_9ce4_8422_2325n;
 const FNV64_PRIME = 0x100_0000_01b3n;
 

@@ -61,6 +61,9 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
   const unitsById = new Map<string, ScenarioUnit>();
   for (const unit of scenario.units) {
     if (unitsById.has(unit.id)) fail(`duplicate unit id "${unit.id}"`);
+    if (typeof unit.echelon !== 'string' || unit.echelon === '') {
+      fail(`unit "${unit.id}" has no echelon label`);
+    }
     unitsById.set(unit.id, unit);
   }
 

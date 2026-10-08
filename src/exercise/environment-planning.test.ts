@@ -12,9 +12,10 @@ import {
 } from '#sim';
 import type { AmbushScenario } from './ambush-scenario';
 import { createExercise, ExerciseError, type Exercise } from './exercise';
+import { TEST_PAIR_TEMPLATE } from './test-organization';
 
-// Planning against the environment (docs/adr/0011): routes around buildings,
-// refused waypoints, and line of sight from planned positions.
+// Planning against the environment (docs/adr/0011, docs/adr/0012): paths
+// around buildings, refused destinations, and line of sight from destinations.
 
 const A = soldierId('A');
 /** A 40 m × 20 m building between A (south) and the area north of it. */
@@ -66,6 +67,22 @@ const SCENARIO: AmbushScenario = {
       shownToTrainee: true,
     },
   ],
+  orp: {
+    id: 'ORP-E',
+    name: 'ORP',
+    centre: { east: 0, north: -40 },
+    shape: { kind: 'circle', radiusM: 5 },
+  },
+  organization: {
+    // One soldier: the test pair's leader slot only.
+    template: {
+      ...TEST_PAIR_TEMPLATE,
+      roles: TEST_PAIR_TEMPLATE.roles.slice(0, 1),
+      slots: TEST_PAIR_TEMPLATE.slots.slice(0, 1),
+    },
+    unitIdPrefix: '',
+    members: [{ soldierId: 'A', slotId: 'lead' }],
+  },
 };
 
 function setup(): Exercise {
@@ -78,66 +95,77 @@ function run(exercise: Exercise, seconds: number): SimEvent[] {
   return events;
 }
 
-describe('waypoint placement', () => {
-  it('refuses a waypoint inside a building, saying which, and leaves the plan unchanged', () => {
-    const exercise = setup();
-    expect(() => exercise.addWaypoint(A, { x: 5, y: 2 })).toThrow(ExerciseError);
-    expect(() => exercise.addWaypoint(A, { x: 5, y: 2 })).toThrow(
-      'Waypoint not placed: inside building B-1; soldiers cannot enter buildings.',
-    );
-    expect(exercise.draft(A)?.waypoints).toEqual([]);
-  });
+describe('destination placement', () => {
+  const destinationOf = (exercise: Exercise) => exercise.draft(A)?.destination;
 
-  it('refuses a waypoint against a building wall', () => {
+  it('refuses a destination inside a building, saying which, and leaves the plan unchanged', () => {
     const exercise = setup();
-    expect(() => exercise.addWaypoint(A, { x: 0, y: -10.4 })).toThrow(
-      /against the wall of building B-1/,
-    );
-  });
-
-  it('refuses a waypoint that cannot be reached', () => {
-    const exercise = setup();
-    expect(() => exercise.addWaypoint(A, { x: 100, y: 100 })).toThrow(/cannot be reached/);
-  });
-
-  it('refuses moving a waypoint into a building, keeping it where it was', () => {
-    const exercise = setup();
-    const id = exercise.addWaypoint(A, { x: 0, y: 40 });
     expect(() => {
-      exercise.moveWaypoint(A, id, { x: 0, y: 0 });
+      exercise.setDestination(A, { x: 5, y: 2 });
+    }).toThrow(ExerciseError);
+    expect(() => {
+      exercise.setDestination(A, { x: 5, y: 2 });
+    }).toThrow('Destination not set: inside building B-1; soldiers cannot enter buildings.');
+    expect(destinationOf(exercise)).toBeNull();
+  });
+
+  it('refuses a destination against a building wall', () => {
+    const exercise = setup();
+    expect(() => {
+      exercise.setDestination(A, { x: 0, y: -10.4 });
+    }).toThrow(/against the wall of building B-1/);
+  });
+
+  it('refuses a destination that cannot be reached', () => {
+    const exercise = setup();
+    expect(() => {
+      exercise.setDestination(A, { x: 100, y: 100 });
+    }).toThrow(
+      /cannot be reached from the soldier’s position|cannot be reached from the soldier's position/,
+    );
+  });
+
+  it('refuses moving the destination into a building, keeping it where it was', () => {
+    const exercise = setup();
+    exercise.setDestination(A, { x: 0, y: 40 });
+    expect(() => {
+      exercise.setDestination(A, { x: 0, y: 0 });
     }).toThrow(/inside building B-1/);
-    expect(exercise.draft(A)?.waypoints).toEqual([{ id, x: 0, y: 40 }]);
+    expect(destinationOf(exercise)).toEqual({ east: 0, north: 40 });
   });
 
   it('still allows tactically poor but possible plans', () => {
     const exercise = setup();
     // Hard against the far side of the barn, facing into its wall: allowed.
-    exercise.addWaypoint(A, { x: 0, y: 11 });
-    exercise.setFinalFacing(A, Math.PI);
-    expect(exercise.draft(A)?.waypoints).toHaveLength(1);
+    exercise.setDestination(A, { x: 0, y: 11 });
+    exercise.setFacing(A, Math.PI);
+    expect(destinationOf(exercise)).toEqual({ east: 0, north: 11 });
     // A long detour is allowed too.
-    exercise.addWaypoint(A, { x: -180, y: 180 });
-    exercise.addWaypoint(A, { x: 0, y: 30 });
+    exercise.setDestination(A, { x: -180, y: 180 });
     expect(exercise.execute().ok).toBe(true);
   });
 });
 
 describe('routes around buildings', () => {
-  it('shows the generated path around a building, separate from the trainee waypoints', () => {
+  it('shows the generated path around a building, separate from the trainee’s destination', () => {
     const exercise = setup();
-    const id = exercise.addWaypoint(A, { x: 0, y: 40 });
+    exercise.setDestination(A, { x: 0, y: 40 });
     const route = exercise.displayedRoute(A);
     expect(route?.ok).toBe(true);
     expect(route?.legs).toHaveLength(1);
-    expect(route?.legs[0]?.waypointId).toBe(id);
+    expect(route?.legs[0]?.to).toEqual({ x: 0, y: 40 });
     expect(route?.legs[0]?.turns?.length).toBeGreaterThan(0);
-    // The trainee's plan holds only the trainee's waypoint.
-    expect(exercise.draft(A)?.waypoints).toEqual([{ id, x: 0, y: 40 }]);
+    // The trainee's plan holds only the destination and facing, never the turns.
+    expect(exercise.draft(A)).toEqual({
+      soldierId: A,
+      destination: { east: 0, north: 40 },
+      facingDegrees: null,
+    });
   });
 
   it('walks exactly the path that was shown, never through the building', () => {
     const exercise = setup();
-    exercise.addWaypoint(A, { x: 0, y: 40 });
+    exercise.setDestination(A, { x: 0, y: 40 });
     const shown = exercise.displayedRoute(A)?.legs[0]?.turns;
     exercise.execute();
     const positions: Vec2[] = [];
@@ -152,19 +180,18 @@ describe('routes around buildings', () => {
     expect(exercise.phase).toBe('bluforReady');
   });
 
-  it('reports only trainee waypoints as reached, not generated turns', () => {
+  it('reports only the destination as reached, not generated turns', () => {
     const exercise = setup();
-    const id = exercise.addWaypoint(A, { x: 0, y: 40 });
+    exercise.setDestination(A, { x: 0, y: 40 });
     exercise.execute();
     const reached = run(exercise, 70).filter((e) => e.type === 'waypointReached');
-    expect(reached.map((e) => e.waypointId)).toEqual([id]);
+    expect(reached.map((e) => e.waypointId)).toEqual(['A.dest.1']);
   });
 
   it('plans identically every time', () => {
     const routes = Array.from({ length: 3 }, () => {
       const exercise = setup();
-      exercise.addWaypoint(A, { x: 0, y: 40 });
-      exercise.addWaypoint(A, { x: 150, y: 100 });
+      exercise.setDestination(A, { x: 150, y: 100 });
       return exercise.displayedRoute(A);
     });
     expect(routes[1]).toEqual(routes[0]);
@@ -173,7 +200,7 @@ describe('routes around buildings', () => {
 
   it('keeps showing the path being walked after a pause', () => {
     const exercise = setup();
-    exercise.addWaypoint(A, { x: 0, y: 40 });
+    exercise.setDestination(A, { x: 0, y: 40 });
     exercise.execute();
     run(exercise, 10);
     exercise.pause();
@@ -184,7 +211,7 @@ describe('routes around buildings', () => {
 });
 
 describe('line of sight from planned positions', () => {
-  it('looks from the planned final position, not where the soldier stands', () => {
+  it('looks from the destination, not where the soldier stands', () => {
     const exercise = setup();
     // From the start (0, −40) the barn blocks the view north; from (60, 0) it does not.
     const target = { x: 0, y: 60 };
@@ -193,7 +220,7 @@ describe('line of sight from planned positions', () => {
       kind: 'building',
       featureId: 'B-1',
     });
-    exercise.addWaypoint(A, { x: 60, y: 0 });
+    exercise.setDestination(A, { x: 60, y: 0 });
     expect(exercise.observer(A)).toEqual({ point: { x: 60, y: 0 }, planned: true });
     expect(exercise.lineOfSightFrom(A, target)?.clear).toBe(true);
     // Before anything has been executed: the soldier itself has not moved.
@@ -234,12 +261,12 @@ describe('visibility from planned positions', () => {
     { x: -15, y: 60 },
   ];
 
-  it('is computed from the planned final position, not where the soldier stands', () => {
+  it('is computed from the destination, not where the soldier stands', () => {
     const exercise = setup();
     zone(exercise, NORTH);
     const fromStart = exercise.killZoneCoverage(viewshedOf(exercise));
     expect(fromStart?.percent).toBe(0); // the barn hides it completely
-    exercise.addWaypoint(A, { x: 60, y: -10 });
+    exercise.setDestination(A, { x: 60, y: -10 });
     expect(exercise.observer(A)).toEqual({ point: { x: 60, y: -10 }, planned: true });
     const fromPlan = exercise.killZoneCoverage(viewshedOf(exercise));
     expect(fromPlan?.percent).toBe(100);
@@ -247,12 +274,12 @@ describe('visibility from planned positions', () => {
     expect(exercise.simulation.state.soldiers[0]?.position.y).toBe(-40); // nobody moved
   });
 
-  it('changes as the planned position moves', () => {
+  it('changes as the destination moves', () => {
     const exercise = setup();
     zone(exercise, NORTH);
-    const id = exercise.addWaypoint(A, { x: 60, y: -10 });
+    exercise.setDestination(A, { x: 60, y: -10 });
     const open = viewshedOf(exercise);
-    exercise.moveWaypoint(A, id, { x: 0, y: -15 }); // right behind the barn
+    exercise.setDestination(A, { x: 0, y: -15 }); // right behind the barn
     const hidden = viewshedOf(exercise);
     expect(hidden).not.toEqual(open);
     expect(exercise.killZoneCoverage(hidden)?.percent).toBe(0);
@@ -263,7 +290,7 @@ describe('visibility from planned positions', () => {
     const opfor = soldierId('E');
     expect(exercise.observer(opfor)).toBeUndefined();
     const viewA = viewshedOf(exercise, A);
-    exercise.addWaypoint(A, { x: 60, y: -10 });
+    exercise.setDestination(A, { x: 60, y: -10 });
     expect(viewshedOf(exercise, A)).not.toEqual(viewA);
   });
 
@@ -282,5 +309,12 @@ describe('visibility from planned positions', () => {
     expect(coverage?.percent).toBeLessThan(100);
     expect(coverage?.percent).toBe((100 * (coverage?.visibleCells ?? 0)) / 400);
     expect(exercise.killZoneCoverage(viewshedOf(exercise))).toEqual(coverage);
+  });
+
+  it('returns to the current position when the destination is cleared', () => {
+    const exercise = setup();
+    exercise.setDestination(A, { x: 60, y: -10 });
+    exercise.clearDestination(A);
+    expect(exercise.observer(A)).toEqual({ point: { x: 0, y: -40 }, planned: false });
   });
 });

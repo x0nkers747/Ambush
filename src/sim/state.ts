@@ -26,8 +26,12 @@ export type Posture = 'standing' | 'kneeling' | 'prone';
 /** Every soldier starts `active`; nothing changes status until combat (later phases). */
 export type SoldierStatus = 'active' | 'wounded' | 'killed';
 
-/** Organizational echelons. Labels only: doctrine lives in scenario data, not here. */
-export type Echelon = 'squad' | 'fireTeam';
+/**
+ * An organizational echelon label (e.g. "squad", "fireTeam"), defined by the
+ * organization template the scenario was built from (docs/adr/0012). Labels
+ * only: the simulation attaches no behavior to them.
+ */
+export type Echelon = string;
 
 /** A map point of a soldier's route. Z always comes from the terrain. */
 export interface Waypoint extends Readonly<Vec2> {

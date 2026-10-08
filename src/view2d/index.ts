@@ -12,6 +12,12 @@ export {
   type Viewport,
 } from './camera';
 export { type VisibilityView } from './scene';
+export {
+  describeSymbol,
+  displaySymbolCode,
+  FRIENDLY_DISMOUNTED_INFANTRY_SIDC,
+  symbolSvg,
+} from './symbology';
 export { createViewshedService, type ViewshedService } from './viewshed-service';
 export {
   createTacticalMap,

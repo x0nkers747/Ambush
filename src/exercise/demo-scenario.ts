@@ -7,10 +7,14 @@ import {
   type VegetationArea,
   type Vec2,
 } from '#sim';
-import type { AmbushScenario, OpforRoute } from './ambush-scenario';
+import { deployInOrp, type AmbushScenario, type OpforRoute } from './ambush-scenario';
+import { validateOrganizationTemplate, type OrganizationInstance } from './organization';
+import usmcRifleSquad from './organizations/usmc-rifle-squad-mcwp-3-11-2.json';
+import type { ObjectiveRallyPoint } from './orp';
 
-// Development content for the interactive ambush slice (Phases 3–3.6), not the
-// doctrinal ambush scenario. A BLUEFOR rifle squad in the south; a three-soldier
+// Development content for the interactive ambush slice (Phases 3–3.7), not a
+// doctrinal ambush scenario. A 13-Marine rifle squad (the MCWP 3-11.2
+// organization template, docs/adr/0012) at an ORP in the south; a three-soldier
 // OPFOR patrol in the north whose route follows the valley road south through
 // a small hamlet. 800 m × 600 m of synthetic terrain designed so that planning
 // choices matter (docs/adr/0011):
@@ -169,14 +173,30 @@ const vegetation: VegetationArea[] = [
   },
 ];
 
-const blufor = (id: string, unitId: string, x: number, y: number): ScenarioSoldier => ({
-  id,
+/** The default trainee organization: the 13-Marine rifle squad of MCWP 3-11.2. */
+export const USMC_RIFLE_SQUAD_TEMPLATE = validateOrganizationTemplate(usmcRifleSquad);
+
+/** The squad's objective rally point, behind the south ridge. */
+const DEMO_ORP: ObjectiveRallyPoint = {
+  id: 'ORP-1',
+  name: 'ORP',
+  centre: { east: -60, north: -236 },
+  shape: { kind: 'circle', radiusM: 14 },
+};
+
+/** Which Marine fills which slot. Soldier ids are scenario data, independent of slot ids. */
+const SQUAD: OrganizationInstance = {
+  templateId: USMC_RIFLE_SQUAD_TEMPLATE.id,
+  templateVersion: USMC_RIFLE_SQUAD_TEMPLATE.version,
   side: 'BLUEFOR',
-  unitId,
-  position: { x, y },
-  azimuthDeg: 0,
+  unitIdPrefix: '',
+  facingDeg: 0,
   posture: 'standing',
-});
+  members: USMC_RIFLE_SQUAD_TEMPLATE.slots.map((slot, i) => ({
+    soldierId: `M${String(i + 1).padStart(2, '0')}`,
+    slotId: slot.id,
+  })),
+};
 
 const opfor = (id: string, x: number, y: number): ScenarioSoldier => ({
   id,
@@ -207,34 +227,26 @@ const patrolRoute = (soldierId: string): OpforRoute => ({
   shownToTrainee: true,
 });
 
+const terrain = createSyntheticTerrain(
+  { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
+  demoElevation,
+  { roads, buildings, vegetation },
+);
+const squad = deployInOrp(USMC_RIFLE_SQUAD_TEMPLATE, SQUAD, DEMO_ORP, terrain);
+
 export const DEMO_SCENARIO: AmbushScenario = {
   id: 'phase3-demo',
-  terrain: createSyntheticTerrain(
-    { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
-    demoElevation,
-    { roads, buildings, vegetation },
-  ),
+  terrain,
   movement: { speed: 1.5, maxTurnRate: Math.PI / 2 },
-  units: [
-    { id: 'SQD', echelon: 'squad', parentId: null, leaderId: 'SL' },
-    { id: 'A-TM', echelon: 'fireTeam', parentId: 'SQD', leaderId: 'A-TL' },
-    { id: 'B-TM', echelon: 'fireTeam', parentId: 'SQD', leaderId: 'B-TL' },
-    { id: 'EN-TM', echelon: 'fireTeam', parentId: null, leaderId: 'EN-1' },
-  ],
+  units: [...squad.units, { id: 'EN-TM', echelon: 'fireTeam', parentId: null, leaderId: 'EN-1' }],
   soldiers: [
-    blufor('SL', 'SQD', -60, -240),
-    blufor('A-TL', 'A-TM', -80, -225),
-    blufor('A-AR', 'A-TM', -88, -232),
-    blufor('A-GR', 'A-TM', -74, -234),
-    blufor('A-RFL', 'A-TM', -82, -241),
-    blufor('B-TL', 'B-TM', -40, -225),
-    blufor('B-AR', 'B-TM', -32, -232),
-    blufor('B-GR', 'B-TM', -46, -234),
-    blufor('B-RFL', 'B-TM', -38, -241),
+    ...squad.soldiers,
     // A file 12 m apart on the road, heading south.
     opfor('EN-1', drawCentreX(250), 250),
     opfor('EN-2', drawCentreX(262), 262),
     opfor('EN-3', drawCentreX(274), 274),
   ],
   opforRoutes: [patrolRoute('EN-1'), patrolRoute('EN-2'), patrolRoute('EN-3')],
+  orp: DEMO_ORP,
+  organization: squad.organization,
 };

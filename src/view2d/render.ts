@@ -1,8 +1,9 @@
-import { polygonCentroid, TRAINEE_SIDE, type PlannedRoute, type SoldierPlan } from '#exercise';
+import { polygonCentroid, type PlannedRoute } from '#exercise';
 import type {
   DeepReadonly,
   RoadClass,
   Soldier,
+  SoldierId,
   TerrainDataset,
   VegetationKind,
   Vec2,
@@ -16,7 +17,14 @@ import {
   worldToScreenTransform,
   type Bounds,
 } from './camera';
-import { routeGeometry, WAYPOINT_RADIUS_PX, type MapScene } from './scene';
+import {
+  deploymentGeometry,
+  DESTINATION_RADIUS_PX,
+  SYMBOL_BOX_PX,
+  symbolLayout,
+  type MapScene,
+} from './scene';
+import { symbolImage } from './symbology';
 import { contourLines, terrainRaster } from './terrain-layer';
 
 // Canvas 2D rendering of the tactical map. Map coordinates are drawn through
@@ -30,6 +38,10 @@ const COLORS = {
   grid: 'rgba(30, 35, 40, 0.18)',
   gridLabel: 'rgba(20, 24, 28, 0.75)',
   friendly: '#2f6fc4',
+  friendlyCompact: '#80c0ff',
+  orpFill: 'rgba(47, 111, 196, 0.1)',
+  orpEdge: 'rgba(29, 64, 120, 0.8)',
+  badge: '#1d4078',
   hostile: '#c8433a',
   symbolOutline: '#f4f6f8',
   facingTick: '#15191d',
@@ -57,13 +69,16 @@ const COLORS = {
   featureLabel: 'rgba(20, 24, 28, 0.85)',
   impossible: '#d6301f',
   visibleEdge: '#0d6b30',
-  generatedTurn: '#ffffff',
 } as const;
 
 const MINOR_CONTOUR_INTERVAL_M = 2;
 const INDEX_CONTOUR_EVERY = 5;
 const SOLDIER_RADIUS_PX = 6;
 const FACING_TICK_PX = 14;
+/** milsymbol's base size for trainee symbols (about 21 px across for a dismounted individual). */
+const SYMBOL_SIZE = 18;
+/** Radius of a decluttered (compact) trainee symbol. */
+const COMPACT_RADIUS_PX = 3.5;
 /** Soldier labels appear once soldiers are far enough apart to read them. */
 const LABEL_MAX_METERS_PER_PIXEL = 0.45;
 /** Building and vegetation ids appear from this zoom. */
@@ -159,14 +174,18 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
   drawTerrain(ctx, scene, layer);
   drawEnvironment(ctx, scene, layer);
   drawGrid(ctx, scene, layer.bounds);
+  drawOrp(ctx, scene);
   drawKillZone(ctx, scene);
   for (const { path } of scene.opforRoutes) drawOpforRoute(ctx, scene, path);
   for (const plan of scene.plans) {
-    if (plan.soldierId !== scene.selectedId) drawOtherRoute(ctx, scene, plan);
+    if (plan.soldierId !== scene.selectedId) drawOtherPlan(ctx, scene, plan.soldierId);
   }
-  drawSelectedRoute(ctx, scene);
+  drawSelectedPlan(ctx, scene);
   drawObserver(ctx, scene);
-  for (const soldier of scene.soldiers) drawSoldier(ctx, scene, soldier);
+  for (const soldier of scene.soldiers) {
+    if (!scene.markings.has(soldier.id)) drawOpforSoldier(ctx, scene, soldier);
+  }
+  drawTraineeSoldiers(ctx, scene);
   drawFacingArrow(ctx, scene);
   drawTrigger(ctx, scene);
   drawNorthArrow(ctx, width);
@@ -345,106 +364,98 @@ function walkedPoints(route: PlannedRoute): Vec2[] {
   return [route.start, ...route.legs.flatMap((leg) => [...(leg.turns ?? []), leg.to])];
 }
 
-function drawOtherRoute(ctx: CanvasRenderingContext2D, scene: MapScene, plan: SoldierPlan): void {
-  const route = scene.routes.get(plan.soldierId);
-  if (!route) return;
-  const points = walkedPoints(route).map((p) => worldToScreen(scene.camera, scene.viewport, p));
-  if (points.length < 2) return;
-  const waypoints = plan.waypoints.map((p) => worldToScreen(scene.camera, scene.viewport, p));
+/** The objective rally point: a subtle outline and fill with its name, beneath everything planned. */
+function drawOrp(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const points = scene.orp.outline.map((p) => worldToScreen(scene.camera, scene.viewport, p));
+  if (points.length < 3) return;
   ctx.save();
-  ctx.strokeStyle = COLORS.otherRoute;
-  ctx.fillStyle = COLORS.otherRoute;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = COLORS.orpFill;
+  ctx.fill();
+  ctx.setLineDash([6, 3]);
   ctx.lineWidth = 1.5;
-  ctx.setLineDash([5, 4]);
-  polyline(ctx, points);
+  ctx.strokeStyle = COLORS.orpEdge;
+  ctx.stroke();
   ctx.setLineDash([]);
-  for (const p of waypoints) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
-    ctx.fill();
-  }
+  // The name sits just outside the northern edge, clear of the soldiers inside.
+  const top = points.reduce((a, b) => (b.y < a.y ? b : a));
+  const centre = worldToScreen(scene.camera, scene.viewport, scene.orp.centre);
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.labelHalo;
+  ctx.strokeText(scene.orp.name, centre.x, top.y - 3);
+  ctx.fillStyle = COLORS.orpEdge;
+  ctx.fillText(scene.orp.name, centre.x, top.y - 3);
   ctx.restore();
 }
 
-function drawSelectedRoute(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const route = routeGeometry(scene);
-  if (!route) return;
-  const { points, legs, impossible } = route;
+/** Another soldier's plan: a faint path to a small destination marker. No turn points. */
+function drawOtherPlan(ctx: CanvasRenderingContext2D, scene: MapScene, id: SoldierId): void {
+  const geometry = deploymentGeometry(scene, id);
+  if (!geometry?.destination) return;
+  const { path, destination: d } = geometry;
+  ctx.save();
+  ctx.strokeStyle = COLORS.otherRoute;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  polyline(ctx, path);
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, 3.5, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The selected soldier's path (as it will be walked) and destination marker. */
+function drawSelectedPlan(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const geometry = deploymentGeometry(scene);
+  if (!geometry?.destination) return;
+  const { path, impossible, destination: d } = geometry;
+  const colour = impossible ? COLORS.impossible : COLORS.route;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  legs.forEach((leg, i) => {
-    const bad = impossible[i] === true;
-    ctx.setLineDash(bad ? [4, 4] : scene.editable ? [] : [8, 5]);
-    ctx.strokeStyle = COLORS.routeHalo;
-    ctx.lineWidth = 5;
-    polyline(ctx, leg);
-    ctx.strokeStyle = bad ? COLORS.impossible : COLORS.route;
-    ctx.lineWidth = 2.5;
-    polyline(ctx, leg);
-  });
+  ctx.setLineDash(impossible ? [4, 4] : scene.editable ? [] : [8, 5]);
+  ctx.strokeStyle = COLORS.routeHalo;
+  ctx.lineWidth = 5;
+  polyline(ctx, path);
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 2.5;
+  polyline(ctx, path);
   ctx.setLineDash([]);
 
-  // Generated turn points: small hollow dots, distinct from numbered trainee waypoints.
-  for (const leg of legs) {
-    for (const p of leg.slice(1, -1)) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
-      ctx.fillStyle = COLORS.generatedTurn;
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = COLORS.route;
-      ctx.stroke();
-    }
-  }
-
-  // A chevron at the middle of each straight piece shows the direction of travel.
-  ctx.fillStyle = COLORS.route;
-  const pieces = legs.flatMap((leg) => leg.slice(1).map((b, k) => [leg[k], b] as const));
-  for (const [a, b] of pieces) {
-    if (!a || Math.hypot(b.x - a.x, b.y - a.y) < 4 * WAYPOINT_RADIUS_PX) continue;
-    const angle = Math.atan2(b.y - a.y, b.x - a.x);
-    ctx.save();
-    ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.moveTo(6, 0);
-    ctx.lineTo(-4, -5);
-    ctx.lineTo(-4, 5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.font = 'bold 10px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  points.slice(1).forEach((p, i) => {
-    const bad = impossible[i] === true;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, WAYPOINT_RADIUS_PX, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = bad ? COLORS.impossible : COLORS.route;
-    ctx.stroke();
-    ctx.fillStyle = bad ? COLORS.impossible : COLORS.route;
-    ctx.fillText(String(i + 1), p.x, p.y + 0.5);
-  });
+  // Destination: a ring with a centre dot, the only planning handle besides the facing.
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, DESTINATION_RADIUS_PX, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = colour;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, 2, 0, 2 * Math.PI);
+  ctx.fillStyle = colour;
+  ctx.fill();
   ctx.restore();
 }
 
-function drawSoldier(
+/** Opposing-force soldiers: a red diamond with a facing tick (not a standard symbol). */
+function drawOpforSoldier(
   ctx: CanvasRenderingContext2D,
   scene: MapScene,
   soldier: DeepReadonly<Soldier>,
 ): void {
   const p = worldToScreen(scene.camera, scene.viewport, soldier.position);
-  const friendly = soldier.side === TRAINEE_SIDE;
-  const selected = soldier.id === scene.selectedId;
   ctx.save();
-
-  // Facing: a tick from the centre along the azimuth.
   ctx.strokeStyle = COLORS.facingTick;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -454,59 +465,153 @@ function drawSoldier(
     p.y - Math.cos(soldier.azimuth) * FACING_TICK_PX,
   );
   ctx.stroke();
-
-  // Friendly: circle. Hostile: diamond (echoing, not implementing, APP-6/MIL-STD-2525 frames).
+  const r = SOLDIER_RADIUS_PX + 1.5;
   ctx.beginPath();
-  if (friendly) {
-    ctx.arc(p.x, p.y, SOLDIER_RADIUS_PX, 0, 2 * Math.PI);
-  } else {
-    const r = SOLDIER_RADIUS_PX + 1.5;
-    ctx.moveTo(p.x, p.y - r);
-    ctx.lineTo(p.x + r, p.y);
-    ctx.lineTo(p.x, p.y + r);
-    ctx.lineTo(p.x - r, p.y);
-    ctx.closePath();
-  }
-  ctx.fillStyle = friendly ? COLORS.friendly : COLORS.hostile;
+  ctx.moveTo(p.x, p.y - r);
+  ctx.lineTo(p.x + r, p.y);
+  ctx.lineTo(p.x, p.y + r);
+  ctx.lineTo(p.x - r, p.y);
+  ctx.closePath();
+  ctx.fillStyle = COLORS.hostile;
   ctx.fill();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = COLORS.symbolOutline;
   ctx.stroke();
-
-  if (selected) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, SOLDIER_RADIUS_PX + 5, 0, 2 * Math.PI);
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = COLORS.selection;
-    ctx.stroke();
-  }
-
-  if (selected || scene.camera.metersPerPixel <= LABEL_MAX_METERS_PER_PIXEL) {
-    ctx.font = `${selected ? 'bold ' : ''}11px system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = COLORS.labelHalo;
-    ctx.strokeText(soldier.id, p.x + 10, p.y + 9);
-    ctx.fillStyle = COLORS.label;
-    ctx.fillText(soldier.id, p.x + 10, p.y + 9);
+  if (scene.camera.metersPerPixel <= LABEL_MAX_METERS_PER_PIXEL) {
+    drawLabel(ctx, soldier.id, p.x + 10, p.y + 9, false);
   }
   ctx.restore();
 }
 
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  bold: boolean,
+): void {
+  ctx.font = `${bold ? 'bold ' : ''}11px system-ui, sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.labelHalo;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = COLORS.label;
+  ctx.fillText(text, x, y);
+}
+
+/**
+ * The trainee's soldiers at their true positions (docs/adr/0012): the standard
+ * symbol from milsymbol, or a compact dot where symbols would overlap, plus
+ * the Ambush! facing indicator, role label and selection halo. The selected
+ * soldier is drawn last, on top.
+ */
+function drawTraineeSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const layout = symbolLayout(scene);
+  const dpr = ctx.getTransform().a;
+  const rank = (id: SoldierId, mode: string) =>
+    id === scene.selectedId ? 2 : mode === 'full' ? 1 : 0;
+  const entries = [...layout].sort(([a, p], [b, q]) => rank(a, p.mode) - rank(b, q.mode));
+  for (const [id, { at, mode, showLabel, covered }] of entries) {
+    const soldier = scene.soldiers.find((s) => s.id === id);
+    const marking = scene.markings.get(id);
+    if (!soldier || !marking) continue;
+    const selected = id === scene.selectedId;
+    const full = mode === 'full';
+    ctx.save();
+
+    // Facing: a stroke beyond the symbol's frame, separate from the standard symbol.
+    const inner = full ? SYMBOL_BOX_PX / 2 - 1 : COMPACT_RADIUS_PX;
+    const outer = inner + (full ? 9 : 7);
+    const sin = Math.sin(soldier.azimuth);
+    const cos = Math.cos(soldier.azimuth);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(at.x + sin * inner, at.y - cos * inner);
+    ctx.lineTo(at.x + sin * outer, at.y - cos * outer);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.facingTick;
+    ctx.stroke();
+
+    if (full) {
+      const symbol = symbolImage(marking.sidc, SYMBOL_SIZE, dpr);
+      ctx.drawImage(
+        symbol.image,
+        at.x - symbol.anchor.x,
+        at.y - symbol.anchor.y,
+        symbol.width,
+        symbol.height,
+      );
+    } else {
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, COMPACT_RADIUS_PX, 0, 2 * Math.PI);
+      ctx.fillStyle = COLORS.friendlyCompact;
+      ctx.fill();
+      ctx.lineWidth = 1.25;
+      ctx.strokeStyle = COLORS.friendly;
+      ctx.stroke();
+    }
+
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, SYMBOL_BOX_PX / 2 + 4, 0, 2 * Math.PI);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = COLORS.selection;
+      ctx.stroke();
+    }
+    if (showLabel) {
+      const offset = full ? SYMBOL_BOX_PX / 2 + 2 : 6;
+      // Keep the selected Marine's label clear of an eastward facing arrow.
+      const facing = selected ? scene.facings.get(id) : undefined;
+      const east = facing !== undefined && Math.sin(facing.azimuth) > 0.6;
+      if (east) {
+        ctx.font = `bold 11px system-ui, sans-serif`;
+        const width = ctx.measureText(marking.label).width;
+        drawLabel(ctx, marking.label, at.x - offset - width, at.y, selected);
+      } else {
+        drawLabel(ctx, marking.label, at.x + offset, at.y, selected);
+      }
+    }
+    if (covered > 0) drawCountBadge(ctx, `+${String(covered)}`, at);
+    ctx.restore();
+  }
+}
+
+/** "+n" on a symbol that hides n more Marines beneath it. */
+function drawCountBadge(ctx: CanvasRenderingContext2D, text: string, at: Vec2): void {
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  const width = ctx.measureText(text).width + 6;
+  const x = at.x + SYMBOL_BOX_PX / 2 - 4;
+  const y = at.y - SYMBOL_BOX_PX / 2 - 6;
+  ctx.beginPath();
+  ctx.roundRect(x, y, width, 13, 6);
+  ctx.fillStyle = COLORS.badge;
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + 3, y + 7);
+}
+
 function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const route = routeGeometry(scene);
-  const plan = scene.selectedPlan;
-  if (!route || !plan) return;
-  const { facingAnchor: a, facingTip: tip } = route;
+  const geometry = deploymentGeometry(scene);
+  if (!geometry) return;
+  const { facingAnchor: a, facingTip: tip, facing } = geometry;
   const angle = Math.atan2(tip.y - a.y, tip.x - a.x);
   ctx.save();
   ctx.strokeStyle = COLORS.route;
   ctx.fillStyle = COLORS.route;
   ctx.lineWidth = 2.5;
+  // A default facing (not chosen by the trainee) is dashed.
+  ctx.setLineDash(facing.explicit ? [] : [5, 4]);
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(tip.x, tip.y);
   ctx.stroke();
+  ctx.setLineDash([]);
   ctx.save();
   ctx.translate(tip.x, tip.y);
   ctx.rotate(angle);
@@ -528,7 +633,7 @@ function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
     ctx.stroke();
   }
 
-  const label = formatBearing(plan.finalFacing);
+  const label = `${formatBearing(facing.azimuth)}${facing.explicit ? '' : ' (default)'}`;
   const lx = tip.x + Math.cos(angle) * 16;
   const ly = tip.y + Math.sin(angle) * 16;
   ctx.font = 'bold 11px system-ui, sans-serif';

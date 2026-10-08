@@ -3,12 +3,14 @@ import {
   DEMO_SCENARIO,
   TRAINEE_SIDE,
   type CommitResult,
+  type DeploymentStatus,
   type ExerciseEvent,
-  type SoldierPlan,
+  type RosterUnit,
 } from '#exercise';
 import {
   clearSelection,
   createSession,
+  selectSoldier,
   setShowVisibility,
   setTimeScale,
   setTool,
@@ -17,8 +19,8 @@ import {
   type MapTool,
   type Session,
 } from '#session';
-import { DEFAULT_TICK_RATE_HZ, polygonArea, type SimEvent, type SoldierId } from '#sim';
-import { createTacticalMap, formatBearing } from '#view2d';
+import { DEFAULT_TICK_RATE_HZ, polygonArea, soldierId, type SimEvent, type SoldierId } from '#sim';
+import { createTacticalMap, formatBearing, symbolSvg } from '#view2d';
 
 // Composition root for the ambush slice: the demo scenario, the exercise, the
 // session, the tactical map and the controls around them.
@@ -49,7 +51,7 @@ app.innerHTML = `
     <div class="group" data-ui="tools"><span class="label">Edit</span></div>
     <div class="group">
       <span class="label">View</span>
-      <button data-ui="visibility" title="Show what the selected soldier can see (V)">Visibility</button>
+      <button data-ui="visibility" title="Show what the selected Marine can see (V)">Visibility</button>
     </div>
     <span class="spacer"></span>
     <button data-ui="fit" title="Fit the whole map (F)">Fit map</button>
@@ -63,28 +65,33 @@ app.innerHTML = `
     <h2>Ambush status</h2>
     <dl class="status" data-ui="status"></dl>
     <div data-ui="start-check" class="start-check"></div>
+    <h2>Roster</h2>
+    <div data-ui="roster" class="roster"></div>
+    <h2>Selected Marine</h2>
+    <div data-ui="selection"></div>
+    <div data-ui="problems" class="problems"></div>
     <h2>Kill zone</h2>
     <div data-ui="kill-zone"></div>
     <h2>Visibility</h2>
     <div data-ui="visibility-panel"></div>
-    <h2>Selected soldier</h2>
-    <div data-ui="selection"></div>
-    <div data-ui="problems" class="problems"></div>
     <h2>Events</h2>
     <ul class="events" data-ui="events"></ul>
-    <h2>Controls: routes</h2>
+    <h2>Controls: positions</h2>
     <dl class="help">
-      <dt>Click soldier</dt><dd>Select a BLUEFOR soldier</dd>
-      <dt>Click map</dt><dd>Add a waypoint at the end of the route</dd>
-      <dt>Click a route leg</dt><dd>Insert a waypoint into that leg</dd>
-      <dt>Drag waypoint</dt><dd>Move it</dd>
-      <dt>Right-click waypoint</dt><dd>Delete it</dd>
-      <dt>Drag yellow handle</dt><dd>Set final facing</dd>
-      <dt>Backspace / Del</dt><dd>Delete the last waypoint</dd>
+      <dt>Roster / symbol</dt><dd>Select a Marine</dd>
+      <dt>Click map</dt><dd>Set the Marine's destination (click again to move it)</dd>
+      <dt>Drag destination</dt><dd>Move it</dd>
+      <dt>Drag yellow handle</dt><dd>Set the facing (kept when the destination moves)</dd>
+      <dt>Right-click destination</dt><dd>Clear it</dd>
+      <dt>Backspace / Del</dt><dd>Clear the destination</dd>
     </dl>
+    <p class="muted">One destination and one facing per Marine. Paths are planned automatically
+    round buildings; their bends are not handles. Without a chosen facing a Marine faces the way
+    it arrives (dashed arrow). Marines without a destination stay put and never hold up
+    readiness.</p>
     <h2>Controls: kill zone (K)</h2>
     <dl class="help">
-      <dt>K</dt><dd>Switch between editing routes and the kill zone</dd>
+      <dt>K</dt><dd>Switch between editing positions and the kill zone</dd>
       <dt>Click map</dt><dd>Add a corner after the last one</dd>
       <dt>Click a side</dt><dd>Insert a corner into that side</dd>
       <dt>Drag corner</dt><dd>Move it (it cannot cross itself)</dd>
@@ -92,13 +99,13 @@ app.innerHTML = `
     </dl>
     <h2>Controls: visibility (V)</h2>
     <dl class="help">
-      <dt>V</dt><dd>Show or hide what the selected soldier can see</dd>
-      <dt>Click soldier</dt><dd>Show that soldier's visible area</dd>
-      <dt>Drag last waypoint</dt><dd>Compare positions: the green area follows</dd>
+      <dt>V</dt><dd>Show or hide what the selected Marine can see</dd>
+      <dt>Select Marine</dt><dd>Show that Marine's visible area</dd>
+      <dt>Drag destination</dt><dd>Compare positions: the green area follows</dd>
     </dl>
-    <p class="muted">Green is the ground a standing soldier at the planned final position (or where
-    they stand, if they have no route) can see a standing person on. Terrain, buildings and
-    vegetation block the view.</p>
+    <p class="muted">Green is the ground a standing Marine at the destination (or where they stand,
+    if they have none) can see a standing person on. Terrain, buildings and vegetation block the
+    view.</p>
     <h2>Controls: map and time</h2>
     <dl class="help">
       <dt>Drag map</dt><dd>Pan (left or middle button)</dd>
@@ -109,10 +116,15 @@ app.innerHTML = `
       <dt>+ / −</dt><dd>Faster / slower (1× · 8× · 16×)</dd>
       <dt>Esc</dt><dd>Clear selection</dd>
     </dl>
-    <p class="muted">Routes and the kill zone can be edited during planning, while occupation is
-    paused, and once BLUEFOR is ready. Routes bend around buildings automatically (small white
-    dots); waypoints cannot be placed in or against a building. The dashed dark-red line is the
-    OPFOR route given by the scenario; it cannot be edited.</p>
+    <p class="muted">Positions and the kill zone can be edited during planning, while occupation is
+    paused, and once BLUEFOR is ready. Destinations cannot be placed in or against a building. The
+    dashed outline is the ORP, where the squad starts. The dashed dark-red line is the OPFOR route
+    given by the scenario; it cannot be edited.</p>
+    <h2>Symbols</h2>
+    <p class="muted">Each Marine is the APP-6 friendly dismounted-individual infantry symbol
+    (blue frame), the same for every role. The role label, facing stroke and yellow selection
+    ring are Ambush! additions, not part of the standard. Where symbols would overlap, Marines
+    are shown as small blue dots at their true positions; zoom in or use the roster.</p>
   </aside>
   <footer data-ui="pointer"></footer>
 `;
@@ -165,8 +177,8 @@ const speedButtons = TIME_SCALES.map((scale) => {
   return { scale, speedButton };
 });
 
-const TOOL_LABELS: Record<MapTool, string> = { routes: 'Routes', killZone: 'Kill zone' };
-const toolButtons = (['routes', 'killZone'] as const).map((tool) => {
+const TOOL_LABELS: Record<MapTool, string> = { deploy: 'Positions', killZone: 'Kill zone' };
+const toolButtons = (['deploy', 'killZone'] as const).map((tool) => {
   const toolButton = document.createElement('button');
   toolButton.textContent = TOOL_LABELS[tool];
   toolButton.addEventListener('click', () => {
@@ -177,7 +189,9 @@ const toolButtons = (['routes', 'killZone'] as const).map((tool) => {
 });
 
 function report(result: CommitResult): void {
-  problems = result.ok ? [] : result.problems.map((p) => `${p.soldierId}: ${p.problem}`);
+  problems = result.ok
+    ? []
+    : result.problems.map((p) => `${soldierName(p.soldierId)}: ${p.problem}`);
 }
 
 const execute = () => {
@@ -227,7 +241,7 @@ window.addEventListener('keydown', (event) => {
       break;
     case 'k':
     case 'K':
-      session = setTool(session, session.tool === 'killZone' ? 'routes' : 'killZone');
+      session = setTool(session, session.tool === 'killZone' ? 'deploy' : 'killZone');
       break;
     case 'v':
     case 'V':
@@ -252,10 +266,10 @@ window.addEventListener('keydown', (event) => {
       break;
     case 'Backspace':
     case 'Delete': {
-      const last = selected === null ? undefined : exercise.draft(selected)?.waypoints.at(-1);
-      if (session.tool === 'routes' && selected !== null && last) {
+      const destination = selected === null ? undefined : exercise.draft(selected)?.destination;
+      if (session.tool === 'deploy' && selected !== null && destination) {
         event.preventDefault();
-        exercise.deleteWaypoint(selected, last.id);
+        exercise.clearDestination(selected);
       }
       break;
     }
@@ -274,10 +288,11 @@ function describeEvent(event: SimEvent): string | undefined {
         .find((s) => s.id === event.soldierId)
         ?.orders?.orders.waypoints.find((w) => w.id === event.waypointId);
       const where = waypoint ? ` at E ${waypoint.x.toFixed(0)} N ${waypoint.y.toFixed(0)}` : '';
-      return `${clock(event.atSeconds)}  ${event.soldierId} reached waypoint${where}`;
+      const what = exercise.isPlannable(event.soldierId) ? 'destination' : 'route point';
+      return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} reached ${what}${where}`;
     }
     case 'soldierInPosition':
-      return `${clock(event.atSeconds)}  ${event.soldierId} in position`;
+      return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} in position`;
     case 'commandRejected':
       return `${clock(event.tick / exercise.simulation.config.tickRateHz)}  Command rejected (${event.reason})`;
     case 'ordersChanged':
@@ -294,7 +309,7 @@ function describeMilestone(event: ExerciseEvent): string {
     case 'planCommitted': {
       const { revision } = event;
       const changed = revision.changedSoldierIds.length;
-      return `${at}  Plan revision ${String(revision.revision)} committed (${String(changed)} soldier${changed === 1 ? '' : 's'} re-tasked)`;
+      return `${at}  Plan revision ${String(revision.revision)} committed (${String(changed)} Marine${changed === 1 ? '' : 's'} re-tasked)`;
     }
     case 'paused':
       return `${at}  Paused`;
@@ -328,108 +343,168 @@ function phaseLabel(): string {
   }
 }
 
-function soldierStatus(id: SoldierId): string {
-  const soldier = exercise.simulation.state.soldiers.find((s) => s.id === id);
-  const active = soldier?.orders;
-  if (!active) return 'No orders';
-  switch (active.behavior) {
-    case 'moving':
-      return `Moving to waypoint ${String(active.nextWaypointIndex + 1)} of ${String(active.orders.waypoints.length)}`;
-    case 'facing':
-      return 'Turning to final facing';
-    case 'inPosition':
-      return 'In position';
-  }
+const STATUS_LABELS: Record<DeploymentStatus, string> = {
+  atOrp: 'At ORP',
+  destinationAssigned: 'Destination assigned',
+  moving: 'Moving',
+  inPosition: 'In position',
+  holding: 'Holding (no destination)',
+};
+
+/** Status counts for the status panel, e.g. "12 at the ORP". */
+const COUNT_LABELS: Record<DeploymentStatus, string> = {
+  atOrp: 'at the ORP',
+  destinationAssigned: 'with a destination',
+  moving: 'moving',
+  inPosition: 'in position',
+  holding: 'holding',
+};
+
+/** "1-AR (M03)" for a trainee soldier; the plain id for anyone else. */
+function soldierName(id: string): string {
+  const member = exercise.rosterMember(soldierId(id));
+  return member ? `${member.slot.label} (${id})` : id;
 }
 
-function routeTable(plan: SoldierPlan, start: { x: number; y: number }, editable: boolean): string {
-  if (plan.waypoints.length === 0) {
-    return editable
-      ? '<p class="muted">No waypoints. Click the map to add one.</p>'
-      : '<p class="muted">No waypoints.</p>';
-  }
-  // Distances follow the walked path, including detours around buildings.
-  const route = exercise.displayedRoute(plan.soldierId);
-  let previous = start;
-  let total = 0;
-  let detours = 0;
-  const rows = plan.waypoints.map((w, i) => {
-    const leg = route?.legs[i];
-    const points = [previous, ...(leg?.turns ?? []), w];
-    const length = points
-      .slice(1)
-      .reduce(
-        (sum, p, k) => sum + Math.hypot(p.x - (points[k]?.x ?? p.x), p.y - (points[k]?.y ?? p.y)),
-        0,
-      );
-    total += length;
-    previous = w;
-    const note = leg?.problem
-      ? ' <span class="alert">✕</span>'
-      : (leg?.turns?.length ?? 0) > 0
-        ? ' <span class="muted" title="Detours around buildings">↷</span>'
-        : '';
-    if ((leg?.turns?.length ?? 0) > 0) detours += 1;
-    return `<tr><td>${String(i + 1)}</td><td>${w.x.toFixed(0)}</td><td>${w.y.toFixed(0)}</td><td>${length.toFixed(0)} m${note}</td></tr>`;
-  });
-  const problems = (route?.legs ?? [])
-    .flatMap((leg, i) => (leg.problem ? [`Waypoint ${String(i + 1)} is ${leg.problem}.`] : []))
-    .map((text) => `<p class="alert">${escapeHtml(text)}</p>`)
+function rosterUnitHtml(node: RosterUnit, depth: number): string {
+  const sidc = node.unit.symbology?.sidc;
+  const icon = sidc
+    ? `<span class="unit-symbol" aria-hidden="true">${symbolSvg(sidc, 11)}</span>`
+    : '';
+  const rows = node.members
+    .map((m) => {
+      const id = soldierId(m.soldierId);
+      const status = exercise.deploymentStatus(id) ?? 'atOrp';
+      const selected = session.selectedSoldierId === id;
+      const tip = `${m.role.name}${m.leads ? ` (leads ${node.unit.name})` : ''} · map label ${m.slot.label} · ${m.soldierId}`;
+      return `<button class="roster-row" data-soldier="${escapeHtml(m.soldierId)}" aria-pressed="${String(selected)}" title="${escapeHtml(tip)}">
+        <span class="abbr">${escapeHtml(m.role.abbreviation)}</span>
+        <span class="role">${escapeHtml(m.role.name)}</span>
+        <span class="sid">${escapeHtml(m.soldierId)}</span>
+        <span class="st" data-status="${status}">${STATUS_LABELS[status]}</span>
+      </button>`;
+    })
     .join('');
-  const detourText =
-    detours > 0
-      ? ` · ${String(detours)} leg${detours === 1 ? '' : 's'} detour around buildings (↷)`
-      : '';
-  return `<table><tr><th>#</th><th>East</th><th>North</th><th>Leg</th></tr>${rows.join('')}</table>
-    ${problems}
-    <p class="muted">Total ${total.toFixed(0)} m · about ${clock(total / exercise.simulation.world.movement.speed)} at ${String(exercise.simulation.world.movement.speed)} m/s${detourText}</p>`;
+  const children = node.children.map((c) => rosterUnitHtml(c, depth + 1)).join('');
+  return `<div class="roster-unit" style="--depth:${String(depth)}">
+    <div class="roster-unit-name">${icon}${escapeHtml(node.unit.name)}</div>${rows}${children}</div>`;
+}
+
+function rosterHtml(): string {
+  const template = exercise.roster.unit;
+  return `${rosterUnitHtml(exercise.roster, 0)}<p class="muted roster-source">${escapeHtml(
+    template.name,
+  )} · ${escapeHtml(sourceLine())}</p>`;
+}
+
+function sourceLine(): string {
+  const { source, version } = DEMO_SCENARIO.organization.template;
+  return source.kind === 'doctrine'
+    ? `${source.designation}, ${source.date} (template ${version})`
+    : `synthetic (template ${version})`;
+}
+
+ui('roster').addEventListener('click', (event) => {
+  const row = event.target instanceof Element ? event.target.closest('[data-soldier]') : null;
+  const id = row instanceof HTMLElement ? row.dataset['soldier'] : undefined;
+  if (id === undefined) return;
+  session = selectSoldier(session, exercise, soldierId(id));
+  const soldier = exercise.simulation.state.soldiers.find((s) => s.id === id);
+  if (soldier && !map.isInView(soldier.position)) map.centreOn(soldier.position);
+});
+
+/** Walked length of a planned route, metres. */
+function routeLength(id: SoldierId): number {
+  const route = exercise.displayedRoute(id);
+  const leg = route?.legs[0];
+  if (!route || !leg) return 0;
+  const points = [route.start, ...(leg.turns ?? []), leg.to];
+  return points
+    .slice(1)
+    .reduce(
+      (sum, p, k) => sum + Math.hypot(p.x - (points[k]?.x ?? p.x), p.y - (points[k]?.y ?? p.y)),
+      0,
+    );
 }
 
 function selectionHtml(): string {
   const id = session.selectedSoldierId;
   if (id === null)
-    return '<p class="muted">Click a blue soldier on the map to plan their route.</p>';
+    return '<p class="muted">Choose a Marine in the roster or click a blue symbol on the map.</p>';
   const soldier = exercise.simulation.state.soldiers.find((s) => s.id === id);
   const plan = exercise.displayedPlan(id);
-  if (!soldier || !plan) return '';
-  const unit = exercise.simulation.state.units.find((u) => u.id === soldier.unitId);
-  const leader = unit?.leaderId === id ? ' · leader' : '';
+  const member = exercise.rosterMember(id);
+  const facing = exercise.displayedFacing(id);
+  if (!soldier || !plan || !member || !facing) return '';
   const editable = exercise.canEditPlans;
+  const route = exercise.displayedRoute(id);
+  const problem = route?.legs[0]?.problem;
+  const status = exercise.deploymentStatus(id) ?? 'atOrp';
+  const d = plan.destination;
+  const length = routeLength(id);
+  const speed = exercise.simulation.world.movement.speed;
+  const detour = (route?.legs[0]?.turns?.length ?? 0) > 0 ? ' · bends round buildings' : '';
+  const destination = d
+    ? `<p>E ${d.east.toFixed(0)} · N ${d.north.toFixed(0)}</p>
+       <p class="muted">${
+         length < 0.5
+           ? 'The Marine is there.'
+           : `${length.toFixed(0)} m from where the Marine stands · about ${clock(length / speed)} at ${String(speed)} m/s${detour}`
+       }</p>
+       ${problem ? `<p class="alert">The destination is ${escapeHtml(problem)}.</p>` : ''}`
+    : `<p class="muted">None: stays where they are.${editable && session.tool === 'deploy' ? ' Click the map to set one.' : ''}</p>`;
+  const buttons = editable
+    ? `<p class="buttons">
+        <button data-action="clear-destination" ${d ? '' : 'disabled'}>Clear destination</button>
+        <button data-action="default-facing" ${plan.facingDegrees === null ? 'disabled' : ''}>Default facing</button>
+        <button data-action="reset-plan" title="Back to the last executed plan">Reset</button>
+      </p>`
+    : '<p class="muted">Plans can be changed while occupation is paused or once BLUEFOR is ready.</p>';
   return `
-    <div class="soldier-title">${escapeHtml(id)}</div>
-    <div class="muted">${escapeHtml(soldier.unitId)} (${unit?.echelon === 'squad' ? 'squad' : 'fire team'})${leader}</div>
-    <div>${soldierStatus(id)}</div>
-    <h2>${editable ? 'Route (editable)' : 'Remaining route'}</h2>
-    ${routeTable(plan, soldier.position, editable && session.tool === 'routes')}
-    <h2>Final facing</h2>
-    <div class="facing">${formatBearing(plan.finalFacing)}</div>
-    ${editable ? '<p><button data-action="clear-route">Clear route</button></p>' : '<p class="muted">Plans can be changed while occupation is paused or once BLUEFOR is ready.</p>'}
+    <div class="soldier-title">${escapeHtml(member.slot.label)} · ${escapeHtml(member.role.name)}</div>
+    <div class="muted">${escapeHtml(id)} · ${escapeHtml(unitName(member.slot.unitId))}${member.leads ? ' · leader' : ''}</div>
+    <div>${STATUS_LABELS[status]}</div>
+    <h2>Destination${editable ? ' (editable)' : ''}</h2>
+    ${destination}
+    <h2>Facing</h2>
+    <div class="facing">${formatBearing(facing.azimuth)}</div>
+    <div class="muted">${facing.explicit ? 'Set by you.' : d ? 'Default: the direction of arrival. Drag the yellow handle to choose one.' : 'Default: the current facing.'}</div>
+    ${buttons}
   `;
+}
+
+function unitName(templateUnitId: string): string {
+  const find = (node: RosterUnit): string | undefined =>
+    node.unit.id === templateUnitId ? node.unit.name : node.children.map(find).find(Boolean);
+  return find(exercise.roster) ?? templateUnitId;
 }
 
 ui('selection').addEventListener('click', (event) => {
   const id = session.selectedSoldierId;
-  if (
-    event.target instanceof HTMLElement &&
-    event.target.dataset['action'] === 'clear-route' &&
-    id !== null
-  ) {
-    exercise.clearRoute(id);
-  }
+  const action = event.target instanceof HTMLElement ? event.target.dataset['action'] : undefined;
+  if (id === null || action === undefined) return;
+  if (action === 'clear-destination') exercise.clearDestination(id);
+  if (action === 'default-facing') exercise.clearFacing(id);
+  if (action === 'reset-plan') exercise.resetPlan(id);
 });
 
 function statusHtml(): string {
-  const { soldiers } = exercise.simulation.state;
-  const blufor = soldiers.filter((s) => s.side === TRAINEE_SIDE);
-  const moving = blufor.filter(
-    (s) => s.orders !== null && s.orders.behavior !== 'inPosition',
-  ).length;
+  const trainee = exercise.simulation.state.soldiers.filter((s) => s.side === TRAINEE_SIDE);
+  const counts = new Map<DeploymentStatus, number>();
+  for (const s of trainee) {
+    const status = exercise.deploymentStatus(s.id) ?? 'atOrp';
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  const moving = counts.get('moving') ?? 0;
+  const parts = (Object.keys(STATUS_LABELS) as DeploymentStatus[])
+    .filter((k) => (counts.get(k) ?? 0) > 0)
+    .map((k) => `${String(counts.get(k))} ${COUNT_LABELS[k]}`);
   const bluforText =
-    exercise.phase === 'bluforPlanning'
-      ? `${String(blufor.length)} soldiers at their start positions`
-      : moving > 0
-        ? `<span class="warn">${String(moving)} of ${String(blufor.length)} still moving</span>`
-        : `<span class="ok">All ${String(blufor.length)} in position</span>`;
+    exercise.phase !== 'bluforPlanning' && moving > 0
+      ? `<span class="warn">${parts.join(' · ')}</span>`
+      : exercise.phase === 'bluforReady'
+        ? `<span class="ok">${parts.join(' · ')}</span>`
+        : parts.join(' · ');
   const opforText = exercise.trigger
     ? `<span class="alert">${escapeHtml(exercise.trigger.soldierId)} entered the kill zone</span>`
     : exercise.opforStart
@@ -454,15 +529,16 @@ function startCheckHtml(): string {
 
 function visibilityHtml(): string {
   if (!session.showVisibility) {
-    return '<p class="muted">Press <b>V</b> or <b>View: Visibility</b> to see what the selected soldier can see.</p>';
+    return '<p class="muted">Press <b>V</b> or <b>View: Visibility</b> to see what the selected Marine can see.</p>';
   }
   const id = session.selectedSoldierId;
   const view = map.visibility;
   if (id === null || !view)
-    return '<p class="muted">Click a blue soldier to see their visible area.</p>';
+    return '<p class="muted">Select a Marine to see their visible area.</p>';
+  const name = escapeHtml(soldierName(id));
   const from = view.planned
-    ? `From ${escapeHtml(id)}'s <b>PLANNED POSITION</b>.`
-    : `From ${escapeHtml(id)}'s <b>CURRENT POSITION</b> (no planned final position).`;
+    ? `From ${name}'s <b>DESTINATION</b>.`
+    : `From ${name}'s <b>CURRENT POSITION</b> (no destination).`;
   // The viewshed shown may still be the previous one while the new one is computed.
   const shown = view.viewshed;
   const current =
@@ -563,6 +639,7 @@ function updatePanels(): void {
   setHtml('kill-zone', killZoneHtml());
   setHtml('visibility-panel', visibilityHtml());
   ui('visibility').setAttribute('aria-pressed', String(session.showVisibility));
+  setHtml('roster', rosterHtml());
   setHtml('selection', selectionHtml());
   ui('problems').textContent = problems.join('\n');
   setHtml(

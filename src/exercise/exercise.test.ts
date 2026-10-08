@@ -4,12 +4,13 @@ import {
   flatElevation,
   hashSimState,
   soldierId,
-  waypointId,
   type SimEvent,
   type Vec2,
 } from '#sim';
 import type { AmbushScenario } from './ambush-scenario';
+import { parseDeploymentPlans, serializeDeploymentPlans } from './deployment';
 import { createExercise, ExerciseError, type Exercise } from './exercise';
+import { TEST_ORP, TEST_PAIR_ORGANIZATION, TEST_PAIR_TEMPLATE } from './test-organization';
 
 const TICK_RATE = 10;
 const A = soldierId('A');
@@ -18,8 +19,9 @@ const ENEMY = soldierId('E');
 const ENEMY2 = soldierId('E2');
 
 /**
- * Two BLUEFOR soldiers in the south and two OPFOR soldiers in the north on flat
- * 400 m × 400 m terrain; 2 m/s, 90°/s. The OPFOR routes run due south.
+ * Two BLUEFOR soldiers (a test pair) in an ORP in the south and two OPFOR
+ * soldiers in the north on flat 400 m × 400 m terrain; 2 m/s, 90°/s. The OPFOR
+ * routes run due south.
  */
 function scenario(overrides: Partial<AmbushScenario> = {}): AmbushScenario {
   const soldier = (
@@ -62,6 +64,8 @@ function scenario(overrides: Partial<AmbushScenario> = {}): AmbushScenario {
     ],
     // E reaches the kill zone's north edge (y = 100) 25 s after starting; E2 after 30 s.
     opforRoutes: [route('E', 0), route('E2', 10)],
+    orp: TEST_ORP,
+    organization: TEST_PAIR_ORGANIZATION,
     ...overrides,
   };
 }
@@ -96,11 +100,10 @@ function run(exercise: Exercise, seconds: number): SimEvent[] {
   return events;
 }
 
-/** Gives A a three-leg route north: (0, 20), (0, 40), (0, 50), finally facing east. */
+/** Sends A 50 m north to (0, 50), to face east there. */
 function planA(exercise: Exercise) {
-  const ids = [20, 40, 50].map((y) => exercise.addWaypoint(A, { x: 0, y }));
-  exercise.setFinalFacing(A, Math.PI / 2);
-  return ids;
+  exercise.setDestination(A, { x: 0, y: 50 });
+  exercise.setFacing(A, Math.PI / 2);
 }
 
 function drawKillZone(exercise: Exercise, vertices: Vec2[] = KILL_ZONE) {
@@ -153,7 +156,7 @@ describe('phases', () => {
 
   it('rejects transitions the current phase does not allow', () => {
     const exercise = setup();
-    exercise.addWaypoint(A, { x: 0, y: 150 });
+    exercise.setDestination(A, { x: 0, y: 150 });
     expect(() => {
       exercise.pause();
     }).toThrow(ExerciseError);
@@ -170,7 +173,7 @@ describe('phases', () => {
 
   it('advances only while running, in whole ticks scaled by the time scale', () => {
     const exercise = setup();
-    exercise.addWaypoint(A, { x: 0, y: 150 });
+    exercise.setDestination(A, { x: 0, y: 150 });
     exercise.execute();
     run(exercise, 1);
     expect(exercise.simulation.tick).toBe(10);
@@ -190,7 +193,7 @@ describe('phases', () => {
 
   it('pauses on a tick boundary and does not carry partial ticks into the resume', () => {
     const exercise = setup();
-    exercise.addWaypoint(A, { x: 0, y: 150 });
+    exercise.setDestination(A, { x: 0, y: 150 });
     exercise.execute();
     exercise.advance(0.1);
     exercise.advance(0.15); // 2.5 ticks in all: 2 stepped, half a tick pending
@@ -203,114 +206,152 @@ describe('phases', () => {
 });
 
 describe('draft plans', () => {
-  it('exist only for the trainee side, starting from each soldier’s current facing', () => {
+  it('exist only for the trainee side, empty: no destination, no facing', () => {
     const exercise = setup();
     expect(exercise.isPlannable(A)).toBe(true);
     expect(exercise.isPlannable(ENEMY)).toBe(false);
-    expect(exercise.draft(A)).toEqual({ soldierId: A, waypoints: [], finalFacing: 0 });
-    expect(exercise.draft(B)).toEqual({ soldierId: B, waypoints: [], finalFacing: Math.PI / 2 });
+    expect(exercise.draft(A)).toEqual({ soldierId: A, destination: null, facingDegrees: null });
+    expect(exercise.draft(B)).toEqual({ soldierId: B, destination: null, facingDegrees: null });
     expect(exercise.draft(ENEMY)).toBeUndefined();
     expect(exercise.displayedPlan(ENEMY)).toBeUndefined();
   });
 
   it('cannot be edited for OPFOR', () => {
     const exercise = setup();
-    expect(() => exercise.addWaypoint(ENEMY, { x: 0, y: 0 })).toThrow(ExerciseError);
     expect(() => {
-      exercise.setFinalFacing(ENEMY, 1);
+      exercise.setDestination(ENEMY, { x: 0, y: 0 });
+    }).toThrow(ExerciseError);
+    expect(() => {
+      exercise.setFacing(ENEMY, 1);
     }).toThrow(ExerciseError);
   });
 
-  it('adds, inserts, moves and deletes waypoints and clears the route', () => {
+  it('hold one destination: setting it again moves it, clearing removes it', () => {
     const exercise = setup();
-    const [w1, w2, w3] = planA(exercise);
-    const w4 = exercise.addWaypoint(A, { x: 5, y: 30 }, 2);
-    const xs = () => exercise.draft(A)?.waypoints.map((w) => [w.id, w.x, w.y]);
-    expect(xs()).toEqual([
-      [w1, 0, 20],
-      [w2, 0, 40],
-      [w4, 5, 30],
-      [w3, 0, 50],
-    ]);
-    if (!w2 || !w3) throw new Error('missing ids');
-    exercise.moveWaypoint(A, w2, { x: -10, y: 45 });
-    exercise.deleteWaypoint(A, w3);
-    expect(xs()).toEqual([
-      [w1, 0, 20],
-      [w2, -10, 45],
-      [w4, 5, 30],
-    ]);
-    exercise.clearRoute(A);
-    expect(exercise.draft(A)?.waypoints).toEqual([]);
-    expect(exercise.draft(A)?.finalFacing).toBe(Math.PI / 2);
+    exercise.setDestination(A, { x: 0, y: 20 });
+    expect(exercise.draft(A)?.destination).toEqual({ east: 0, north: 20 });
+    exercise.setDestination(A, { x: 5, y: 30 });
+    expect(exercise.draft(A)?.destination).toEqual({ east: 5, north: 30 });
+    exercise.clearDestination(A);
+    expect(exercise.draft(A)?.destination).toBeNull();
   });
 
-  it('rejects points off the map, bad indices and unknown waypoints', () => {
+  it('keep an explicit facing when the destination changes or is cleared', () => {
     const exercise = setup();
-    expect(() => exercise.addWaypoint(A, { x: 0, y: 200.5 })).toThrow(ExerciseError);
-    expect(() => exercise.addWaypoint(A, { x: 0, y: 0 }, 1)).toThrow(ExerciseError);
+    exercise.setFacing(A, Math.PI / 2);
+    exercise.setDestination(A, { x: 0, y: 20 });
+    exercise.setDestination(A, { x: -30, y: 40 });
+    expect(exercise.draft(A)?.facingDegrees).toBe(90);
+    exercise.clearDestination(A);
+    expect(exercise.draft(A)).toEqual({ soldierId: A, destination: null, facingDegrees: 90 });
+    exercise.clearFacing(A);
+    expect(exercise.draft(A)?.facingDegrees).toBeNull();
+  });
+
+  it('store the facing as degrees in [0, 360)', () => {
+    const exercise = setup();
+    exercise.setFacing(A, -Math.PI / 2);
+    expect(exercise.draft(A)?.facingDegrees).toBeCloseTo(270, 9);
+    exercise.setFacing(A, 2 * Math.PI);
+    expect(exercise.draft(A)?.facingDegrees).toBe(0);
     expect(() => {
-      exercise.moveWaypoint(A, waypointId('nope'), { x: 0, y: 0 });
-    }).toThrow(ExerciseError);
-    expect(() => {
-      exercise.deleteWaypoint(A, waypointId('nope'));
+      exercise.setFacing(A, Number.NaN);
     }).toThrow(ExerciseError);
   });
 
-  it('normalizes the final facing to an azimuth', () => {
+  it('refuse destinations off the map and leave the draft unchanged', () => {
     const exercise = setup();
-    exercise.setFinalFacing(A, -Math.PI / 2);
-    expect(exercise.draft(A)?.finalFacing).toBeCloseTo((3 * Math.PI) / 2, 12);
-    exercise.setFinalFacing(A, 2 * Math.PI);
-    expect(exercise.draft(A)?.finalFacing).toBe(0);
+    exercise.setDestination(A, { x: 0, y: 20 });
+    expect(() => {
+      exercise.setDestination(A, { x: 0, y: 200.5 });
+    }).toThrow(/Destination not set: off the map/);
+    expect(() => {
+      exercise.setDestination(A, { x: Number.NaN, y: 0 });
+    }).toThrow(ExerciseError);
+    expect(exercise.draft(A)?.destination).toEqual({ east: 0, north: 20 });
   });
 
   it('are read-only while BLUEFOR is moving', () => {
     const exercise = setup();
-    const [w1] = planA(exercise);
+    planA(exercise);
     exercise.execute();
     expect(exercise.draft(A)).toBeUndefined();
-    expect(() => exercise.addWaypoint(A, { x: 1, y: 1 })).toThrow(ExerciseError);
-    expect(() => {
-      if (w1) exercise.moveWaypoint(A, w1, { x: 1, y: 1 });
-    }).toThrow(ExerciseError);
-    expect(() => {
-      exercise.clearRoute(A);
-    }).toThrow(ExerciseError);
-    expect(() => {
-      exercise.setFinalFacing(A, 1);
-    }).toThrow(ExerciseError);
+    for (const edit of [
+      () => {
+        exercise.setDestination(A, { x: 1, y: 1 });
+      },
+      () => {
+        exercise.clearDestination(A);
+      },
+      () => {
+        exercise.setFacing(A, 1);
+      },
+      () => {
+        exercise.clearFacing(A);
+      },
+      () => {
+        exercise.resetPlan(A);
+      },
+    ]) {
+      expect(edit).toThrow(ExerciseError);
+    }
+  });
+
+  it('reset to the last committed plan', () => {
+    const exercise = setup();
+    exercise.setDestination(A, { x: 0, y: 20 });
+    exercise.resetPlan(A);
+    expect(exercise.draft(A)).toEqual({ soldierId: A, destination: null, facingDegrees: null });
+    planA(exercise);
+    exercise.execute();
+    run(exercise, 5);
+    exercise.pause();
+    exercise.setDestination(A, { x: 40, y: 10 });
+    exercise.setFacing(A, 0);
+    expect(exercise.hasUncommittedChanges).toBe(true);
+    exercise.resetPlan(A);
+    expect(exercise.draft(A)).toEqual({
+      soldierId: A,
+      destination: { east: 0, north: 50 },
+      facingDegrees: 90,
+    });
+    expect(exercise.hasUncommittedChanges).toBe(false);
   });
 });
 
-describe('stable waypoint ids', () => {
-  it('are generated per soldier, never reused, and kept when a waypoint moves', () => {
+describe('default facing', () => {
+  it('is the direction of the last piece of the path when the trainee set none', () => {
     const exercise = setup();
-    const a1 = exercise.addWaypoint(A, { x: 0, y: 10 });
-    const b1 = exercise.addWaypoint(B, { x: 10, y: 10 });
-    const a2 = exercise.addWaypoint(A, { x: 0, y: 20 });
-    expect([a1, b1, a2]).toEqual(['A.1', 'B.1', 'A.2']);
-    exercise.deleteWaypoint(A, a2);
-    expect(exercise.addWaypoint(A, { x: 0, y: 30 })).toBe('A.3');
-    exercise.moveWaypoint(A, a1, { x: 3, y: 12 });
-    expect(exercise.draft(A)?.waypoints[0]).toEqual({ id: 'A.1', x: 3, y: 12 });
+    exercise.setDestination(A, { x: 0, y: 50 }); // due north
+    exercise.setDestination(B, { x: 40, y: 0 }); // due east
+    expect(exercise.displayedFacing(A)).toEqual({ azimuth: 0, explicit: false });
+    expect(exercise.displayedFacing(B)?.azimuth).toBeCloseTo(Math.PI / 2, 12);
+    expect(exercise.displayedFacing(B)?.explicit).toBe(false);
   });
 
-  it('carry through pause and resume into the next revision', () => {
+  it('is the current facing without a destination', () => {
     const exercise = setup();
-    const ids = planA(exercise);
+    expect(exercise.displayedFacing(B)).toEqual({ azimuth: Math.PI / 2, explicit: false });
+  });
+
+  it('never overrides an explicit facing', () => {
+    const exercise = setup();
+    exercise.setFacing(A, Math.PI);
+    exercise.setDestination(A, { x: 0, y: 50 });
+    expect(exercise.displayedFacing(A)?.azimuth).toBeCloseTo(Math.PI, 12);
+    expect(exercise.displayedFacing(A)?.explicit).toBe(true);
+  });
+
+  it('is fixed into the orders at commit and applied on arrival', () => {
+    const exercise = setup();
+    exercise.setDestination(B, { x: 10, y: 40 }); // north from (10, 0)
     exercise.execute();
-    run(exercise, 15); // past (0, 20), on the way to (0, 40)
-    exercise.pause();
-    const added = exercise.addWaypoint(A, { x: 20, y: 30 });
-    exercise.resume();
-    const [, second] = exercise.revisions;
-    expect(second?.plans.find((p) => p.soldierId === A)?.waypoints.map((w) => w.id)).toEqual([
-      ids[1],
-      ids[2],
-      added,
-    ]);
-    expect(added).toBe('A.4');
+    run(exercise, 25);
+    const b = soldier(exercise, 'B');
+    expect(b.orders?.orders.finalFacing).toBe(0);
+    expect(b.orders?.behavior).toBe('inPosition');
+    expect(b.azimuth).toBe(0);
+    expect(exercise.displayedFacing(B)).toEqual({ azimuth: 0, explicit: false });
   });
 });
 
@@ -328,7 +369,10 @@ describe('committing plans', () => {
       changedSoldierIds: [A],
       killZone: null,
     });
-    expect(result.revision.plans.map((p) => p.soldierId)).toEqual([A, B]);
+    expect(result.revision.plans).toEqual([
+      { soldierId: A, destination: { east: 0, north: 50 }, facingDegrees: 90 },
+      { soldierId: B, destination: null, facingDegrees: null },
+    ]);
     expect(exercise.revisions).toEqual([result.revision]);
 
     const events = exercise.advance(0.1);
@@ -337,7 +381,8 @@ describe('committing plans', () => {
         type: 'ordersChanged',
         tick: 0,
         soldierId: A,
-        orders: { waypoints: exercise.revisions[0]?.plans[0]?.waypoints, finalFacing: Math.PI / 2 },
+        // One destination is one waypoint of the simulation's orders.
+        orders: { waypoints: [{ id: 'A.dest.1', x: 0, y: 50 }], finalFacing: Math.PI / 2 },
       },
     ]);
     expect(soldier(exercise, 'B').orders).toBeNull();
@@ -345,10 +390,11 @@ describe('committing plans', () => {
 
   it('orders a facing-only change as a turn in place', () => {
     const exercise = setup();
-    exercise.setFinalFacing(B, Math.PI);
+    exercise.setFacing(B, Math.PI);
     exercise.execute();
     run(exercise, 2);
-    expect(soldier(exercise, 'B').azimuth).toBe(Math.PI);
+    expect(soldier(exercise, 'B').azimuth).toBeCloseTo(Math.PI, 12);
+    expect(soldier(exercise, 'B').position).toMatchObject({ x: 10, y: 0 });
     expect(soldier(exercise, 'B').orders?.behavior).toBe('inPosition');
   });
 
@@ -360,52 +406,51 @@ describe('committing plans', () => {
     const [revision] = exercise.revisions;
     expect(revision?.killZone?.vertices).toEqual(KILL_ZONE.slice(0, 2));
     expect(Object.isFrozen(revision)).toBe(true);
-    expect(Object.isFrozen(revision?.plans[0]?.waypoints[0])).toBe(true);
+    expect(Object.isFrozen(revision?.plans[0]?.destination)).toBe(true);
     exercise.pause();
-    exercise.clearRoute(A);
+    exercise.clearDestination(A);
     exercise.clearKillZone();
-    expect(revision?.plans[0]?.waypoints).toHaveLength(3);
+    expect(revision?.plans[0]?.destination).toEqual({ east: 0, north: 50 });
     expect(revision?.killZone?.vertices).toHaveLength(2);
   });
 
   it('never exposes a partially edited draft to the simulation', () => {
     const exercise = setup();
-    exercise.addWaypoint(B, { x: 10, y: 100 });
+    exercise.setDestination(B, { x: 10, y: 100 });
     exercise.execute();
     run(exercise, 1);
     exercise.pause();
-    exercise.addWaypoint(A, { x: 0, y: 50 });
-    exercise.addWaypoint(A, { x: 50, y: 50 });
+    exercise.setDestination(A, { x: 0, y: 50 });
+    exercise.setDestination(A, { x: 50, y: 50 });
     // Edits while paused reach the simulation only at Resume.
     expect(soldier(exercise, 'A').orders).toBeNull();
     exercise.resume();
     run(exercise, 0.1);
-    expect(soldier(exercise, 'A').orders?.orders.waypoints).toHaveLength(2);
+    expect(soldier(exercise, 'A').orders?.orders.waypoints).toEqual([
+      { id: 'A.dest.2', x: 50, y: 50 },
+    ]);
   });
 });
 
 describe('pause, replan, resume during occupation', () => {
-  it('offers the remaining route from the soldier’s position when paused partway', () => {
+  it('offers the committed plan for editing when paused partway', () => {
     const exercise = setup();
-    const [w1, w2, w3] = planA(exercise);
+    planA(exercise);
     exercise.execute();
-    run(exercise, 15); // 30 m along: past w1 (20 m), heading for w2 (40 m)
+    run(exercise, 15); // 30 m along
     exercise.pause();
     expect(exercise.paused).toBe(true);
     expect(exercise.phase).toBe('bluforOccupation');
     expect(soldier(exercise, 'A').position.y).toBeCloseTo(30, 9);
     expect(exercise.draft(A)).toEqual({
       soldierId: A,
-      waypoints: [
-        { id: w2, x: 0, y: 40 },
-        { id: w3, x: 0, y: 50 },
-      ],
-      finalFacing: Math.PI / 2,
+      destination: { east: 0, north: 50 },
+      facingDegrees: 90,
     });
-    expect(w1).toBe('A.1');
+    expect(exercise.hasUncommittedChanges).toBe(false);
   });
 
-  it('does not re-order soldiers whose remaining plans are unchanged, and does not perturb them', () => {
+  it('does not re-order soldiers whose plans are unchanged, and does not perturb them', () => {
     const reference = setup();
     planA(reference);
     reference.execute();
@@ -429,20 +474,19 @@ describe('pause, replan, resume during occupation', () => {
     expect(hashSimState(exercise.simulation.state)).toBe(hashSimState(reference.simulation.state));
   });
 
-  it('re-orders a soldier whose remaining plan changed, from where the soldier is', () => {
+  it('re-orders a soldier whose plan changed, from where the soldier is', () => {
     const exercise = setup();
-    const [, w2] = planA(exercise);
+    planA(exercise);
     exercise.execute();
     run(exercise, 15); // at (0, 30)
     exercise.pause();
-    if (!w2) throw new Error('missing id');
-    exercise.moveWaypoint(A, w2, { x: 30, y: 30 }); // turn east instead
-    exercise.setFinalFacing(B, Math.PI); // B also changes
+    exercise.setDestination(A, { x: 30, y: 30 }); // go east instead; the facing stays east
+    exercise.setFacing(B, Math.PI); // B also changes
     const result = exercise.resume();
     if (!result.ok || !result.revision) throw new Error('commit failed');
     expect(result.revision.changedSoldierIds).toEqual([A, B]);
 
-    const events = run(exercise, 20); // 30 m east to the moved waypoint (15 s), then toward (0, 50)
+    const events = run(exercise, 20); // 30 m east: 15 s
     expect(
       events.filter((e) => e.type === 'ordersChanged').map((e) => [e.tick, e.soldierId]),
     ).toEqual([
@@ -453,51 +497,91 @@ describe('pause, replan, resume during occupation', () => {
       expect.objectContaining({
         type: 'waypointReached',
         soldierId: A,
-        waypointId: w2,
+        waypointId: 'A.dest.2',
         atSeconds: expect.closeTo(30, 6) as number,
       }),
     );
     const a = soldier(exercise, 'A');
-    expect(a.orders?.nextWaypointIndex).toBe(1);
-    // 5 s × 2 m/s = 10 m along the leg toward (0, 50).
-    const leg = Math.hypot(30, 20);
-    expect(a.position.x).toBeCloseTo(30 - (10 * 30) / leg, 9);
-    expect(a.position.y).toBeCloseTo(30 + (10 * 20) / leg, 9);
+    expect(a.position.x).toBeCloseTo(30, 9);
+    expect(a.position.y).toBeCloseTo(30, 9);
+    expect(a.orders?.behavior).toBe('inPosition');
+  });
+
+  it('stops a soldier where it is when its destination is cleared', () => {
+    const exercise = setup();
+    planA(exercise);
+    exercise.execute();
+    run(exercise, 15);
+    exercise.pause();
+    exercise.clearDestination(A);
+    exercise.resume();
+    run(exercise, 5);
+    const a = soldier(exercise, 'A');
+    expect(a.position.y).toBeCloseTo(30, 9);
+    expect(a.azimuth).toBeCloseTo(Math.PI / 2, 12); // its explicit facing still applies
+    expect(exercise.deploymentStatus(A)).toBe('holding');
+    expect(exercise.phase).toBe('bluforReady');
   });
 
   it('shows committed plans immediately, before the first tick applies them', () => {
     const exercise = setup();
-    const ids = planA(exercise);
+    planA(exercise);
     exercise.execute();
-    expect(exercise.displayedPlan(A)?.waypoints.map((w) => w.id)).toEqual(ids);
-    // Pausing again before any tick keeps the committed plan, not the old orders.
+    expect(exercise.displayedPlan(A)?.destination).toEqual({ east: 0, north: 50 });
+    // Pausing again before any tick keeps the committed plan.
     exercise.pause();
-    expect(exercise.draft(A)?.waypoints.map((w) => w.id)).toEqual(ids);
+    expect(exercise.draft(A)?.destination).toEqual({ east: 0, north: 50 });
     const result = exercise.resume();
     expect(result.ok && result.revision?.changedSoldierIds).toEqual([]);
     run(exercise, 30);
     expect(soldier(exercise, 'A').position.y).toBeCloseTo(50, 9);
   });
 
-  it('shows the remaining active orders while moving', () => {
+  it('shows the path actually being walked while moving', () => {
     const exercise = setup();
-    const [, w2, w3] = planA(exercise);
+    planA(exercise);
     exercise.execute();
     run(exercise, 15);
-    expect(exercise.displayedPlan(A)?.waypoints.map((w) => w.id)).toEqual([w2, w3]);
-    expect(exercise.displayedPlan(B)).toEqual({
-      soldierId: B,
-      waypoints: [],
-      finalFacing: Math.PI / 2,
-    });
+    const route = exercise.displayedRoute(A);
+    expect(route?.start.y).toBeCloseTo(30, 9);
+    expect(route?.legs.map((l) => [l.waypointId, l.to])).toEqual([['A.dest.1', { x: 0, y: 50 }]]);
+    expect(exercise.displayedRoute(B)?.legs).toEqual([]);
+  });
+});
+
+describe('deployment status', () => {
+  it('follows a soldier from the ORP to its position', () => {
+    const exercise = setup();
+    expect(exercise.deploymentStatus(A)).toBe('atOrp');
+    planA(exercise);
+    expect(exercise.deploymentStatus(A)).toBe('destinationAssigned');
+    exercise.execute();
+    expect(exercise.deploymentStatus(A)).toBe('destinationAssigned'); // orders not yet applied
+    run(exercise, 1);
+    expect(exercise.deploymentStatus(A)).toBe('moving');
+    expect(exercise.deploymentStatus(B)).toBe('atOrp');
+    run(exercise, 24.5); // t = 25.5 s: arrived, still turning to face east
+    expect(exercise.deploymentStatus(A)).toBe('moving');
+    run(exercise, 1);
+    expect(exercise.deploymentStatus(A)).toBe('inPosition');
+    expect(exercise.deploymentStatus(B)).toBe('atOrp');
+    expect(exercise.deploymentStatus(ENEMY)).toBeUndefined();
+  });
+
+  it('shows an edited, unexecuted destination as assigned', () => {
+    const exercise = readyExercise();
+    exercise.setDestination(A, { x: 0, y: 30 });
+    expect(exercise.deploymentStatus(A)).toBe('destinationAssigned');
+    exercise.resetPlan(A);
+    expect(exercise.deploymentStatus(A)).toBe('inPosition');
   });
 });
 
 describe('BLUEFOR readiness', () => {
-  it('is reached when every BLUEFOR soldier has completed its orders, not before', () => {
+  it('is reached when every soldier has arrived and turned to its facing, not before', () => {
     const exercise = setup();
     planA(exercise); // 50 m = 25 s, then a 90° turn = 1 s
-    exercise.setFinalFacing(B, Math.PI); // B only turns: 1 s
+    exercise.setFacing(B, Math.PI); // B only turns: 1 s
     exercise.execute();
     expect(exercise.bluforMovementComplete).toBe(false); // orders not yet applied
     run(exercise, 25.5);
@@ -516,9 +600,18 @@ describe('BLUEFOR readiness', () => {
     });
   });
 
-  it('counts soldiers without orders as in position', () => {
+  it('is not held up by soldiers without a destination', () => {
     const exercise = setup();
-    exercise.execute(); // nobody was given a plan
+    planA(exercise); // B gets nothing
+    exercise.execute();
+    run(exercise, 26.1);
+    expect(exercise.phase).toBe('bluforReady');
+    expect(soldier(exercise, 'B').orders).toBeNull();
+  });
+
+  it('counts soldiers without orders as in position: no assignment is forced', () => {
+    const exercise = setup();
+    expect(exercise.execute().ok).toBe(true); // nobody was given a plan
     run(exercise, 0.1);
     expect(exercise.phase).toBe('bluforReady');
   });
@@ -535,7 +628,7 @@ describe('BLUEFOR readiness', () => {
 
   it('allows re-planning from Ready, returning to occupation on Resume', () => {
     const exercise = readyExercise();
-    exercise.addWaypoint(A, { x: 0, y: 30 });
+    exercise.setDestination(A, { x: 0, y: 30 });
     expect(exercise.hasUncommittedChanges).toBe(true);
     const result = exercise.resume();
     expect(result.ok).toBe(true);
@@ -543,6 +636,7 @@ describe('BLUEFOR readiness', () => {
     run(exercise, 20);
     expect(exercise.phase).toBe('bluforReady');
     expect(soldier(exercise, 'A').position.y).toBeCloseTo(30, 9);
+    expect(soldier(exercise, 'A').azimuth).toBeCloseTo(Math.PI / 2, 12);
   });
 });
 
@@ -620,11 +714,11 @@ describe('START OPFOR validation', () => {
     ]);
   });
 
-  it('refuses route changes that have not been executed', () => {
+  it('refuses plan changes that have not been executed', () => {
     const exercise = readyExercise();
-    exercise.addWaypoint(B, { x: 10, y: 10 });
+    exercise.setDestination(B, { x: 10, y: 10 });
     expect(exercise.startOpforProblems()).toEqual([
-      'Route changes have not been executed: press Resume to execute them.',
+      'Plan changes have not been executed: press Resume to execute them.',
     ]);
   });
 
@@ -674,7 +768,9 @@ describe('OPFOR approach', () => {
     run(exercise, 20);
     expect(bluforPoses()).toEqual(before);
     expect(exercise.canEditPlans).toBe(false);
-    expect(() => exercise.addWaypoint(A, { x: 0, y: 0 })).toThrow(ExerciseError);
+    expect(() => {
+      exercise.setDestination(A, { x: 0, y: 0 });
+    }).toThrow(ExerciseError);
     expect(() => {
       exercise.addKillZoneVertex({ x: 50, y: 50 });
     }).toThrow(ExerciseError);
@@ -879,5 +975,154 @@ describe('scenario OPFOR routes', () => {
     const [first, ...rest] = scenario().opforRoutes;
     if (!first) throw new Error('no route');
     expect(() => setup({ opforRoutes: [{ ...first, ...change }, ...rest] })).toThrow(message);
+  });
+});
+
+describe('trainee organization and ORP', () => {
+  it('exposes the roster in template order, with each soldier’s slot and role', () => {
+    const exercise = setup();
+    expect(exercise.roster.unit.id).toBe('TM');
+    expect(
+      exercise.roster.members.map((m) => [m.soldierId, m.slot.id, m.role.abbreviation, m.leads]),
+    ).toEqual([
+      ['A', 'lead', 'L', true],
+      ['B', 'second', 'M', false],
+    ]);
+    expect(exercise.rosterMember(B)?.slot.label).toBe('M');
+    expect(exercise.rosterMember(ENEMY)).toBeUndefined();
+    expect(exercise.orp).toEqual(TEST_ORP);
+  });
+
+  it.each([
+    [
+      'a trainee soldier outside the ORP',
+      (s: AmbushScenario) => ({
+        soldiers: s.soldiers.map((x) => (x.id === 'B' ? { ...x, position: { x: 40, y: 0 } } : x)),
+      }),
+      /does not start inside ORP "ORP-T"/,
+    ],
+    [
+      'two soldiers less than 1 m apart',
+      (s: AmbushScenario) => ({
+        soldiers: s.soldiers.map((x) => (x.id === 'B' ? { ...x, position: { x: 0.5, y: 0 } } : x)),
+      }),
+      /less than 1 m apart/,
+    ],
+    [
+      'a trainee soldier in no slot',
+      () => ({
+        organization: {
+          ...TEST_PAIR_ORGANIZATION,
+          members: TEST_PAIR_ORGANIZATION.members.slice(0, 1),
+        },
+      }),
+      /"B" fills no organization slot/,
+    ],
+    [
+      'a soldier in the wrong unit',
+      () => ({
+        organization: {
+          ...TEST_PAIR_ORGANIZATION,
+          template: {
+            ...TEST_PAIR_TEMPLATE,
+            units: [
+              ...TEST_PAIR_TEMPLATE.units,
+              {
+                id: 'TM2',
+                name: 'Second team',
+                abbreviation: 'TM2',
+                echelon: 'team',
+                parentId: 'TM',
+                leaderSlotId: null,
+              },
+            ],
+            slots: TEST_PAIR_TEMPLATE.slots.map((s) =>
+              s.id === 'second' ? { ...s, unitId: 'TM2' } : s,
+            ),
+          },
+        },
+      }),
+      /"B" is in unit "TM", not "TM2"/,
+    ],
+    [
+      'an invalid template',
+      () => ({
+        organization: {
+          ...TEST_PAIR_ORGANIZATION,
+          template: { ...TEST_PAIR_TEMPLATE, version: 'one' },
+        },
+      }),
+      /\$\.version/,
+    ],
+    [
+      'an ORP off the map',
+      () => ({ orp: { ...TEST_ORP, shape: { kind: 'circle', radiusM: 500 } } as const }),
+      /extends off the terrain/,
+    ],
+  ])('rejects a scenario with %s', (_label, change, message) => {
+    expect(() => setup(change(scenario()))).toThrow(message);
+  });
+});
+
+describe('scenario fingerprint and plan exchange', () => {
+  it('is stable for the same scenario and changes with anything plans depend on', () => {
+    const base = setup().scenarioFingerprint;
+    expect(setup().scenarioFingerprint).toBe(base);
+    expect(base).toMatch(/^[0-9a-f]{16}$/);
+    const changed = [
+      setup({
+        organization: {
+          ...TEST_PAIR_ORGANIZATION,
+          template: { ...TEST_PAIR_TEMPLATE, version: '1.0.1' },
+        },
+      }),
+      setup({
+        organization: {
+          ...TEST_PAIR_ORGANIZATION,
+          template: { ...TEST_PAIR_TEMPLATE, name: 'Renamed' },
+        },
+      }),
+      setup({ orp: { ...TEST_ORP, shape: { kind: 'circle', radiusM: 13 } } }),
+      setup({ opforRoutes: scenario().opforRoutes.slice(0, 1) }),
+      setup({ id: 'other' }),
+    ].map((e) => e.scenarioFingerprint);
+    expect(new Set([base, ...changed]).size).toBe(changed.length + 1);
+  });
+
+  it('round-trips the drafts through the versioned format, deterministically', () => {
+    const exercise = setup();
+    planA(exercise);
+    exercise.setFacing(B, 1);
+    const text = serializeDeploymentPlans(exercise.deploymentPlans());
+    expect(serializeDeploymentPlans(exercise.deploymentPlans())).toBe(text);
+    expect(JSON.parse(text)).toMatchObject({ schema: 'ambush.deployment-plans', schemaVersion: 1 });
+
+    const other = setup();
+    const set = parseDeploymentPlans(text, {
+      scenarioFingerprint: other.scenarioFingerprint,
+      soldierIds: [A, B],
+    });
+    other.loadDeploymentPlans(set);
+    expect(other.draft(A)).toEqual(exercise.draft(A));
+    expect(other.draft(B)).toEqual(exercise.draft(B));
+    expect(serializeDeploymentPlans(other.deploymentPlans())).toBe(text);
+  });
+
+  it('refuses to load plans that are invalid now, changing nothing', () => {
+    const exercise = setup();
+    planA(exercise);
+    expect(() => {
+      exercise.loadDeploymentPlans({
+        scenarioFingerprint: exercise.scenarioFingerprint,
+        plans: [
+          { soldierId: B, destination: { east: 10, north: 20 }, facingDegrees: null },
+          { soldierId: A, destination: { east: 0, north: 999 }, facingDegrees: null },
+        ],
+      });
+    }).toThrow(/A: destination is off the map/);
+    expect(exercise.draft(B)?.destination).toBeNull();
+    expect(() => {
+      exercise.loadDeploymentPlans({ scenarioFingerprint: 'other', plans: [] });
+    }).toThrow(/different scenario/);
   });
 });

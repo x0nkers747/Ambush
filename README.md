@@ -4,9 +4,12 @@ Interactive training simulation for planning, executing and reviewing
 squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
-Status: **Phase 3.6**: tactical environment and planning tools. The demo map has relief, roads,
-buildings and vegetation; routes bend around buildings; CHECK LOS shows what a planned position
-can see. The ambush flow runs through AMBUSH TRIGGERED. No combat, 3D or GIS import yet.
+Status: **Phase 3.7**: doctrinal squad organization and simplified deployment. The trainee
+commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
+[ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an
+objective rally point, and gives each Marine one destination and one facing. Marines are shown
+with APP-6 symbols (milsymbol) and listed in a roster. The ambush flow runs through AMBUSH
+TRIGGERED. No combat, 3D or GIS import yet.
 
 ## Requirements
 
@@ -24,38 +27,40 @@ npm run dev
 
 Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge.
 
-1. **BLUEFOR planning.** Select soldiers and plan their routes and final facings. Press **K** to
-   switch to the kill zone and draw it across the expected enemy route (the dark-red dashed
-   line).
-   Press **V** (Visibility) to shade green everything the selected soldier can see from their
-   planned final position, with the share of the kill zone that is visible; drag the last
-   waypoint to compare positions. Routes bend around buildings automatically; waypoints cannot be
-   placed in or against a building.
-2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change the
-   remaining routes, then Resume.
-3. **BLUEFOR ready.** When every soldier is in position the exercise stops and waits.
+1. **BLUEFOR planning.** The squad starts in the ORP (dashed circle). Choose a Marine in the
+   roster or on the map and click the map to give them a destination; drag the yellow handle to
+   set their facing. Marines you leave alone stay in the ORP. Press **K** to switch to the kill
+   zone and draw it across the expected enemy route (the dark-red dashed line).
+   Press **V** (Visibility) to shade green everything the selected Marine can see from their
+   destination, with the share of the kill zone that is visible; drag the destination to compare
+   positions. Paths bend around buildings automatically; destinations cannot be placed in or
+   against a building.
+2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
+   destinations or facings, then Resume.
+3. **BLUEFOR ready.** When every Marine with a destination or facing has arrived and turned, the
+   exercise stops and waits.
 4. **START OPFOR.** Declares the ambush ready; OPFOR follows its scenario route.
 5. **Ambush triggered.** The moment an OPFOR soldier enters the kill zone, the simulation stops
    and shows who entered and when.
 
-| Action                        | Effect                                          |
-| ----------------------------- | ----------------------------------------------- |
-| Click a blue soldier          | Select it (OPFOR cannot be selected)            |
-| Click the map                 | Add a waypoint (or, with K, a kill-zone corner) |
-| Click a route leg / zone side | Insert a waypoint / corner there                |
-| Drag a waypoint / corner      | Move it                                         |
-| Right-click waypoint/corner   | Delete it                                       |
-| Drag the yellow arrow handle  | Set the final facing (shown as 000°–359°)       |
-| K                             | Switch between editing routes and the kill zone |
-| V                             | Visibility: show what the selected soldier sees |
-| Backspace / Delete            | Delete the last waypoint                        |
-| Drag the map / middle-drag    | Pan                                             |
-| Mouse wheel                   | Zoom at the cursor                              |
-| F                             | Fit the whole map                               |
-| Space                         | Pause / Resume                                  |
-| 1 · 8                         | Time scale 1× · 8×                              |
-| + / −                         | Faster / slower through 1× · 8× · 16×           |
-| Esc                           | Clear the selection                             |
+| Action                          | Effect                                             |
+| ------------------------------- | -------------------------------------------------- |
+| Roster row / blue symbol        | Select a Marine (OPFOR cannot be selected)         |
+| Click the map                   | Set or move the destination (with K: add a corner) |
+| Click a kill-zone side          | Insert a corner there                              |
+| Drag the destination / a corner | Move it                                            |
+| Right-click destination/corner  | Clear the destination / delete the corner          |
+| Drag the yellow arrow handle    | Set the facing (000°–359°; dashed arrow = default) |
+| K                               | Switch between editing positions and the kill zone |
+| V                               | Visibility: show what the selected Marine sees     |
+| Backspace / Delete              | Clear the selected Marine's destination            |
+| Drag the map / middle-drag      | Pan                                                |
+| Mouse wheel                     | Zoom at the cursor                                 |
+| F                               | Fit the whole map                                  |
+| Space                           | Pause / Resume                                     |
+| 1 · 8                           | Time scale 1× · 8×                                 |
+| + / −                           | Faster / slower through 1× · 8× · 16×              |
+| Esc                             | Clear the selection                                |
 
 ## Scripts
 
@@ -101,3 +106,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 9. [Exercise phases, plan revisions and the 2D planning view](docs/adr/0009-exercise-and-planning-view.md)
 10. [Ambush exercise flow, kill zone and trigger](docs/adr/0010-ambush-exercise-flow.md)
 11. [Tactical environment, path planning and line of sight](docs/adr/0011-tactical-environment.md)
+12. [Doctrinal organization, ORP and single-destination deployment](docs/adr/0012-organization-orp-and-single-destination-planning.md)

@@ -2,8 +2,9 @@ import {
   azimuthFromDegrees,
   createSimulation,
   engagementAreaId,
+  fingerprintPlainData,
+  fingerprintWorld,
   lineOfSight,
-  normalizeAzimuth,
   pointProblem,
   visibleCellsIn,
   soldierId,
@@ -19,9 +20,24 @@ import {
   type SoldierId,
   type Vec2,
   type Viewshed,
-  type WaypointId,
 } from '#sim';
-import { validateOpforRoutes, type AmbushScenario, type OpforRoute } from './ambush-scenario';
+import {
+  validateOpforRoutes,
+  validateTraineeSetup,
+  type AmbushScenario,
+  type OpforRoute,
+} from './ambush-scenario';
+import {
+  emptyPlan,
+  facingDegreesOf,
+  resolvedFacing,
+  samePlan,
+  toMapPoint,
+  toVec2,
+  validateDeploymentPlan,
+  type DeploymentPlanSet,
+  type SoldierDeploymentPlan,
+} from './deployment';
 import {
   deleteVertex,
   insertVertex,
@@ -30,7 +46,8 @@ import {
   moveVertex,
   type KillZone,
 } from './kill-zone';
-import { remainingPlan, samePlan, validatePlan, type SoldierPlan } from './plan';
+import { rosterMembers, rosterTree, type RosterMember, type RosterUnit } from './organization';
+import { orpContains, type ObjectiveRallyPoint } from './orp';
 import {
   createPathCache,
   describePathProblem,
@@ -48,9 +65,10 @@ import { createFixedStepRunner, type FixedStepRunner } from './runner';
  * The ambush sequence. The simulation runs only during `bluforOccupation` and
  * `opforApproach`, and only while not paused.
  *
- * - `bluforPlanning`: the trainee plans routes, facings and the kill zone.
+ * - `bluforPlanning`: the trainee plans destinations, facings and the kill zone.
  * - `bluforOccupation`: BLUEFOR moves into position; OPFOR waits. Can pause and re-plan.
- * - `bluforReady`: every BLUEFOR soldier has completed its orders. Frozen until the
+ * - `bluforReady`: every BLUEFOR soldier given a destination or facing has
+ *   arrived and turned (soldiers without one never hold this up). Frozen until the
  *   trainee declares the ambush ready (START OPFOR) or re-plans and resumes.
  * - `opforApproach`: OPFOR follows its scenario routes; BLUEFOR holds.
  * - `ambushTriggered`: an OPFOR soldier entered the kill zone. Frozen; combat comes later.
@@ -71,8 +89,8 @@ export interface PlanRevision {
   /** Tick at which the resulting orders take effect (the simulation's tick at commit). */
   readonly tick: number;
   readonly timeSeconds: number;
-  /** The committed plan of every trainee soldier, from that soldier's position at the time. */
-  readonly plans: readonly SoldierPlan[];
+  /** The committed plan of every trainee soldier, in roster order. */
+  readonly plans: readonly SoldierDeploymentPlan[];
   /** Soldiers whose plans changed and were sent new orders. */
   readonly changedSoldierIds: readonly SoldierId[];
   /** The trainee's kill zone at the time, as drawn (possibly incomplete). */
@@ -150,6 +168,27 @@ export interface KillZoneCoverage {
   readonly percent: number;
 }
 
+/**
+ * Where a trainee soldier stands in the deployment, for the roster. Neutral
+ * descriptions of state, not assessments:
+ *
+ * - `atOrp`: no destination, standing in the ORP;
+ * - `destinationAssigned`: has a destination it has not reached (or changes not yet executed);
+ * - `moving`: walking to its destination or turning to its facing;
+ * - `inPosition`: at its destination with its facing applied;
+ * - `holding`: no destination, standing outside the ORP (e.g. its destination
+ *   was cleared on the way).
+ */
+export type DeploymentStatus =
+  'atOrp' | 'destinationAssigned' | 'moving' | 'inPosition' | 'holding';
+
+/** A soldier's facing as shown: the trainee's choice, or the default it would take. */
+export interface DisplayedFacing {
+  readonly azimuth: Azimuth;
+  /** Whether the trainee set it (otherwise it is the default, see `defaultFacing`). */
+  readonly explicit: boolean;
+}
+
 export interface ExerciseOptions {
   readonly config: SimConfig;
   readonly scenario: AmbushScenario;
@@ -163,6 +202,18 @@ export interface Exercise {
   readonly simulation: Pick<Simulation, 'config' | 'world' | 'state' | 'tick' | 'timeSeconds'>;
   /** The scenario's OPFOR routes: administrator data, never editable here. */
   readonly opforRoutes: readonly OpforRoute[];
+  /** The trainee organization's objective rally point. */
+  readonly orp: ObjectiveRallyPoint;
+  /** The trainee organization as a tree, in template order. */
+  readonly roster: RosterUnit;
+  /** A trainee soldier's slot and role, or `undefined` for anyone else. */
+  rosterMember(soldierId: SoldierId): RosterMember | undefined;
+  /**
+   * Fingerprint of everything plans depend on: the scenario id and world, the
+   * organization template's id, version and content, who fills which slot, the
+   * ORP, starting positions and OPFOR routes (docs/adr/0012).
+   */
+  readonly scenarioFingerprint: string;
   /** Where the scenario placed a soldier at the start of the exercise. */
   scenarioStart(soldierId: string): Vec2 | undefined;
   readonly revisions: readonly PlanRevision[];
@@ -180,26 +231,28 @@ export interface Exercise {
   /** Whether plans and the kill zone can be edited now: Planning, Ready, or occupation paused. */
   readonly canEditPlans: boolean;
   /** The trainee's editable draft, or `undefined` when not editable or not a trainee soldier. */
-  draft(soldierId: SoldierId): SoldierPlan | undefined;
-  /**
-   * The plan to show for a soldier: the draft while editable, otherwise what is
-   * left of the soldier's active orders.
-   */
-  displayedPlan(soldierId: SoldierId): SoldierPlan | undefined;
-  /** Whether any draft differs from what the soldiers are doing (edits not yet executed). */
+  draft(soldierId: SoldierId): SoldierDeploymentPlan | undefined;
+  /** The plan to show for a soldier: the draft while editable, otherwise the committed plan. */
+  displayedPlan(soldierId: SoldierId): SoldierDeploymentPlan | undefined;
+  /** Whether any draft differs from the committed plans (edits not yet executed). */
   readonly hasUncommittedChanges: boolean;
   /**
-   * The displayed plan with the walkable path of each leg: generated turn points
-   * (not trainee intent) between the trainee's waypoints, from the soldier's
-   * current position.
+   * The walkable path from the soldier's current position to the displayed
+   * plan's destination: generated turn points, not trainee intent. No legs
+   * without a destination. While the soldier carries out the committed plan,
+   * this is the path it is actually walking.
    */
   displayedRoute(soldierId: SoldierId): PlannedRoute | undefined;
+  /** The facing the displayed plan gives the soldier on arrival (or in place). */
+  displayedFacing(soldierId: SoldierId): DisplayedFacing | undefined;
+  /** See `DeploymentStatus`; `undefined` for soldiers that are not the trainee's. */
+  deploymentStatus(soldierId: SoldierId): DeploymentStatus | undefined;
   /** The walkable path of each scenario OPFOR route, by route id, from its soldier's start. */
   readonly opforRoutePaths: ReadonlyMap<string, PlannedRoute>;
 
   /**
-   * Where a trainee soldier will observe from: its planned final position (the
-   * last waypoint of the displayed plan), or where it stands if it has none.
+   * Where a trainee soldier will observe from: the displayed plan's destination,
+   * or where it stands if it has none.
    */
   observer(soldierId: SoldierId): { readonly point: Vec2; readonly planned: boolean } | undefined;
   /** Line of sight from the soldier's observation point (see `observer`) to a map point. */
@@ -211,11 +264,27 @@ export interface Exercise {
    */
   killZoneCoverage(viewshed: Viewshed): KillZoneCoverage | undefined;
 
-  addWaypoint(soldierId: SoldierId, point: Vec2, index?: number): WaypointId;
-  moveWaypoint(soldierId: SoldierId, waypoint: WaypointId, point: Vec2): void;
-  deleteWaypoint(soldierId: SoldierId, waypoint: WaypointId): void;
-  clearRoute(soldierId: SoldierId): void;
-  setFinalFacing(soldierId: SoldierId, azimuth: Azimuth): void;
+  /**
+   * Sets (or moves) the soldier's single destination, keeping its facing. Refused
+   * off the map, in or against a building, or where the soldier cannot walk to
+   * from its current position.
+   */
+  setDestination(soldierId: SoldierId, point: Vec2): void;
+  /** Removes the destination: the soldier stays where it is. Keeps its facing. */
+  clearDestination(soldierId: SoldierId): void;
+  /** Sets the facing explicitly; it then survives destination changes. */
+  setFacing(soldierId: SoldierId, azimuth: Azimuth): void;
+  /** Returns to the default facing (see `defaultFacing`). */
+  clearFacing(soldierId: SoldierId): void;
+  /** Discards uncommitted edits for the soldier: back to its last committed plan. */
+  resetPlan(soldierId: SoldierId): void;
+  /** The displayed plans of every trainee soldier, in roster order, for saving. */
+  deploymentPlans(): DeploymentPlanSet;
+  /**
+   * Replaces the drafts with saved plans (see `parseDeploymentPlans`). All or
+   * nothing: refused with an `ExerciseError` if any plan is invalid now.
+   */
+  loadDeploymentPlans(set: DeploymentPlanSet): void;
 
   /** The trainee's kill zone as drawn so far, or `null`. */
   readonly killZone: KillZone | null;
@@ -226,9 +295,10 @@ export interface Exercise {
   clearKillZone(): void;
 
   /**
-   * Whether every active BLUEFOR soldier has completed its committed orders
-   * (or has none). Computed from simulation state; distinct from the trainee's
-   * declaration that the ambush is ready, which is `startOpfor`.
+   * Whether every active BLUEFOR soldier has completed its committed orders:
+   * arrived at its destination and turned to its facing. Soldiers without
+   * orders count as complete. Computed from simulation state; distinct from the
+   * trainee's declaration that the ambush is ready, which is `startOpfor`.
    */
   readonly bluforMovementComplete: boolean;
   /** Why START OPFOR is not available now; empty when it is. */
@@ -257,6 +327,7 @@ export interface Exercise {
 
 export function createExercise({ config, scenario }: ExerciseOptions): Exercise {
   validateOpforRoutes(scenario, TRAINEE_SIDE);
+  validateTraineeSetup(scenario, TRAINEE_SIDE);
   const sim = createSimulation(config, scenario);
   const terrain = sim.world.terrain;
   const pathFor = createPathCache(terrain);
@@ -288,11 +359,36 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     }
     opforRoutePaths.set(route.id, planned);
   }
-  const trainee = sim.state.soldiers.filter((s) => s.side === TRAINEE_SIDE).map((s) => s.id);
+
+  const roster = deepFreeze(rosterTree(scenario.organization));
+  const members = new Map(rosterMembers(roster).map((m) => [m.soldierId, m]));
+  /** Trainee soldiers in roster order. */
+  const trainee = rosterMembers(roster).map((m) => soldierId(m.soldierId));
   const traineeIds = new Set<SoldierId>(trainee);
-  /** Next number for generated waypoint ids, per soldier; never reused. */
-  const waypointCounters = new Map<SoldierId, number>(trainee.map((id) => [id, 1]));
-  const drafts = new Map<SoldierId, SoldierPlan>();
+  const scenarioFingerprint = fingerprintPlainData({
+    scenarioId: scenario.id,
+    world: fingerprintWorld(sim.world),
+    organizationTemplate: {
+      id: scenario.organization.template.id,
+      version: scenario.organization.template.version,
+      content: fingerprintPlainData(scenario.organization.template),
+    },
+    unitIdPrefix: scenario.organization.unitIdPrefix,
+    members: scenario.organization.members.map((m) => ({
+      soldierId: m.soldierId,
+      slotId: m.slotId,
+    })),
+    orp: scenario.orp,
+    units: scenario.units,
+    soldiers: scenario.soldiers,
+    opforRoutes: scenario.opforRoutes,
+  });
+
+  /** The plan each trainee soldier was last committed to (empty before Execute). */
+  const committed = new Map<SoldierId, SoldierDeploymentPlan>(
+    trainee.map((id) => [id, emptyPlan(id)]),
+  );
+  const drafts = new Map<SoldierId, SoldierDeploymentPlan>(committed);
 
   const now = () => ({ tick: sim.tick, timeSeconds: sim.timeSeconds });
   const running = () => !paused && (phase === 'bluforOccupation' || phase === 'opforApproach');
@@ -302,24 +398,12 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     if (!soldier) throw new ExerciseError(`unknown soldier "${id}"`);
     return soldier;
   };
+  const committedPlan = (id: SoldierId) => committed.get(id) ?? emptyPlan(id);
 
-  /**
-   * What the soldier is going to do: the remaining active orders, or, until the
-   * simulation has stepped past the latest commit, that commit's plan (its
-   * orders are queued for the current tick but not yet applied).
-   */
-  const currentPlan = (id: SoldierId): SoldierPlan => {
-    const latest = revisions.at(-1);
-    const committed =
-      latest?.tick === sim.tick ? latest.plans.find((p) => p.soldierId === id) : undefined;
-    return committed ?? remainingPlan(soldierState(id));
-  };
-
-  /** Drafts restart from what each soldier still has to do. */
+  /** Drafts restart from the committed plans. */
   const resetDrafts = () => {
-    for (const id of trainee) drafts.set(id, currentPlan(id));
+    for (const id of trainee) drafts.set(id, committedPlan(id));
   };
-  resetDrafts();
 
   const editable = () =>
     phase === 'bluforPlanning' ||
@@ -329,22 +413,23 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     if (!editable())
       throw new ExerciseError(`plans cannot be edited during ${phase}${paused ? ' (paused)' : ''}`);
   };
+  /** Orders committed this tick have not reached the soldiers yet. */
+  const commitPending = () => revisions.at(-1)?.tick === sim.tick;
 
   const movementComplete = (): boolean => {
     if (phase === 'bluforPlanning') return false;
-    // Orders committed this tick have not reached the soldiers yet.
-    if (revisions.at(-1)?.tick === sim.tick) return false;
+    if (commitPending()) return false;
     return trainee.every((id) => {
       const s = soldierState(id);
       return s.status !== 'active' || s.orders === null || s.orders.behavior === 'inPosition';
     });
   };
 
-  const uncommittedChanges = () =>
-    trainee.some((id) => {
-      const draft = drafts.get(id);
-      return draft !== undefined && !samePlan(draft, currentPlan(id));
-    });
+  const changed = (id: SoldierId) => {
+    const draft = drafts.get(id);
+    return draft !== undefined && !samePlan(draft, committedPlan(id));
+  };
+  const uncommittedChanges = () => trainee.some(changed);
 
   const afterTick = (events: readonly SimEvent[]) => {
     if (phase === 'bluforOccupation' && movementComplete()) {
@@ -393,7 +478,7 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     runner = createFixedStepRunner(stepper);
   };
 
-  const editableDraft = (id: SoldierId): SoldierPlan => {
+  const editableDraft = (id: SoldierId): SoldierDeploymentPlan => {
     requireEditable();
     const draft = drafts.get(id);
     if (!draft) throw new ExerciseError(`soldier "${id}" cannot be planned for`);
@@ -403,50 +488,69 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     const { x, y } = soldierState(id).position;
     return { x, y };
   };
-  /** The soldier's planned final position, or where it stands if it has no waypoints. */
+  const displayed = (id: SoldierId) => (editable() ? drafts.get(id) : committed.get(id));
+
+  /** The soldier's displayed destination, or where it stands if it has none. */
   const observer = (id: SoldierId) => {
     if (!traineeIds.has(id)) return undefined;
-    const plan = editable() ? drafts.get(id) : currentPlan(id);
-    const last = plan?.waypoints.at(-1);
-    return last
-      ? { point: { x: last.x, y: last.y }, planned: true }
+    const destination = displayed(id)?.destination;
+    return destination
+      ? { point: toVec2(destination), planned: true }
       : { point: position(id), planned: false };
   };
 
-  /**
-   * Refuses a waypoint at `point` that is not a place to stand or that cannot be
-   * walked to from the point before it, or on to the point after it. `index` is
-   * the waypoint's position in the route; `replacing` when it moves an existing one.
-   */
-  const checkPlacement = (draft: SoldierPlan, index: number, point: Vec2, replacing: boolean) => {
+  /** Why a destination at `point` cannot be used by the soldier now, or `null`. */
+  const destinationProblem = (id: SoldierId, point: Vec2): string | null => {
     const problem = pointProblem(terrain, point);
-    if (problem) throw new ExerciseError(`Waypoint not placed: ${describePathProblem(problem)}.`);
-    const before = index === 0 ? position(draft.soldierId) : draft.waypoints[index - 1];
-    const after = draft.waypoints[replacing ? index + 1 : index];
-    for (const [a, b] of [
-      [before, point],
-      [point, after],
-    ] as const) {
-      if (a && b && !pathFor(a, b).ok) {
-        throw new ExerciseError(
-          `Waypoint not placed: ${describePathProblem({ kind: 'unreachable' })}.`,
-        );
-      }
+    if (problem) return describePathProblem(problem);
+    return pathFor(position(id), point).ok ? null : describePathProblem({ kind: 'unreachable' });
+  };
+
+  /**
+   * The route the displayed plan leads to. While the plan is what the soldier is
+   * already doing, the path it is actually walking; otherwise the path the
+   * simulation will plan on commit, from where the soldier stands now.
+   */
+  const routeOf = (id: SoldierId): PlannedRoute | undefined => {
+    const plan = displayed(id);
+    if (!plan) return undefined;
+    const soldier = soldierState(id);
+    const active = soldier.orders;
+    if (active && !commitPending() && samePlan(plan, committedPlan(id))) {
+      const legs: PlannedLeg[] = active.orders.waypoints
+        .slice(active.nextWaypointIndex)
+        .map((w, k) => {
+          const turns = active.legPaths[active.nextWaypointIndex + k] ?? [];
+          return {
+            waypointId: w.id,
+            to: { x: w.x, y: w.y },
+            turns: k === 0 ? turns.slice(active.nextTurnIndex) : turns,
+            problem: null,
+          };
+        });
+      return { start: position(id), legs, ok: true };
     }
+    const waypoints = plan.destination
+      ? [{ id: `${id}.destination`, ...toVec2(plan.destination) }]
+      : [];
+    return planRoute(pathFor, position(id), waypoints);
   };
-  const indexOf = (draft: SoldierPlan, waypoint: WaypointId) => {
-    const index = draft.waypoints.findIndex((w) => w.id === waypoint);
-    if (index < 0) throw new ExerciseError(`no waypoint "${waypoint}" for "${draft.soldierId}"`);
-    return index;
+
+  const facingOf = (id: SoldierId): DisplayedFacing | undefined => {
+    const plan = displayed(id);
+    if (!plan) return undefined;
+    const soldier = soldierState(id);
+    const active = soldier.orders;
+    // A committed default facing was fixed when the orders were given.
+    if (active && !commitPending() && samePlan(plan, committedPlan(id))) {
+      return { azimuth: active.orders.finalFacing, explicit: plan.facingDegrees !== null };
+    }
+    const route = routeOf(id);
+    const leg = route?.legs[0];
+    const path = route && leg ? [route.start, ...(leg.turns ?? []), leg.to] : [];
+    return resolvedFacing(plan, path, soldier.azimuth);
   };
-  const replaceWaypoints = (
-    draft: SoldierPlan,
-    edit: (w: SoldierPlan['waypoints'][number][]) => void,
-  ) => {
-    const waypoints = [...draft.waypoints];
-    edit(waypoints);
-    drafts.set(draft.soldierId, { ...draft, waypoints });
-  };
+
   const editKillZone = (edit: () => KillZone | null) => {
     requireEditable();
     try {
@@ -458,32 +562,44 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
   };
 
   const commit = (trigger: PlanRevision['trigger']): CommitResult => {
-    const plans = trainee.map((id) => drafts.get(id) ?? currentPlan(id));
-    const problems = plans.flatMap((plan) => [
-      ...validatePlan(plan, terrain).map((problem) => ({ soldierId: plan.soldierId, problem })),
-      ...planRoute(pathFor, position(plan.soldierId), plan.waypoints).legs.flatMap((leg, i) =>
-        leg.problem === null
-          ? []
-          : [{ soldierId: plan.soldierId, problem: `waypoint ${String(i + 1)} is ${leg.problem}` }],
-      ),
-    ]);
+    const plans = trainee.map((id) => drafts.get(id) ?? committedPlan(id));
+    const problems = plans.flatMap((plan) => {
+      const own = validateDeploymentPlan(plan, terrain);
+      const reach =
+        own.length === 0 && plan.destination
+          ? destinationProblem(plan.soldierId, toVec2(plan.destination))
+          : null;
+      return [...own, ...(reach ? [`destination is ${reach}`] : [])].map((problem) => ({
+        soldierId: plan.soldierId,
+        problem,
+      }));
+    });
     if (problems.length > 0) return { ok: false, problems };
 
-    const changed = plans.filter((plan) => !samePlan(plan, currentPlan(plan.soldierId)));
-    for (const plan of changed) {
+    const number = revisions.length + 1;
+    const changedPlans = plans.filter((plan) => !samePlan(plan, committedPlan(plan.soldierId)));
+    for (const plan of changedPlans) {
+      const id = plan.soldierId;
+      const facing = facingOf(id)?.azimuth ?? soldierState(id).azimuth;
+      // One destination becomes one waypoint of the simulation's orders; the
+      // path to it is planned by the simulation when the orders arrive.
+      const waypoints = plan.destination
+        ? [{ id: waypointId(`${id}.dest.${String(number)}`), ...toVec2(plan.destination) }]
+        : [];
       sim.submit({
         type: 'setOrders',
         tick: sim.tick,
-        soldierId: plan.soldierId,
-        orders: { waypoints: plan.waypoints, finalFacing: plan.finalFacing },
+        soldierId: id,
+        orders: { waypoints, finalFacing: facing },
       });
     }
+    for (const plan of plans) committed.set(plan.soldierId, plan);
     const revision: PlanRevision = deepFreeze({
-      revision: revisions.length + 1,
+      revision: number,
       trigger,
       ...now(),
-      plans: plans.map((p) => ({ ...p, waypoints: p.waypoints.map((w) => ({ ...w })) })),
-      changedSoldierIds: changed.map((p) => p.soldierId),
+      plans: plans.map((p) => ({ ...p, destination: p.destination && { ...p.destination } })),
+      changedSoldierIds: changedPlans.map((p) => p.soldierId),
       killZone: killZone && { id: killZone.id, vertices: killZone.vertices.map((v) => ({ ...v })) },
     });
     revisions.push(revision);
@@ -516,7 +632,7 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
         return ['OPFOR has already been started.'];
       case 'bluforReady':
         if (uncommittedChanges())
-          problems.push('Route changes have not been executed: press Resume to execute them.');
+          problems.push('Plan changes have not been executed: press Resume to execute them.');
         break;
     }
     const opfor = sim.state.soldiers.filter((s) => s.side === ENEMY_SIDE);
@@ -536,6 +652,10 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     opforRoutes: deepFreeze(
       scenario.opforRoutes.map((r) => ({ ...r, waypoints: r.waypoints.map((w) => ({ ...w })) })),
     ),
+    orp: deepFreeze(structuredCopy(scenario.orp)),
+    roster,
+    rosterMember: (id) => members.get(id),
+    scenarioFingerprint,
     scenarioStart: (id) => starts.get(id),
     revisions,
     get opforStart() {
@@ -554,37 +674,29 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
       return editable();
     },
     draft: (id) => (editable() ? drafts.get(id) : undefined),
-    displayedPlan(id) {
-      if (!traineeIds.has(id)) return undefined;
-      return editable() ? drafts.get(id) : currentPlan(id);
-    },
+    displayedPlan: (id) => (traineeIds.has(id) ? displayed(id) : undefined),
     get hasUncommittedChanges() {
       return uncommittedChanges();
     },
-    displayedRoute(id) {
+    displayedRoute: (id) => (traineeIds.has(id) ? routeOf(id) : undefined),
+    displayedFacing: (id) => (traineeIds.has(id) ? facingOf(id) : undefined),
+    deploymentStatus(id) {
       if (!traineeIds.has(id)) return undefined;
       const soldier = soldierState(id);
-      const plan = editable() ? drafts.get(id) : currentPlan(id);
-      if (!plan) return undefined;
+      const plan = displayed(id) ?? emptyPlan(id);
       const active = soldier.orders;
-      const pending = revisions.at(-1)?.tick === sim.tick;
-      // While the plan is what the soldier is already doing, show the paths it is
-      // actually walking; otherwise plan them as the simulation will on commit.
-      if (active && !pending && samePlan(plan, remainingPlan(soldier))) {
-        const legs: PlannedLeg[] = active.orders.waypoints
-          .slice(active.nextWaypointIndex)
-          .map((w, k) => {
-            const turns = active.legPaths[active.nextWaypointIndex + k] ?? [];
-            return {
-              waypointId: w.id,
-              to: { x: w.x, y: w.y },
-              turns: k === 0 ? turns.slice(active.nextTurnIndex) : turns,
-              problem: null,
-            };
-          });
-        return { start: position(id), legs, ok: true };
+      if (active && active.behavior !== 'inPosition' && !(editable() && changed(id))) {
+        return 'moving';
       }
-      return planRoute(pathFor, position(id), plan.waypoints);
+      if (plan.destination) {
+        const there =
+          Math.hypot(
+            soldier.position.x - plan.destination.east,
+            soldier.position.y - plan.destination.north,
+          ) < 1e-6;
+        return there && !changed(id) && !commitPending() ? 'inPosition' : 'destinationAssigned';
+      }
+      return orpContains(scenario.orp, soldier.position) ? 'atOrp' : 'holding';
     },
     opforRoutePaths,
 
@@ -602,41 +714,59 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
         : { cells, visibleCells: visible, percent: (100 * visible) / cells };
     },
 
-    addWaypoint(id, point, index) {
+    setDestination(id, point) {
       const draft = editableDraft(id);
-      const at = index ?? draft.waypoints.length;
-      if (!Number.isInteger(at) || at < 0 || at > draft.waypoints.length) {
-        throw new ExerciseError(`waypoint index ${String(at)} is out of range`);
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        throw new ExerciseError('Destination not set: not a map point.');
       }
-      checkPlacement(draft, at, point, false);
-      const n = waypointCounters.get(id) ?? 1;
-      waypointCounters.set(id, n + 1);
-      const newId = waypointId(`${id}.${String(n)}`);
-      replaceWaypoints(draft, (w) => w.splice(at, 0, { id: newId, x: point.x, y: point.y }));
-      return newId;
+      const problem = destinationProblem(id, point);
+      if (problem) throw new ExerciseError(`Destination not set: ${problem}.`);
+      drafts.set(id, { ...draft, destination: toMapPoint(point) });
     },
-    moveWaypoint(id, waypoint, point) {
+    clearDestination(id) {
       const draft = editableDraft(id);
-      const index = indexOf(draft, waypoint);
-      checkPlacement(draft, index, point, true);
-      replaceWaypoints(draft, (w) => {
-        w[index] = { id: waypoint, x: point.x, y: point.y };
-      });
+      drafts.set(id, { ...draft, destination: null });
     },
-    deleteWaypoint(id, waypoint) {
-      const draft = editableDraft(id);
-      const index = indexOf(draft, waypoint);
-      replaceWaypoints(draft, (w) => w.splice(index, 1));
-    },
-    clearRoute(id) {
-      const draft = editableDraft(id);
-      drafts.set(id, { ...draft, waypoints: [] });
-    },
-    setFinalFacing(id, azimuth) {
+    setFacing(id, azimuth) {
       const draft = editableDraft(id);
       if (!Number.isFinite(azimuth))
         throw new ExerciseError(`facing must be finite, got ${String(azimuth)}`);
-      drafts.set(id, { ...draft, finalFacing: normalizeAzimuth(azimuth) });
+      drafts.set(id, { ...draft, facingDegrees: facingDegreesOf(azimuth) });
+    },
+    clearFacing(id) {
+      const draft = editableDraft(id);
+      drafts.set(id, { ...draft, facingDegrees: null });
+    },
+    resetPlan(id) {
+      editableDraft(id);
+      drafts.set(id, committedPlan(id));
+    },
+    deploymentPlans() {
+      return {
+        scenarioFingerprint,
+        plans: trainee.map((id) => displayed(id) ?? committedPlan(id)),
+      };
+    },
+    loadDeploymentPlans(set) {
+      requireEditable();
+      if (set.scenarioFingerprint !== scenarioFingerprint) {
+        throw new ExerciseError('Plans not loaded: they were made for a different scenario.');
+      }
+      const problems = set.plans.flatMap((plan) => {
+        if (!traineeIds.has(plan.soldierId)) return [`unknown soldier "${plan.soldierId}"`];
+        const own = validateDeploymentPlan(plan, terrain);
+        if (own.length > 0 || !plan.destination) return own.map((p) => `${plan.soldierId}: ${p}`);
+        const reach = destinationProblem(plan.soldierId, toVec2(plan.destination));
+        return reach ? [`${plan.soldierId}: destination is ${reach}`] : [];
+      });
+      if (problems.length > 0) throw new ExerciseError(`Plans not loaded: ${problems.join('; ')}.`);
+      for (const plan of set.plans) {
+        drafts.set(plan.soldierId, {
+          soldierId: plan.soldierId,
+          destination: plan.destination && { ...plan.destination },
+          facingDegrees: plan.facingDegrees,
+        });
+      }
     },
 
     get killZone() {
@@ -740,6 +870,11 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
       return stepped.splice(0);
     },
   };
+}
+
+/** A deep copy of plain JSON-like data. */
+function structuredCopy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function deepFreeze<T>(value: T): T {

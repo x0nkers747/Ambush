@@ -1,15 +1,14 @@
 import { TRAINEE_SIDE } from '#exercise';
-import type { Azimuth, SoldierId, Vec2, WaypointId } from '#sim';
+import type { Azimuth, SoldierId, Vec2 } from '#sim';
 import { facingToward } from './bearing';
 import { panBy, screenToWorld, zoomAt, type Camera } from './camera';
 import {
-  insertionIndexAt,
+  isOnDestination,
   isOnFacingHandle,
   killZoneInsertionIndexAt,
   killZoneVertexAt,
   selectedSoldier,
   soldierAt,
-  waypointAt,
   type MapScene,
 } from './scene';
 
@@ -18,15 +17,16 @@ import {
 // wheel input and it calls `MapActions`.
 //
 //   Left click a BLUEFOR soldier      select it
-//   Left click the map                append a waypoint to the selected route
-//   Left click on a route leg         insert a waypoint into that leg
-//   Left drag a waypoint              move it
-//   Left drag the facing arrow tip    set the final facing
-//   Right click a waypoint            delete it
+//   Left click the map                set (or move) the selected soldier's destination
+//   Left drag the destination         move it
+//   Left drag the facing arrow tip    set the facing
+//   Right click the destination       clear it
 //   Left drag the map / middle drag   pan
 //   Mouse wheel                       zoom at the cursor
 //
-// With the kill-zone tool, clicks edit the kill zone instead of routes:
+// Generated path turns are shown but are never handles: they are not intent.
+//
+// With the kill-zone tool, clicks edit the kill zone instead of destinations:
 //
 //   Left click the map                add a corner after the last one
 //   Left click on a side              insert a corner into that side
@@ -35,10 +35,9 @@ import {
 
 export interface MapActions {
   select(id: SoldierId): void;
-  addWaypoint(point: Vec2, index?: number): void;
-  moveWaypoint(id: WaypointId, point: Vec2): void;
-  deleteWaypoint(id: WaypointId): void;
-  setFinalFacing(azimuth: Azimuth): void;
+  setDestination(point: Vec2): void;
+  clearDestination(): void;
+  setFacing(azimuth: Azimuth): void;
   addKillZoneVertex(point: Vec2, index?: number): void;
   moveKillZoneVertex(index: number, point: Vec2): void;
   deleteKillZoneVertex(index: number): void;
@@ -63,7 +62,7 @@ type Mode =
   /** Left button down on the map; becomes a click or a pan. */
   | { readonly kind: 'press'; readonly start: Vec2 }
   | { readonly kind: 'pan'; readonly last: Vec2 }
-  | { readonly kind: 'waypoint'; readonly id: WaypointId }
+  | { readonly kind: 'destination' }
   | { readonly kind: 'facing' }
   | { readonly kind: 'killZoneVertex'; readonly index: number };
 
@@ -77,8 +76,8 @@ export interface MapController {
   wheel(screen: Vec2, deltaY: number): void;
   /** Cursor that suits what is under the pointer and the current drag. */
   readonly cursor: MapCursor;
-  /** The waypoint being dragged, if any (e.g. to show a quicker preview meanwhile). */
-  readonly draggedWaypoint: WaypointId | null;
+  /** Whether the destination is being dragged (e.g. to show a quicker preview meanwhile). */
+  readonly draggingDestination: boolean;
 }
 
 export function createMapController(scene: () => MapScene, actions: MapActions): MapController {
@@ -92,7 +91,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       if (!s.killZoneEditable) return 'grab';
       return killZoneVertexAt(s, p) !== undefined ? 'move' : 'crosshair';
     }
-    if (s.editable && (isOnFacingHandle(s, p) || waypointAt(s, p) !== undefined)) return 'move';
+    if (s.editable && (isOnFacingHandle(s, p) || isOnDestination(s, p))) return 'move';
     const soldier = soldierAt(s, p);
     if (soldier?.side === TRAINEE_SIDE) return 'pointer';
     return s.editable ? 'crosshair' : 'grab';
@@ -115,18 +114,15 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     }
     if (!s.editable) return;
     const point = toWorld(s, p);
-    if (!s.isOnMap(point)) return;
-    const index = insertionIndexAt(s, p);
-    if (index === undefined) actions.addWaypoint(point);
-    else actions.addWaypoint(point, index);
+    if (s.isOnMap(point)) actions.setDestination(point);
   };
 
   return {
     get cursor() {
       return cursor;
     },
-    get draggedWaypoint() {
-      return mode.kind === 'waypoint' ? mode.id : null;
+    get draggingDestination() {
+      return mode.kind === 'destination';
     },
 
     pointerDown(input) {
@@ -139,17 +135,15 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
           const index = s.killZoneEditable ? killZoneVertexAt(s, p) : undefined;
           if (index !== undefined) actions.deleteKillZoneVertex(index);
         } else {
-          const id = s.editable ? waypointAt(s, p) : undefined;
-          if (id !== undefined) actions.deleteWaypoint(id);
+          if (s.editable && isOnDestination(s, p)) actions.clearDestination();
         }
       } else if (input.button === 0 && s.tool === 'killZone') {
         const index = s.killZoneEditable ? killZoneVertexAt(s, p) : undefined;
         mode =
           index === undefined ? { kind: 'press', start: p } : { kind: 'killZoneVertex', index };
       } else if (input.button === 0) {
-        const waypoint = s.editable ? waypointAt(s, p) : undefined;
         if (s.editable && isOnFacingHandle(s, p)) mode = { kind: 'facing' };
-        else if (waypoint !== undefined) mode = { kind: 'waypoint', id: waypoint };
+        else if (s.editable && isOnDestination(s, p)) mode = { kind: 'destination' };
         else mode = { kind: 'press', start: p };
       }
       cursor = mode.kind === 'pan' ? 'grabbing' : cursor;
@@ -172,17 +166,21 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
           actions.setCamera(panBy(s.camera, p.x - mode.last.x, p.y - mode.last.y));
           mode = { kind: 'pan', last: p };
           return;
-        case 'waypoint': {
+        case 'destination': {
+          // Positions the exercise refuses (in a building, unreachable) are skipped.
           const point = toWorld(s, p);
-          if (s.editable && s.isOnMap(point)) actions.moveWaypoint(mode.id, point);
+          if (s.editable && s.isOnMap(point)) actions.setDestination(point);
           return;
         }
         case 'facing': {
           const soldier = selectedSoldier(s);
           if (!s.editable || !soldier) return;
-          const anchor = s.selectedPlan?.waypoints.at(-1) ?? soldier.position;
+          const destination = s.selectedPlan?.destination;
+          const anchor = destination
+            ? { x: destination.east, y: destination.north }
+            : soldier.position;
           const azimuth = facingToward(anchor, toWorld(s, p));
-          if (azimuth !== undefined) actions.setFinalFacing(azimuth);
+          if (azimuth !== undefined) actions.setFacing(azimuth);
           return;
         }
         case 'killZoneVertex': {

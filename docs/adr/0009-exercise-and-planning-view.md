@@ -1,6 +1,8 @@
 # ADR 0009: Exercise phases, plan revisions and the 2D planning view
 
-- Status: Accepted; the phase model is extended by ADR 0010
+- Status: Accepted; the phase model is extended by ADR 0010; trainee waypoint
+  chains (`SoldierPlan`, waypoint identity, route editing) are superseded by
+  single-destination deployment plans in ADR 0012
 - Date: 2026-10-07
 
 ## Context

@@ -7,7 +7,7 @@ import type { MapActions } from './interaction';
 /**
  * Connects map interactions to the exercise (plan edits for the selected
  * soldier, kill-zone edits) and the session (selection).
- * Edits the exercise refuses (a waypoint inside a building, a kill zone that
+ * Edits the exercise refuses (a destination inside a building, a kill zone that
  * would cross itself, …) change nothing and are reported through `notify`, so
  * a drag simply stops at the last acceptable position.
  */
@@ -15,7 +15,7 @@ export function createMapActions(
   exercise: Exercise,
   session: { get: () => Session; set: (session: Session) => void },
   setCamera: (camera: Camera) => void,
-  /** Tells the trainee why an edit was refused (e.g. a waypoint inside a building). */
+  /** Tells the trainee why an edit was refused (e.g. a destination inside a building). */
   notify: (message: string) => void = () => undefined,
 ): MapActions {
   const ignoreRefused = (change: () => void) => {
@@ -37,22 +37,19 @@ export function createMapActions(
     select: (id) => {
       session.set(selectSoldier(session.get(), exercise, id));
     },
-    addWaypoint: (point, index) => {
-      edit((id) => exercise.addWaypoint(id, point, index));
-    },
-    moveWaypoint: (waypoint, point) => {
+    setDestination: (point) => {
       edit((id) => {
-        exercise.moveWaypoint(id, waypoint, point);
+        exercise.setDestination(id, point);
       });
     },
-    deleteWaypoint: (waypoint) => {
+    clearDestination: () => {
       edit((id) => {
-        exercise.deleteWaypoint(id, waypoint);
+        exercise.clearDestination(id);
       });
     },
-    setFinalFacing: (azimuth) => {
+    setFacing: (azimuth) => {
       edit((id) => {
-        exercise.setFinalFacing(id, azimuth);
+        exercise.setFacing(id, azimuth);
       });
     },
     addKillZoneVertex: (point, index) => {

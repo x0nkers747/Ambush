@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   createInitialState,
+  createSimulation,
+  hashSimState,
   heightAt,
   lineOfSight,
   pointProblem,
   soldierId,
+  waypointId,
   type Vec2,
 } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
 import { createExercise } from './exercise';
+import { rosterMembers, rosterTree } from './organization';
+import { layoutOrp, MIN_START_SPACING_M, orpContains } from './orp';
 
 describe('DEMO_SCENARIO', () => {
   const state = createInitialState(DEMO_SCENARIO, 0);
@@ -27,18 +32,59 @@ describe('DEMO_SCENARIO', () => {
     expect(max - min).toBeGreaterThan(20);
   });
 
-  it('has a BLUEFOR rifle squad of a squad leader and two four-soldier fire teams', () => {
+  it('has the 13-Marine rifle squad of the MCWP 3-11.2 template: a squad leader and three fire teams of four', () => {
+    expect(DEMO_SCENARIO.organization.template.id).toBe('usmc-rifle-squad-mcwp-3-11-2');
     expect(state.units.map((u) => [u.id, u.echelon, u.parentId, u.leaderId])).toEqual([
-      ['SQD', 'squad', null, 'SL'],
-      ['A-TM', 'fireTeam', 'SQD', 'A-TL'],
-      ['B-TM', 'fireTeam', 'SQD', 'B-TL'],
+      ['SQD', 'squad', null, 'M01'],
+      ['FT1', 'fireTeam', 'SQD', 'M02'],
+      ['FT2', 'fireTeam', 'SQD', 'M06'],
+      ['FT3', 'fireTeam', 'SQD', 'M10'],
       ['EN-TM', 'fireTeam', null, 'EN-1'],
     ]);
     const members = (unit: string) =>
       state.soldiers.filter((s) => s.unitId === unit).map((s) => s.id);
-    expect(members('SQD')).toEqual(['SL']);
-    expect(members('A-TM')).toEqual(['A-TL', 'A-AR', 'A-GR', 'A-RFL']);
-    expect(members('B-TM')).toEqual(['B-TL', 'B-AR', 'B-GR', 'B-RFL']);
+    expect(members('SQD')).toEqual(['M01']);
+    expect(members('FT1')).toEqual(['M02', 'M03', 'M04', 'M05']);
+    expect(members('FT2')).toEqual(['M06', 'M07', 'M08', 'M09']);
+    expect(members('FT3')).toEqual(['M10', 'M11', 'M12', 'M13']);
+    const roster = rosterMembers(rosterTree(DEMO_SCENARIO.organization));
+    expect(roster.map((m) => `${m.soldierId}:${m.slot.label}`)).toEqual([
+      'M01:SL',
+      'M02:1-FTL',
+      'M03:1-AR',
+      'M04:1-AAR',
+      'M05:1-R',
+      'M06:2-FTL',
+      'M07:2-AR',
+      'M08:2-AAR',
+      'M09:2-R',
+      'M10:3-FTL',
+      'M11:3-AR',
+      'M12:3-AAR',
+      'M13:3-R',
+    ]);
+  });
+
+  it('starts the whole squad in the ORP, at distinct, deterministic places a Marine can stand', () => {
+    const { orp, terrain } = DEMO_SCENARIO;
+    const squad = state.soldiers.filter((s) => s.side === 'BLUEFOR');
+    expect(squad).toHaveLength(13);
+    for (const s of squad) {
+      expect(orpContains(orp, s.position)).toBe(true);
+      expect(pointProblem(terrain, s.position)).toBeNull();
+    }
+    for (const [i, a] of squad.entries()) {
+      for (const b of squad.slice(i + 1)) {
+        expect(
+          Math.hypot(a.position.x - b.position.x, a.position.y - b.position.y),
+        ).toBeGreaterThanOrEqual(MIN_START_SPACING_M);
+      }
+    }
+    // The squad leader at the centre, then outwards; the same every time.
+    expect(squad[0]?.position).toMatchObject({ x: orp.centre.east, y: orp.centre.north });
+    expect(squad.map((s) => ({ x: s.position.x, y: s.position.y }))).toEqual(
+      layoutOrp(orp, terrain, 13),
+    );
   });
 
   it('has a small OPFOR element well away from the squad', () => {
@@ -100,8 +146,8 @@ describe('DEMO_SCENARIO', () => {
       config: { tickRateHz: 30, seed: 0 },
       scenario: DEMO_SCENARIO,
     });
-    const sl = soldierId('SL');
-    exercise.addWaypoint(sl, { x: -85, y: -25 });
+    const sl = soldierId('M01');
+    exercise.setDestination(sl, { x: -85, y: -25 });
     const route = exercise.displayedRoute(sl);
     expect(route?.legs[0]?.turns?.length).toBeGreaterThan(0);
     expect(pointProblem(DEMO_SCENARIO.terrain, { x: -72, y: -185 })).toEqual({
@@ -176,6 +222,51 @@ describe('DEMO_SCENARIO', () => {
     expect(exercise.trigger?.soldierId).toBe('EN-1');
     // EN-1 enters through the north edge, y = 30.
     expect(exercise.trigger?.point.y).toBeCloseTo(30, 6);
+  });
+
+  it('deploys part of the squad from the ORP to readiness, the same way every time', () => {
+    const deploy = () => {
+      const exercise = createExercise({
+        config: { tickRateHz: 30, seed: 0 },
+        scenario: DEMO_SCENARIO,
+      });
+      exercise.setDestination(soldierId('M01'), { x: -85, y: -25 }); // round the cottage
+      exercise.setDestination(soldierId('M03'), { x: -60, y: -58 });
+      exercise.setFacing(soldierId('M03'), Math.PI / 4);
+      exercise.setFacing(soldierId('M13'), Math.PI); // turns in place at the ORP
+      expect(exercise.execute().ok).toBe(true);
+      for (let i = 0; i < 30 * 400 && exercise.phase !== 'bluforReady'; i += 1)
+        exercise.advance(1 / 30);
+      return exercise;
+    };
+    const a = deploy();
+    expect(a.phase).toBe('bluforReady');
+    expect(a.deploymentStatus(soldierId('M01'))).toBe('inPosition');
+    expect(a.deploymentStatus(soldierId('M13'))).toBe('atOrp');
+    expect(a.deploymentStatus(soldierId('M07'))).toBe('atOrp');
+    const b = deploy();
+    expect(hashSimState(b.simulation.state)).toBe(hashSimState(a.simulation.state));
+    expect(b.scenarioFingerprint).toBe(a.scenarioFingerprint);
+  });
+
+  it('snapshots and restores the squad mid-deployment, through JSON, to the same future', () => {
+    const sim = createSimulation({ tickRateHz: 30, seed: 0 }, DEMO_SCENARIO);
+    // The orders an Execute gives one Marine: a single destination waypoint.
+    sim.submit({
+      type: 'setOrders',
+      tick: 0,
+      soldierId: soldierId('M03'),
+      orders: { waypoints: [{ id: waypointId('M03.dest.1'), x: -60, y: -58 }], finalFacing: 0 },
+    });
+    for (let i = 0; i < 300; i += 1) sim.step();
+    const saved = JSON.parse(JSON.stringify(sim.snapshot())) as ReturnType<typeof sim.snapshot>;
+    for (let i = 0; i < 600; i += 1) sim.step();
+    const expected = hashSimState(sim.state);
+    const fresh = createSimulation({ tickRateHz: 30, seed: 0 }, DEMO_SCENARIO);
+    fresh.restore(saved);
+    for (let i = 0; i < 600; i += 1) fresh.step();
+    expect(hashSimState(fresh.state)).toBe(expected);
+    expect(fresh.state.soldiers.filter((s) => s.side === 'BLUEFOR')).toHaveLength(13);
   });
 
   it('starts everyone without orders, standing on the terrain', () => {

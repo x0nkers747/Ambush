@@ -7,6 +7,6 @@
     "rootDir": ".",
     "outDir": "../../.tsbuild/exercise"
   },
-  "include": ["**/*.ts"],
+  "include": ["**/*.ts", "**/*.json"],
   "references": [{ "path": "../sim" }]
 }

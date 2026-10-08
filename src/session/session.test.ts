@@ -19,21 +19,21 @@ describe('session', () => {
     expect(createSession()).toEqual({
       selectedSoldierId: null,
       timeScale: 1,
-      tool: 'routes',
+      tool: 'deploy',
       showVisibility: false,
     });
   });
 
   it('selects BLUEFOR soldiers, one at a time', () => {
-    let session = selectSoldier(createSession(), exercise, soldierId('A-TL'));
-    expect(session.selectedSoldierId).toBe('A-TL');
-    session = selectSoldier(session, exercise, soldierId('B-AR'));
-    expect(session.selectedSoldierId).toBe('B-AR');
+    let session = selectSoldier(createSession(), exercise, soldierId('M02'));
+    expect(session.selectedSoldierId).toBe('M02');
+    session = selectSoldier(session, exercise, soldierId('M07'));
+    expect(session.selectedSoldierId).toBe('M07');
     expect(clearSelection(session).selectedSoldierId).toBeNull();
   });
 
   it('ignores OPFOR and unknown soldiers', () => {
-    const session = selectSoldier(createSession(), exercise, soldierId('SL'));
+    const session = selectSoldier(createSession(), exercise, soldierId('M01'));
     expect(selectSoldier(session, exercise, soldierId('EN-1'))).toBe(session);
     expect(selectSoldier(session, exercise, soldierId('nobody'))).toBe(session);
   });
@@ -69,6 +69,6 @@ describe('session', () => {
   it('switches between route and kill-zone editing', () => {
     const session = setTool(createSession(), 'killZone');
     expect(session.tool).toBe('killZone');
-    expect(setTool(session, 'routes').tool).toBe('routes');
+    expect(setTool(session, 'deploy').tool).toBe('deploy');
   });
 });

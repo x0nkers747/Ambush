@@ -38,7 +38,7 @@ export {
   type VegetationArea,
   type VegetationKind,
 } from './environment';
-export { fingerprintWorld, hashSimState } from './hash';
+export { fingerprintPlainData, fingerprintWorld, hashSimState } from './hash';
 export {
   buildingRoofElevations,
   lineOfSight,

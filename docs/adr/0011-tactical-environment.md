@@ -1,6 +1,7 @@
 # ADR 0011: Tactical environment, path planning and line of sight
 
-- Status: Accepted
+- Status: Accepted; trainee routes are now single destinations (ADR 0012), planned
+  with the same navigation described here
 - Date: 2026-10-07
 
 ## Context

@@ -1,11 +1,64 @@
 // Public API of the exercise layer. Other layers import only from here (`#exercise`).
 export {
+  deployInOrp,
   validateOpforRoutes,
+  validateTraineeSetup,
   type AmbushScenario,
   type OpforRoute,
   type ScenarioRouteWaypoint,
 } from './ambush-scenario';
-export { DEMO_SCENARIO } from './demo-scenario';
+export { DEMO_SCENARIO, USMC_RIFLE_SQUAD_TEMPLATE } from './demo-scenario';
+export {
+  defaultFacing,
+  DEPLOYMENT_PLAN_SCHEMA,
+  DEPLOYMENT_PLAN_SCHEMA_VERSION,
+  DeploymentPlanError,
+  emptyPlan,
+  facingDegreesOf,
+  parseDeploymentPlans,
+  resolvedFacing,
+  samePlan,
+  serializeDeploymentPlans,
+  toMapPoint,
+  toVec2,
+  validateDeploymentPlan,
+  type DeploymentPlanSet,
+  type MapPoint,
+  type SoldierDeploymentPlan,
+} from './deployment';
+export {
+  instantiateOrganization,
+  ORGANIZATION_TEMPLATE_SCHEMA,
+  ORGANIZATION_TEMPLATE_SCHEMA_VERSION,
+  OrganizationTemplateError,
+  rosterMembers,
+  rosterTree,
+  validateOrganizationTemplate,
+  type OrganizationInstance,
+  type OrganizationMember,
+  type OrganizationTemplate,
+  type RosterMember,
+  type RosterUnit,
+  type TemplateRole,
+  type TemplateSlot,
+  type TemplateSource,
+  type TemplateSymbology,
+  type TemplateUnit,
+  type TraineeOrganization,
+} from './organization';
+export {
+  layoutOrp,
+  MIN_START_SPACING_M,
+  ORP_LAYOUT_MARGIN_M,
+  ORP_LAYOUT_SPACING_M,
+  orpContains,
+  orpLayoutCandidates,
+  orpOutline,
+  orpPlacementProblems,
+  orpProblems,
+  type ObjectiveRallyPoint,
+  type OrpShape,
+} from './orp';
 export {
   createExercise,
   ENEMY_SIDE,
@@ -13,6 +66,8 @@ export {
   TRAINEE_SIDE,
   type AmbushTrigger,
   type CommitResult,
+  type DeploymentStatus,
+  type DisplayedFacing,
   type Exercise,
   type ExerciseEvent,
   type ExerciseOptions,
@@ -29,7 +84,6 @@ export {
   MIN_VERTEX_SPACING_M,
   type KillZone,
 } from './kill-zone';
-export { remainingPlan, samePlan, validatePlan, type SoldierPlan } from './plan';
 export {
   createPathCache,
   describePathProblem,

@@ -1,10 +1,13 @@
-import type {
-  AmbushTrigger,
-  Exercise,
-  KillZone,
-  OpforRoute,
-  PlannedRoute,
-  SoldierPlan,
+import {
+  orpOutline,
+  toVec2,
+  type AmbushTrigger,
+  type DisplayedFacing,
+  type Exercise,
+  type KillZone,
+  type OpforRoute,
+  type PlannedRoute,
+  type SoldierDeploymentPlan,
 } from '#exercise';
 import type { MapTool, Session } from '#session';
 import {
@@ -14,23 +17,29 @@ import {
   type SoldierId,
   type Vec2,
   type Viewshed,
-  type WaypointId,
 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
 
 // What the map shows and where, in screen pixels, plus hit-testing on it.
 // Pure: shared by the renderer and the interaction controller.
 
+/** How a trainee soldier is drawn: its symbol code and short role label. */
+export interface SoldierMarking {
+  readonly sidc: string;
+  /** Short role label from the organization template (e.g. "1-AR"). */
+  readonly label: string;
+}
+
 export interface MapScene {
   readonly camera: Camera;
   readonly viewport: Viewport;
   readonly soldiers: readonly DeepReadonly<Soldier>[];
   readonly selectedId: SoldierId | null;
-  /** Plans shown for every trainee soldier (drafts while editable, else remaining orders). */
-  readonly plans: readonly SoldierPlan[];
+  /** Plans shown for every trainee soldier (drafts while editable, else committed plans). */
+  readonly plans: readonly SoldierDeploymentPlan[];
   /** The selected soldier's entry in `plans`. */
-  readonly selectedPlan: SoldierPlan | undefined;
-  /** Whether the selected soldier's plan can be edited now (route tool). */
+  readonly selectedPlan: SoldierDeploymentPlan | undefined;
+  /** Whether the selected soldier's plan can be edited now (deployment tool). */
   readonly editable: boolean;
   /** What map clicks edit. */
   readonly tool: MapTool;
@@ -38,8 +47,14 @@ export interface MapScene {
   readonly killZone: KillZone | null;
   /** Whether the kill zone can be edited now (kill-zone tool). */
   readonly killZoneEditable: boolean;
-  /** Walkable routes of trainee soldiers (generated turn points between waypoints). */
+  /** Walkable paths to trainee soldiers' destinations (generated turn points, not intent). */
   readonly routes: ReadonlyMap<SoldierId, PlannedRoute>;
+  /** The facing each trainee soldier's plan gives it. */
+  readonly facings: ReadonlyMap<SoldierId, DisplayedFacing>;
+  /** Symbol and label of each trainee soldier, from the organization template. */
+  readonly markings: ReadonlyMap<SoldierId, SoldierMarking>;
+  /** The trainee organization's objective rally point. */
+  readonly orp: { readonly name: string; readonly centre: Vec2; readonly outline: readonly Vec2[] };
   /** Scenario OPFOR routes the trainee may see, with their walkable paths. */
   readonly opforRoutes: readonly { readonly route: OpforRoute; readonly path: PlannedRoute }[];
   /** The selected soldier's visible area, while the visibility overlay is on. */
@@ -52,7 +67,7 @@ export interface MapScene {
 
 /** The visibility overlay for the selected soldier. */
 export interface VisibilityView {
-  /** Where the soldier observes from: its planned final position, or where it stands. */
+  /** Where the soldier observes from: its destination, or where it stands. */
   readonly observer: Vec2;
   readonly planned: boolean;
   /** The viewshed to draw: from `observer` once ready, otherwise the previous one. */
@@ -72,6 +87,7 @@ export function buildScene(
   const { state, world } = exercise.simulation;
   const plans = state.soldiers.flatMap((s) => exercise.displayedPlan(s.id) ?? []);
   const selectedPlan = plans.find((p) => p.soldierId === session.selectedSoldierId);
+  const orp = exercise.orp;
   return {
     camera,
     viewport,
@@ -79,7 +95,7 @@ export function buildScene(
     selectedId: session.selectedSoldierId,
     plans,
     selectedPlan,
-    editable: exercise.canEditPlans && selectedPlan !== undefined && session.tool === 'routes',
+    editable: exercise.canEditPlans && selectedPlan !== undefined && session.tool === 'deploy',
     tool: session.tool,
     killZone: exercise.killZone,
     killZoneEditable: exercise.canEditPlans && session.tool === 'killZone',
@@ -89,6 +105,25 @@ export function buildScene(
         return route ? [[p.soldierId, route] as const] : [];
       }),
     ),
+    facings: new Map(
+      plans.flatMap((p) => {
+        const facing = exercise.displayedFacing(p.soldierId);
+        return facing ? [[p.soldierId, facing] as const] : [];
+      }),
+    ),
+    markings: new Map(
+      plans.flatMap((p) => {
+        const member = exercise.rosterMember(p.soldierId);
+        return member
+          ? [[p.soldierId, { sidc: member.role.symbology.sidc, label: member.slot.label }] as const]
+          : [];
+      }),
+    ),
+    orp: {
+      name: orp.name,
+      centre: { x: orp.centre.east, y: orp.centre.north },
+      outline: orpOutline(orp),
+    },
     opforRoutes: exercise.opforRoutes.flatMap((route) => {
       const path = exercise.opforRoutePaths.get(route.id);
       return route.shownToTrainee && path ? [{ route, path }] : [];
@@ -101,56 +136,67 @@ export function buildScene(
 
 /** Hit radii and sizes in CSS pixels. */
 export const SOLDIER_HIT_RADIUS_PX = 10;
-export const WAYPOINT_RADIUS_PX = 8;
-export const WAYPOINT_HIT_RADIUS_PX = 10;
-export const SEGMENT_HIT_DISTANCE_PX = 6;
+export const DESTINATION_RADIUS_PX = 7;
+export const DESTINATION_HIT_RADIUS_PX = 10;
 export const FACING_ARROW_PX = 42;
 export const FACING_HANDLE_HIT_RADIUS_PX = 10;
 export const KILL_ZONE_VERTEX_HIT_RADIUS_PX = 9;
+export const SEGMENT_HIT_DISTANCE_PX = 6;
+/** The square a full trainee symbol occupies on screen, for decluttering. */
+export const SYMBOL_BOX_PX = 24;
+/** Approximate width per character of a soldier label, for decluttering. */
+const LABEL_CHAR_PX = 6.5;
+const LABEL_HEIGHT_PX = 12;
 
-export interface RouteGeometry {
-  /** Route start (the soldier) followed by each trainee waypoint, in screen pixels. */
-  readonly points: readonly Vec2[];
+/** The selected soldier's plan in screen pixels. */
+export interface DeploymentGeometry {
+  readonly soldier: Vec2;
+  /** The destination marker, or `null` without a destination. */
+  readonly destination: Vec2 | null;
   /**
-   * Each leg as walked, in screen pixels: from the previous point through the
-   * generated turn points to its waypoint. A leg that cannot be walked is a
-   * straight line flagged in `impossible`.
+   * The path as it will be walked: from the soldier through the generated turn
+   * points to the destination. Empty without a destination; a straight line
+   * flagged `impossible` when it cannot be walked.
    */
-  readonly legs: readonly (readonly Vec2[])[];
-  readonly impossible: readonly boolean[];
-  /** Where the final facing arrow starts: the last waypoint, or the soldier. */
+  readonly path: readonly Vec2[];
+  readonly impossible: boolean;
+  /** Where the facing arrow starts: the destination, or the soldier. */
   readonly facingAnchor: Vec2;
-  /** Tip of the final facing arrow (the drag handle). */
+  /** Tip of the facing arrow (the drag handle). */
   readonly facingTip: Vec2;
+  readonly facing: DisplayedFacing;
 }
 
 export function selectedSoldier(scene: MapScene): DeepReadonly<Soldier> | undefined {
   return scene.soldiers.find((s) => s.id === scene.selectedId);
 }
 
-/** Screen geometry of the selected soldier's route, if there is a selection with a plan. */
-export function routeGeometry(scene: MapScene): RouteGeometry | undefined {
-  const soldier = selectedSoldier(scene);
-  const plan = scene.selectedPlan;
-  if (!soldier || !plan) return undefined;
+/** Screen geometry of a trainee soldier's plan (default: the selected soldier's). */
+export function deploymentGeometry(
+  scene: MapScene,
+  id: SoldierId | null = scene.selectedId,
+): DeploymentGeometry | undefined {
+  const soldier = scene.soldiers.find((s) => s.id === id);
+  const plan = scene.plans.find((p) => p.soldierId === id);
+  const facing = id === null ? undefined : scene.facings.get(id);
+  if (!soldier || !plan || !facing) return undefined;
   const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
-  const points = [toScreen(soldier.position), ...plan.waypoints.map(toScreen)];
-  const facingAnchor = points[points.length - 1] ?? toScreen(soldier.position);
-  const route = scene.routes.get(soldier.id);
-  const legs = plan.waypoints.map((_, i) => [
-    points[i] ?? facingAnchor,
-    ...(route?.legs[i]?.turns ?? []).map(toScreen),
-    points[i + 1] ?? facingAnchor,
-  ]);
+  const start = toScreen(soldier.position);
+  const destination = plan.destination ? toScreen(toVec2(plan.destination)) : null;
+  const leg = scene.routes.get(soldier.id)?.legs[0];
+  const path = destination ? [start, ...(leg?.turns ?? []).map(toScreen), destination] : [];
+  const facingAnchor = destination ?? start;
   return {
-    points,
-    legs,
-    impossible: plan.waypoints.map((_, i) => route?.legs[i]?.turns === null),
+    soldier: start,
+    destination,
+    path,
+    impossible: destination !== null && (leg?.turns ?? null) === null,
     facingAnchor,
     facingTip: {
-      x: facingAnchor.x + Math.sin(plan.finalFacing) * FACING_ARROW_PX,
-      y: facingAnchor.y - Math.cos(plan.finalFacing) * FACING_ARROW_PX,
+      x: facingAnchor.x + Math.sin(facing.azimuth) * FACING_ARROW_PX,
+      y: facingAnchor.y - Math.cos(facing.azimuth) * FACING_ARROW_PX,
     },
+    facing,
   };
 }
 
@@ -168,53 +214,99 @@ export function soldierAt(scene: MapScene, screen: Vec2): DeepReadonly<Soldier> 
   return best;
 }
 
-/** The selected route's waypoint drawn nearest to `screen`, within the hit radius. */
-export function waypointAt(scene: MapScene, screen: Vec2): WaypointId | undefined {
-  const plan = scene.selectedPlan;
-  const route = routeGeometry(scene);
-  if (!plan || !route) return undefined;
-  let best: WaypointId | undefined;
-  let bestDistance = WAYPOINT_HIT_RADIUS_PX;
-  plan.waypoints.forEach((w, i) => {
-    const point = route.points[i + 1];
-    if (!point) return;
-    const d = distance(point, screen);
-    if (d <= bestDistance) {
-      best = w.id;
-      bestDistance = d;
-    }
-  });
-  return best;
-}
-
-/**
- * The index at which a waypoint placed at `screen` would be inserted if it lies
- * on a leg of the selected route as walked (leg i ends at waypoint i), or `undefined`.
- */
-export function insertionIndexAt(scene: MapScene, screen: Vec2): number | undefined {
-  const route = routeGeometry(scene);
-  if (!route) return undefined;
-  let best: number | undefined;
-  let bestDistance = SEGMENT_HIT_DISTANCE_PX;
-  // Any piece of a leg as walked counts, including around generated turns.
-  route.legs.forEach((leg, i) => {
-    for (let k = 1; k < leg.length; k += 1) {
-      const a = leg[k - 1];
-      const b = leg[k];
-      if (!a || !b) continue;
-      const d = distanceToSegment(screen, a, b);
-      if (d <= bestDistance) {
-        best = i;
-        bestDistance = d;
-      }
-    }
-  });
-  return best;
+/** Whether `screen` is on the selected soldier's destination marker. */
+export function isOnDestination(scene: MapScene, screen: Vec2): boolean {
+  const destination = deploymentGeometry(scene)?.destination;
+  return destination != null && distance(destination, screen) <= DESTINATION_HIT_RADIUS_PX;
 }
 
 export function isOnFacingHandle(scene: MapScene, screen: Vec2): boolean {
-  const route = routeGeometry(scene);
-  return route !== undefined && distance(route.facingTip, screen) <= FACING_HANDLE_HIT_RADIUS_PX;
+  const geometry = deploymentGeometry(scene);
+  return (
+    geometry !== undefined && distance(geometry.facingTip, screen) <= FACING_HANDLE_HIT_RADIUS_PX
+  );
+}
+
+/** A screen rectangle. */
+interface Box {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/** How a trainee soldier's symbol is drawn after decluttering. */
+export interface SymbolPlacement {
+  /** The soldier's true position on screen: symbols are never displaced. */
+  readonly at: Vec2;
+  /** `full`: the standard symbol; `compact`: a small dot, because it would overlap another symbol. */
+  readonly mode: 'full' | 'compact';
+  readonly showLabel: boolean;
+  /**
+   * How many compact soldiers stand under this full symbol, where they cannot
+   * be seen (shown as a "+n" badge); 0 for compact symbols.
+   */
+  readonly covered: number;
+}
+
+/**
+ * Declutters the trainee soldiers' symbols without moving them: the selected
+ * soldier first, then in scene order, each gets a full symbol unless it would
+ * overlap a full symbol already placed, in which case it is drawn compact.
+ * A label is shown where it overlaps no symbol or label placed before it; the
+ * selected soldier's label is always shown. Compact soldiers hidden under a
+ * full symbol are counted on that symbol (`covered`), so a cluster always
+ * shows how many it holds.
+ */
+export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlacement> {
+  const trainee = scene.soldiers.filter((s) => scene.markings.has(s.id));
+  const ordered = [
+    ...trainee.filter((s) => s.id === scene.selectedId),
+    ...trainee.filter((s) => s.id !== scene.selectedId),
+  ];
+  const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const symbols: Box[] = [];
+  const owners: SoldierId[] = [];
+  const labels: Box[] = [];
+  const layout = new Map<SoldierId, SymbolPlacement>();
+  const covered = new Map<SoldierId, number>();
+  const half = SYMBOL_BOX_PX / 2;
+  for (const soldier of ordered) {
+    const at = worldToScreen(scene.camera, scene.viewport, soldier.position);
+    const box = { x0: at.x - half, y0: at.y - half, x1: at.x + half, y1: at.y + half };
+    const selected = soldier.id === scene.selectedId;
+    const full = selected || !symbols.some((b) => overlaps(b, box));
+    if (full) {
+      symbols.push(box);
+      owners.push(soldier.id);
+    } else {
+      const under = symbols.findIndex(
+        (b) => at.x >= b.x0 && at.x <= b.x1 && at.y >= b.y0 && at.y <= b.y1,
+      );
+      const owner = owners[under];
+      if (owner !== undefined) covered.set(owner, (covered.get(owner) ?? 0) + 1);
+    }
+    const text = scene.markings.get(soldier.id)?.label ?? '';
+    const offset = full ? half + 2 : 6;
+    const label = {
+      x0: at.x + offset,
+      y0: at.y - LABEL_HEIGHT_PX / 2,
+      x1: at.x + offset + text.length * LABEL_CHAR_PX,
+      y1: at.y + LABEL_HEIGHT_PX / 2,
+    };
+    const showLabel =
+      selected ||
+      (full &&
+        !labels.some((b) => overlaps(b, label)) &&
+        !symbols.some((b) => b !== box && overlaps(b, label)));
+    if (showLabel) labels.push(label);
+    layout.set(soldier.id, { at, mode: full ? 'full' : 'compact', showLabel, covered: 0 });
+  }
+  for (const [id, count] of covered) {
+    const placement = layout.get(id);
+    if (placement) layout.set(id, { ...placement, covered: count });
+  }
+  return layout;
 }
 
 export function distance(a: Vec2, b: Vec2): number {
