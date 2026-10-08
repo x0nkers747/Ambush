@@ -1,0 +1,135 @@
+{
+  "schema": "ambush.organization-template",
+  "schemaVersion": 1,
+  "id": "usmc-rifle-squad-mcwp-3-11-2",
+  "version": "1.0.0",
+  "name": "USMC rifle squad (MCWP 3-11.2, 13 Marines)",
+  "source": {
+    "kind": "doctrine",
+    "designation": "MCWP 3-11.2 (formerly FMFM 6-5)",
+    "title": "Marine Rifle Squad",
+    "publisher": "Headquarters, U.S. Marine Corps (Marine Corps Combat Development Command)",
+    "date": "1991-12-02",
+    "identifier": "PCN 143 000112 00",
+    "amendments": [
+      {
+        "designation": "Change 1 to FMFM 6-5",
+        "date": "1997-07-24",
+        "summary": "Replaced mine-warfare pages; the organization chapter is unchanged."
+      },
+      {
+        "designation": "Erratum to MCWP 3-11.2",
+        "date": "2002-11-27",
+        "summary": "Re-identified FMFM 6-5 as MCWP 3-11.2."
+      }
+    ],
+    "references": [
+      "para 1002, Organization of the Rifle Squad",
+      "para 1003, Composition of the Rifle Squad",
+      "Figure 1-1, Marine Rifle Squad",
+      "para 1004a, Organic Weapons"
+    ],
+    "status": "Historical. Later Marine Corps publications (MCIP 3-10A.4i, 2019; MCRP 3-10A.4, 2020) supersede this manual and are not represented by this template. It describes the 1991 squad only and is not a statement of current USMC organization."
+  },
+  "conventions": [
+    "Fire-team numbering (1st, 2nd, 3rd), the unit ids SQD and FT1 to FT3, and the unit abbreviations are Ambush! conventions: the source shows three identical, unnamed fire teams.",
+    "The role abbreviations (SL, FTL, AR, AAR, R) and the map labels (e.g. 1-AR) are Ambush! conventions, not taken from the source.",
+    "The symbol identification codes (SIDCs) are Ambush!'s choice of APP-6 D / MIL-STD-2525 D entries; the source's own figure symbols are not reproduced.",
+    "Weapon profile references name weapons from para 1004a for later phases; no weapon is modelled yet."
+  ],
+  "roles": [
+    {
+      "id": "squadLeader",
+      "name": "Squad leader",
+      "abbreviation": "SL",
+      "grade": "Sergeant",
+      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
+      "symbology": { "sidc": "10032700001101010000" }
+    },
+    {
+      "id": "fireTeamLeader",
+      "name": "Fire team leader / grenadier",
+      "abbreviation": "FTL",
+      "grade": "Corporal",
+      "weaponProfileRefs": ["m16-rifle", "m203-grenade-launcher", "bayonet-knife"],
+      "symbology": { "sidc": "10032700001101010000" }
+    },
+    {
+      "id": "automaticRifleman",
+      "name": "Automatic rifleman",
+      "abbreviation": "AR",
+      "grade": "Lance corporal",
+      "weaponProfileRefs": ["squad-automatic-weapon", "combat-knife"],
+      "symbology": { "sidc": "10032700001101010000" }
+    },
+    {
+      "id": "assistantAutomaticRifleman",
+      "name": "Assistant automatic rifleman",
+      "abbreviation": "AAR",
+      "grade": "Lance corporal",
+      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
+      "symbology": { "sidc": "10032700001101010000" }
+    },
+    {
+      "id": "rifleman",
+      "name": "Rifleman",
+      "abbreviation": "R",
+      "grade": "Private or private first class",
+      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
+      "symbology": { "sidc": "10032700001101010000" }
+    }
+  ],
+  "units": [
+    {
+      "id": "SQD",
+      "name": "Rifle squad",
+      "abbreviation": "SQD",
+      "echelon": "squad",
+      "parentId": null,
+      "leaderSlotId": "SL",
+      "symbology": { "sidc": "10031000121211000000" }
+    },
+    {
+      "id": "FT1",
+      "name": "1st fire team",
+      "abbreviation": "1st FT",
+      "echelon": "fireTeam",
+      "parentId": "SQD",
+      "leaderSlotId": "FT1.FTL",
+      "symbology": { "sidc": "10031000111211000000" }
+    },
+    {
+      "id": "FT2",
+      "name": "2nd fire team",
+      "abbreviation": "2nd FT",
+      "echelon": "fireTeam",
+      "parentId": "SQD",
+      "leaderSlotId": "FT2.FTL",
+      "symbology": { "sidc": "10031000111211000000" }
+    },
+    {
+      "id": "FT3",
+      "name": "3rd fire team",
+      "abbreviation": "3rd FT",
+      "echelon": "fireTeam",
+      "parentId": "SQD",
+      "leaderSlotId": "FT3.FTL",
+      "symbology": { "sidc": "10031000111211000000" }
+    }
+  ],
+  "slots": [
+    { "id": "SL", "unitId": "SQD", "roleId": "squadLeader", "label": "SL" },
+    { "id": "FT1.FTL", "unitId": "FT1", "roleId": "fireTeamLeader", "label": "1-FTL" },
+    { "id": "FT1.AR", "unitId": "FT1", "roleId": "automaticRifleman", "label": "1-AR" },
+    { "id": "FT1.AAR", "unitId": "FT1", "roleId": "assistantAutomaticRifleman", "label": "1-AAR" },
+    { "id": "FT1.R", "unitId": "FT1", "roleId": "rifleman", "label": "1-R" },
+    { "id": "FT2.FTL", "unitId": "FT2", "roleId": "fireTeamLeader", "label": "2-FTL" },
+    { "id": "FT2.AR", "unitId": "FT2", "roleId": "automaticRifleman", "label": "2-AR" },
+    { "id": "FT2.AAR", "unitId": "FT2", "roleId": "assistantAutomaticRifleman", "label": "2-AAR" },
+    { "id": "FT2.R", "unitId": "FT2", "roleId": "rifleman", "label": "2-R" },
+    { "id": "FT3.FTL", "unitId": "FT3", "roleId": "fireTeamLeader", "label": "3-FTL" },
+    { "id": "FT3.AR", "unitId": "FT3", "roleId": "automaticRifleman", "label": "3-AR" },
+    { "id": "FT3.AAR", "unitId": "FT3", "roleId": "assistantAutomaticRifleman", "label": "3-AAR" },
+    { "id": "FT3.R", "unitId": "FT3", "roleId": "rifleman", "label": "3-R" }
+  ]
+}

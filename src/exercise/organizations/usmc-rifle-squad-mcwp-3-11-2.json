@@ -1,8 +1,8 @@
 {
   "schema": "ambush.organization-template",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "usmc-rifle-squad-mcwp-3-11-2",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "name": "USMC rifle squad (MCWP 3-11.2, 13 Marines)",
   "source": {
     "kind": "doctrine",
@@ -34,8 +34,9 @@
   "conventions": [
     "Fire-team numbering (1st, 2nd, 3rd), the unit ids SQD and FT1 to FT3, and the unit abbreviations are Ambush! conventions: the source shows three identical, unnamed fire teams.",
     "The role abbreviations (SL, FTL, AR, AAR, R) and the map labels (e.g. 1-AR) are Ambush! conventions, not taken from the source.",
-    "The symbol identification codes (SIDCs) are Ambush!'s choice of APP-6 D / MIL-STD-2525 D entries; the source's own figure symbols are not reproduced.",
-    "Weapon profile references name weapons from para 1004a for later phases; no weapon is modelled yet."
+    "The unit symbol identification codes (SIDCs) are Ambush!'s choice of APP-6 D / MIL-STD-2525 D entries; the source's own figure symbols are not reproduced.",
+    "Individual Marines are drawn with Ambush!'s own role icons, not APP-6 symbols (docs/adr/0013). The fire team leader, who is also the team's grenadier (para 1003), shows the fire team leader icon; the assistant automatic rifleman, armed with a rifle (para 1004a), shows the rifleman icon.",
+    "Each role's default loadout names weapons from para 1004a by weapon profile reference, for later phases; no weapon is modelled yet. Loadout and map icon are separate properties of a position: the role gives their defaults."
   ],
   "roles": [
     {
@@ -43,40 +44,42 @@
       "name": "Squad leader",
       "abbreviation": "SL",
       "grade": "Sergeant",
-      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultLoadout": { "weaponProfileRefs": ["m16-rifle", "bayonet-knife"] },
+      "defaultIcon": "squadLeader"
     },
     {
       "id": "fireTeamLeader",
       "name": "Fire team leader / grenadier",
       "abbreviation": "FTL",
       "grade": "Corporal",
-      "weaponProfileRefs": ["m16-rifle", "m203-grenade-launcher", "bayonet-knife"],
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "m203-grenade-launcher", "bayonet-knife"]
+      },
+      "defaultIcon": "fireTeamLeader"
     },
     {
       "id": "automaticRifleman",
       "name": "Automatic rifleman",
       "abbreviation": "AR",
       "grade": "Lance corporal",
-      "weaponProfileRefs": ["squad-automatic-weapon", "combat-knife"],
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultLoadout": { "weaponProfileRefs": ["squad-automatic-weapon", "combat-knife"] },
+      "defaultIcon": "automaticRifleman"
     },
     {
       "id": "assistantAutomaticRifleman",
       "name": "Assistant automatic rifleman",
       "abbreviation": "AAR",
       "grade": "Lance corporal",
-      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultLoadout": { "weaponProfileRefs": ["m16-rifle", "bayonet-knife"] },
+      "defaultIcon": "rifleman"
     },
     {
       "id": "rifleman",
       "name": "Rifleman",
       "abbreviation": "R",
       "grade": "Private or private first class",
-      "weaponProfileRefs": ["m16-rifle", "bayonet-knife"],
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultLoadout": { "weaponProfileRefs": ["m16-rifle", "bayonet-knife"] },
+      "defaultIcon": "rifleman"
     }
   ],
   "units": [

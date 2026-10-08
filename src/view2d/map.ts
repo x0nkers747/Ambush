@@ -1,7 +1,15 @@
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
 import { heightAt, isOnTerrain, type Vec2 } from '#sim';
-import { fitBounds, screenToWorld, worldToScreen, type Camera, type Viewport } from './camera';
+import {
+  fitBounds,
+  MAX_METERS_PER_PIXEL,
+  MIN_METERS_PER_PIXEL,
+  screenToWorld,
+  worldToScreen,
+  type Camera,
+  type Viewport,
+} from './camera';
 import { createMapActions } from './actions';
 import { createMapController } from './interaction';
 import { createTerrainLayer, drawMap } from './render';
@@ -42,6 +50,8 @@ export interface TacticalMap {
   readonly visibility: VisibilityView | null;
   /** Centres the view on a map point, keeping the zoom (e.g. a soldier chosen in the roster). */
   centreOn(point: Vec2): void;
+  /** Centres the view on a map point at a scale in metres per pixel (within the zoom limits). */
+  setView(point: Vec2, metersPerPixel: number): void;
   /** Whether a map point is currently on screen. */
   isInView(point: Vec2): boolean;
   dispose(): void;
@@ -187,6 +197,17 @@ export function createTacticalMap({
     },
     centreOn(point) {
       camera = { ...camera, centerX: point.x, centerY: point.y };
+    },
+    setView(point, metersPerPixel) {
+      fitted = true;
+      camera = {
+        centerX: point.x,
+        centerY: point.y,
+        metersPerPixel: Math.min(
+          Math.max(metersPerPixel, MIN_METERS_PER_PIXEL),
+          MAX_METERS_PER_PIXEL,
+        ),
+      };
     },
     isInView(point) {
       const p = worldToScreen(camera, viewport, point);

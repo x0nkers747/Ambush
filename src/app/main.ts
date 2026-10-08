@@ -20,7 +20,7 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, polygonArea, soldierId, type SimEvent, type SoldierId } from '#sim';
-import { createTacticalMap, formatBearing, symbolSvg } from '#view2d';
+import { createTacticalMap, formatBearing, soldierIconSvg, symbolSvg } from '#view2d';
 
 // Composition root for the ambush slice: the demo scenario, the exercise, the
 // session, the tactical map and the controls around them.
@@ -377,7 +377,9 @@ function rosterUnitHtml(node: RosterUnit, depth: number): string {
       const status = exercise.deploymentStatus(id) ?? 'atOrp';
       const selected = session.selectedSoldierId === id;
       const tip = `${m.role.name}${m.leads ? ` (leads ${node.unit.name})` : ''} · map label ${m.slot.label} · ${m.soldierId}`;
+      const icon = soldierIconSvg({ role: m.icon, affiliation: 'friendly', facing: null }, 14);
       return `<button class="roster-row" data-soldier="${escapeHtml(m.soldierId)}" aria-pressed="${String(selected)}" title="${escapeHtml(tip)}">
+        <span class="icon" aria-hidden="true">${icon}</span>
         <span class="abbr">${escapeHtml(m.role.abbreviation)}</span>
         <span class="role">${escapeHtml(m.role.name)}</span>
         <span class="sid">${escapeHtml(m.soldierId)}</span>

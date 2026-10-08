@@ -1,4 +1,3 @@
-import { TRAINEE_SIDE } from '#exercise';
 import type { Azimuth, SoldierId, Vec2 } from '#sim';
 import { facingToward } from './bearing';
 import { panBy, screenToWorld, zoomAt, type Camera } from './camera';
@@ -7,6 +6,8 @@ import {
   isOnFacingHandle,
   killZoneInsertionIndexAt,
   killZoneVertexAt,
+  nextSelectionAt,
+  selectableSoldiersAt,
   selectedSoldier,
   soldierAt,
   type MapScene,
@@ -92,8 +93,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       return killZoneVertexAt(s, p) !== undefined ? 'move' : 'crosshair';
     }
     if (s.editable && (isOnFacingHandle(s, p) || isOnDestination(s, p))) return 'move';
-    const soldier = soldierAt(s, p);
-    if (soldier?.side === TRAINEE_SIDE) return 'pointer';
+    if (selectableSoldiersAt(s, p).length > 0) return 'pointer';
     return s.editable ? 'crosshair' : 'grab';
   };
 
@@ -107,11 +107,14 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       else actions.addKillZoneVertex(point, index);
       return;
     }
-    const soldier = soldierAt(s, p);
-    if (soldier) {
-      actions.select(soldier.id);
+    // Repeated clicks on a cluster step through every Marine in it.
+    const next = nextSelectionAt(s, p);
+    if (next !== undefined) {
+      actions.select(next);
       return;
     }
+    // A click on an OPFOR symbol selects nothing and sets no destination.
+    if (soldierAt(s, p)) return;
     if (!s.editable) return;
     const point = toWorld(s, p);
     if (s.isOnMap(point)) actions.setDestination(point);

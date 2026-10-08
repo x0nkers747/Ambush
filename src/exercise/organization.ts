@@ -7,7 +7,29 @@ import type { Posture, ScenarioSoldier, ScenarioUnit, Side } from '#sim';
 // positions in an array.
 
 export const ORGANIZATION_TEMPLATE_SCHEMA = 'ambush.organization-template';
-export const ORGANIZATION_TEMPLATE_SCHEMA_VERSION = 1;
+/**
+ * 2: a role's loadout and icon are separate properties (`defaultLoadout`,
+ * `defaultIcon`) that a slot may override, and individuals are drawn with
+ * Ambush! icons instead of APP-6 codes (docs/adr/0013). Version 1 templates
+ * are converted by `readOrganizationTemplate`.
+ */
+export const ORGANIZATION_TEMPLATE_SCHEMA_VERSION = 2;
+
+/**
+ * The individual soldier icons a role can be drawn with (docs/adr/0013): custom
+ * Ambush! symbols, not APP-6. The 2D view draws one for each id.
+ */
+export const INDIVIDUAL_ICONS = [
+  'squadLeader',
+  'fireTeamLeader',
+  'rifleman',
+  'automaticRifleman',
+  'grenadier',
+  'marksman',
+  'medic',
+  'radioOperator',
+] as const;
+export type IndividualIcon = (typeof INDIVIDUAL_ICONS)[number];
 
 /** Where a template's content comes from. */
 export type TemplateSource =
@@ -37,20 +59,41 @@ export type TemplateSource =
       readonly notes: string;
     };
 
-/** Symbology metadata: a 20-digit APP-6 D / MIL-STD-2525 D symbol identification code. */
+/** Unit symbology: a 20-digit APP-6 D / MIL-STD-2525 D symbol identification code. */
 export interface TemplateSymbology {
   readonly sidc: string;
 }
 
+/**
+ * What a soldier carries: references to weapon and equipment profiles, which
+ * are names for later phases, not modelled yet.
+ */
+export interface Loadout {
+  readonly weaponProfileRefs: readonly string[];
+}
+
+/** A loadout of nothing, for soldiers whose role and slot name none. */
+export const EMPTY_LOADOUT: Loadout = Object.freeze({ weaponProfileRefs: Object.freeze([]) });
+
+/**
+ * An organizational role: what a position in the organization is (its name,
+ * abbreviation and grade). What its holders carry and how they are drawn are
+ * separate properties (docs/adr/0013): the role only gives their defaults,
+ * which a slot may override.
+ */
 export interface TemplateRole {
   readonly id: string;
   readonly name: string;
   readonly abbreviation: string;
   /** Grade or rank as the source states it, if it does. */
   readonly grade?: string;
-  /** References to weapon or equipment profiles; not resolved or modelled yet. */
-  readonly weaponProfileRefs?: readonly string[];
-  readonly symbology: TemplateSymbology;
+  /** The loadout of the role's holders unless their slot gives one. */
+  readonly defaultLoadout?: Loadout;
+  /**
+   * The map icon of the role's holders unless their slot gives one. Without
+   * either, a holder is drawn as the plain circle of an unknown role.
+   */
+  readonly defaultIcon?: IndividualIcon;
 }
 
 export interface TemplateUnit {
@@ -72,6 +115,33 @@ export interface TemplateSlot {
   readonly roleId: string;
   /** Short map and roster label (e.g. "1-AR"). */
   readonly label: string;
+  /** This position's loadout, when it differs from its role's default. */
+  readonly loadout?: Loadout;
+  /** This position's map icon, when it differs from its role's default. */
+  readonly icon?: IndividualIcon;
+}
+
+/** A slot's role, loadout and icon: three separate properties, resolved from the template. */
+export interface ResolvedSlot {
+  readonly role: TemplateRole;
+  readonly loadout: Loadout;
+  /** `null`: no icon is defined, so the holder is drawn as an unknown role. */
+  readonly icon: IndividualIcon | null;
+}
+
+/** Resolves a slot of a validated template: the slot's own loadout and icon, else its role's. */
+export function resolveSlot(template: OrganizationTemplate, slot: TemplateSlot): ResolvedSlot {
+  const role = template.roles.find((r) => r.id === slot.roleId);
+  if (!role) {
+    throw new OrganizationTemplateError(
+      `template "${template.id}": slot "${slot.id}" has unknown role "${slot.roleId}"`,
+    );
+  }
+  return {
+    role,
+    loadout: slot.loadout ?? role.defaultLoadout ?? EMPTY_LOADOUT,
+    icon: slot.icon ?? role.defaultIcon ?? null,
+  };
 }
 
 export interface OrganizationTemplate {
@@ -136,6 +206,18 @@ export function validateOrganizationTemplate(data: unknown): OrganizationTemplat
     const s = object(value, path, ['sidc']);
     text(s['sidc'], `${path}.sidc`, SIDC);
   };
+  const icon = (value: unknown, path: string) => {
+    const id = text(value, path);
+    if (!(INDIVIDUAL_ICONS as readonly string[]).includes(id)) {
+      fail(path, `"${id}" is not one of ${INDIVIDUAL_ICONS.join(', ')}`);
+    }
+  };
+  const loadout = (value: unknown, path: string) => {
+    const l = object(value, path, ['weaponProfileRefs']);
+    list(l['weaponProfileRefs'], `${path}.weaponProfileRefs`, false).forEach((r, k) => {
+      text(r, `${path}.weaponProfileRefs[${String(k)}]`, ID);
+    });
+  };
   const unique = (ids: string[], path: string) => {
     const seen = new Set<string>();
     ids.forEach((id, i) => {
@@ -162,7 +244,7 @@ export function validateOrganizationTemplate(data: unknown): OrganizationTemplat
   if (root['schemaVersion'] !== ORGANIZATION_TEMPLATE_SCHEMA_VERSION) {
     fail(
       '$.schemaVersion',
-      `${JSON.stringify(root['schemaVersion'])} is not supported (expected ${String(ORGANIZATION_TEMPLATE_SCHEMA_VERSION)})`,
+      `${JSON.stringify(root['schemaVersion'])} is not supported (expected ${String(ORGANIZATION_TEMPLATE_SCHEMA_VERSION)}; readOrganizationTemplate converts version 1)`,
     );
   }
   text(root['id'], '$.id', ID);
@@ -224,19 +306,16 @@ export function validateOrganizationTemplate(data: unknown): OrganizationTemplat
     const role = object(
       value,
       path,
-      ['id', 'name', 'abbreviation', 'symbology'],
-      ['grade', 'weaponProfileRefs'],
+      ['id', 'name', 'abbreviation'],
+      ['grade', 'defaultLoadout', 'defaultIcon'],
     );
     const id = text(role['id'], `${path}.id`, ID);
     text(role['name'], `${path}.name`);
     text(role['abbreviation'], `${path}.abbreviation`);
     if (role['grade'] !== undefined) text(role['grade'], `${path}.grade`);
-    if (role['weaponProfileRefs'] !== undefined) {
-      list(role['weaponProfileRefs'], `${path}.weaponProfileRefs`, false).forEach((r, k) => {
-        text(r, `${path}.weaponProfileRefs[${String(k)}]`, ID);
-      });
-    }
-    symbology(role['symbology'], `${path}.symbology`);
+    if (role['defaultLoadout'] !== undefined)
+      loadout(role['defaultLoadout'], `${path}.defaultLoadout`);
+    if (role['defaultIcon'] !== undefined) icon(role['defaultIcon'], `${path}.defaultIcon`);
     return id;
   });
   unique(roles, '$.roles');
@@ -293,13 +372,15 @@ export function validateOrganizationTemplate(data: unknown): OrganizationTemplat
   const roleIds = new Set(roles);
   const slots = list(root['slots'], '$.slots').map((value, i) => {
     const path = `$.slots[${String(i)}]`;
-    const slot = object(value, path, ['id', 'unitId', 'roleId', 'label']);
+    const slot = object(value, path, ['id', 'unitId', 'roleId', 'label'], ['loadout', 'icon']);
     const id = text(slot['id'], `${path}.id`, ID);
     const unitId = text(slot['unitId'], `${path}.unitId`);
     const roleId = text(slot['roleId'], `${path}.roleId`);
     const label = text(slot['label'], `${path}.label`);
     if (!unitIds.has(unitId)) fail(`${path}.unitId`, `refers to unknown unit "${unitId}"`);
     if (!roleIds.has(roleId)) fail(`${path}.roleId`, `refers to unknown role "${roleId}"`);
+    if (slot['loadout'] !== undefined) loadout(slot['loadout'], `${path}.loadout`);
+    if (slot['icon'] !== undefined) icon(slot['icon'], `${path}.icon`);
     return { id, unitId, label };
   });
   unique(
@@ -328,6 +409,85 @@ export function validateOrganizationTemplate(data: unknown): OrganizationTemplat
     }
   }
   return data as OrganizationTemplate;
+}
+
+/** A template read from data, and how it was converted to the current schema version. */
+export interface ReadTemplate {
+  readonly template: OrganizationTemplate;
+  /** The schema version the data had, when it was converted; `null` when it was current. */
+  readonly migratedFrom: number | null;
+  /** What the conversion did, for whoever maintains the template; empty when nothing changed. */
+  readonly notes: readonly string[];
+}
+
+/**
+ * Converts template data from an older schema version to the current one,
+ * without validating it. Data in the current version, or that is not a
+ * template at all, is returned unchanged for validation to judge.
+ *
+ * Version 1 → 2 (docs/adr/0013):
+ * - a role's `weaponProfileRefs` become its `defaultLoadout`;
+ * - a role's APP-6 `symbology` code is dropped. It cannot name a role icon
+ *   (version 1 templates gave every role the same individual code), so the
+ *   converted role has no `defaultIcon` and its holders are drawn as the plain
+ *   circle of an unknown role until one is added. Nothing is guessed.
+ * - units, slots and everything else are unchanged; so is the template's own `version`.
+ */
+export function migrateOrganizationTemplate(data: unknown): {
+  readonly data: unknown;
+  readonly migratedFrom: number | null;
+  readonly notes: readonly string[];
+} {
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (
+    !isRecord(data) ||
+    data['schema'] !== ORGANIZATION_TEMPLATE_SCHEMA ||
+    data['schemaVersion'] !== 1
+  ) {
+    return { data, migratedFrom: null, notes: [] };
+  }
+  const notes: string[] = [];
+  const roles = Array.isArray(data['roles'])
+    ? (data['roles'] as unknown[]).map((role) => {
+        if (!isRecord(role)) return role;
+        const { weaponProfileRefs, symbology, ...rest } = role;
+        const id = typeof rest['id'] === 'string' ? rest['id'] : '?';
+        if (weaponProfileRefs !== undefined) {
+          notes.push(`role "${id}": weaponProfileRefs moved to defaultLoadout`);
+        }
+        if (symbology !== undefined) {
+          const sidc = isRecord(symbology) ? JSON.stringify(symbology['sidc']) : 'symbology';
+          notes.push(
+            `role "${id}": APP-6 code ${sidc} dropped; it names no role icon, so the role has no defaultIcon and is drawn as an unknown role until one is added`,
+          );
+        }
+        return {
+          ...rest,
+          ...(weaponProfileRefs === undefined ? {} : { defaultLoadout: { weaponProfileRefs } }),
+        };
+      })
+    : data['roles'];
+  return {
+    data: { ...data, schemaVersion: ORGANIZATION_TEMPLATE_SCHEMA_VERSION, roles },
+    migratedFrom: 1,
+    notes,
+  };
+}
+
+/**
+ * Reads template data of any supported schema version: converts it to the
+ * current version (`migrateOrganizationTemplate`), then validates it
+ * (`validateOrganizationTemplate`). Throws an `OrganizationTemplateError` when
+ * the result is not a valid template.
+ */
+export function readOrganizationTemplate(data: unknown): ReadTemplate {
+  const migrated = migrateOrganizationTemplate(data);
+  return {
+    template: validateOrganizationTemplate(migrated.data),
+    migratedFrom: migrated.migratedFrom,
+    notes: migrated.notes,
+  };
 }
 
 /** One soldier of a scenario filling one template slot. */
@@ -438,10 +598,10 @@ export interface RosterUnit {
   readonly children: readonly RosterUnit[];
 }
 
-export interface RosterMember {
+/** A soldier in the roster: the slot it fills, and that slot's resolved role, loadout and icon. */
+export interface RosterMember extends ResolvedSlot {
   readonly soldierId: string;
   readonly slot: TemplateSlot;
-  readonly role: TemplateRole;
   /** Whether this soldier leads `RosterUnit.unit`. */
   readonly leads: boolean;
 }
@@ -453,7 +613,6 @@ export interface RosterMember {
 export function rosterTree(organization: TraineeOrganization): RosterUnit {
   const { template } = organization;
   const holder = new Map(organization.members.map((m) => [m.slotId, m.soldierId]));
-  const roles = new Map(template.roles.map((r) => [r.id, r]));
   const build = (unit: TemplateUnit): RosterUnit => ({
     unit,
     simUnitId: `${organization.unitIdPrefix}${unit.id}`,
@@ -461,10 +620,16 @@ export function rosterTree(organization: TraineeOrganization): RosterUnit {
       .filter((s) => s.unitId === unit.id)
       .flatMap((slot) => {
         const soldierId = holder.get(slot.id);
-        const role = roles.get(slot.roleId);
-        return soldierId === undefined || !role
+        return soldierId === undefined
           ? []
-          : [{ soldierId, slot, role, leads: unit.leaderSlotId === slot.id }];
+          : [
+              {
+                soldierId,
+                slot,
+                ...resolveSlot(template, slot),
+                leads: unit.leaderSlotId === slot.id,
+              },
+            ];
       }),
     children: template.units.filter((u) => u.parentId === unit.id).map(build),
   });

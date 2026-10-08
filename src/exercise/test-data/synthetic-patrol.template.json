@@ -1,8 +1,8 @@
 {
   "schema": "ambush.organization-template",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "synthetic-patrol",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "Synthetic patrol (test only)",
   "source": {
     "kind": "synthetic",
@@ -15,20 +15,20 @@
       "id": "patrolLeader",
       "name": "Patrol leader",
       "abbreviation": "PL",
-      "symbology": { "sidc": "10032700001101010000" }
+      "defaultIcon": "squadLeader"
     },
     {
       "id": "signaller",
       "name": "Signaller",
       "abbreviation": "SIG",
-      "weaponProfileRefs": ["carbine"],
-      "symbology": { "sidc": "10032700001101040000" }
+      "defaultLoadout": { "weaponProfileRefs": ["carbine"] },
+      "defaultIcon": "radioOperator"
     },
     {
       "id": "scout",
       "name": "Scout",
       "abbreviation": "SCT",
-      "symbology": { "sidc": "10032700001101030000" }
+      "defaultIcon": "marksman"
     }
   ],
   "units": [

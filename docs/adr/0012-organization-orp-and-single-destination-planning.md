@@ -1,6 +1,9 @@
 # ADR 0012: Doctrinal organization, ORP and single-destination deployment
 
-- Status: Accepted
+- Status: Accepted; §5 is superseded for individual soldiers by ADR 0013 (custom role icons,
+  organization template schema version 2, in which a role's loadout and icon are separate
+  properties a slot may override, and version 1 templates are converted). APP-6 unit symbols
+  are unchanged.
 - Date: 2026-10-08
 - Supersedes in part: ADR 0009 (trainee waypoint chains, `SoldierPlan`, waypoint
   identity) and the trainee-route parts of ADR 0011. OPFOR scenario routes are
@@ -114,6 +117,9 @@ clockwise from grid north).
   cannot intercept selection or destination clicks.
 
 ### 5. Symbology: milsymbol, and what is standard
+
+> Individual soldiers now use Ambush!'s own role icons, not APP-6 (ADR 0013). This section still
+> describes the milsymbol library and the unit symbols.
 
 **Library: milsymbol 3.0.4** (npm `milsymbol`, MIT licence, by Måns Beckman).
 

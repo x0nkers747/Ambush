@@ -11,13 +11,16 @@ export {
   type Camera,
   type Viewport,
 } from './camera';
-export { type VisibilityView } from './scene';
+export { SOLDIER_ICON_PX, type VisibilityView } from './scene';
 export {
-  describeSymbol,
-  displaySymbolCode,
-  FRIENDLY_DISMOUNTED_INFANTRY_SIDC,
-  symbolSvg,
-} from './symbology';
+  AFFILIATION_COLORS,
+  drawSoldierIcon,
+  ICON_BOX_SCALE,
+  soldierIconSvg,
+  type Affiliation,
+  type SoldierIconSpec,
+} from './soldier-icons';
+export { describeSymbol, displaySymbolCode, symbolSvg } from './symbology';
 export { createViewshedService, type ViewshedService } from './viewshed-service';
 export {
   createTacticalMap,

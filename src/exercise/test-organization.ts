@@ -7,7 +7,7 @@ import type { ObjectiveRallyPoint } from './orp';
 /** A two-person team: one unit, a leader slot and a member slot. */
 export const TEST_PAIR_TEMPLATE: OrganizationTemplate = {
   schema: 'ambush.organization-template',
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'test-pair',
   version: '1.0.0',
   name: 'Test pair',
@@ -18,13 +18,13 @@ export const TEST_PAIR_TEMPLATE: OrganizationTemplate = {
       id: 'leader',
       name: 'Leader',
       abbreviation: 'L',
-      symbology: { sidc: '10032700001101010000' },
+      defaultIcon: 'squadLeader',
     },
     {
       id: 'member',
       name: 'Member',
       abbreviation: 'M',
-      symbology: { sidc: '10032700001101010000' },
+      defaultIcon: 'rifleman',
     },
   ],
   units: [

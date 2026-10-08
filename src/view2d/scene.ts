@@ -1,9 +1,11 @@
 import {
   orpOutline,
   toVec2,
+  TRAINEE_SIDE,
   type AmbushTrigger,
   type DisplayedFacing,
   type Exercise,
+  type IndividualIcon,
   type KillZone,
   type OpforRoute,
   type PlannedRoute,
@@ -13,19 +15,22 @@ import type { MapTool, Session } from '#session';
 import {
   isOnTerrain,
   type DeepReadonly,
+  type Side,
   type Soldier,
   type SoldierId,
   type Vec2,
   type Viewshed,
 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
+import type { Affiliation } from './soldier-icons';
 
 // What the map shows and where, in screen pixels, plus hit-testing on it.
 // Pure: shared by the renderer and the interaction controller.
 
-/** How a trainee soldier is drawn: its symbol code and short role label. */
+/** How a trainee soldier is drawn: its role icon and short role label. */
 export interface SoldierMarking {
-  readonly sidc: string;
+  /** The slot's individual icon from the organization template (docs/adr/0013); `null`: none defined. */
+  readonly icon: IndividualIcon | null;
   /** Short role label from the organization template (e.g. "1-AR"). */
   readonly label: string;
 }
@@ -51,7 +56,7 @@ export interface MapScene {
   readonly routes: ReadonlyMap<SoldierId, PlannedRoute>;
   /** The facing each trainee soldier's plan gives it. */
   readonly facings: ReadonlyMap<SoldierId, DisplayedFacing>;
-  /** Symbol and label of each trainee soldier, from the organization template. */
+  /** Icon and label of each trainee soldier, from the organization template. */
   readonly markings: ReadonlyMap<SoldierId, SoldierMarking>;
   /** The trainee organization's objective rally point. */
   readonly orp: { readonly name: string; readonly centre: Vec2; readonly outline: readonly Vec2[] };
@@ -115,7 +120,7 @@ export function buildScene(
       plans.flatMap((p) => {
         const member = exercise.rosterMember(p.soldierId);
         return member
-          ? [[p.soldierId, { sidc: member.role.symbology.sidc, label: member.slot.label }] as const]
+          ? [[p.soldierId, { icon: member.icon, label: member.slot.label }] as const]
           : [];
       }),
     ),
@@ -142,8 +147,13 @@ export const FACING_ARROW_PX = 42;
 export const FACING_HANDLE_HIT_RADIUS_PX = 10;
 export const KILL_ZONE_VERTEX_HIT_RADIUS_PX = 9;
 export const SEGMENT_HIT_DISTANCE_PX = 6;
-/** The square a full trainee symbol occupies on screen, for decluttering. */
-export const SYMBOL_BOX_PX = 24;
+/**
+ * Diameter of a soldier icon's circle on the map, in CSS pixels. The icon
+ * design stays legible from 16 px; the facing triangle extends beyond it.
+ */
+export const SOLDIER_ICON_PX = 22;
+/** The square a full trainee symbol occupies on screen, for decluttering: the circle plus a margin. */
+export const SYMBOL_BOX_PX = SOLDIER_ICON_PX + 2;
 /** Approximate width per character of a soldier label, for decluttering. */
 const LABEL_CHAR_PX = 6.5;
 const LABEL_HEIGHT_PX = 12;
@@ -165,6 +175,11 @@ export interface DeploymentGeometry {
   /** Tip of the facing arrow (the drag handle). */
   readonly facingTip: Vec2;
   readonly facing: DisplayedFacing;
+}
+
+/** The icon colour of a soldier's side: the trainee's side is friendly, the other enemy. */
+export function affiliationOf(side: Side): Affiliation {
+  return side === TRAINEE_SIDE ? 'friendly' : 'enemy';
 }
 
 export function selectedSoldier(scene: MapScene): DeepReadonly<Soldier> | undefined {
@@ -235,44 +250,51 @@ interface Box {
   readonly y1: number;
 }
 
-/** How a trainee soldier's symbol is drawn after decluttering. */
+/** How a soldier's symbol is drawn after decluttering. */
 export interface SymbolPlacement {
   /** The soldier's true position on screen: symbols are never displaced. */
   readonly at: Vec2;
-  /** `full`: the standard symbol; `compact`: a small dot, because it would overlap another symbol. */
+  /** `full`: the full icon; `compact`: a small dot, because it would overlap another symbol. */
   readonly mode: 'full' | 'compact';
+  /** Icon colour family, from the soldier's side. */
+  readonly affiliation: Affiliation;
+  /** Text beside the symbol: the trainee soldier's slot label, or the soldier id. */
+  readonly label: string;
   readonly showLabel: boolean;
   /**
-   * How many compact soldiers stand under this full symbol, where they cannot
-   * be seen (shown as a "+n" badge); 0 for compact symbols.
+   * Compact soldiers standing under this full symbol, where they cannot be seen
+   * (shown as "+n" badges, one per affiliation); empty for compact symbols.
    */
+  readonly hidden: readonly { readonly id: SoldierId; readonly affiliation: Affiliation }[];
+  /** `hidden.length`. */
   readonly covered: number;
 }
 
 /**
- * Declutters the trainee soldiers' symbols without moving them: the selected
- * soldier first, then in scene order, each gets a full symbol unless it would
- * overlap a full symbol already placed, in which case it is drawn compact.
- * A label is shown where it overlaps no symbol or label placed before it; the
- * selected soldier's label is always shown. Compact soldiers hidden under a
- * full symbol are counted on that symbol (`covered`), so a cluster always
- * shows how many it holds.
+ * Declutters every soldier's symbol, whatever its side, without moving it:
+ * the selected soldier first, then in scene order, each gets a full symbol
+ * unless it would overlap a full symbol already placed, in which case it is
+ * drawn compact (a dot at its true position). A label is shown where it
+ * overlaps no symbol or label placed before it; the selected soldier's label
+ * is always shown. Compact soldiers hidden under a full symbol are listed on
+ * that symbol (`hidden`), so a cluster always shows how many it holds, and of
+ * which affiliation.
  */
 export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlacement> {
-  const trainee = scene.soldiers.filter((s) => scene.markings.has(s.id));
   const ordered = [
-    ...trainee.filter((s) => s.id === scene.selectedId),
-    ...trainee.filter((s) => s.id !== scene.selectedId),
+    ...scene.soldiers.filter((s) => s.id === scene.selectedId),
+    ...scene.soldiers.filter((s) => s.id !== scene.selectedId),
   ];
   const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
   const symbols: Box[] = [];
   const owners: SoldierId[] = [];
   const labels: Box[] = [];
   const layout = new Map<SoldierId, SymbolPlacement>();
-  const covered = new Map<SoldierId, number>();
+  const hidden = new Map<SoldierId, { id: SoldierId; affiliation: Affiliation }[]>();
   const half = SYMBOL_BOX_PX / 2;
   for (const soldier of ordered) {
     const at = worldToScreen(scene.camera, scene.viewport, soldier.position);
+    const affiliation = affiliationOf(soldier.side);
     const box = { x0: at.x - half, y0: at.y - half, x1: at.x + half, y1: at.y + half };
     const selected = soldier.id === scene.selectedId;
     const full = selected || !symbols.some((b) => overlaps(b, box));
@@ -284,9 +306,13 @@ export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlac
         (b) => at.x >= b.x0 && at.x <= b.x1 && at.y >= b.y0 && at.y <= b.y1,
       );
       const owner = owners[under];
-      if (owner !== undefined) covered.set(owner, (covered.get(owner) ?? 0) + 1);
+      if (owner !== undefined) {
+        const list = hidden.get(owner) ?? [];
+        list.push({ id: soldier.id, affiliation });
+        hidden.set(owner, list);
+      }
     }
-    const text = scene.markings.get(soldier.id)?.label ?? '';
+    const text = scene.markings.get(soldier.id)?.label ?? soldier.id;
     const offset = full ? half + 2 : 6;
     const label = {
       x0: at.x + offset,
@@ -300,13 +326,52 @@ export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlac
         !labels.some((b) => overlaps(b, label)) &&
         !symbols.some((b) => b !== box && overlaps(b, label)));
     if (showLabel) labels.push(label);
-    layout.set(soldier.id, { at, mode: full ? 'full' : 'compact', showLabel, covered: 0 });
+    layout.set(soldier.id, {
+      at,
+      mode: full ? 'full' : 'compact',
+      affiliation,
+      label: text,
+      showLabel,
+      hidden: [],
+      covered: 0,
+    });
   }
-  for (const [id, count] of covered) {
+  for (const [id, list] of hidden) {
     const placement = layout.get(id);
-    if (placement) layout.set(id, { ...placement, covered: count });
+    if (placement) layout.set(id, { ...placement, hidden: list, covered: list.length });
   }
   return layout;
+}
+
+/**
+ * The trainee soldiers a click at `screen` may select: every one whose symbol
+ * box (`SYMBOL_BOX_PX`) contains the point, nearest first (scene order on a
+ * tie). Depends only on positions, never on which soldier is selected or drawn
+ * in full, so clicking a cluster repeatedly steps through all its soldiers,
+ * including those drawn compact or hidden under another symbol.
+ */
+export function selectableSoldiersAt(scene: MapScene, screen: Vec2): SoldierId[] {
+  const half = SYMBOL_BOX_PX / 2;
+  return scene.soldiers
+    .filter((s) => scene.markings.has(s.id))
+    .map((s, order) => {
+      const at = worldToScreen(scene.camera, scene.viewport, s.position);
+      return { id: s.id, at, order, d: distance(at, screen) };
+    })
+    .filter(({ at }) => Math.abs(at.x - screen.x) <= half && Math.abs(at.y - screen.y) <= half)
+    .sort((a, b) => a.d - b.d || a.order - b.order)
+    .map(({ id }) => id);
+}
+
+/**
+ * The soldier a click at `screen` selects: the nearest selectable one, or, if
+ * the selected soldier is among them, the next after it (wrapping round), so
+ * repeated clicks on a cluster select each of its soldiers in turn.
+ */
+export function nextSelectionAt(scene: MapScene, screen: Vec2): SoldierId | undefined {
+  const candidates = selectableSoldiersAt(scene, screen);
+  const current = scene.selectedId === null ? -1 : candidates.indexOf(scene.selectedId);
+  return candidates[current < 0 ? 0 : (current + 1) % candidates.length];
 }
 
 export function distance(a: Vec2, b: Vec2): number {

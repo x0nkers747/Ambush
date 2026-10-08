@@ -5,7 +5,10 @@ import { USMC_RIFLE_SQUAD_TEMPLATE } from './demo-scenario';
 import { createExercise } from './exercise';
 import {
   instantiateOrganization,
+  migrateOrganizationTemplate,
   OrganizationTemplateError,
+  readOrganizationTemplate,
+  resolveSlot,
   rosterMembers,
   rosterTree,
   validateOrganizationTemplate,
@@ -13,6 +16,7 @@ import {
 } from './organization';
 import usmc from './organizations/usmc-rifle-squad-mcwp-3-11-2.json';
 import patrol from './test-data/synthetic-patrol.template.json';
+import usmcV1 from './test-data/usmc-rifle-squad-v1.template.json';
 
 const PATROL = validateOrganizationTemplate(patrol);
 
@@ -68,18 +72,166 @@ describe('the USMC rifle squad template (MCWP 3-11.2)', () => {
     expect(role('fireTeamLeader')?.grade).toBe('Corporal');
     expect(role('automaticRifleman')?.grade).toBe('Lance corporal');
     expect(role('rifleman')?.grade).toBe('Private or private first class');
-    expect(role('fireTeamLeader')?.weaponProfileRefs).toContain('m203-grenade-launcher');
-    expect(role('automaticRifleman')?.weaponProfileRefs).toContain('squad-automatic-weapon');
+    expect(role('fireTeamLeader')?.defaultLoadout?.weaponProfileRefs).toContain(
+      'm203-grenade-launcher',
+    );
+    expect(role('automaticRifleman')?.defaultLoadout?.weaponProfileRefs).toContain(
+      'squad-automatic-weapon',
+    );
   });
 
-  it('gives every Marine the same standard individual symbol, whatever the role', () => {
-    expect(new Set(template.roles.map((r) => r.symbology.sidc))).toEqual(
-      new Set(['10032700001101010000']),
-    );
+  it('maps every role to an Ambush! individual icon (docs/adr/0013)', () => {
+    expect(Object.fromEntries(template.roles.map((r) => [r.id, r.defaultIcon]))).toEqual({
+      squadLeader: 'squadLeader',
+      fireTeamLeader: 'fireTeamLeader',
+      automaticRifleman: 'automaticRifleman',
+      // Armed with a rifle (para 1004a); there is no assistant automatic rifleman icon.
+      assistantAutomaticRifleman: 'rifleman',
+      rifleman: 'rifleman',
+    });
+  });
+
+  it('keeps APP-6 unit symbols for the squad and its fire teams', () => {
+    expect(template.units.map((u) => u.symbology?.sidc)).toEqual([
+      '10031000121211000000',
+      '10031000111211000000',
+      '10031000111211000000',
+      '10031000111211000000',
+    ]);
   });
 
   it('is the JSON file, validated unchanged', () => {
     expect(template).toEqual(usmc);
+  });
+});
+
+describe('role, loadout and icon', () => {
+  const template = USMC_RIFLE_SQUAD_TEMPLATE;
+  const slot = (id: string) => {
+    const found = template.slots.find((s) => s.id === id);
+    if (!found) throw new Error(`no slot ${id}`);
+    return found;
+  };
+
+  it('resolve as three separate properties, the role giving the defaults', () => {
+    const ftl = resolveSlot(template, slot('FT1.FTL'));
+    expect(ftl.role.id).toBe('fireTeamLeader');
+    expect(ftl.loadout.weaponProfileRefs).toEqual([
+      'm16-rifle',
+      'm203-grenade-launcher',
+      'bayonet-knife',
+    ]);
+    expect(ftl.icon).toBe('fireTeamLeader');
+    // Same role-derived icon as a rifleman, different role and the same rifle.
+    const aar = resolveSlot(template, slot('FT1.AAR'));
+    expect([aar.role.id, aar.icon]).toEqual(['assistantAutomaticRifleman', 'rifleman']);
+  });
+
+  it('let a slot override its loadout and icon without changing its role', () => {
+    const data = copy(usmc);
+    item(data, 'slots', 1)['icon'] = 'grenadier';
+    item(data, 'slots', 1)['loadout'] = { weaponProfileRefs: ['m203-grenade-launcher'] };
+    const edited = validateOrganizationTemplate(data);
+    const ftl = resolveSlot(edited, edited.slots[1] ?? slot('FT1.FTL'));
+    expect(ftl.role.id).toBe('fireTeamLeader');
+    expect(ftl.icon).toBe('grenadier');
+    expect(ftl.loadout.weaponProfileRefs).toEqual(['m203-grenade-launcher']);
+    // The other fire team leaders keep their role's defaults.
+    expect(resolveSlot(edited, slot('FT2.FTL')).icon).toBe('fireTeamLeader');
+  });
+
+  it('fall back to no loadout and no icon (unknown role) when none is given', () => {
+    const data = copy(usmc);
+    delete item(data, 'roles', 4)['defaultIcon'];
+    delete item(data, 'roles', 4)['defaultLoadout'];
+    const edited = validateOrganizationTemplate(data);
+    expect(resolveSlot(edited, slot('FT1.R'))).toMatchObject({
+      icon: null,
+      loadout: { weaponProfileRefs: [] },
+    });
+  });
+
+  it('are what the roster shows for each member', () => {
+    const members = rosterMembers(
+      rosterTree({
+        template,
+        unitIdPrefix: '',
+        members: template.slots.map((s, i) => ({ soldierId: `M${String(i)}`, slotId: s.id })),
+      }),
+    );
+    for (const m of members) expect(m).toMatchObject(resolveSlot(template, m.slot));
+  });
+});
+
+describe('version 1 templates', () => {
+  it('are converted to version 2 automatically by readOrganizationTemplate', () => {
+    const read = readOrganizationTemplate(usmcV1);
+    expect(read.migratedFrom).toBe(1);
+    expect(read.template.schemaVersion).toBe(2);
+    // The template's own version is the author's and is kept.
+    expect(read.template.version).toBe('1.0.0');
+    // Units, slots, source and loadouts carry over; roles lose only their APP-6 code.
+    expect(read.template.units).toEqual(usmc.units);
+    expect(read.template.slots).toEqual(usmc.slots);
+    expect(read.template.source).toEqual(usmc.source);
+    const withoutIcon = (role: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(role).filter(([key]) => key !== 'defaultIcon'));
+    expect(read.template.roles).toEqual(usmc.roles.map(withoutIcon));
+  });
+
+  it('get no role icon: an individual APP-6 code names none, so nothing is guessed', () => {
+    const { template: migrated, notes } = readOrganizationTemplate(usmcV1);
+    for (const s of migrated.slots) expect(resolveSlot(migrated, s).icon).toBeNull();
+    expect(notes).toContain(
+      'role "squadLeader": APP-6 code "10032700001101010000" dropped; it names no role icon, so the role has no defaultIcon and is drawn as an unknown role until one is added',
+    );
+    expect(notes).toContain('role "rifleman": weaponProfileRefs moved to defaultLoadout');
+  });
+
+  it('can then be instantiated like any template', () => {
+    const { template: migrated } = readOrganizationTemplate(usmcV1);
+    const { soldiers } = instantiateOrganization(
+      migrated,
+      {
+        templateId: migrated.id,
+        templateVersion: migrated.version,
+        side: 'BLUEFOR',
+        unitIdPrefix: '',
+        facingDeg: 0,
+        posture: 'standing',
+        members: migrated.slots.map((s, i) => ({ soldierId: `S${String(i)}`, slotId: s.id })),
+      },
+      (_member, i) => ({ east: i * 2, north: 0 }),
+    );
+    expect(soldiers).toHaveLength(13);
+  });
+
+  it('are still refused by the strict validator, which reads only the current version', () => {
+    expect(() => validateOrganizationTemplate(usmcV1)).toThrow(
+      /schemaVersion: 1 is not supported \(expected 2; readOrganizationTemplate converts version 1\)/,
+    );
+  });
+
+  it('leave current, unknown and malformed data to validation, unchanged', () => {
+    expect(migrateOrganizationTemplate(usmc)).toEqual({
+      data: usmc,
+      migratedFrom: null,
+      notes: [],
+    });
+    const other = { schema: 'something-else', schemaVersion: 1 };
+    expect(migrateOrganizationTemplate(other).data).toBe(other);
+    expect(() => readOrganizationTemplate({ ...copy(usmcV1), roles: 'none' })).toThrow(
+      /\$\.roles: must be an array/,
+    );
+    expect(() => readOrganizationTemplate({ ...copy(usmcV1), schemaVersion: 0 })).toThrow(
+      /schemaVersion: 0 is not supported/,
+    );
+  });
+
+  it('do not alter the data they are given', () => {
+    const before = JSON.stringify(usmcV1);
+    readOrganizationTemplate(usmcV1);
+    expect(JSON.stringify(usmcV1)).toBe(before);
   });
 });
 
@@ -108,8 +260,28 @@ describe('validateOrganizationTemplate', () => {
     ['another schema', (t) => (t['schema'] = 'something-else'), /\$\.schema/],
     [
       'a newer schema version',
-      (t) => (t['schemaVersion'] = 2),
-      /schemaVersion: 2 is not supported/,
+      (t) => (t['schemaVersion'] = 3),
+      /schemaVersion: 3 is not supported/,
+    ],
+    [
+      'a role with an APP-6 code (version 1 style)',
+      (t) => (item(t, 'roles', 0)['symbology'] = { sidc: '10032700001101010000' }),
+      /\$\.roles\[0\]\.symbology: is not a known field/,
+    ],
+    [
+      'a role with an unknown icon',
+      (t) => (item(t, 'roles', 0)['defaultIcon'] = 'sniper'),
+      /\$\.roles\[0\]\.defaultIcon: "sniper" is not one of squadLeader, fireTeamLeader/,
+    ],
+    [
+      'a slot with an unknown icon',
+      (t) => (item(t, 'slots', 0)['icon'] = 'sniper'),
+      /\$\.slots\[0\]\.icon: "sniper" is not one of/,
+    ],
+    [
+      'a loadout that is not a list of profile references',
+      (t) => (item(t, 'slots', 0)['loadout'] = { weaponProfileRefs: 'm16-rifle' }),
+      /\$\.slots\[0\]\.loadout\.weaponProfileRefs: must be an array/,
     ],
     ['an unknown field', (t) => (t['colour'] = 'blue'), /\$\.colour: is not a known field/],
     ['a version that is not semantic', (t) => (t['version'] = 'v1'), /\$\.version/],
@@ -146,8 +318,8 @@ describe('validateOrganizationTemplate', () => {
       /unknown slot "FT9.FTL"/,
     ],
     [
-      'a malformed symbol code',
-      (t) => (item(t, 'roles', 0)['symbology'] = { sidc: 'SFGPUCI----' }),
+      'a malformed unit symbol code',
+      (t) => (item(t, 'units', 0)['symbology'] = { sidc: 'SFGPUCI----' }),
       /sidc/,
     ],
     [
@@ -209,9 +381,9 @@ describe('instantiateOrganization', () => {
   it.each<[string, OrganizationInstance, RegExp]>([
     ['another template', { ...instance(ALL), templateId: 'other' }, /refers to template "other"/],
     [
-      'another template version',
-      { ...instance(ALL), templateVersion: '0.2.0' },
-      /needs template version 0.2.0/,
+      'another (e.g. an older) template version',
+      { ...instance(ALL), templateVersion: '0.1.0' },
+      /needs template version 0.1.0/,
     ],
     ['an unfilled slot', instance(ALL.slice(1)), /slots "lead" are not filled/],
     [

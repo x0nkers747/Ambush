@@ -8,7 +8,8 @@ Status: **Phase 3.7**: doctrinal squad organization and simplified deployment. T
 commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
 [ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
-with APP-6 symbols (milsymbol) and listed in a roster. The ambush flow runs through AMBUSH
+with Ambush!'s own role icons (not APP-6, see
+[ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow runs through AMBUSH
 TRIGGERED. No combat, 3D or GIS import yet.
 
 ## Requirements
@@ -43,24 +44,24 @@ Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or 
 5. **Ambush triggered.** The moment an OPFOR soldier enters the kill zone, the simulation stops
    and shows who entered and when.
 
-| Action                          | Effect                                             |
-| ------------------------------- | -------------------------------------------------- |
-| Roster row / blue symbol        | Select a Marine (OPFOR cannot be selected)         |
-| Click the map                   | Set or move the destination (with K: add a corner) |
-| Click a kill-zone side          | Insert a corner there                              |
-| Drag the destination / a corner | Move it                                            |
-| Right-click destination/corner  | Clear the destination / delete the corner          |
-| Drag the yellow arrow handle    | Set the facing (000°–359°; dashed arrow = default) |
-| K                               | Switch between editing positions and the kill zone |
-| V                               | Visibility: show what the selected Marine sees     |
-| Backspace / Delete              | Clear the selected Marine's destination            |
-| Drag the map / middle-drag      | Pan                                                |
-| Mouse wheel                     | Zoom at the cursor                                 |
-| F                               | Fit the whole map                                  |
-| Space                           | Pause / Resume                                     |
-| 1 · 8                           | Time scale 1× · 8×                                 |
-| + / −                           | Faster / slower through 1× · 8× · 16×              |
-| Esc                             | Clear the selection                                |
+| Action                          | Effect                                              |
+| ------------------------------- | --------------------------------------------------- |
+| Roster row / blue symbol        | Select a Marine; click a cluster again for the next |
+| Click the map                   | Set or move the destination (with K: add a corner)  |
+| Click a kill-zone side          | Insert a corner there                               |
+| Drag the destination / a corner | Move it                                             |
+| Right-click destination/corner  | Clear the destination / delete the corner           |
+| Drag the yellow arrow handle    | Set the facing (000°–359°; dashed arrow = default)  |
+| K                               | Switch between editing positions and the kill zone  |
+| V                               | Visibility: show what the selected Marine sees      |
+| Backspace / Delete              | Clear the selected Marine's destination             |
+| Drag the map / middle-drag      | Pan                                                 |
+| Mouse wheel                     | Zoom at the cursor                                  |
+| F                               | Fit the whole map                                   |
+| Space                           | Pause / Resume                                      |
+| 1 · 8                           | Time scale 1× · 8×                                  |
+| + / −                           | Faster / slower through 1× · 8× · 16×               |
+| Esc                             | Clear the selection                                 |
 
 ## Scripts
 
@@ -76,6 +77,11 @@ Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or 
 | `npm run format:check` | Check formatting                                        |
 | `npm run check`        | typecheck + lint + test + format:check                  |
 | `npm run sim:headless` | Run headless, e.g. `-- --rate 30 --seconds 10 --seed 0` |
+
+Development tool: with `npm run dev` running, `/symbols.html` previews every individual soldier
+icon (all roles, affiliations, sizes and facings) and live tactical maps drawn by the production
+renderer, including crowded and mixed-affiliation decluttering
+([ADR 0013](docs/adr/0013-individual-soldier-icons.md)).
 
 ## Architecture
 
@@ -107,3 +113,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 10. [Ambush exercise flow, kill zone and trigger](docs/adr/0010-ambush-exercise-flow.md)
 11. [Tactical environment, path planning and line of sight](docs/adr/0011-tactical-environment.md)
 12. [Doctrinal organization, ORP and single-destination deployment](docs/adr/0012-organization-orp-and-single-destination-planning.md)
+13. [Custom individual soldier icons](docs/adr/0013-individual-soldier-icons.md)

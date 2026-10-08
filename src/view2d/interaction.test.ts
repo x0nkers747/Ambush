@@ -11,7 +11,13 @@ import { createMapActions } from './actions';
 import { formatBearing } from './bearing';
 import { screenToWorld, type Camera } from './camera';
 import { createMapController, DRAG_THRESHOLD_PX } from './interaction';
-import { buildScene, deploymentGeometry, FACING_ARROW_PX, symbolLayout } from './scene';
+import {
+  buildScene,
+  deploymentGeometry,
+  FACING_ARROW_PX,
+  selectableSoldiersAt,
+  symbolLayout,
+} from './scene';
 
 // Pointer interaction driven through the real exercise, session and map
 // actions, with a camera of 1 m per pixel centred on the origin of a
@@ -22,7 +28,7 @@ const A = soldierId('A');
 /** A synthetic two-person team (represents no real organization). */
 const PAIR: OrganizationTemplate = {
   schema: 'ambush.organization-template',
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: 'interaction-pair',
   version: '1.0.0',
   name: 'Interaction test pair',
@@ -33,7 +39,7 @@ const PAIR: OrganizationTemplate = {
       id: 'member',
       name: 'Member',
       abbreviation: 'M',
-      symbology: { sidc: '10032700001101010000' },
+      defaultIcon: 'rifleman',
     },
   ],
   units: [
@@ -172,6 +178,9 @@ function setup() {
       return tip;
     },
     notices,
+    setCamera(next: Camera) {
+      camera = next;
+    },
     setSession(next: Session) {
       session = next;
     },
@@ -535,20 +544,87 @@ describe('symbol decluttering', () => {
   it('draws full symbols where they do not overlap, at the soldiers’ true positions', () => {
     const ui = setup();
     const layout = symbolLayout(sceneAt(ui, 1));
-    expect([...layout.values()].map((p) => p.mode)).toEqual(['full', 'full']);
+    expect([...layout.values()].map((p) => p.mode)).toEqual(['full', 'full', 'full']);
     expect(layout.get(A)?.at).toEqual(screen(0, 0));
-    expect(layout.get(soldierId('E'))).toBeUndefined(); // OPFOR is drawn separately
+    // OPFOR is laid out by the same rules, as an enemy labelled with its soldier id.
+    expect(layout.get(soldierId('E'))).toMatchObject({
+      at: screen(0, 100),
+      affiliation: 'enemy',
+      label: 'E',
+      mode: 'full',
+    });
+    expect(layout.get(A)).toMatchObject({ affiliation: 'friendly', label: 'M1' });
   });
 
   it('draws overlapping symbols compact, the selected soldier always in full with its label', () => {
     const ui = setup();
-    const far = sceneAt(ui, 10, 'B'); // 50 m apart = 5 px: they overlap
+    // A (0, 0), B (50, 0) and OPFOR E (0, 100) are 5–10 px apart: they overlap.
+    const far = sceneAt(ui, 10, 'B');
     const layout = symbolLayout(far);
     expect(layout.get(soldierId('B'))).toMatchObject({ mode: 'full', showLabel: true });
     expect(layout.get(A)).toMatchObject({ mode: 'compact', showLabel: false });
-    expect(layout.get(soldierId('B'))?.covered).toBe(1); // A is hidden under B: counted
+    expect(layout.get(soldierId('E'))).toMatchObject({ mode: 'compact', showLabel: false });
+    // Both are hidden under B, and counted with their affiliations.
+    expect(layout.get(soldierId('B'))?.hidden).toEqual([
+      { id: A, affiliation: 'friendly' },
+      { id: soldierId('E'), affiliation: 'enemy' },
+    ]);
+    expect(layout.get(soldierId('B'))?.covered).toBe(2);
     // Positions are never moved to make room.
     expect(layout.get(A)?.at.x).toBeCloseTo(200, 9);
     expect(layout.get(soldierId('B'))?.at.x).toBeCloseTo(205, 9);
+    expect(layout.get(soldierId('E'))?.at.y).toBeCloseTo(190, 9);
+  });
+
+  it('gives OPFOR the full symbol when no Marine is in the way', () => {
+    const ui = setup();
+    // 2 m per pixel: A and B are 25 px apart, E 50 px north of A.
+    const layout = symbolLayout(sceneAt(ui, 2));
+    expect([...layout.values()].every((p) => p.mode === 'full' && p.covered === 0)).toBe(true);
+  });
+});
+
+describe('selecting soldiers in a cluster', () => {
+  /** The cluster at 10 m per pixel: A at (200, 200), B at (205, 200), OPFOR E at (200, 190). */
+  const clustered = () => {
+    const ui = setup();
+    ui.setCamera({ centerX: 0, centerY: 0, metersPerPixel: 10 });
+    return ui;
+  };
+  const clickPixel = (ui: ReturnType<typeof setup>, x: number, y: number) => {
+    ui.controller.pointerDown({ x, y, button: 0 });
+    ui.controller.pointerUp({ x, y, button: 0 });
+  };
+
+  it('lists every Marine whose symbol is under the pointer, nearest first, never OPFOR', () => {
+    const ui = clustered();
+    const scene = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 });
+    expect(selectableSoldiersAt(scene, { x: 201, y: 200 })).toEqual([A, soldierId('B')]);
+    expect(selectableSoldiersAt(scene, { x: 205, y: 199 })).toEqual([soldierId('B'), A]);
+    expect(selectableSoldiersAt(scene, { x: 260, y: 260 })).toEqual([]);
+  });
+
+  it('steps through the cluster on repeated clicks, including the hidden Marine', () => {
+    const ui = clustered();
+    clickPixel(ui, 201, 200);
+    expect(ui.session.selectedSoldierId).toBe('A');
+    clickPixel(ui, 201, 200);
+    expect(ui.session.selectedSoldierId).toBe('B');
+    // B is now drawn in full on top of A; the same click still reaches A.
+    expect(
+      symbolLayout(buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 })).get(
+        A,
+      )?.mode,
+    ).toBe('compact');
+    clickPixel(ui, 201, 200);
+    expect(ui.session.selectedSoldierId).toBe('A');
+  });
+
+  it('does not set a destination when an OPFOR symbol alone is clicked', () => {
+    const ui = setup();
+    ui.click(0, 0); // select A
+    ui.click(0, 100); // E's symbol
+    expect(ui.session.selectedSoldierId).toBe('A');
+    expect(ui.destination()).toBeNull();
   });
 });

@@ -296,7 +296,7 @@
       }
       .roster-row {
         display: grid;
-        grid-template-columns: 34px 1fr auto auto;
+        grid-template-columns: 15px 34px 1fr auto auto;
         gap: 6px;
         align-items: baseline;
         width: 100%;
@@ -307,6 +307,12 @@
         text-align: left;
         font-size: 12px;
         border-radius: 2px;
+      }
+      .roster-row .icon {
+        align-self: center;
+      }
+      .roster-row .icon svg {
+        display: block;
       }
       .roster-row .abbr {
         font-weight: 700;

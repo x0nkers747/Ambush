@@ -1,14 +1,5 @@
 import { polygonCentroid, type PlannedRoute } from '#exercise';
-import type {
-  DeepReadonly,
-  RoadClass,
-  Soldier,
-  SoldierId,
-  TerrainDataset,
-  VegetationKind,
-  Vec2,
-  Viewshed,
-} from '#sim';
+import type { RoadClass, SoldierId, TerrainDataset, VegetationKind, Vec2, Viewshed } from '#sim';
 import { formatBearing } from './bearing';
 import {
   screenToWorld,
@@ -20,11 +11,18 @@ import {
 import {
   deploymentGeometry,
   DESTINATION_RADIUS_PX,
+  SOLDIER_ICON_PX,
   SYMBOL_BOX_PX,
   symbolLayout,
   type MapScene,
 } from './scene';
-import { symbolImage } from './symbology';
+import {
+  AFFILIATION_COLORS,
+  drawSoldierIcon,
+  FACING_REACH,
+  ICON_INK,
+  type Affiliation,
+} from './soldier-icons';
 import { contourLines, terrainRaster } from './terrain-layer';
 
 // Canvas 2D rendering of the tactical map. Map coordinates are drawn through
@@ -37,13 +35,9 @@ const COLORS = {
   indexContour: 'rgba(92, 66, 40, 0.72)',
   grid: 'rgba(30, 35, 40, 0.18)',
   gridLabel: 'rgba(20, 24, 28, 0.75)',
-  friendly: '#2f6fc4',
-  friendlyCompact: '#80c0ff',
   orpFill: 'rgba(47, 111, 196, 0.1)',
   orpEdge: 'rgba(29, 64, 120, 0.8)',
   badge: '#1d4078',
-  hostile: '#c8433a',
-  symbolOutline: '#f4f6f8',
   facingTick: '#15191d',
   route: '#1d4f9c',
   routeHalo: 'rgba(255, 255, 255, 0.7)',
@@ -73,14 +67,8 @@ const COLORS = {
 
 const MINOR_CONTOUR_INTERVAL_M = 2;
 const INDEX_CONTOUR_EVERY = 5;
-const SOLDIER_RADIUS_PX = 6;
-const FACING_TICK_PX = 14;
-/** milsymbol's base size for trainee symbols (about 21 px across for a dismounted individual). */
-const SYMBOL_SIZE = 18;
-/** Radius of a decluttered (compact) trainee symbol. */
+/** Radius of a decluttered (compact) soldier symbol. */
 const COMPACT_RADIUS_PX = 3.5;
-/** Soldier labels appear once soldiers are far enough apart to read them. */
-const LABEL_MAX_METERS_PER_PIXEL = 0.45;
 /** Building and vegetation ids appear from this zoom. */
 const FEATURE_LABEL_MAX_METERS_PER_PIXEL = 0.6;
 /** Opacity (0–255) of the visibility overlay, inside the visible area and along its edge. */
@@ -182,10 +170,7 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
   }
   drawSelectedPlan(ctx, scene);
   drawObserver(ctx, scene);
-  for (const soldier of scene.soldiers) {
-    if (!scene.markings.has(soldier.id)) drawOpforSoldier(ctx, scene, soldier);
-  }
-  drawTraineeSoldiers(ctx, scene);
+  drawSoldiers(ctx, scene);
   drawFacingArrow(ctx, scene);
   drawTrigger(ctx, scene);
   drawNorthArrow(ctx, width);
@@ -448,39 +433,15 @@ function drawSelectedPlan(ctx: CanvasRenderingContext2D, scene: MapScene): void 
   ctx.restore();
 }
 
-/** Opposing-force soldiers: a red diamond with a facing tick (not a standard symbol). */
-function drawOpforSoldier(
-  ctx: CanvasRenderingContext2D,
-  scene: MapScene,
-  soldier: DeepReadonly<Soldier>,
-): void {
-  const p = worldToScreen(scene.camera, scene.viewport, soldier.position);
-  ctx.save();
-  ctx.strokeStyle = COLORS.facingTick;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(p.x, p.y);
-  ctx.lineTo(
-    p.x + Math.sin(soldier.azimuth) * FACING_TICK_PX,
-    p.y - Math.cos(soldier.azimuth) * FACING_TICK_PX,
-  );
-  ctx.stroke();
-  const r = SOLDIER_RADIUS_PX + 1.5;
-  ctx.beginPath();
-  ctx.moveTo(p.x, p.y - r);
-  ctx.lineTo(p.x + r, p.y);
-  ctx.lineTo(p.x, p.y + r);
-  ctx.lineTo(p.x - r, p.y);
-  ctx.closePath();
-  ctx.fillStyle = COLORS.hostile;
-  ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = COLORS.symbolOutline;
-  ctx.stroke();
-  if (scene.camera.metersPerPixel <= LABEL_MAX_METERS_PER_PIXEL) {
-    drawLabel(ctx, soldier.id, p.x + 10, p.y + 9, false);
-  }
-  ctx.restore();
+/**
+ * How far a label beside an icon must start (east `side` 1, west −1) to clear
+ * its facing triangle; 0 when the triangle points away from the label's line.
+ */
+function triangleClearance(azimuth: number, side: 1 | -1): number {
+  const reach = FACING_REACH * SOLDIER_ICON_PX;
+  const x = reach * Math.sin(azimuth) * side;
+  const y = reach * Math.cos(azimuth);
+  return x > 0 && Math.abs(y) < 10 ? x + 3 : 0;
 }
 
 function drawLabel(
@@ -501,99 +462,121 @@ function drawLabel(
 }
 
 /**
- * The trainee's soldiers at their true positions (docs/adr/0012): the standard
- * symbol from milsymbol, or a compact dot where symbols would overlap, plus
- * the Ambush! facing indicator, role label and selection halo. The selected
- * soldier is drawn last, on top.
+ * Every soldier, whatever its side, at its true position (docs/adr/0013): the
+ * icon with its facing triangle, or a compact dot with a facing tick where
+ * icons would overlap (`symbolLayout`), plus its label, "+n" badges for the
+ * soldiers hidden beneath it, and the selection ring. Compact soldiers are
+ * drawn first, full icons over them, the selected soldier last, on top.
  */
-function drawTraineeSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const layout = symbolLayout(scene);
-  const dpr = ctx.getTransform().a;
   const rank = (id: SoldierId, mode: string) =>
     id === scene.selectedId ? 2 : mode === 'full' ? 1 : 0;
   const entries = [...layout].sort(([a, p], [b, q]) => rank(a, p.mode) - rank(b, q.mode));
-  for (const [id, { at, mode, showLabel, covered }] of entries) {
+  for (const [id, { at, mode, affiliation, label, showLabel, hidden }] of entries) {
     const soldier = scene.soldiers.find((s) => s.id === id);
-    const marking = scene.markings.get(id);
-    if (!soldier || !marking) continue;
+    if (!soldier) continue;
     const selected = id === scene.selectedId;
     const full = mode === 'full';
     ctx.save();
 
-    // Facing: a stroke beyond the symbol's frame, separate from the standard symbol.
-    const inner = full ? SYMBOL_BOX_PX / 2 - 1 : COMPACT_RADIUS_PX;
-    const outer = inner + (full ? 9 : 7);
-    const sin = Math.sin(soldier.azimuth);
-    const cos = Math.cos(soldier.azimuth);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(at.x + sin * inner, at.y - cos * inner);
-    ctx.lineTo(at.x + sin * outer, at.y - cos * outer);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = COLORS.labelHalo;
-    ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = COLORS.facingTick;
-    ctx.stroke();
-
-    if (full) {
-      const symbol = symbolImage(marking.sidc, SYMBOL_SIZE, dpr);
-      ctx.drawImage(
-        symbol.image,
-        at.x - symbol.anchor.x,
-        at.y - symbol.anchor.y,
-        symbol.width,
-        symbol.height,
-      );
-    } else {
-      ctx.beginPath();
-      ctx.arc(at.x, at.y, COMPACT_RADIUS_PX, 0, 2 * Math.PI);
-      ctx.fillStyle = COLORS.friendlyCompact;
-      ctx.fill();
-      ctx.lineWidth = 1.25;
-      ctx.strokeStyle = COLORS.friendly;
-      ctx.stroke();
-    }
-
+    // The selection ring goes beneath the icon, so the facing triangle stays on top of it.
     if (selected) {
       ctx.beginPath();
-      ctx.arc(at.x, at.y, SYMBOL_BOX_PX / 2 + 4, 0, 2 * Math.PI);
-      ctx.lineWidth = 2.5;
+      ctx.arc(at.x, at.y, SOLDIER_ICON_PX / 2 + 3.5, 0, 2 * Math.PI);
+      ctx.lineWidth = 3.5;
       ctx.strokeStyle = COLORS.selection;
       ctx.stroke();
     }
+
+    if (full) {
+      // Soldiers outside the trainee's organization (OPFOR) have no role: the plain circle.
+      const role = scene.markings.get(id)?.icon ?? null;
+      drawSoldierIcon(ctx, { role, affiliation, facing: soldier.azimuth }, at, SOLDIER_ICON_PX);
+    } else {
+      // Facing: a short tick beyond the dot.
+      const inner = COMPACT_RADIUS_PX;
+      const outer = inner + 7;
+      const sin = Math.sin(soldier.azimuth);
+      const cos = Math.cos(soldier.azimuth);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(at.x + sin * inner, at.y - cos * inner);
+      ctx.lineTo(at.x + sin * outer, at.y - cos * outer);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = COLORS.labelHalo;
+      ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = COLORS.facingTick;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, COMPACT_RADIUS_PX, 0, 2 * Math.PI);
+      ctx.fillStyle = AFFILIATION_COLORS[affiliation];
+      ctx.fill();
+      ctx.lineWidth = 1.25;
+      ctx.strokeStyle = ICON_INK;
+      ctx.stroke();
+    }
     if (showLabel) {
-      const offset = full ? SYMBOL_BOX_PX / 2 + 2 : 6;
       // Keep the selected Marine's label clear of an eastward facing arrow.
       const facing = selected ? scene.facings.get(id) : undefined;
       const east = facing !== undefined && Math.sin(facing.azimuth) > 0.6;
+      const offset = full
+        ? Math.max(SYMBOL_BOX_PX / 2 + 2, triangleClearance(soldier.azimuth, east ? -1 : 1))
+        : 6;
       if (east) {
         ctx.font = `bold 11px system-ui, sans-serif`;
-        const width = ctx.measureText(marking.label).width;
-        drawLabel(ctx, marking.label, at.x - offset - width, at.y, selected);
+        const width = ctx.measureText(label).width;
+        drawLabel(ctx, label, at.x - offset - width, at.y, selected);
       } else {
-        drawLabel(ctx, marking.label, at.x + offset, at.y, selected);
+        drawLabel(ctx, label, at.x + offset, at.y, selected);
       }
     }
-    if (covered > 0) drawCountBadge(ctx, `+${String(covered)}`, at);
+    if (hidden.length > 0) drawHiddenBadges(ctx, hidden, at);
     ctx.restore();
   }
 }
 
-/** "+n" on a symbol that hides n more Marines beneath it. */
-function drawCountBadge(ctx: CanvasRenderingContext2D, text: string, at: Vec2): void {
+/** Badge colours, darker than the icons so white "+n" text reads on them. */
+const BADGE_COLORS: Readonly<Record<Affiliation, string>> = {
+  friendly: COLORS.badge,
+  enemy: '#8f1f19',
+  friendly2: '#2f6a28',
+  neutral: '#7a5a00',
+  unknown: '#45494e',
+};
+
+/**
+ * "+n" badges on a symbol that hides n more soldiers beneath it: one badge per
+ * affiliation, in the affiliation's colour, so an enemy hidden under a friendly
+ * soldier is never counted as friendly.
+ */
+function drawHiddenBadges(
+  ctx: CanvasRenderingContext2D,
+  hidden: readonly { readonly affiliation: Affiliation }[],
+  at: Vec2,
+): void {
+  const counts = new Map<Affiliation, number>();
+  for (const { affiliation } of hidden) counts.set(affiliation, (counts.get(affiliation) ?? 0) + 1);
   ctx.font = 'bold 10px system-ui, sans-serif';
-  const width = ctx.measureText(text).width + 6;
-  const x = at.x + SYMBOL_BOX_PX / 2 - 4;
-  const y = at.y - SYMBOL_BOX_PX / 2 - 6;
-  ctx.beginPath();
-  ctx.roundRect(x, y, width, 13, 6);
-  ctx.fillStyle = COLORS.badge;
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + 3, y + 7);
+  let x = at.x + SYMBOL_BOX_PX / 2 - 4;
+  const y = at.y - SYMBOL_BOX_PX / 2 - 6;
+  for (const [affiliation, count] of counts) {
+    const text = `+${String(count)}`;
+    const width = ctx.measureText(text).width + 6;
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, 13, 6);
+    ctx.fillStyle = BADGE_COLORS[affiliation];
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, x + 3, y + 7);
+    x += width + 2;
+  }
 }
 
 function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {

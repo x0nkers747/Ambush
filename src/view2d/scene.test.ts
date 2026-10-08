@@ -18,15 +18,20 @@ function setup() {
 }
 
 describe('soldier markings', () => {
-  it('map each Marine’s soldier id to its slot label and template symbol code', () => {
+  it('map each Marine’s soldier id to its slot label and template role icon', () => {
     const { exercise, session } = setup();
     const scene = buildScene(exercise, session, FITTED, viewport);
     expect(scene.markings.size).toBe(13);
-    expect(scene.markings.get(soldierId('M01'))).toEqual({
-      sidc: '10032700001101010000',
-      label: 'SL',
+    expect(scene.markings.get(soldierId('M01'))).toEqual({ icon: 'squadLeader', label: 'SL' });
+    expect(scene.markings.get(soldierId('M02'))).toEqual({
+      icon: 'fireTeamLeader',
+      label: '1-FTL',
     });
-    expect(scene.markings.get(soldierId('M03'))?.label).toBe('1-AR');
+    expect(scene.markings.get(soldierId('M03'))).toEqual({
+      icon: 'automaticRifleman',
+      label: '1-AR',
+    });
+    expect(scene.markings.get(soldierId('M04'))).toEqual({ icon: 'rifleman', label: '1-AAR' });
     expect(scene.markings.get(soldierId('M13'))?.label).toBe('3-R');
     expect(scene.markings.has(soldierId('EN-1'))).toBe(false); // OPFOR is not in the organization
     // The mapping follows soldier ids, not the order soldiers are listed in.
@@ -42,14 +47,25 @@ describe('symbols in the ORP', () => {
     const selected = selectSoldier(session, exercise, soldierId('M07'));
     const scene = buildScene(exercise, selected, FITTED, viewport);
     const layout = symbolLayout(scene);
-    expect(layout.size).toBe(13);
+    expect(layout.size).toBe(16); // 13 Marines and 3 OPFOR
     expect(layout.get(soldierId('M07'))).toMatchObject({ mode: 'full', showLabel: true });
     expect([...layout.values()].filter((p) => p.mode === 'full').length).toBeLessThan(13);
-    // Every compact Marine is either visible or counted on the symbol that hides it.
-    const full = [...layout.values()].filter((p) => p.mode === 'full');
+    // Every compact soldier is either visible or counted on the symbol that hides it.
+    const marines = [...layout.entries()].filter(([id]) => scene.markings.has(id));
+    const full = marines.filter(([, p]) => p.mode === 'full').map(([, p]) => p);
     const compact = 13 - full.length;
     const counted = full.reduce((n, p) => n + p.covered, 0);
     expect(counted).toBeLessThanOrEqual(compact);
+    // No Marine is hidden without being counted on the symbol above it.
+    const hiddenIds = new Set(full.flatMap((p) => p.hidden.map((h) => h.id)));
+    for (const [id, p] of marines) {
+      if (p.mode === 'compact' && !hiddenIds.has(id)) {
+        // Visible: not inside any full symbol's box.
+        for (const f of full) {
+          expect(Math.abs(p.at.x - f.at.x) > 12 || Math.abs(p.at.y - f.at.y) > 12).toBe(true);
+        }
+      }
+    }
     expect(layout.get(soldierId('M07'))?.covered).toBeGreaterThan(0);
     for (const soldier of scene.soldiers.filter((s) => s.side === 'BLUEFOR')) {
       const at = layout.get(soldier.id)?.at;
@@ -60,10 +76,12 @@ describe('symbols in the ORP', () => {
 
   it('are all full, each with its label, when zoomed in on the ORP', () => {
     const { exercise, session } = setup();
-    const layout = symbolLayout(buildScene(exercise, session, CLOSE, viewport));
-    expect([...layout.values()].every((p) => p.mode === 'full')).toBe(true);
-    expect([...layout.values()].every((p) => p.covered === 0)).toBe(true);
-    expect([...layout.values()].filter((p) => p.showLabel).length).toBe(13);
+    const scene = buildScene(exercise, session, CLOSE, viewport);
+    const layout = [...symbolLayout(scene)].filter(([id]) => scene.markings.has(id));
+    expect(layout).toHaveLength(13);
+    expect(layout.every(([, p]) => p.mode === 'full')).toBe(true);
+    expect(layout.every(([, p]) => p.covered === 0)).toBe(true);
+    expect(layout.filter(([, p]) => p.showLabel).length).toBe(13);
   });
 });
 
