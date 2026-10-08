@@ -582,7 +582,7 @@ function drawHiddenBadges(
 function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const geometry = deploymentGeometry(scene);
   if (!geometry) return;
-  const { facingAnchor: a, facingTip: tip, facing } = geometry;
+  const { facingAnchor: a, facingShaftStart: from, facingTip: tip, facing } = geometry;
   const angle = Math.atan2(tip.y - a.y, tip.x - a.x);
   ctx.save();
   ctx.strokeStyle = COLORS.route;
@@ -591,7 +591,7 @@ function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   // A default facing (not chosen by the trainee) is dashed.
   ctx.setLineDash(facing.explicit ? [] : [5, 4]);
   ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
+  ctx.moveTo(from.x, from.y);
   ctx.lineTo(tip.x, tip.y);
   ctx.stroke();
   ctx.setLineDash([]);
@@ -616,7 +616,8 @@ function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
     ctx.stroke();
   }
 
-  const label = `${formatBearing(facing.azimuth)}${facing.explicit ? '' : ' (default)'}`;
+  // The bearing alone; a default facing is shown by the dashed shaft.
+  const label = formatBearing(facing.azimuth);
   const lx = tip.x + Math.cos(angle) * 16;
   const ly = tip.y + Math.sin(angle) * 16;
   ctx.font = 'bold 11px system-ui, sans-serif';

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createExercise, DEMO_SCENARIO } from '#exercise';
 import { createSession, selectSoldier } from '#session';
 import { soldierId } from '#sim';
-import { buildScene, deploymentGeometry, symbolLayout } from './scene';
+import { buildScene, deploymentGeometry, SOLDIER_ICON_PX, symbolLayout } from './scene';
+import { FACING_REACH } from './soldier-icons';
 
 // The scene for the demo squad: symbols, labels and the selected Marine's plan.
 
@@ -111,5 +112,55 @@ describe('the selected Marine’s plan', () => {
     expect(g?.destination).toBeNull();
     expect(g?.path).toEqual([]);
     expect(g?.facingAnchor).toEqual(g?.soldier);
+  });
+});
+
+describe('the facing arrow of the selected Marine', () => {
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+  /** Beyond the icon's circle and its facing triangle. */
+  const clearOfIcon = FACING_REACH * SOLDIER_ICON_PX;
+
+  it.each([0, 90, 180, 270])(
+    'starts outside the icon when anchored on the Marine (no destination), facing %i°',
+    (degrees) => {
+      const { exercise, session } = setup();
+      const id = soldierId('M03'); // automatic rifleman: two dashes, no third line
+      exercise.setFacing(id, (degrees * Math.PI) / 180);
+      const selected = selectSoldier(session, exercise, id);
+      const g = deploymentGeometry(buildScene(exercise, selected, CLOSE, viewport));
+      if (!g) throw new Error('no geometry');
+      expect(g.facingAnchor).toEqual(g.soldier);
+      expect(dist(g.facingShaftStart, g.soldier)).toBeGreaterThan(clearOfIcon);
+      // Along the facing, and short of the handle, which has not moved.
+      const along = (p: { x: number; y: number }) =>
+        (p.x - g.soldier.x) * Math.sin(g.facing.azimuth) -
+        (p.y - g.soldier.y) * Math.cos(g.facing.azimuth);
+      expect(along(g.facingShaftStart)).toBeCloseTo(dist(g.facingShaftStart, g.soldier), 9);
+      expect(dist(g.facingTip, g.soldier)).toBeCloseTo(42, 9);
+      expect(dist(g.facingShaftStart, g.soldier)).toBeLessThan(42);
+    },
+  );
+
+  it('starts outside the icon when the Marine stands on its destination', () => {
+    const { exercise, session } = setup();
+    const id = soldierId('M01');
+    const here = exercise.simulation.state.soldiers.find((s) => s.id === id)?.position;
+    if (!here) throw new Error('no M01');
+    exercise.setDestination(id, { x: here.x, y: here.y });
+    const selected = selectSoldier(session, exercise, id);
+    const g = deploymentGeometry(buildScene(exercise, selected, CLOSE, viewport));
+    if (!g?.destination) throw new Error('no destination');
+    expect(dist(g.destination, g.soldier)).toBeLessThan(1e-6);
+    expect(dist(g.facingShaftStart, g.soldier)).toBeGreaterThan(clearOfIcon);
+  });
+
+  it('starts at a destination away from the Marine', () => {
+    const { exercise, session } = setup();
+    const id = soldierId('M03');
+    exercise.setDestination(id, { x: -60, y: -200 });
+    const selected = selectSoldier(session, exercise, id);
+    const g = deploymentGeometry(buildScene(exercise, selected, CLOSE, viewport));
+    expect(g?.facingShaftStart).toEqual(g?.destination);
   });
 });

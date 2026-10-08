@@ -22,7 +22,7 @@ import {
   type Viewshed,
 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
-import type { Affiliation } from './soldier-icons';
+import { FACING_REACH, type Affiliation } from './soldier-icons';
 
 // What the map shows and where, in screen pixels, plus hit-testing on it.
 // Pure: shared by the renderer and the interaction controller.
@@ -172,6 +172,12 @@ export interface DeploymentGeometry {
   readonly impossible: boolean;
   /** Where the facing arrow starts: the destination, or the soldier. */
   readonly facingAnchor: Vec2;
+  /**
+   * Where the facing arrow's shaft is drawn from: the anchor, or, when the
+   * anchor is on the soldier (no destination, or standing on it), a point
+   * beyond its icon and facing triangle, so no line is drawn across the icon.
+   */
+  readonly facingShaftStart: Vec2;
   /** Tip of the facing arrow (the drag handle). */
   readonly facingTip: Vec2;
   readonly facing: DisplayedFacing;
@@ -201,12 +207,18 @@ export function deploymentGeometry(
   const leg = scene.routes.get(soldier.id)?.legs[0];
   const path = destination ? [start, ...(leg?.turns ?? []).map(toScreen), destination] : [];
   const facingAnchor = destination ?? start;
+  const clear =
+    distance(facingAnchor, start) <= SOLDIER_ICON_PX / 2 ? FACING_REACH * SOLDIER_ICON_PX + 1 : 0;
   return {
     soldier: start,
     destination,
     path,
     impossible: destination !== null && (leg?.turns ?? null) === null,
     facingAnchor,
+    facingShaftStart: {
+      x: facingAnchor.x + Math.sin(facing.azimuth) * clear,
+      y: facingAnchor.y - Math.cos(facing.azimuth) * clear,
+    },
     facingTip: {
       x: facingAnchor.x + Math.sin(facing.azimuth) * FACING_ARROW_PX,
       y: facingAnchor.y - Math.cos(facing.azimuth) * FACING_ARROW_PX,
