@@ -1,0 +1,13 @@
+{
+  // Data acquisition (docs/adr/0014): geographic services, tile decoding and
+  // IndexedDB storage in the browser. May use sim and geo.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/acquire"
+  },
+  "include": ["**/*.ts", "**/*.json"],
+  "references": [{ "path": "../sim" }, { "path": "../geo" }]
+}

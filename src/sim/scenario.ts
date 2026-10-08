@@ -101,7 +101,9 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     }
     if (!isOnTerrain(terrain, x, y)) fail(`soldier "${soldier.id}" is off the terrain`);
     const blocked = pointProblem(terrain, { x, y });
-    if (blocked && blocked.kind !== 'offTerrain') {
+    if (blocked?.kind === 'inWater') {
+      fail(`soldier "${soldier.id}" stands in water "${blocked.waterId}"`);
+    } else if (blocked && blocked.kind !== 'offTerrain') {
       fail(`soldier "${soldier.id}" stands in or against building "${blocked.buildingId}"`);
     }
   }

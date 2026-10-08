@@ -1,3 +1,4 @@
 dist/
 .tsbuild/
 package-lock.json
+src/geo/test-data/*.overpass.json

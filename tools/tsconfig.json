@@ -8,5 +8,5 @@
     "outDir": "../.tsbuild/tools"
   },
   "include": ["**/*.ts"],
-  "references": [{ "path": "../src/sim" }, { "path": "../src/exercise" }]
+  "references": [{ "path": "../src/sim" }, { "path": "../src/exercise" }, { "path": "../src/geo" }]
 }

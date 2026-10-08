@@ -11,6 +11,8 @@
   "references": [
     { "path": "../sim" },
     { "path": "../exercise" },
+    { "path": "../geo" },
+    { "path": "../acquire" },
     { "path": "../session" },
     { "path": "../view2d" },
     { "path": "../view3d" }

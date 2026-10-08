@@ -1,5 +1,15 @@
 import { polygonCentroid, type PlannedRoute } from '#exercise';
-import type { RoadClass, SoldierId, TerrainDataset, VegetationKind, Vec2, Viewshed } from '#sim';
+import type {
+  LandUseKind,
+  RoadClass,
+  SoldierId,
+  TerrainDataset,
+  VegetationKind,
+  Vec2,
+  Viewshed,
+  WaterArea,
+  WaterwayKind,
+} from '#sim';
 import { formatBearing } from './bearing';
 import {
   screenToWorld,
@@ -23,7 +33,7 @@ import {
   ICON_INK,
   type Affiliation,
 } from './soldier-icons';
-import { contourLines, terrainRaster } from './terrain-layer';
+import { contourIntervals, contourLines, terrainRaster } from './terrain-layer';
 
 // Canvas 2D rendering of the tactical map. Map coordinates are drawn through
 // the camera transform; symbols and labels are drawn in screen pixels so they
@@ -57,7 +67,15 @@ const COLORS = {
   scrubEdge: 'rgba(80, 112, 50, 0.75)',
   roadCasing: '#6f5b3b',
   roadFill: '#ecdfbf',
+  majorRoadCasing: '#6e2116',
+  majorRoadFill: '#e2683f',
   track: 'rgba(110, 86, 52, 0.9)',
+  path: 'rgba(40, 32, 24, 0.85)',
+  waterFill: 'rgba(115, 168, 222, 0.9)',
+  waterEdge: '#2b67a3',
+  wetlandFill: 'rgba(115, 168, 222, 0.28)',
+  wetlandEdge: 'rgba(43, 103, 163, 0.75)',
+  waterway: '#2b67a3',
   building: '#4b4b4b',
   buildingEdge: '#191919',
   featureLabel: 'rgba(20, 24, 28, 0.85)',
@@ -65,8 +83,6 @@ const COLORS = {
   visibleEdge: '#0d6b30',
 } as const;
 
-const MINOR_CONTOUR_INTERVAL_M = 2;
-const INDEX_CONTOUR_EVERY = 5;
 /** Radius of a decluttered (compact) soldier symbol. */
 const COMPACT_RADIUS_PX = 3.5;
 /** Building and vegetation ids appear from this zoom. */
@@ -75,6 +91,20 @@ const FEATURE_LABEL_MAX_METERS_PER_PIXEL = 0.6;
 const VISIBLE_ALPHA = 80;
 const VISIBLE_EDGE_ALPHA = 150;
 
+/** Land-use tints: light, so terrain shading and contours read through them. */
+const LAND_USE_FILL: Readonly<Record<LandUseKind, string>> = {
+  farmland: 'rgba(236, 222, 150, 0.32)',
+  meadow: 'rgba(196, 226, 150, 0.32)',
+  orchard: 'rgba(170, 210, 130, 0.38)',
+  residential: 'rgba(214, 196, 188, 0.42)',
+  commercial: 'rgba(214, 190, 206, 0.42)',
+  industrial: 'rgba(200, 188, 210, 0.42)',
+  military: 'rgba(214, 150, 140, 0.18)',
+  cemetery: 'rgba(170, 196, 170, 0.4)',
+  recreation: 'rgba(186, 228, 170, 0.36)',
+  other: 'rgba(210, 204, 190, 0.25)',
+};
+
 /** Canvas objects for one terrain, built once. */
 export interface TerrainLayer {
   readonly terrain: TerrainDataset;
@@ -82,24 +112,49 @@ export interface TerrainLayer {
   readonly image: HTMLCanvasElement;
   readonly minorContours: Path2D;
   readonly indexContours: Path2D;
-  /** Environment features as map-coordinate paths, with label anchors. */
-  readonly vegetation: readonly { id: string; kind: VegetationKind; path: Path2D; anchor: Vec2 }[];
+  /**
+   * Environment features as map-coordinate paths. Ids are drawn only for
+   * hand-authored features (`label`), not for imported ones, whose ids are
+   * source references.
+   */
+  readonly vegetation: readonly {
+    id: string;
+    kind: VegetationKind;
+    path: Path2D;
+    anchor: Vec2;
+    label: boolean;
+  }[];
   readonly roads: readonly {
     id: string;
     roadClass: RoadClass;
     widthMeters: number;
     path: Path2D;
   }[];
-  readonly buildings: readonly { id: string; path: Path2D; anchor: Vec2 }[];
+  readonly buildings: readonly { id: string; path: Path2D; anchor: Vec2; label: boolean }[];
+  readonly landUse: readonly { kind: LandUseKind; path: Path2D }[];
+  readonly water: readonly { kind: WaterArea['kind']; path: Path2D }[];
+  readonly waterways: readonly { kind: WaterwayKind; widthMeters: number; path: Path2D }[];
 }
 
-function polygonPath(points: readonly Vec2[]): Path2D {
+/** A polygon (and its holes, as further subpaths) for filling with the even-odd rule. */
+function polygonPath(points: readonly Vec2[], holes: readonly (readonly Vec2[])[] = []): Path2D {
+  const path = new Path2D();
+  for (const ring of [points, ...holes]) {
+    ring.forEach((p, i) => {
+      if (i === 0) path.moveTo(p.x, p.y);
+      else path.lineTo(p.x, p.y);
+    });
+    path.closePath();
+  }
+  return path;
+}
+
+function linePath(points: readonly Vec2[]): Path2D {
   const path = new Path2D();
   points.forEach((p, i) => {
     if (i === 0) path.moveTo(p.x, p.y);
     else path.lineTo(p.x, p.y);
   });
-  path.closePath();
   return path;
 }
 
@@ -116,15 +171,23 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
 
   const minorContours = new Path2D();
   const indexContours = new Path2D();
-  for (const { level, segments } of contourLines(terrain, MINOR_CONTOUR_INTERVAL_M)) {
-    const isIndex = Math.round(level / MINOR_CONTOUR_INTERVAL_M) % INDEX_CONTOUR_EVERY === 0;
+  const intervals = contourIntervals(terrain);
+  for (const { level, segments } of contourLines(terrain, intervals.minor)) {
+    const isIndex = Math.round(level / intervals.minor) % (intervals.index / intervals.minor) === 0;
     const path = isIndex ? indexContours : minorContours;
     for (let i = 0; i + 3 < segments.length; i += 4) {
       path.moveTo(segments[i] ?? 0, segments[i + 1] ?? 0);
       path.lineTo(segments[i + 2] ?? 0, segments[i + 3] ?? 0);
     }
   }
-  const { roads, buildings, vegetation } = terrain.features;
+  const {
+    roads,
+    buildings,
+    vegetation,
+    water = [],
+    waterways = [],
+    landUse = [],
+  } = terrain.features;
   return {
     terrain,
     bounds: terrainBounds(terrain),
@@ -134,21 +197,28 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
     vegetation: vegetation.map((v) => ({
       id: v.id,
       kind: v.kind,
-      path: polygonPath(v.boundary),
+      path: polygonPath(v.boundary, v.holes),
       anchor: polygonCentroid(v.boundary) ?? v.boundary[0] ?? { x: 0, y: 0 },
+      label: v.source === undefined,
     })),
-    roads: roads.map((r) => {
-      const path = new Path2D();
-      r.centerline.forEach((p, i) => {
-        if (i === 0) path.moveTo(p.x, p.y);
-        else path.lineTo(p.x, p.y);
-      });
-      return { id: r.id, roadClass: r.roadClass, widthMeters: r.widthMeters, path };
-    }),
+    roads: roads.map((r) => ({
+      id: r.id,
+      roadClass: r.roadClass,
+      widthMeters: r.widthMeters,
+      path: linePath(r.centerline),
+    })),
     buildings: buildings.map((b) => ({
       id: b.id,
       path: polygonPath(b.footprint),
       anchor: polygonCentroid(b.footprint) ?? b.footprint[0] ?? { x: 0, y: 0 },
+      label: b.source === undefined,
+    })),
+    landUse: landUse.map((l) => ({ kind: l.kind, path: polygonPath(l.boundary, l.holes) })),
+    water: water.map((w) => ({ kind: w.kind, path: polygonPath(w.boundary, w.holes) })),
+    waterways: waterways.map((w) => ({
+      kind: w.kind,
+      widthMeters: w.widthMeters,
+      path: linePath(w.centerline),
     })),
   };
 }
@@ -240,6 +310,18 @@ function drawEnvironment(
   useMapTransform(ctx, scene, dpr);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  // Map layers bottom to top: land use, vegetation, water, waterways, roads, buildings.
+  for (const l of layer.landUse) {
+    ctx.fillStyle = LAND_USE_FILL[l.kind];
+    ctx.fill(l.path, 'evenodd');
+    if (l.kind === 'military') {
+      ctx.strokeStyle = 'rgba(150, 40, 30, 0.55)';
+      ctx.lineWidth = 1.5 * mpp;
+      ctx.setLineDash([8 * mpp, 5 * mpp]);
+      ctx.stroke(l.path);
+      ctx.setLineDash([]);
+    }
+  }
   for (const v of layer.vegetation) {
     ctx.fillStyle =
       v.kind === 'scrub'
@@ -247,14 +329,41 @@ function drawEnvironment(
         : v.kind === 'treeLine'
           ? COLORS.treeLineFill
           : COLORS.woodlandFill;
-    ctx.fill(v.path);
+    ctx.fill(v.path, 'evenodd');
     ctx.strokeStyle = v.kind === 'scrub' ? COLORS.scrubEdge : COLORS.woodlandEdge;
     ctx.lineWidth = 1.2 * mpp;
     ctx.setLineDash(v.kind === 'scrub' ? [4 * mpp, 3 * mpp] : []);
     ctx.stroke(v.path);
   }
   ctx.setLineDash([]);
+  for (const w of layer.water) {
+    ctx.fillStyle = w.kind === 'wetland' ? COLORS.wetlandFill : COLORS.waterFill;
+    ctx.fill(w.path, 'evenodd');
+    ctx.strokeStyle = w.kind === 'wetland' ? COLORS.wetlandEdge : COLORS.waterEdge;
+    ctx.lineWidth = 1 * mpp;
+    ctx.setLineDash(w.kind === 'wetland' ? [3 * mpp, 3 * mpp] : []);
+    ctx.stroke(w.path);
+  }
+  ctx.setLineDash([]);
+  for (const w of layer.waterways) {
+    ctx.strokeStyle = COLORS.waterway;
+    ctx.lineWidth = Math.max(
+      w.widthMeters,
+      (w.kind === 'river' || w.kind === 'canal' ? 2.5 : 1.4) * mpp,
+    );
+    ctx.setLineDash(w.kind === 'drain' || w.kind === 'ditch' ? [5 * mpp, 3 * mpp] : []);
+    ctx.stroke(w.path);
+  }
+  ctx.setLineDash([]);
   for (const r of layer.roads) {
+    if (r.roadClass === 'path') {
+      ctx.strokeStyle = COLORS.path;
+      ctx.lineWidth = 1.2 * mpp;
+      ctx.setLineDash([2 * mpp, 3 * mpp]);
+      ctx.stroke(r.path);
+      ctx.setLineDash([]);
+      continue;
+    }
     if (r.roadClass === 'track') {
       ctx.strokeStyle = COLORS.track;
       ctx.lineWidth = Math.max(r.widthMeters, 1.5 * mpp);
@@ -263,11 +372,12 @@ function drawEnvironment(
       ctx.setLineDash([]);
       continue;
     }
-    ctx.strokeStyle = COLORS.roadCasing;
-    ctx.lineWidth = Math.max(r.widthMeters, 3 * mpp) + 2 * mpp;
+    const major = r.roadClass === 'major';
+    ctx.strokeStyle = major ? COLORS.majorRoadCasing : COLORS.roadCasing;
+    ctx.lineWidth = Math.max(r.widthMeters, (major ? 4 : 3) * mpp) + 2 * mpp;
     ctx.stroke(r.path);
-    ctx.strokeStyle = COLORS.roadFill;
-    ctx.lineWidth = Math.max(r.widthMeters, 3 * mpp);
+    ctx.strokeStyle = major ? COLORS.majorRoadFill : COLORS.roadFill;
+    ctx.lineWidth = Math.max(r.widthMeters, (major ? 4 : 3) * mpp);
     ctx.stroke(r.path);
   }
   for (const b of layer.buildings) {
@@ -293,8 +403,8 @@ function drawEnvironment(
     ctx.fillStyle = color;
     ctx.fillText(text, p.x, p.y);
   };
-  for (const v of layer.vegetation) label(v.id, v.anchor, COLORS.woodlandEdge);
-  for (const b of layer.buildings) label(b.id, b.anchor, COLORS.featureLabel);
+  for (const v of layer.vegetation) if (v.label) label(v.id, v.anchor, COLORS.woodlandEdge);
+  for (const b of layer.buildings) if (b.label) label(b.id, b.anchor, COLORS.featureLabel);
   ctx.restore();
 }
 

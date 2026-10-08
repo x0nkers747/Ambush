@@ -155,16 +155,24 @@ export function traceSightLine(terrain: TerrainDataset, a: Vec3, b: Vec3): Sight
   crossings(gy0, gy1);
   crossings(gx0 - gy0, gx1 - gy1); // the SW–NE diagonals (docs/adr/0008)
   for (const { polygon } of buildings) addEdgeCrossings(a, b, polygon, push);
-  for (const { polygon } of vegetation) addEdgeCrossings(a, b, polygon, push);
+  for (const { polygon, holes } of vegetation) {
+    addEdgeCrossings(a, b, polygon, push);
+    for (const hole of holes) addEdgeCrossings(a, b, hole, push);
+  }
   const cuts = cutBuffer.subarray(0, n).sort();
 
   const groundAt = (t: number) => heightAt(terrain, a.x + t * dx, a.y + t * dy);
-  const inside = (f: { box: Box; polygon: readonly Vec2[] }, x: number, y: number) =>
+  const inside = (
+    f: { box: Box; polygon: readonly Vec2[]; holes?: readonly (readonly Vec2[])[] },
+    x: number,
+    y: number,
+  ) =>
     x >= f.box.minX &&
     x <= f.box.maxX &&
     y >= f.box.minY &&
     y <= f.box.maxY &&
-    pointInPolygon({ x, y }, f.polygon);
+    pointInPolygon({ x, y }, f.polygon) &&
+    !(f.holes ?? []).some((hole) => pointInPolygon({ x, y }, hole));
 
   const parts: number[] = [];
   const inBuildings: PreparedBuilding[] = [];
@@ -284,6 +292,8 @@ interface PreparedVegetation {
   readonly id: string;
   readonly cause: LosCause;
   readonly polygon: readonly Vec2[];
+  /** Clearings: not part of the area. */
+  readonly holes: readonly (readonly Vec2[])[];
   readonly box: Box;
   readonly canopy: number;
   readonly seeThrough: number;
@@ -310,6 +320,7 @@ function queryFeatures(terrain: TerrainDataset) {
         id: f.id,
         cause: { kind: 'vegetation' as const, featureId: f.id },
         polygon: f.boundary,
+        holes: f.holes ?? [],
         box: boundsOf(f.boundary),
         canopy: f.canopyHeightMeters,
         seeThrough: f.seeThroughMeters,

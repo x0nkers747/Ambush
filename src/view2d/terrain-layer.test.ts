@@ -9,7 +9,7 @@ import {
   slopeElevation,
   type TerrainDataset,
 } from '#sim';
-import { contourLines, elevationRange, terrainRaster } from './terrain-layer';
+import { contourIntervals, contourLines, elevationRange, terrainRaster } from './terrain-layer';
 import { gridSpacing } from './render';
 
 const GRID = { originX: 0, originY: 0, cellSize: 10, columns: 21, rows: 11 };
@@ -115,5 +115,35 @@ describe('gridSpacing', () => {
       expect(spacing / mpp).toBeGreaterThanOrEqual(70);
       expect([10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]).toContain(spacing);
     }
+  });
+});
+
+describe('contour intervals', () => {
+  const imported = (res: number | null, low: number, high: number): TerrainDataset => {
+    const t = createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 10, columns: 3, rows: 2 },
+      (x) => (x === 0 ? low : high),
+    );
+    return { ...t, formatVersion: 3, metadata: { elevationResolutionM: res, surfaceModel: 'DSM' } };
+  };
+
+  it('keeps 2 m with 10 m index lines for terrain without source metadata (the demo)', () => {
+    const demo = createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 10, columns: 2, rows: 2 },
+      () => 0,
+    );
+    expect(contourIntervals(demo)).toEqual({ minor: 2, index: 10 });
+  });
+
+  it('is never finer than the elevation source supports', () => {
+    expect(contourIntervals(imported(3, 100, 120))).toEqual({ minor: 1, index: 5 });
+    expect(contourIntervals(imported(10, 100, 120))).toEqual({ minor: 2, index: 10 });
+    expect(contourIntervals(imported(30, 100, 120))).toEqual({ minor: 5, index: 25 });
+    expect(contourIntervals(imported(null, 100, 120))).toEqual({ minor: 5, index: 25 });
+  });
+
+  it('widens to keep the relief to at most 40 levels', () => {
+    expect(contourIntervals(imported(3, 0, 300))).toEqual({ minor: 10, index: 50 });
+    expect(contourIntervals(imported(30, 0, 1500))).toEqual({ minor: 50, index: 250 });
   });
 });

@@ -1,0 +1,86 @@
+// Public API of the geographic processing layer (`#geo`, docs/adr/0014). Pure:
+// no DOM, no network, no storage. Turns downloaded OSM and elevation data into
+// battlefield packages whose terrain the simulation uses as it is.
+export { clipPolygon, clipPolyline, clipSegment, type Rect } from './clip';
+export {
+  classifyElevationSource,
+  summarizeElevationSources,
+  type ElevationDataset,
+  type ElevationSourceSummary,
+  type SurfaceModel,
+} from './elevation-sources';
+export {
+  createFrame,
+  geographicBounds,
+  gridConvergenceDeg,
+  localBounds,
+  toGeo,
+  toLocal,
+  type BattlefieldFrame,
+  type GeoBox,
+} from './frame';
+export {
+  assembleRings,
+  featuresFromOsm,
+  overpassQuery,
+  parseMetres,
+  type OsmElement,
+  type OsmImportReport,
+  type OverpassResponse,
+} from './osm';
+export {
+  BATTLEFIELD_SCHEMA,
+  BATTLEFIELD_SCHEMA_VERSION,
+  BattlefieldPackageError,
+  battlefieldRequest,
+  buildBattlefield,
+  DEFAULT_BATTLEFIELD_SIZE_M,
+  DEFAULT_CELL_SIZE_M,
+  formatCoordinates,
+  IMPORTER_VERSION,
+  OSM_ATTRIBUTION,
+  OSM_QUERY_MARGIN_M,
+  parseBattlefieldPackage,
+  planBattlefield,
+  TERRAIN_TILES_ATTRIBUTION,
+  type BattlefieldInputs,
+  type BattlefieldPackage,
+  type BattlefieldPlan,
+  type BattlefieldRequest,
+} from './package';
+export {
+  battlefieldGrid,
+  decodeTerrarium,
+  encodeTerrarium,
+  fillMissing,
+  resampleToGrid,
+  tilesForGrid,
+  type ElevationTile,
+  type ResampleResult,
+  type SampleGrid,
+} from './terrarium';
+export {
+  groundResolution,
+  mercatorPixel,
+  TERRARIUM_MAX_ZOOM,
+  TILE_SIZE,
+  tileKey,
+  tilesForPixelRange,
+  wrapTileX,
+  zoomForCellSize,
+  type TileId,
+} from './tiles';
+export {
+  centralMeridian,
+  fromUtm,
+  normalizeLon,
+  toUtm,
+  UTM_MAX_LAT,
+  UTM_MIN_LAT,
+  utmEpsg,
+  utmZone,
+  validateLatLon,
+  type Hemisphere,
+  type LatLon,
+  type UtmPoint,
+} from './utm';

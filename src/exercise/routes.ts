@@ -33,6 +33,8 @@ export function describePathProblem(
       return `inside building ${problem.buildingId}; soldiers cannot enter buildings`;
     case 'tooCloseToBuilding':
       return `against the wall of building ${problem.buildingId}; keep a little clear of it`;
+    case 'inWater':
+      return `in water (${problem.waterId}); soldiers cannot enter water`;
     case 'unreachable':
       return "cannot be reached from the soldier's position";
   }

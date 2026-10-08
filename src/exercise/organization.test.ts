@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSyntheticTerrain, flatElevation, soldierId, type ScenarioSoldier } from '#sim';
 import { deployInOrp, type AmbushScenario } from './ambush-scenario';
-import { USMC_RIFLE_SQUAD_TEMPLATE } from './demo-scenario';
+import { USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 import { createExercise } from './exercise';
 import {
   instantiateOrganization,

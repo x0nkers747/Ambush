@@ -10,6 +10,9 @@
   "imports": {
     "#sim": "./src/sim/index.ts",
     "#exercise": "./src/exercise/index.ts",
+    "#geo": "./src/geo/index.ts",
+    "#geo/fixtures": "./src/geo/test-data/fixtures.ts",
+    "#acquire": "./src/acquire/index.ts",
     "#session": "./src/session/index.ts",
     "#view2d": "./src/view2d/index.ts",
     "#view3d": "./src/view3d/index.ts"

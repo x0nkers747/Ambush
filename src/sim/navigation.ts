@@ -1,10 +1,12 @@
-import { boundsOf, type Box, type Building } from './environment';
+import { boundsOf, impassableWater, type Box, type Building, type WaterArea } from './environment';
 import type { Vec2 } from './geometry';
 import { pointInPolygon, segmentIntersectionParams } from './polygon';
 import { isOnTerrain, type TerrainDataset } from './terrain';
 
-// Basic path planning around hard obstacles (docs/adr/0011). Between two map
-// points: a straight line if it keeps clear of every building; otherwise A* on
+// Basic path planning around hard obstacles (docs/adr/0011): buildings, kept
+// clear of by `OBSTACLE_CLEARANCE_M`, and standing water (docs/adr/0014), which
+// may be walked up to but not into. Between two map points: a straight line
+// if it avoids every obstacle; otherwise A* on
 // a navigation grid, then string-pulling into a few straight legs. Pure and
 // deterministic; the same function plans for the simulation and for the
 // planning display, so what is shown is what will be walked.
@@ -20,7 +22,8 @@ const CONNECT_RADIUS_CELLS = 3;
 export type PointProblem =
   | { readonly kind: 'offTerrain' }
   | { readonly kind: 'insideBuilding'; readonly buildingId: string }
-  | { readonly kind: 'tooCloseToBuilding'; readonly buildingId: string };
+  | { readonly kind: 'tooCloseToBuilding'; readonly buildingId: string }
+  | { readonly kind: 'inWater'; readonly waterId: string };
 
 export type PathResult =
   /** `turns`: the generated intermediate points between start and goal (often none). */
@@ -38,18 +41,29 @@ export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | n
       return { kind: 'tooCloseToBuilding', buildingId: building.id };
     }
   }
+  for (const { water, box } of waterObstacles(terrain)) {
+    if (near(box, p, 0) && pointInPolygon(p, water.boundary)) {
+      return { kind: 'inWater', waterId: water.id };
+    }
+  }
   return null;
 }
 
-/** Whether a soldier can walk straight from `a` to `b`, keeping clear of every building. */
+/** Whether a soldier can walk straight from `a` to `b`, keeping clear of every building and out of water. */
 export function isSegmentWalkable(terrain: TerrainDataset, a: Vec2, b: Vec2): boolean {
   // The terrain is a rectangle, so a segment between two points on it stays on it.
   if (!isOnTerrain(terrain, a.x, a.y) || !isOnTerrain(terrain, b.x, b.y)) return false;
   const segmentBox = boundsOf([a, b]);
-  return obstacles(terrain).every(
-    ({ building, box }) =>
-      !overlaps(box, segmentBox, OBSTACLE_CLEARANCE_M) ||
-      segmentClearOfPolygon(a, b, building.footprint, OBSTACLE_CLEARANCE_M),
+  return (
+    obstacles(terrain).every(
+      ({ building, box }) =>
+        !overlaps(box, segmentBox, OBSTACLE_CLEARANCE_M) ||
+        segmentClearOfPolygon(a, b, building.footprint, OBSTACLE_CLEARANCE_M),
+    ) &&
+    waterObstacles(terrain).every(
+      ({ water, box }) =>
+        !overlaps(box, segmentBox, 0) || segmentClearOfPolygon(a, b, water.boundary, 0),
+    )
   );
 }
 
@@ -108,6 +122,20 @@ interface Obstacle {
 }
 
 const obstacleCache = new WeakMap<TerrainDataset, readonly Obstacle[]>();
+const waterCache = new WeakMap<TerrainDataset, readonly { water: WaterArea; box: Box }[]>();
+
+/** Impassable water with bounds, computed once per terrain. */
+function waterObstacles(terrain: TerrainDataset): readonly { water: WaterArea; box: Box }[] {
+  let list = waterCache.get(terrain);
+  if (!list) {
+    list = impassableWater(terrain.features).map((water) => ({
+      water,
+      box: boundsOf(water.boundary),
+    }));
+    waterCache.set(terrain, list);
+  }
+  return list;
+}
 
 /** Buildings with their bounds, computed once per terrain. A spatial index can replace this later. */
 function obstacles(terrain: TerrainDataset): readonly Obstacle[] {
@@ -230,6 +258,23 @@ function navGrid(terrain: TerrainDataset): NavGrid {
           pointInPolygon(p, building.footprint) ||
           distanceToPolygon(p, building.footprint) < margin
         ) {
+          grid.blocked[r * grid.columns + c] = 1;
+        }
+      }
+    }
+  }
+  // Water: no clearance, but a cell's centre must be half a cell diagonal from
+  // the shore, so that no grid step between two free cells can cross it.
+  const half = (NAV_CELL_M * Math.SQRT2) / 2;
+  for (const { water, box } of waterObstacles(terrain)) {
+    const c0 = Math.max(0, Math.floor((box.minX - half - originX) / NAV_CELL_M));
+    const c1 = Math.min(grid.columns - 1, Math.ceil((box.maxX + half - originX) / NAV_CELL_M));
+    const r0 = Math.max(0, Math.floor((box.minY - half - originY) / NAV_CELL_M));
+    const r1 = Math.min(grid.rows - 1, Math.ceil((box.maxY + half - originY) / NAV_CELL_M));
+    for (let r = r0; r <= r1; r += 1) {
+      for (let c = c0; c <= c1; c += 1) {
+        const p = cellCentre(grid, r * grid.columns + c);
+        if (pointInPolygon(p, water.boundary) || distanceToPolygon(p, water.boundary) < half) {
           grid.blocked[r * grid.columns + c] = 1;
         }
       }

@@ -8,8 +8,7 @@ import {
   type Vec2,
 } from '#sim';
 import { deployInOrp, type AmbushScenario, type OpforRoute } from './ambush-scenario';
-import { validateOrganizationTemplate, type OrganizationInstance } from './organization';
-import usmcRifleSquad from './organizations/usmc-rifle-squad-mcwp-3-11-2.json';
+import { DEFAULT_MOVEMENT, squadInstance, USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 import type { ObjectiveRallyPoint } from './orp';
 
 // Development content for the interactive ambush slice (Phases 3–3.7), not a
@@ -173,29 +172,12 @@ const vegetation: VegetationArea[] = [
   },
 ];
 
-/** The default trainee organization: the 13-Marine rifle squad of MCWP 3-11.2. */
-export const USMC_RIFLE_SQUAD_TEMPLATE = validateOrganizationTemplate(usmcRifleSquad);
-
 /** The squad's objective rally point, behind the south ridge. */
 const DEMO_ORP: ObjectiveRallyPoint = {
   id: 'ORP-1',
   name: 'ORP',
   centre: { east: -60, north: -236 },
   shape: { kind: 'circle', radiusM: 14 },
-};
-
-/** Which Marine fills which slot. Soldier ids are scenario data, independent of slot ids. */
-const SQUAD: OrganizationInstance = {
-  templateId: USMC_RIFLE_SQUAD_TEMPLATE.id,
-  templateVersion: USMC_RIFLE_SQUAD_TEMPLATE.version,
-  side: 'BLUEFOR',
-  unitIdPrefix: '',
-  facingDeg: 0,
-  posture: 'standing',
-  members: USMC_RIFLE_SQUAD_TEMPLATE.slots.map((slot, i) => ({
-    soldierId: `M${String(i + 1).padStart(2, '0')}`,
-    slotId: slot.id,
-  })),
 };
 
 const opfor = (id: string, x: number, y: number): ScenarioSoldier => ({
@@ -232,12 +214,12 @@ const terrain = createSyntheticTerrain(
   demoElevation,
   { roads, buildings, vegetation },
 );
-const squad = deployInOrp(USMC_RIFLE_SQUAD_TEMPLATE, SQUAD, DEMO_ORP, terrain);
+const squad = deployInOrp(USMC_RIFLE_SQUAD_TEMPLATE, squadInstance(), DEMO_ORP, terrain);
 
 export const DEMO_SCENARIO: AmbushScenario = {
   id: 'phase3-demo',
   terrain,
-  movement: { speed: 1.5, maxTurnRate: Math.PI / 2 },
+  movement: DEFAULT_MOVEMENT,
   units: [...squad.units, { id: 'EN-TM', echelon: 'fireTeam', parentId: null, leaderId: 'EN-1' }],
   soldiers: [
     ...squad.soldiers,

@@ -1,6 +1,7 @@
 # ADR 0006: Terrain dataset and georeference
 
-- Status: Accepted
+- Status: Accepted; implemented for 1 km battlefields by ADR 0014 (OSM and AWS Terrain Tiles,
+  fetched in the browser, processed by `src/geo`)
 - Date: 2026-10-07
 
 ## Context

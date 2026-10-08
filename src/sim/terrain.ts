@@ -37,17 +37,47 @@ export interface Heightfield {
   readonly elevations: readonly number[];
 }
 
+/**
+ * What is known about an imported heightfield's source (docs/adr/0014). Not
+ * used by the simulation: it lets tools state how far to trust the terrain.
+ */
+export interface TerrainMetadata {
+  /**
+   * Native horizontal resolution of the elevation source, in metres (the
+   * finest listed; the grid's `cellSize` may be finer, which adds no detail).
+   */
+  readonly elevationResolutionM: number | null;
+  /** `DTM`: bare earth; `DSM`: includes canopy and buildings; `mixed` or `unknown`. */
+  readonly surfaceModel: 'DTM' | 'DSM' | 'mixed' | 'unknown';
+}
+
 /** Elevation plus the environment features standing on it. */
 export interface TerrainDataset {
-  /** 2 added `features`. */
-  readonly formatVersion: 2;
+  /**
+   * 2 added `features`; 3 (imported terrain, docs/adr/0014) adds water,
+   * waterways, land use, vegetation holes, feature sources and `metadata`.
+   * Format 2 data stays valid as it is.
+   */
+  readonly formatVersion: 2 | 3;
   readonly georef: GeoReference | null;
   readonly heightfield: Heightfield;
   readonly features: EnvironmentFeatures;
+  readonly metadata?: TerrainMetadata;
 }
 
 /** Throws a RangeError describing the first invalid field. */
 export function validateTerrain(terrain: TerrainDataset): void {
+  // Stored data is checked at run time, whatever its static type says.
+  const format: number = terrain.formatVersion;
+  if (format !== 2 && format !== 3) {
+    throw new RangeError(`terrain format ${String(format)} is not supported`);
+  }
+  if (terrain.formatVersion === 3) {
+    const { water, waterways, landUse } = terrain.features;
+    if (!Array.isArray(water) || !Array.isArray(waterways) || !Array.isArray(landUse)) {
+      throw new RangeError('terrain format 3 needs water, waterways and land use lists');
+    }
+  }
   const { originX, originY, cellSize, columns, rows, elevations } = terrain.heightfield;
   if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
     throw new RangeError('terrain origin must be finite');

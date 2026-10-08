@@ -1,7 +1,9 @@
 # ADR 0011: Tactical environment, path planning and line of sight
 
 - Status: Accepted; trainee routes are now single destinations (ADR 0012), planned
-  with the same navigation described here
+  with the same navigation described here; terrain format 3 (ADR 0014) adds standing water (blocks
+  movement), wetland, waterways and land use (display only) and vegetation clearings (holes, not
+  obscuring sight lines)
 - Date: 2026-10-07
 
 ## Context

@@ -63,6 +63,35 @@ function tint(t: number): [number, number, number] {
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
 
+/** Contour spacing in metres: minor lines, and index lines (every fifth). */
+export interface ContourIntervals {
+  readonly minor: number;
+  readonly index: number;
+}
+
+const NICE_INTERVALS = [1, 2, 5, 10, 20, 50, 100] as const;
+/** At most this many minor contour levels across the terrain's relief. */
+const MAX_CONTOUR_LEVELS = 40;
+
+/**
+ * Contour intervals for a terrain (docs/adr/0014). Terrain without source
+ * metadata (the synthetic demo) keeps 2 m with 10 m index lines. For imported
+ * terrain the interval is never finer than the elevation source supports
+ * (about 1 m for 3 m lidar, 2 m for 10 m data, 5 m for 30 m data such as
+ * SRTM: contours finer than that would only show resampling, not the
+ * ground), and is widened until the relief needs at most 40 levels.
+ */
+export function contourIntervals(terrain: TerrainDataset): ContourIntervals {
+  const metadata = terrain.metadata;
+  if (!metadata) return { minor: 2, index: 10 };
+  const res = metadata.elevationResolutionM;
+  const finest = res === null ? 5 : res <= 3 ? 1 : res <= 10 ? 2 : res <= 30 ? 5 : 10;
+  const { min, max } = elevationRange(terrain);
+  const relief = Math.max(0, max - min);
+  const minor = NICE_INTERVALS.find((v) => v >= finest && relief / v <= MAX_CONTOUR_LEVELS) ?? 100;
+  return { minor, index: minor * 5 };
+}
+
 export interface ContourLevel {
   /** Elevation in metres. */
   readonly level: number;

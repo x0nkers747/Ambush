@@ -4,13 +4,16 @@ Interactive training simulation for planning, executing and reviewing
 squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
-Status: **Phase 3.7**: doctrinal squad organization and simplified deployment. The trainee
-commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
+Status: **real-world terrain** ([ADR 0014](docs/adr/0014-real-world-terrain-import.md)): besides
+the synthetic demo, any 1 × 1 km area between 80° S and 84° N can be generated from
+OpenStreetMap and freely available elevation data, saved in the browser and played offline. The
+trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
 [ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
 with Ambush!'s own role icons (not APP-6, see
-[ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow runs through AMBUSH
-TRIGGERED. No combat, 3D or GIS import yet.
+[ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow
+runs through AMBUSH TRIGGERED on the demo; generated battlefields have no OPFOR yet. No combat
+or 3D yet.
 
 ## Requirements
 
@@ -24,9 +27,27 @@ npm install
 npm run dev
 ```
 
-## Running an ambush exercise
+## Choosing a battlefield
 
-Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge.
+Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. The start
+screen offers:
+
+- **The demo battlefield**: synthetic terrain with an OPFOR patrol; the full ambush exercise below.
+- **A new battlefield**: enter a latitude and longitude in decimal degrees (e.g. `38.5223`,
+  `-77.2934`), or search for a place and pick a result. Check the location (there is a link to view
+  it on OpenStreetMap), then press **Generate battlefield**. Ambush! downloads the elevation tiles
+  and OpenStreetMap features, builds a 1,000 × 1,000 m battlefield, saves it and opens it, usually
+  within seconds. **Cancel** stops it; if OpenStreetMap is unavailable you can retry or continue
+  with terrain only. The squad starts at an ORP on open ground near the centre. There is no OPFOR
+  yet: movement, facing, visibility and the kill zone work as on the demo.
+- **Saved battlefields**: open one (no network needed) or delete it.
+
+The battlefield button at the top left of the exercise returns to the start screen. Each
+battlefield's panel lists its sources, their resolution and accuracy, and the credits their
+licences require. Service endpoints can be changed per browser: see
+[ADR 0014](docs/adr/0014-real-world-terrain-import.md#data-sources-and-services).
+
+## Running an ambush exercise
 
 1. **BLUEFOR planning.** The squad starts in the ORP (dashed circle). Choose a Marine in the
    roster or on the map and click the map to give them a destination; drag the yellow handle to
@@ -91,12 +112,14 @@ ESLint. Other layers are imported only through their alias (`#sim`, `#exercise`,
 
 ```
 src/sim       simulation (no DOM, no Node, no Three.js, deterministic)
-src/exercise  phases, plans, revisions, runner, demo scenario -> sim
+src/exercise  phases, plans, revisions, runner, scenarios  -> sim
+src/geo       geographic processing (pure: UTM, DEM, OSM)  -> sim
+src/acquire   geographic services, IndexedDB (browser)     -> sim, geo
 src/session   ephemeral UI state                           -> sim, exercise
 src/view2d    2D tactical view                             -> sim, exercise, session
-src/view3d    3D observer view (Three.js)                  -> sim, exercise, session
+src/view3d    3D observer view (Three.js)                  -> sim, exercise, session, geo
 src/app       composition root                             -> all
-tools         Node command-line tools                      -> sim, exercise
+tools         Node command-line tools                      -> sim, exercise, geo
 ```
 
 Decisions are recorded in [`docs/adr`](docs/adr):
@@ -114,3 +137,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 11. [Tactical environment, path planning and line of sight](docs/adr/0011-tactical-environment.md)
 12. [Doctrinal organization, ORP and single-destination deployment](docs/adr/0012-organization-orp-and-single-destination-planning.md)
 13. [Custom individual soldier icons](docs/adr/0013-individual-soldier-icons.md)
+14. [Real-world terrain import (1 km battlefields)](docs/adr/0014-real-world-terrain-import.md)

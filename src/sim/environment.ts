@@ -1,14 +1,26 @@
 import type { Vec2 } from './geometry';
-import { isSimplePolygon } from './polygon';
+import { isSimplePolygon, pointInPolygon } from './polygon';
 
-// Normalized environment features (docs/adr/0011): roads, buildings and
-// vegetation in simulation map coordinates (metres, X = East, Y = North).
-// Immutable world data, part of `TerrainDataset`. Synthetic scenarios build
-// them directly; future importers (OSM, cadastral data, …) convert their
-// source data into exactly this form, so the simulation never sees the source.
+// Normalized environment features (docs/adr/0011, docs/adr/0014): roads,
+// buildings, vegetation, water, waterways and land use in simulation map
+// coordinates (metres, X = East, Y = North). Immutable world data, part of
+// `TerrainDataset`. Synthetic scenarios build them directly; the OSM importer
+// (src/geo) converts its source data into exactly this form, so the
+// simulation never sees the source.
 
-/** Road classes, from least to most developed. Labels only: roads do not affect movement yet. */
-export type RoadClass = 'track' | 'unpaved' | 'paved';
+/** Where an imported feature came from, and which of its values were estimated. */
+export interface FeatureSource {
+  /** e.g. "osm:way/123" or "osm:relation/456". */
+  readonly ref: string;
+  /** Names of fields set from defaults because the source gave no value (e.g. "heightMeters"). */
+  readonly estimated?: readonly string[];
+}
+
+/**
+ * Road classes. Labels only: roads do not affect movement yet. `path` is a
+ * foot or cycle path; `major` a primary road or higher.
+ */
+export type RoadClass = 'path' | 'track' | 'unpaved' | 'paved' | 'major';
 
 export interface Road {
   readonly id: string;
@@ -17,6 +29,7 @@ export interface Road {
   readonly centerline: readonly Vec2[];
   /** Full carriageway width in metres. */
   readonly widthMeters: number;
+  readonly source?: FeatureSource;
 }
 
 /**
@@ -26,9 +39,10 @@ export interface Road {
  */
 export interface Building {
   readonly id: string;
-  /** A simple polygon, at least three corners. */
+  /** A simple polygon, at least three corners. Inner courtyards are not represented. */
   readonly footprint: readonly Vec2[];
   readonly heightMeters: number;
+  readonly source?: FeatureSource;
 }
 
 export type VegetationKind = 'woodland' | 'treeLine' | 'scrub';
@@ -44,16 +58,76 @@ export interface VegetationArea {
   readonly kind: VegetationKind;
   /** A simple polygon, at least three corners. */
   readonly boundary: readonly Vec2[];
+  /**
+   * Clearings: simple polygons inside the boundary that are not part of the
+   * area (e.g. a meadow in a wood). Sight lines through them are not obscured.
+   */
+  readonly holes?: readonly (readonly Vec2[])[];
   /** Canopy height above the ground in metres. */
   readonly canopyHeightMeters: number;
   /** Depth of this vegetation that fully obscures a sight line, in metres. */
   readonly seeThroughMeters: number;
+  readonly source?: FeatureSource;
+}
+
+/**
+ * Standing water: lakes, ponds, reservoirs, river surfaces. Soldiers cannot
+ * enter `water`; `wetland` is drawn but does not block movement (yet).
+ * Neither affects line of sight.
+ */
+export interface WaterArea {
+  readonly id: string;
+  readonly kind: 'water' | 'wetland';
+  /** A simple polygon, at least three corners. */
+  readonly boundary: readonly Vec2[];
+  /** Islands: simple polygons inside the boundary. Drawn as land; still impassable (they can only be reached across water). */
+  readonly holes?: readonly (readonly Vec2[])[];
+  readonly source?: FeatureSource;
+}
+
+export type WaterwayKind = 'river' | 'stream' | 'canal' | 'drain' | 'ditch';
+
+/** A watercourse drawn as a line. Display only: it neither blocks movement nor sight. */
+export interface Waterway {
+  readonly id: string;
+  readonly kind: WaterwayKind;
+  /** Centreline, at least two points. */
+  readonly centerline: readonly Vec2[];
+  /** Width in metres. */
+  readonly widthMeters: number;
+  readonly source?: FeatureSource;
+}
+
+export type LandUseKind =
+  | 'farmland'
+  | 'meadow'
+  | 'orchard'
+  | 'residential'
+  | 'commercial'
+  | 'industrial'
+  | 'military'
+  | 'cemetery'
+  | 'recreation'
+  | 'other';
+
+/** How land is used. Display only. */
+export interface LandUseArea {
+  readonly id: string;
+  readonly kind: LandUseKind;
+  /** A simple polygon, at least three corners. */
+  readonly boundary: readonly Vec2[];
+  readonly holes?: readonly (readonly Vec2[])[];
+  readonly source?: FeatureSource;
 }
 
 export interface EnvironmentFeatures {
   readonly roads: readonly Road[];
   readonly buildings: readonly Building[];
   readonly vegetation: readonly VegetationArea[];
+  /** Absent in terrain format 2; imported terrain (format 3) always has them. */
+  readonly water?: readonly WaterArea[];
+  readonly waterways?: readonly Waterway[];
+  readonly landUse?: readonly LandUseArea[];
 }
 
 export const NO_FEATURES: EnvironmentFeatures = { roads: [], buildings: [], vegetation: [] };
@@ -101,15 +175,50 @@ export function validateFeatures(
     }
     positive(`building "${building.id}" height`, building.heightMeters);
   }
+  /** A simple boundary and simple holes, each hole inside the boundary. */
+  const checkArea = (
+    label: string,
+    boundary: readonly Vec2[],
+    holes: readonly (readonly Vec2[])[] | undefined,
+  ) => {
+    checkPoints(label, boundary);
+    if (!isSimplePolygon(boundary)) fail(`${label} boundary must be a simple polygon`);
+    (holes ?? []).forEach((hole, i) => {
+      checkPoints(`${label} hole ${String(i + 1)}`, hole);
+      if (!isSimplePolygon(hole)) fail(`${label} hole ${String(i + 1)} must be a simple polygon`);
+      if (!hole.every((p) => pointInPolygon(p, boundary))) {
+        fail(`${label} hole ${String(i + 1)} must lie inside the boundary`);
+      }
+    });
+  };
   for (const area of features.vegetation) {
     checkId('vegetation', area.id);
-    checkPoints(`vegetation "${area.id}"`, area.boundary);
-    if (!isSimplePolygon(area.boundary)) {
-      fail(`vegetation "${area.id}" boundary must be a simple polygon`);
-    }
+    checkArea(`vegetation "${area.id}"`, area.boundary, area.holes);
     positive(`vegetation "${area.id}" canopy height`, area.canopyHeightMeters);
     positive(`vegetation "${area.id}" see-through depth`, area.seeThroughMeters);
   }
+  for (const area of features.water ?? []) {
+    checkId('water', area.id);
+    // Imported data is checked at run time, whatever its static type says.
+    const kind: string = area.kind;
+    if (kind !== 'water' && kind !== 'wetland') fail(`water "${area.id}" has an unknown kind`);
+    checkArea(`water "${area.id}"`, area.boundary, area.holes);
+  }
+  for (const way of features.waterways ?? []) {
+    checkId('waterway', way.id);
+    if (way.centerline.length < 2) fail(`waterway "${way.id}" needs at least two points`);
+    checkPoints(`waterway "${way.id}"`, way.centerline);
+    positive(`waterway "${way.id}" width`, way.widthMeters);
+  }
+  for (const area of features.landUse ?? []) {
+    checkId('land use', area.id);
+    checkArea(`land use "${area.id}"`, area.boundary, area.holes);
+  }
+}
+
+/** Water areas soldiers cannot enter (`kind: 'water'`). */
+export function impassableWater(features: EnvironmentFeatures): readonly WaterArea[] {
+  return (features.water ?? []).filter((w) => w.kind === 'water');
 }
 
 /** Axis-aligned bounds of a point set, for cheap rejection before exact tests. */

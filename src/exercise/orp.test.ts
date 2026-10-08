@@ -8,7 +8,7 @@ import {
   type Vec2,
 } from '#sim';
 import { deployInOrp } from './ambush-scenario';
-import { USMC_RIFLE_SQUAD_TEMPLATE } from './demo-scenario';
+import { USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 import {
   layoutOrp,
   MIN_START_SPACING_M,

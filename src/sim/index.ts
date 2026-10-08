@@ -27,16 +27,23 @@ export {
 } from './geometry';
 export {
   boundsOf,
+  impassableWater,
   NO_FEATURES,
   rectangle,
   validateFeatures,
   type Box,
   type Building,
   type EnvironmentFeatures,
+  type FeatureSource,
+  type LandUseArea,
+  type LandUseKind,
   type Road,
   type RoadClass,
   type VegetationArea,
   type VegetationKind,
+  type WaterArea,
+  type Waterway,
+  type WaterwayKind,
 } from './environment';
 export { fingerprintPlainData, fingerprintWorld, hashSimState } from './hash';
 export {
@@ -118,6 +125,7 @@ export {
   type GeoReference,
   type Heightfield,
   type TerrainDataset,
+  type TerrainMetadata,
 } from './terrain';
 export type { MovementParams, SimWorld } from './world';
 export {

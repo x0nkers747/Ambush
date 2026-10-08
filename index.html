@@ -388,6 +388,217 @@
         white-space: nowrap;
         overflow: hidden;
       }
+      /* Battlefield selection (docs/adr/0014). */
+      .start-screen [hidden],
+      aside [hidden],
+      main [hidden] {
+        display: none !important;
+      }
+      #app.start {
+        display: block;
+        height: auto;
+        min-height: 100%;
+        overflow: auto;
+      }
+      .start-screen {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 20px 16px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .start-header {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding: 0;
+        background: none;
+        border: 0;
+      }
+      .start-header h1 {
+        font-size: 22px;
+      }
+      .start-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 14px;
+        align-items: start;
+      }
+      .start-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .start-card:nth-child(2) {
+        grid-row: span 2;
+      }
+      .start-card h2,
+      .start-card p {
+        margin: 0;
+      }
+      .start-card h2 {
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .bf-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: end;
+      }
+      .bf-row label {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .bf-row label.grow,
+      .grow {
+        flex: 1;
+        min-width: 0;
+      }
+      .start-card input {
+        font: inherit;
+        color: var(--text);
+        background: #12151a;
+        border: 1px solid #3a424a;
+        border-radius: 3px;
+        padding: 5px 8px;
+        width: 140px;
+      }
+      .bf-row label.grow input {
+        width: 100%;
+      }
+      .start-card input:focus-visible,
+      .start-card button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .bf-results,
+      .bf-saved,
+      .bf-steps {
+        margin: 0;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .bf-saved {
+        padding: 0;
+        list-style: none;
+        gap: 8px;
+      }
+      .bf-saved-item {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+      }
+      .bf-full {
+        flex-basis: 100%;
+      }
+      button.link {
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--friendly);
+        text-align: left;
+        text-decoration: underline;
+      }
+      button.danger {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+      .bf-location {
+        padding: 8px 10px;
+        border-left: 3px solid var(--friendly);
+        background: #171b1f;
+      }
+      .bf-location a {
+        color: var(--friendly);
+      }
+      .bf-steps li[data-state='done'] {
+        color: var(--executing);
+      }
+      .bf-steps li[data-state='done']::after {
+        content: ' ✓';
+      }
+      .bf-steps li[data-state='active'] {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .bf-steps li[data-state='failed'] {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      .bf-steps li[data-state='waiting'] {
+        color: var(--muted);
+      }
+      .bf-error {
+        padding: 8px 10px;
+        border-left: 3px solid var(--danger);
+        background: #241615;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .bf-error p {
+        margin: 0;
+      }
+      .bf-warn {
+        color: var(--paused);
+      }
+      .start-footer {
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      /* Exercise screen additions. */
+      .battlefield-button {
+        max-width: 280px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .attribution {
+        position: absolute;
+        right: 6px;
+        bottom: 6px;
+        max-width: 60%;
+        padding: 2px 6px;
+        font-size: 10px;
+        color: #1c2024;
+        background: rgba(255, 255, 255, 0.72);
+        border-radius: 2px;
+        pointer-events: auto;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .bf-warnings {
+        margin: 6px 0;
+        padding-left: 18px;
+        color: var(--paused);
+      }
+      .bf-credits summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+      .bf-credits ul {
+        padding-left: 18px;
+        margin: 4px 0;
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>

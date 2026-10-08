@@ -7,7 +7,14 @@ export {
   type OpforRoute,
   type ScenarioRouteWaypoint,
 } from './ambush-scenario';
-export { DEMO_SCENARIO, USMC_RIFLE_SQUAD_TEMPLATE } from './demo-scenario';
+export {
+  AUTO_ORP_RADIUS_M,
+  placeOrp,
+  scenarioForTerrain,
+  ScenarioPlacementError,
+} from './battlefield-scenario';
+export { DEMO_SCENARIO } from './demo-scenario';
+export { DEFAULT_MOVEMENT, squadInstance, USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 export {
   defaultFacing,
   DEPLOYMENT_PLAN_SCHEMA,

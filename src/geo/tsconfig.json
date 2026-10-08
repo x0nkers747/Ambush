@@ -1,0 +1,13 @@
+{
+  // Geographic processing (docs/adr/0014): projections, tile maths, DEM and OSM
+  // normalization, battlefield packages. Pure: no DOM, no Node, no network. May use sim.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": ".",
+    "outDir": "../../.tsbuild/geo"
+  },
+  "include": ["**/*.ts", "**/*.json"],
+  "references": [{ "path": "../sim" }]
+}
