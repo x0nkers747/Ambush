@@ -102,6 +102,10 @@ export interface ContourLevel {
 /**
  * Contour lines every `interval` metres, traced on the terrain triangles
  * (`terrainTriangleIndices`) so they match the simulated surface exactly.
+ *
+ * One pass over the triangles: each is visited only for the levels between
+ * its lowest and highest corner (the only ones that can cross it), and each
+ * level's segments come out in triangle order, as a pass per level gave them.
  */
 export function contourLines(terrain: TerrainDataset, interval: number): ContourLevel[] {
   const { originX, originY, cellSize, columns, elevations } = terrain.heightfield;
@@ -110,26 +114,43 @@ export function contourLines(terrain: TerrainDataset, interval: number): Contour
   const y = (i: number) => originY + Math.floor(i / columns) * cellSize;
   const z = (i: number) => elevations[i] ?? 0;
 
-  const levels: ContourLevel[] = [];
   const { min, max } = elevationRange(terrain);
-  for (let n = Math.ceil(min / interval); n * interval <= max; n += 1) {
-    const level = n * interval;
-    const segments: number[] = [];
-    for (let t = 0; t < triangles.length; t += 3) {
-      const corners = [triangles[t] ?? 0, triangles[t + 1] ?? 0, triangles[t + 2] ?? 0];
-      const crossings: number[] = [];
+  const first = Math.ceil(min / interval);
+  const levels: { level: number; segments: number[] }[] = [];
+  for (let n = first; n * interval <= max; n += 1)
+    levels.push({ level: n * interval, segments: [] });
+  const corners = [0, 0, 0];
+  for (let t = 0; t < triangles.length; t += 3) {
+    corners[0] = triangles[t] ?? 0;
+    corners[1] = triangles[t + 1] ?? 0;
+    corners[2] = triangles[t + 2] ?? 0;
+    const z0 = z(corners[0]);
+    const z1 = z(corners[1]);
+    const z2 = z(corners[2]);
+    const low = Math.min(z0, z1, z2);
+    const high = Math.max(z0, z1, z2);
+    // A level crosses the triangle when some corner is below it and some at or above it.
+    // Start one level early so that rounding in the division never skips a level.
+    for (let k = Math.max(0, Math.floor(low / interval) - first - 1); k < levels.length; k += 1) {
+      const entry = levels[k];
+      if (!entry) break;
+      const { level, segments } = entry;
+      if (level > high) break;
+      if (!(level > low)) continue;
+      let found = 0;
       for (let e = 0; e < 3; e += 1) {
         const a = corners[e] ?? 0;
         const b = corners[(e + 1) % 3] ?? 0;
         // A corner exactly on the level counts as above it, so each crossing is found once.
         if (z(a) >= level !== z(b) >= level) {
           const f = (level - z(a)) / (z(b) - z(a));
-          crossings.push(x(a) + f * (x(b) - x(a)), y(a) + f * (y(b) - y(a)));
+          segments.push(x(a) + f * (x(b) - x(a)), y(a) + f * (y(b) - y(a)));
+          found += 1;
         }
       }
-      if (crossings.length === 4) segments.push(...crossings);
+      // Two crossings make a segment (always the case here; kept as a guard).
+      if (found !== 2) segments.length -= 2 * found;
     }
-    levels.push({ level, segments });
   }
   return levels;
 }

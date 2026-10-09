@@ -7,6 +7,7 @@ import {
   isOnTerrain,
   ridgeElevation,
   slopeElevation,
+  terrainTriangleIndices,
   type TerrainDataset,
 } from '#sim';
 import { contourIntervals, contourLines, elevationRange, terrainRaster } from './terrain-layer';
@@ -57,6 +58,49 @@ describe('terrainRaster', () => {
 });
 
 describe('contourLines', () => {
+  it('traces exactly what a pass over every triangle for each level traces', () => {
+    // Rough synthetic ground with plateaus exactly on levels (corners on a level count as above it).
+    const terrain = createSyntheticTerrain(
+      { originX: -100, originY: -50, cellSize: 5, columns: 41, rows: 23 },
+      (x, y) => Math.round(20 * Math.sin(x / 17) + 15 * Math.cos(y / 11) + (x * y) / 900) / 2,
+    );
+    const reference = (interval: number) => {
+      const { originX, originY, cellSize, columns, elevations } = terrain.heightfield;
+      const triangles = terrainTriangleIndices(terrain);
+      const { min, max } = elevationRange(terrain);
+      const levels: { level: number; segments: number[] }[] = [];
+      for (let n = Math.ceil(min / interval); n * interval <= max; n += 1) {
+        const level = n * interval;
+        const segments: number[] = [];
+        for (let t = 0; t < triangles.length; t += 3) {
+          const crossings: number[] = [];
+          for (let e = 0; e < 3; e += 1) {
+            const a = triangles[t + e] ?? 0;
+            const b = triangles[t + ((e + 1) % 3)] ?? 0;
+            const za = elevations[a] ?? 0;
+            const zb = elevations[b] ?? 0;
+            if (za >= level !== zb >= level) {
+              const f = (level - za) / (zb - za);
+              const ax = originX + (a % columns) * cellSize;
+              const ay = originY + Math.floor(a / columns) * cellSize;
+              const bx = originX + (b % columns) * cellSize;
+              const by = originY + Math.floor(b / columns) * cellSize;
+              crossings.push(ax + f * (bx - ax), ay + f * (by - ay));
+            }
+          }
+          if (crossings.length === 4) segments.push(...crossings);
+        }
+        levels.push({ level, segments });
+      }
+      return levels;
+    };
+    for (const interval of [0.5, 1, 2, 5, 7.5]) {
+      const levels = contourLines(terrain, interval);
+      expect(levels).toEqual(reference(interval));
+      expect(levels.some((l) => l.segments.length > 0)).toBe(true);
+    }
+  });
+
   function expectOnLevels(terrain: TerrainDataset, interval: number) {
     const levels = contourLines(terrain, interval);
     let segments = 0;

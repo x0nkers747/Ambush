@@ -1,14 +1,15 @@
 import { polygonCentroid, type PlannedRoute } from '#exercise';
-import type {
-  LandUseKind,
-  RoadClass,
-  SoldierId,
-  TerrainDataset,
-  VegetationKind,
-  Vec2,
-  Viewshed,
-  WaterArea,
-  WaterwayKind,
+import {
+  boundsOf,
+  type LandUseKind,
+  type RoadClass,
+  type SoldierId,
+  type TerrainDataset,
+  type VegetationKind,
+  type Vec2,
+  type Viewshed,
+  type WaterArea,
+  type WaterwayKind,
 } from '#sim';
 import { formatBearing } from './bearing';
 import {
@@ -39,7 +40,7 @@ import { contourIntervals, contourLines, terrainRaster } from './terrain-layer';
 // the camera transform; symbols and labels are drawn in screen pixels so they
 // keep their size at every zoom.
 
-const COLORS = {
+export const COLORS = {
   background: '#1b1f23',
   contour: 'rgba(92, 66, 40, 0.38)',
   indexContour: 'rgba(92, 66, 40, 0.72)',
@@ -105,13 +106,27 @@ const LAND_USE_FILL: Readonly<Record<LandUseKind, string>> = {
   other: 'rgba(210, 204, 190, 0.25)',
 };
 
-/** Canvas objects for one terrain, built once. */
+/** Contour lines in one square of the map, so that only the squares in view are drawn. */
+export interface ContourTile {
+  /** Bounds of the segments in the tile, in map metres. */
+  readonly bounds: Bounds;
+  readonly minor: Path2D | null;
+  readonly index: Path2D | null;
+}
+
+/** Side of a contour tile in map metres. */
+const CONTOUR_TILE_M = 250;
+
+/**
+ * Canvas objects for one terrain, built once. Every feature carries its
+ * bounds (map metres), so that drawing a part of the map skips what lies
+ * outside it.
+ */
 export interface TerrainLayer {
   readonly terrain: TerrainDataset;
   readonly bounds: Bounds;
   readonly image: HTMLCanvasElement;
-  readonly minorContours: Path2D;
-  readonly indexContours: Path2D;
+  readonly contours: readonly ContourTile[];
   /**
    * Environment features as map-coordinate paths. Ids are drawn only for
    * hand-authored features (`label`), not for imported ones, whose ids are
@@ -121,6 +136,7 @@ export interface TerrainLayer {
     id: string;
     kind: VegetationKind;
     path: Path2D;
+    bounds: Bounds;
     anchor: Vec2;
     label: boolean;
   }[];
@@ -129,11 +145,23 @@ export interface TerrainLayer {
     roadClass: RoadClass;
     widthMeters: number;
     path: Path2D;
+    bounds: Bounds;
   }[];
-  readonly buildings: readonly { id: string; path: Path2D; anchor: Vec2; label: boolean }[];
-  readonly landUse: readonly { kind: LandUseKind; path: Path2D }[];
-  readonly water: readonly { kind: WaterArea['kind']; path: Path2D }[];
-  readonly waterways: readonly { kind: WaterwayKind; widthMeters: number; path: Path2D }[];
+  readonly buildings: readonly {
+    id: string;
+    path: Path2D;
+    bounds: Bounds;
+    anchor: Vec2;
+    label: boolean;
+  }[];
+  readonly landUse: readonly { kind: LandUseKind; path: Path2D; bounds: Bounds }[];
+  readonly water: readonly { kind: WaterArea['kind']; path: Path2D; bounds: Bounds }[];
+  readonly waterways: readonly {
+    kind: WaterwayKind;
+    widthMeters: number;
+    path: Path2D;
+    bounds: Bounds;
+  }[];
 }
 
 /** A polygon (and its holes, as further subpaths) for filling with the even-odd rule. */
@@ -169,17 +197,53 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
   pixels.data.set(raster.data);
   ctx.putImageData(pixels, 0, 0);
 
-  const minorContours = new Path2D();
-  const indexContours = new Path2D();
+  // Contour segments are grouped into tiles by their first point.
   const intervals = contourIntervals(terrain);
+  const bounds = terrainBounds(terrain);
+  const tileColumns = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) / CONTOUR_TILE_M));
+  const tileRows = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) / CONTOUR_TILE_M));
+  const tiles = new Map<
+    number,
+    { minor: Path2D | null; index: Path2D | null; box: [number, number, number, number] }
+  >();
   for (const { level, segments } of contourLines(terrain, intervals.minor)) {
     const isIndex = Math.round(level / intervals.minor) % (intervals.index / intervals.minor) === 0;
-    const path = isIndex ? indexContours : minorContours;
     for (let i = 0; i + 3 < segments.length; i += 4) {
-      path.moveTo(segments[i] ?? 0, segments[i + 1] ?? 0);
-      path.lineTo(segments[i + 2] ?? 0, segments[i + 3] ?? 0);
+      const x1 = segments[i] ?? 0;
+      const y1 = segments[i + 1] ?? 0;
+      const x2 = segments[i + 2] ?? 0;
+      const y2 = segments[i + 3] ?? 0;
+      const tc = Math.min(
+        tileColumns - 1,
+        Math.max(0, Math.floor((x1 - bounds.minX) / CONTOUR_TILE_M)),
+      );
+      const tr = Math.min(
+        tileRows - 1,
+        Math.max(0, Math.floor((y1 - bounds.minY) / CONTOUR_TILE_M)),
+      );
+      const key = tr * tileColumns + tc;
+      let tile = tiles.get(key);
+      if (!tile) {
+        tile = { minor: null, index: null, box: [x1, y1, x1, y1] };
+        tiles.set(key, tile);
+      }
+      const path = isIndex ? (tile.index ??= new Path2D()) : (tile.minor ??= new Path2D());
+      path.moveTo(x1, y1);
+      path.lineTo(x2, y2);
+      const box = tile.box;
+      box[0] = Math.min(box[0], x1, x2);
+      box[1] = Math.min(box[1], y1, y2);
+      box[2] = Math.max(box[2], x1, x2);
+      box[3] = Math.max(box[3], y1, y2);
     }
   }
+  const contours = [...tiles.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, { minor, index, box }]) => ({
+      minor,
+      index,
+      bounds: { minX: box[0], minY: box[1], maxX: box[2], maxY: box[3] },
+    }));
   const {
     roads,
     buildings,
@@ -190,14 +254,14 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
   } = terrain.features;
   return {
     terrain,
-    bounds: terrainBounds(terrain),
+    bounds,
     image,
-    minorContours,
-    indexContours,
+    contours,
     vegetation: vegetation.map((v) => ({
       id: v.id,
       kind: v.kind,
       path: polygonPath(v.boundary, v.holes),
+      bounds: boundsOf(v.boundary),
       anchor: polygonCentroid(v.boundary) ?? v.boundary[0] ?? { x: 0, y: 0 },
       label: v.source === undefined,
     })),
@@ -206,31 +270,253 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
       roadClass: r.roadClass,
       widthMeters: r.widthMeters,
       path: linePath(r.centerline),
+      bounds: boundsOf(r.centerline),
     })),
     buildings: buildings.map((b) => ({
       id: b.id,
       path: polygonPath(b.footprint),
+      bounds: boundsOf(b.footprint),
       anchor: polygonCentroid(b.footprint) ?? b.footprint[0] ?? { x: 0, y: 0 },
       label: b.source === undefined,
     })),
-    landUse: landUse.map((l) => ({ kind: l.kind, path: polygonPath(l.boundary, l.holes) })),
-    water: water.map((w) => ({ kind: w.kind, path: polygonPath(w.boundary, w.holes) })),
+    landUse: landUse.map((l) => ({
+      kind: l.kind,
+      path: polygonPath(l.boundary, l.holes),
+      bounds: boundsOf(l.boundary),
+    })),
+    water: water.map((w) => ({
+      kind: w.kind,
+      path: polygonPath(w.boundary, w.holes),
+      bounds: boundsOf(w.boundary),
+    })),
     waterways: waterways.map((w) => ({
       kind: w.kind,
       widthMeters: w.widthMeters,
       path: linePath(w.centerline),
+      bounds: boundsOf(w.centerline),
     })),
   };
 }
 
-/** Draws the whole map. `ctx` must already be scaled for the device pixel ratio. */
+/**
+ * Draws the whole map. `ctx` must already be scaled for the device pixel
+ * ratio. Bottom to top: the ground (background and terrain shading), the
+ * visibility overlay, the geographic features (contours and environment),
+ * then the grid and everything tactical. The map widget caches the ground
+ * and the features between frames (`geo-cache.ts`) and draws the same layers
+ * in the same order.
+ */
 export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: TerrainLayer): void {
+  const area = viewArea(scene);
+  drawGround(ctx, scene, layer, area);
+  drawVisibility(ctx, scene, layer);
+  drawFeatures(ctx, scene, layer, area);
+  drawOverlays(ctx, scene, layer);
+}
+
+/** The map area on screen, in map metres. */
+export function viewArea(scene: MapScene): Bounds {
+  const { camera, viewport } = scene;
+  const a = screenToWorld(camera, viewport, { x: 0, y: 0 });
+  const b = screenToWorld(camera, viewport, { x: viewport.width, y: viewport.height });
+  return { minX: a.x, minY: b.y, maxX: b.x, maxY: a.y };
+}
+
+/** Whether `bounds`, grown by `margin` metres, overlaps `area`. */
+function overlaps(bounds: Bounds, area: Bounds, margin: number): boolean {
+  return (
+    bounds.minX - margin <= area.maxX &&
+    bounds.maxX + margin >= area.minX &&
+    bounds.minY - margin <= area.maxY &&
+    bounds.maxY + margin >= area.minY
+  );
+}
+
+/** Clips to the terrain's rectangle (in screen pixels, under the device pixel ratio). */
+function clipToTerrain(ctx: CanvasRenderingContext2D, scene: MapScene, layer: TerrainLayer): void {
+  const edges = worldToScreen(scene.camera, scene.viewport, {
+    x: layer.bounds.minX,
+    y: layer.bounds.maxY,
+  });
+  const far = worldToScreen(scene.camera, scene.viewport, {
+    x: layer.bounds.maxX,
+    y: layer.bounds.minY,
+  });
+  ctx.beginPath();
+  ctx.rect(edges.x, edges.y, far.x - edges.x, far.y - edges.y);
+  ctx.clip();
+}
+
+/**
+ * The background and the shaded terrain image. `area` (map metres) is the
+ * part of the map being drawn: the image is skipped when it lies outside.
+ */
+export function drawGround(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
   const { width, height } = scene.viewport;
   ctx.fillStyle = COLORS.background;
   ctx.fillRect(0, 0, width, height);
+  const { cellSize } = layer.terrain.heightfield;
+  if (!overlaps(layer.bounds, area, cellSize)) return;
+  // Pixel centres sit on the samples, so the image extends half a cell past the bounds.
+  const topLeft = worldToScreen(scene.camera, scene.viewport, {
+    x: layer.bounds.minX - cellSize / 2,
+    y: layer.bounds.maxY + cellSize / 2,
+  });
+  const scale = 1 / scene.camera.metersPerPixel;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  clipToTerrain(ctx, scene, layer);
+  ctx.drawImage(
+    layer.image,
+    topLeft.x,
+    topLeft.y,
+    layer.image.width * cellSize * scale,
+    layer.image.height * cellSize * scale,
+  );
+  ctx.restore();
+}
 
-  drawTerrain(ctx, scene, layer);
-  drawEnvironment(ctx, scene, layer);
+/** Horizontal bands the ground is drawn in, one per step of a settled redraw (`geo-cache.ts`). */
+const GROUND_BANDS = 4;
+
+/**
+ * The ground in steps: horizontal bands of the view, each clipped at whole
+ * device pixels. The shaded image is resampled the same way however it is
+ * clipped, so the bands together give exactly `drawGround`; drawing one band
+ * costs about a quarter as much, which keeps each step of a redraw short.
+ */
+export const GROUND_PHASES: readonly MapPhase[] = Array.from(
+  { length: GROUND_BANDS },
+  (_, band) => (ctx, scene, layer, area) => {
+    const { width, height } = scene.viewport;
+    const dpr = ctx.getTransform().a;
+    const rows = Math.round(height * dpr);
+    const top = Math.round((band * rows) / GROUND_BANDS) / dpr;
+    const bottom = Math.round(((band + 1) * rows) / GROUND_BANDS) / dpr;
+    const a = screenToWorld(scene.camera, scene.viewport, { x: 0, y: top });
+    const b = screenToWorld(scene.camera, scene.viewport, { x: width, y: bottom });
+    const bandArea = {
+      minX: Math.max(area.minX, a.x),
+      maxX: Math.min(area.maxX, b.x),
+      minY: Math.max(area.minY, b.y),
+      maxY: Math.min(area.maxY, a.y),
+    };
+    if (bandArea.minX > bandArea.maxX || bandArea.minY > bandArea.maxY) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, top, width, bottom - top);
+    ctx.clip();
+    drawGround(ctx, scene, layer, bandArea);
+    ctx.restore();
+  },
+);
+
+/** The visibility overlay: on the shaded terrain, beneath contours and features. */
+export function drawVisibility(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+): void {
+  if (!scene.visibility?.viewshed) return;
+  ctx.save();
+  clipToTerrain(ctx, scene, layer);
+  drawViewshed(ctx, scene);
+  ctx.restore();
+}
+
+/** A part of the geographic map, drawn within `area` (map metres). */
+export type MapPhase = (
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+) => void;
+
+/**
+ * Contours and environment features within `area` (map metres): the
+ * geographic map above the ground. Features outside the area (with a margin
+ * for line widths) are skipped; what is drawn is drawn as before.
+ */
+export function drawFeatures(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  for (const phase of FEATURE_PHASES) phase(ctx, scene, layer, area);
+}
+
+/** Contours: the visible tiles joined into one path per weight, so overlapping translucent lines blend as in one stroke. */
+function drawContours(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const dpr = ctx.getTransform().a;
+  const minor = new Path2D();
+  const index = new Path2D();
+  let any = false;
+  for (const tile of layer.contours) {
+    if (!overlaps(tile.bounds, area, 2 * mpp)) continue;
+    if (tile.minor) minor.addPath(tile.minor);
+    if (tile.index) index.addPath(tile.index);
+    any = true;
+  }
+  if (!any) return;
+  ctx.save();
+  clipToTerrain(ctx, scene, layer);
+  useMapTransform(ctx, scene, dpr);
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = COLORS.contour;
+  ctx.lineWidth = 0.8 * mpp;
+  ctx.stroke(minor);
+  ctx.strokeStyle = COLORS.indexContour;
+  ctx.lineWidth = 1.4 * mpp;
+  ctx.stroke(index);
+  ctx.restore();
+}
+
+/**
+ * The geographic features in drawing order, in steps that can be drawn one at
+ * a time (each draws everything of its kind, so drawing them in turn gives
+ * exactly `drawFeatures`): contours; land use, vegetation and water; roads;
+ * buildings and labels. A topographic-map look, not imagery.
+ */
+export const FEATURE_PHASES: readonly MapPhase[] = [
+  drawContours,
+  (ctx, scene, layer, area) => {
+    withEnvironmentStyle(ctx, scene, () => {
+      drawAreas(ctx, scene, layer, area);
+    });
+  },
+  (ctx, scene, layer, area) => {
+    withEnvironmentStyle(ctx, scene, () => {
+      drawRoads(ctx, scene, layer, area);
+    });
+  },
+  (ctx, scene, layer, area) => {
+    withEnvironmentStyle(ctx, scene, () => {
+      drawBuildings(ctx, scene, layer, area);
+    });
+    drawFeatureLabels(ctx, scene, layer, area);
+  },
+];
+
+/** The grid and everything tactical, over the geographic map. */
+export function drawOverlays(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+): void {
+  const { width, height } = scene.viewport;
   drawGrid(ctx, scene, layer.bounds);
   drawOrp(ctx, scene);
   drawKillZone(ctx, scene);
@@ -247,71 +533,37 @@ export function drawMap(ctx: CanvasRenderingContext2D, scene: MapScene, layer: T
   drawScaleBar(ctx, scene, height);
 }
 
-function drawTerrain(ctx: CanvasRenderingContext2D, scene: MapScene, layer: TerrainLayer): void {
-  const { cellSize } = layer.terrain.heightfield;
-  // Pixel centres sit on the samples, so the image extends half a cell past the bounds.
-  const topLeft = worldToScreen(scene.camera, scene.viewport, {
-    x: layer.bounds.minX - cellSize / 2,
-    y: layer.bounds.maxY + cellSize / 2,
-  });
-  const scale = 1 / scene.camera.metersPerPixel;
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  const edges = worldToScreen(scene.camera, scene.viewport, {
-    x: layer.bounds.minX,
-    y: layer.bounds.maxY,
-  });
-  const far = worldToScreen(scene.camera, scene.viewport, {
-    x: layer.bounds.maxX,
-    y: layer.bounds.minY,
-  });
-  ctx.beginPath();
-  ctx.rect(edges.x, edges.y, far.x - edges.x, far.y - edges.y);
-  ctx.clip();
-  ctx.drawImage(
-    layer.image,
-    topLeft.x,
-    topLeft.y,
-    layer.image.width * cellSize * scale,
-    layer.image.height * cellSize * scale,
-  );
-  // The visibility overlay goes on the shaded terrain, beneath contours and features.
-  drawViewshed(ctx, scene);
-
-  const dpr = ctx.getTransform().a;
-  const [a, b, c, d, e, f] = worldToScreenTransform(scene.camera, scene.viewport);
-  ctx.setTransform(a * dpr, b * dpr, c * dpr, d * dpr, e * dpr, f * dpr);
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = COLORS.contour;
-  ctx.lineWidth = 0.8 * scene.camera.metersPerPixel;
-  ctx.stroke(layer.minorContours);
-  ctx.strokeStyle = COLORS.indexContour;
-  ctx.lineWidth = 1.4 * scene.camera.metersPerPixel;
-  ctx.stroke(layer.indexContours);
-  ctx.restore();
-}
-
 /** Sets the context to draw in map coordinates (metres), keeping the device pixel ratio. */
 function useMapTransform(ctx: CanvasRenderingContext2D, scene: MapScene, dpr: number): void {
   const [a, b, c, d, e, f] = worldToScreenTransform(scene.camera, scene.viewport);
   ctx.setTransform(a * dpr, b * dpr, c * dpr, d * dpr, e * dpr, f * dpr);
 }
 
-/** Vegetation, then roads, then buildings: a topographic-map look, not imagery. */
-function drawEnvironment(
-  ctx: CanvasRenderingContext2D,
-  scene: MapScene,
-  layer: TerrainLayer,
-): void {
-  const mpp = scene.camera.metersPerPixel;
+/** Margin (map metres) for strokes on polygon edges (at most 1.5 px wide), with room for antialiasing. */
+const edgeMargin = (scene: MapScene) => 2 * scene.camera.metersPerPixel;
+
+/** Runs `draw` in map coordinates with the environment's round joins and caps. */
+function withEnvironmentStyle(ctx: CanvasRenderingContext2D, scene: MapScene, draw: () => void) {
   const dpr = ctx.getTransform().a;
   ctx.save();
   useMapTransform(ctx, scene, dpr);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  // Map layers bottom to top: land use, vegetation, water, waterways, roads, buildings.
+  draw();
+  ctx.restore();
+}
+
+/** Land use, vegetation, water and waterways, bottom to top. */
+function drawAreas(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const edge = edgeMargin(scene);
   for (const l of layer.landUse) {
+    if (!overlaps(l.bounds, area, edge)) continue;
     ctx.fillStyle = LAND_USE_FILL[l.kind];
     ctx.fill(l.path, 'evenodd');
     if (l.kind === 'military') {
@@ -323,6 +575,7 @@ function drawEnvironment(
     }
   }
   for (const v of layer.vegetation) {
+    if (!overlaps(v.bounds, area, edge)) continue;
     ctx.fillStyle =
       v.kind === 'scrub'
         ? COLORS.scrubFill
@@ -337,6 +590,7 @@ function drawEnvironment(
   }
   ctx.setLineDash([]);
   for (const w of layer.water) {
+    if (!overlaps(w.bounds, area, edge)) continue;
     ctx.fillStyle = w.kind === 'wetland' ? COLORS.wetlandFill : COLORS.waterFill;
     ctx.fill(w.path, 'evenodd');
     ctx.strokeStyle = w.kind === 'wetland' ? COLORS.wetlandEdge : COLORS.waterEdge;
@@ -346,16 +600,31 @@ function drawEnvironment(
   }
   ctx.setLineDash([]);
   for (const w of layer.waterways) {
-    ctx.strokeStyle = COLORS.waterway;
-    ctx.lineWidth = Math.max(
+    const width = Math.max(
       w.widthMeters,
       (w.kind === 'river' || w.kind === 'canal' ? 2.5 : 1.4) * mpp,
     );
+    if (!overlaps(w.bounds, area, width / 2 + edge)) continue;
+    ctx.strokeStyle = COLORS.waterway;
+    ctx.lineWidth = width;
     ctx.setLineDash(w.kind === 'drain' || w.kind === 'ditch' ? [5 * mpp, 3 * mpp] : []);
     ctx.stroke(w.path);
   }
   ctx.setLineDash([]);
+}
+
+function drawRoads(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const edge = edgeMargin(scene);
   for (const r of layer.roads) {
+    // The widest stroke of any road class: a major road's casing.
+    const reach = (Math.max(r.widthMeters, 4 * mpp) + 2 * mpp) / 2 + edge;
+    if (!overlaps(r.bounds, area, reach)) continue;
     if (r.roadClass === 'path') {
       ctx.strokeStyle = COLORS.path;
       ctx.lineWidth = 1.2 * mpp;
@@ -380,22 +649,43 @@ function drawEnvironment(
     ctx.lineWidth = Math.max(r.widthMeters, (major ? 4 : 3) * mpp);
     ctx.stroke(r.path);
   }
+}
+
+function drawBuildings(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const edge = edgeMargin(scene);
   for (const b of layer.buildings) {
+    if (!overlaps(b.bounds, area, edge)) continue;
     ctx.fillStyle = COLORS.building;
     ctx.fill(b.path);
     ctx.strokeStyle = COLORS.buildingEdge;
     ctx.lineWidth = 1 * mpp;
     ctx.stroke(b.path);
   }
-  ctx.restore();
+}
 
-  // Feature ids, once zoomed in far enough to read them.
+/** Feature ids, once zoomed in far enough to read them. */
+function drawFeatureLabels(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
   if (mpp > FEATURE_LABEL_MAX_METERS_PER_PIXEL) return;
   ctx.save();
   ctx.font = '10px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // Labels are centred on their anchor and at most a few hundred pixels wide.
+  const textReach = 200 * mpp;
   const label = (text: string, at: Vec2, color: string) => {
+    if (!overlaps({ minX: at.x, minY: at.y, maxX: at.x, maxY: at.y }, area, textReach)) return;
     const p = worldToScreen(scene.camera, scene.viewport, at);
     ctx.lineWidth = 3;
     ctx.strokeStyle = COLORS.labelHalo;

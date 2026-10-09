@@ -3,6 +3,7 @@ import type { Session } from '#session';
 import { heightAt, isOnTerrain, type Vec2 } from '#sim';
 import {
   fitBounds,
+  type Bounds,
   MAX_METERS_PER_PIXEL,
   MIN_METERS_PER_PIXEL,
   screenToWorld,
@@ -12,7 +13,15 @@ import {
 } from './camera';
 import { createMapActions } from './actions';
 import { createMapController, DRAG_THRESHOLD_PX } from './interaction';
-import { createTerrainLayer, drawMap } from './render';
+import { createGeoCache, snapCamera, type CacheContext } from './geo-cache';
+import {
+  COLORS,
+  createTerrainLayer,
+  FEATURE_PHASES,
+  GROUND_PHASES,
+  drawOverlays,
+  drawVisibility,
+} from './render';
 import { buildScene, type MapScene, type VisibilityView } from './scene';
 import { createViewshedService } from './viewshed-service';
 
@@ -100,8 +109,41 @@ export function createTacticalMap({
 
   let viewport: Viewport = { width: 1, height: 1 };
   let camera: Camera = fitBounds(layer.bounds, viewport);
+  /** Device pixels per CSS pixel of the canvas. */
+  const pixelRatio = () => canvas.width / viewport.width;
+  /** Every camera is snapped to whole device pixels, so pans can reuse the cached map (geo-cache.ts). */
+  const setCamera = (next: Camera) => {
+    camera = snapCamera(next, pixelRatio());
+  };
+  const fitCamera = () => snapCamera(fitBounds(layer.bounds, viewport), pixelRatio());
   let fitted = false;
   let pointer: PointerReadout | null = null;
+
+  // The geographic map is cached between frames (geo-cache.ts); the painter
+  // functions are the renderer's own, so what is cached is what was drawn.
+  const asCanvas = (c: CacheContext) => c as CanvasRenderingContext2D;
+  const geo = createGeoCache<MapScene>(
+    {
+      ground: GROUND_PHASES.map((phase) => (c: CacheContext, s: MapScene, area: Bounds) => {
+        phase(asCanvas(c), s, layer, area);
+      }),
+      features: FEATURE_PHASES.map((phase) => (c: CacheContext, s: MapScene, area: Bounds) => {
+        phase(asCanvas(c), s, layer, area);
+      }),
+      between: (c, s) => {
+        drawVisibility(asCanvas(c), s, layer);
+      },
+      hasBetween: (s) => s.visibility?.viewshed != null,
+    },
+    (width, height) => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = width;
+      offscreen.height = height;
+      return offscreen;
+    },
+    (s, view) => ({ ...s, camera: view }),
+    COLORS.background,
+  );
 
   const viewsheds = createViewshedService(world.terrain);
   let visibility: VisibilityView | null = null;
@@ -129,14 +171,7 @@ export function createTacticalMap({
   const makeController = () =>
     createMapController(
       scene,
-      createMapActions(
-        current,
-        { get: getSession, set: setSession },
-        (next) => {
-          camera = next;
-        },
-        notify,
-      ),
+      createMapActions(current, { get: getSession, set: setSession }, setCamera, notify),
     );
   let controller = makeController();
 
@@ -233,8 +268,16 @@ export function createTacticalMap({
   const draw = () => {
     updateVisibility();
     const dpr = canvas.width / viewport.width;
+    const s = scene();
+    geo.draw(
+      ctx,
+      s,
+      { camera, viewport, width: canvas.width, height: canvas.height },
+      fitCamera(),
+      performance.now(),
+    );
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawMap(ctx, scene(), layer);
+    drawOverlays(ctx, s, layer);
     if (editor?.draw) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       editor.draw(ctx, (p) => worldToScreen(camera, viewport, p));
@@ -245,17 +288,23 @@ export function createTacticalMap({
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     viewport = { width: Math.max(rect.width, 1), height: Math.max(rect.height, 1) };
-    if (!fitted && rect.width > 0 && rect.height > 0) {
-      camera = fitBounds(layer.bounds, viewport);
-      fitted = true;
-    }
     const width = Math.round(viewport.width * dpr);
     const height = Math.round(viewport.height * dpr);
-    if (canvas.width === width && canvas.height === height) return;
+    const resized = canvas.width !== width || canvas.height !== height;
     // Setting the size clears the canvas, and resize observers run after this
     // frame's animation callbacks: redraw now so a blank canvas is never shown.
-    canvas.width = width;
-    canvas.height = height;
+    if (resized) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    if (!fitted && rect.width > 0 && rect.height > 0) {
+      setCamera(fitCamera());
+      fitted = true;
+    } else if (resized) {
+      // Snapped again for the new pixel ratio.
+      setCamera(camera);
+    }
+    if (!resized) return;
     draw();
   };
   const observer = new ResizeObserver(resize);
@@ -265,21 +314,21 @@ export function createTacticalMap({
   return {
     render: draw,
     fitView() {
-      camera = fitBounds(layer.bounds, viewport);
+      setCamera(fitCamera());
     },
     centreOn(point) {
-      camera = { ...camera, centerX: point.x, centerY: point.y };
+      setCamera({ ...camera, centerX: point.x, centerY: point.y });
     },
     setView(point, metersPerPixel) {
       fitted = true;
-      camera = {
+      setCamera({
         centerX: point.x,
         centerY: point.y,
         metersPerPixel: Math.min(
           Math.max(metersPerPixel, MIN_METERS_PER_PIXEL),
           MAX_METERS_PER_PIXEL,
         ),
-      };
+      });
     },
     toScreen(point) {
       return worldToScreen(camera, viewport, point);
@@ -299,6 +348,9 @@ export function createTacticalMap({
       return visibility;
     },
     dispose() {
+      geo.dispose();
+      layer.image.width = 0;
+      layer.image.height = 0;
       viewsheds.dispose();
       observer.disconnect();
       canvas.removeEventListener('pointerdown', onPointerDown);
