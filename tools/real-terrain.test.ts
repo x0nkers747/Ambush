@@ -36,7 +36,8 @@ describe.each([
   ['Quantico, Virginia (US)', { lat: 38.5223, lon: -77.2934 }, quantico],
   ['Grafenwöhr, Bavaria (DE)', { lat: 49.717, lon: 11.906 }, grafenwoehr],
 ])('a real-world battlefield: %s', (name, centre, osm) => {
-  const request = battlefieldRequest(centre, { name });
+  // The recorded OSM covers 1 km.
+  const request = battlefieldRequest(centre, { name, widthM: 1000 });
   const pkg = buildBattlefield({
     request,
     tiles: tilesFor(request),

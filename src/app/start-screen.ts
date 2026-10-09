@@ -28,7 +28,7 @@ import {
 import type { ExerciseUiOptions } from './exercise-ui';
 
 // The battlefield selection screen (docs/adr/0014): open the demo, generate a
-// new 1 km battlefield from a position or a place name, or open a saved one.
+// new 5 km battlefield from a position or a place name, or open a saved one.
 
 export interface SelectionOptions {
   readonly config: ServiceConfig;

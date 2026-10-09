@@ -261,7 +261,10 @@ describe('service clients', () => {
 });
 
 describe('generating a battlefield', () => {
-  const request = battlefieldRequest({ lat: 38.5223, lon: -77.2934 }, { name: 'Quantico' });
+  const request = battlefieldRequest(
+    { lat: 38.5223, lon: -77.2934 },
+    { name: 'Quantico', widthM: 1000 },
+  );
   const pixels = (() => {
     const e = new Array<number>(TILE_SIZE * TILE_SIZE);
     for (let i = 0; i < e.length; i += 1) e[i] = 30 + (i % TILE_SIZE) * 0.1;

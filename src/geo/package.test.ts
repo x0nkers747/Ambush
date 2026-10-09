@@ -13,11 +13,15 @@ import {
   type BattlefieldInputs,
   type BattlefieldPackage,
 } from './package';
-import type { ElevationTile } from './terrarium';
+import { battlefieldGrid, type ElevationTile } from './terrarium';
 import quantico from './test-data/quantico-va.overpass.json';
 import { TILE_SIZE } from './tiles';
 
-const REQUEST = battlefieldRequest({ lat: 38.5223, lon: -77.2934 }, { name: 'Quantico' });
+// The recorded OSM fixtures cover 1 km, so these tests use 1 km rather than the default size.
+const REQUEST = battlefieldRequest(
+  { lat: 38.5223, lon: -77.2934 },
+  { name: 'Quantico', widthM: 1000 },
+);
 
 /** Tiles of a plane rising 1 m per pixel eastward, with US sources. */
 function tiles(
@@ -56,6 +60,17 @@ describe('battlefield packages', () => {
     expect(plan.tiles.length).toBeGreaterThanOrEqual(4);
     expect(plan.tiles.length).toBeLessThanOrEqual(9);
     expect(plan.osmQuery).toContain('out geom;');
+  });
+
+  it('plans 5 km battlefields by default: 501 × 501 samples at 10 m', () => {
+    const request = battlefieldRequest({ lat: 38.5223, lon: -77.2934 });
+    expect([request.widthM, request.heightM, request.cellSizeM]).toEqual([5000, 5000, 10]);
+    expect(battlefieldGrid(planBattlefield(request).frame, request.cellSizeM)).toMatchObject({
+      columns: 501,
+      rows: 501,
+      originX: -2500,
+      originY: -2500,
+    });
   });
 
   it('builds a georeferenced 101 × 101 terrain with OSM features, sources and attribution', () => {
@@ -162,7 +177,7 @@ describe('battlefield packages', () => {
   it('formats coordinates and names unnamed battlefields by them', () => {
     expect(formatCoordinates({ lat: -33.86, lon: 151.2 })).toBe('33.86000° S, 151.20000° E');
     const unnamed = buildBattlefield(
-      inputs({ request: battlefieldRequest({ lat: 38.5223, lon: -77.2934 }) }),
+      inputs({ request: battlefieldRequest({ lat: 38.5223, lon: -77.2934 }, { widthM: 1000 }) }),
     );
     expect(unnamed.name).toBe('38.52230° N, 77.29340° W');
     expect(() => battlefieldRequest({ lat: 86, lon: 0 })).toThrow(/outside the supported range/);

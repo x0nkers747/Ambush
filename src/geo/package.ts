@@ -25,8 +25,8 @@ export const BATTLEFIELD_SCHEMA_VERSION = 1;
 export const IMPORTER_VERSION = '1.0.0';
 
 /** The only battlefield size offered for now; the format supports others. */
-export const DEFAULT_BATTLEFIELD_SIZE_M = 1000;
-/** Default elevation grid spacing: 101 × 101 samples for 1 km. */
+export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;
+/** Default elevation grid spacing: 501 × 501 samples for 5 km. */
 export const DEFAULT_CELL_SIZE_M = 10;
 /** Margin around the battlefield for the OSM query, so features crossing the edge are complete. */
 export const OSM_QUERY_MARGIN_M = 100;
@@ -264,8 +264,9 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       coarsestResolutionM: sources.coarsestResolutionM,
       surfaceModel: sources.surfaceModel,
       filledSamples: resampled.filled,
-      minM: Math.min(...elevations),
-      maxM: Math.max(...elevations),
+      // A loop, not Math.min(...elevations): spreading 251 001 samples (5 km) overflows the stack.
+      minM: elevations.reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY),
+      maxM: elevations.reduce((a, b) => Math.max(a, b), Number.NEGATIVE_INFINITY),
     },
     osm: {
       endpoint: inputs.osmEndpoint,

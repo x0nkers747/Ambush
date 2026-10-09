@@ -5,7 +5,7 @@ squad-level military ambushes. A deterministic, headless-capable simulation
 drives a 2D tactical view and a 3D (Three.js) observer view.
 
 Status: **real-world terrain** ([ADR 0014](docs/adr/0014-real-world-terrain-import.md)): besides
-the synthetic demo, any 1 × 1 km area between 80° S and 84° N can be generated from
+the synthetic demo, any 5 × 5 km area between 80° S and 84° N can be generated from
 OpenStreetMap and freely available elevation data, saved in the browser and played offline. The
 trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
 [ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an

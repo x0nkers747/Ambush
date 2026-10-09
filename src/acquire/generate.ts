@@ -114,7 +114,7 @@ export async function generateBattlefield(
   }
   check();
 
-  // 3. Processing (pure; fast enough for a 1 km battlefield to run here).
+  // 3. Processing (pure; under a second for a 5 km battlefield, so it runs here).
   report({ step: 'processing', message: 'Building the battlefield…' });
   const pkg = buildBattlefield({
     request,
