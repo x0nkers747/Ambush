@@ -152,21 +152,30 @@ export function createTacticalMap({
 
   /**
    * The selected soldier's viewshed from its destination (or where it stands): a
-   * coarser preview while the destination is being dragged, full detail
-   * otherwise. Computed in the background; the previous result is shown until
-   * the new one is ready.
+   * coarser grid while the destination is being dragged, full detail
+   * otherwise. Computed in the background: half-way, every other row is shown
+   * as a preview; until then the latest finished viewshed.
    */
   const updateVisibility = () => {
     const session = getSession();
     const id = session.selectedSoldierId;
     const observer = session.showVisibility && id !== null ? current.observer(id) : undefined;
     if (!observer || id === null) {
+      // Nothing to show: stop work in progress (finished viewsheds stay cached).
+      if (visibility !== null) viewsheds.cancel();
       visibility = null;
       return;
     }
     const cellSize = controller.draggingDestination ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
-    const { viewshed, pending } = viewsheds.request(observer.point, cellSize);
-    visibility = { observer: observer.point, planned: observer.planned, viewshed, pending };
+    const { viewshed, pending, failed, preview } = viewsheds.request(observer.point, cellSize);
+    visibility = {
+      observer: observer.point,
+      planned: observer.planned,
+      viewshed,
+      pending,
+      failed,
+      preview,
+    };
   };
 
   const makeController = () =>

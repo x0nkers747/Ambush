@@ -279,7 +279,7 @@ function addEdgeCrossings(
 
 // --- Feature preparation -----------------------------------------------------------
 
-interface PreparedBuilding {
+export interface PreparedBuilding {
   readonly id: string;
   readonly cause: LosCause;
   readonly polygon: readonly Vec2[];
@@ -288,7 +288,7 @@ interface PreparedBuilding {
   readonly roofZ: number;
 }
 
-interface PreparedVegetation {
+export interface PreparedVegetation {
   readonly id: string;
   readonly cause: LosCause;
   readonly polygon: readonly Vec2[];
@@ -305,7 +305,7 @@ const prepared = new WeakMap<
 >();
 
 /** Features with bounds and roof levels, computed once per terrain. A spatial index can replace this later. */
-function queryFeatures(terrain: TerrainDataset) {
+export function queryFeatures(terrain: TerrainDataset) {
   let features = prepared.get(terrain);
   if (!features) {
     features = {

@@ -6,14 +6,19 @@ import {
   type LosOptions,
 } from './los';
 import { pointInPolygon } from './polygon';
+import { noObstruction, sightLineTracer, type Obstruction } from './sight-tracer';
 import { heightAt, type TerrainDataset } from './terrain';
 
-// Viewsheds (docs/adr/0011): which ground an observer can see, sampled on a
-// regular grid. Each cell is decided by exactly the same sight-line trace as
-// `lineOfSight`, from the observer's eye to a standing target at the cell
-// centre, so a viewshed never disagrees with a point query. The interface
-// (a grid in, a visibility field out) lets a faster algorithm replace the
-// per-cell trace later without changing callers.
+// Viewsheds (docs/adr/0011, docs/adr/0020): which ground an observer can see,
+// sampled on a regular grid. Each cell is decided as the sight-line trace of
+// `lineOfSight` decides it, from the observer's eye to a standing target at
+// the cell centre, so a viewshed never disagrees with a point query. The
+// work is done by `sightLineTracer`, which reaches the same decision far
+// faster, and most hidden cells are settled by a proof from a neighbour's
+// obstruction instead of a trace.
+
+/** Recent distinct obstructions tried as quick proofs for each cell. */
+const RECENT_OBSTRUCTIONS = 4;
 
 /** A regular grid of target points: cell (c, r) is centred on `origin + (c + ½, r + ½) × cellSize`. */
 export interface ViewshedGrid {
@@ -29,6 +34,14 @@ export interface Viewshed {
   readonly observer: Vec2;
   /** One byte per cell, row-major from the south-west: 1 visible, 0 not. */
   readonly visible: Uint8Array;
+}
+
+/**
+ * Builds the terrain's visibility index (feature and edge buckets, polygon
+ * rasters) now rather than on the first viewshed. Idempotent per terrain.
+ */
+export function prepareViewsheds(terrain: TerrainDataset): void {
+  sightLineTracer(terrain);
 }
 
 /** The grid of whole `cellSize` cells covering the terrain, all centres on the terrain. */
@@ -55,11 +68,96 @@ export function cellCentre(grid: ViewshedGrid, column: number, row: number): Vec
 
 /**
  * Visibility of rows `rowStart` (inclusive) to `rowEnd` (exclusive) of the
- * grid from `observer`: one byte per cell, 1 visible, 0 not. Rows are
- * independent, so a viewshed can be computed in parts, in any order, and
- * assembled into an identical result.
+ * grid from `observer`, every `rowStep`th row: one byte per cell, 1 visible,
+ * 0 not, the rows packed in order. Every cell is decided on its own, so a
+ * viewshed can be computed in parts, in any order, and assembled into an
+ * identical result.
  */
 export function computeViewshedRows(
+  terrain: TerrainDataset,
+  observer: Vec2,
+  grid: ViewshedGrid,
+  rowStart: number,
+  rowEnd: number,
+  options: LosOptions = {},
+  rowStep = 1,
+): Uint8Array {
+  const eye = {
+    x: observer.x,
+    y: observer.y,
+    z:
+      heightAt(terrain, observer.x, observer.y) +
+      (options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M),
+  };
+  const aim = options.targetHeightMeters ?? STANDING_TARGET_HEIGHT_M;
+  const out = new Uint8Array(Math.ceil((rowEnd - rowStart) / rowStep) * grid.columns);
+  const tracer = sightLineTracer(terrain);
+  // What obstructed the cell to the left and each cell of the row below, and
+  // a few recent obstructions: usually what obstructs this cell too, which a
+  // quick proof confirms. Proofs that need a short walk come next; a full
+  // trace only when no proof succeeds.
+  let below: Obstruction[] = Array.from({ length: grid.columns }, noObstruction);
+  let current: Obstruction[] = Array.from({ length: grid.columns }, noObstruction);
+  const recent: Obstruction[] = Array.from({ length: RECENT_OBSTRUCTIONS }, noObstruction);
+  let nextRecent = 0;
+  const target = { x: 0, y: 0, z: 0 };
+  /** Two obstructions that would give the same proof. */
+  const same = (o: Obstruction, p: Obstruction | undefined) =>
+    o.kind === p?.kind && (o.kind === 2 ? o.building === p.building : o.x === p.x && o.y === p.y);
+  /** The first of left, below and the recent obstructions that proves the cell hidden at a glance. */
+  const quickProof = (left: Obstruction | undefined, under: Obstruction | undefined) => {
+    if (left && left.kind !== 0 && tracer.provesQuickly(eye, target, left)) return left;
+    if (under && under.kind !== 0 && !same(under, left) && tracer.provesQuickly(eye, target, under))
+      return under;
+    for (const o of recent) {
+      if (o.kind !== 0 && !same(o, left) && !same(o, under) && tracer.provesQuickly(eye, target, o))
+        return o;
+    }
+    return undefined;
+  };
+  for (let r = rowStart; r < rowEnd; r += rowStep) {
+    let left: Obstruction | undefined;
+    for (let c = 0; c < grid.columns; c += 1) {
+      // `cellCentre`, without the allocation.
+      const x = grid.originX + (c + 0.5) * grid.cellSize;
+      const y = grid.originY + (r + 0.5) * grid.cellSize;
+      target.x = x;
+      target.y = y;
+      target.z = heightAt(terrain, x, y) + aim;
+      const here = current[c] ?? noObstruction();
+      const under = below[c];
+      let proof: Obstruction | undefined;
+      if (x === eye.x && y === eye.y) {
+        here.kind = 0;
+      } else {
+        proof = quickProof(left, under);
+        if (!proof && left && tracer.provesByWalking(eye, target, left)) proof = left;
+        if (!proof && under && under.kind !== 0 && !same(under, left)) {
+          if (tracer.provesByWalking(eye, target, under)) proof = under;
+        }
+        if (proof) {
+          Object.assign(here, proof);
+        } else if (tracer.blocked(eye, target, here)) {
+          // A new obstruction: remember it among the recent ones.
+          const slot = recent[nextRecent];
+          if (slot) Object.assign(slot, here);
+          nextRecent = (nextRecent + 1) % RECENT_OBSTRUCTIONS;
+          proof = here;
+        }
+      }
+      left = here;
+      out[((r - rowStart) / rowStep) * grid.columns + c] = proof ? 0 : 1;
+    }
+    [below, current] = [current, below];
+  }
+  return out;
+}
+
+/**
+ * The reference viewshed: every cell traced with `traceSightLine`, exactly as
+ * viewsheds were computed before `sightLineTracer`. For tests and benchmarks.
+ */
+export function computeViewshedRowsReference(
   terrain: TerrainDataset,
   observer: Vec2,
   grid: ViewshedGrid,

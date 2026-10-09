@@ -720,10 +720,21 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         ? shown
         : null;
     const resolution = shown ? `${String(shown.grid.cellSize)} m` : '';
+    if (view.failed) {
+      return `<p>${from}</p><p class="alert">Visibility cannot be calculated in this browser (its background workers failed).</p>`;
+    }
+    const showing = !shown
+      ? ''
+      : current && view.preview
+        ? ' (showing a preview: half the rows of the full result)'
+        : current
+          ? ` (showing ${resolution} preview)`
+          : ` (showing ${resolution} result for the previous position)`;
     const status = view.pending
-      ? `<p class="muted">Calculating…${shown ? ` (showing ${current ? `${resolution} preview` : `${resolution} result for the previous position`})` : ''}</p>`
+      ? `<p class="muted">Calculating…${showing}</p>`
       : `<p class="muted">Ground sampled every ${resolution}.</p>`;
-    const coverage = current ? exercise.killZoneCoverage(current) : undefined;
+    // Kill-zone coverage only from a complete viewshed: a preview's rows between are copies.
+    const coverage = current && !view.preview ? exercise.killZoneCoverage(current) : undefined;
     const zone = exercise.killZone
       ? coverage
         ? `<p><b>KILL ZONE VISIBLE: ${coverage.percent.toFixed(0)}%</b></p>

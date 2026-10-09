@@ -163,3 +163,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 17. [Tactical map rendering on 5 km battlefields](docs/adr/0017-map-rendering-performance-5-km.md)
 18. [The selected Marine's weapon engagement wedge](docs/adr/0018-weapon-engagement-wedge.md)
 19. [Combat v1: probabilistic two-sided engagements](docs/adr/0019-probabilistic-engagements.md)
+20. [Viewsheds on 5 km battlefields](docs/adr/0020-viewshed-performance-5-km.md)

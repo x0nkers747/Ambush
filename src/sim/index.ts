@@ -174,6 +174,7 @@ export {
   cellCentre,
   computeViewshed,
   computeViewshedRows,
+  prepareViewsheds,
   viewshedGrid,
   visibleCellsIn,
   type Viewshed,

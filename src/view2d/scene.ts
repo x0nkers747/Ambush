@@ -107,6 +107,10 @@ export interface VisibilityView {
   readonly viewshed: Viewshed | null;
   /** Whether the viewshed from `observer` is still being computed. */
   readonly pending: boolean;
+  /** Whether viewsheds cannot be computed (every worker failed). */
+  readonly failed?: boolean;
+  /** Whether `viewshed` is the requested one half-computed (every other row). */
+  readonly preview?: boolean;
 }
 
 /** The scene for the current exercise and session state. */
