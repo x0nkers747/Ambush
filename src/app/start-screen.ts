@@ -12,7 +12,8 @@ import {
   type PlaceResult,
   type ServiceConfig,
 } from '#acquire';
-import { scenarioForTerrain } from '#exercise';
+import type { AmbushScenario } from '#exercise';
+import type { Vec2 } from '#sim';
 import {
   battlefieldRequest,
   createFrame,
@@ -50,10 +51,17 @@ const SURFACE_LABEL: Record<string, string> = {
   unknown: 'unknown source type',
 };
 
-/** The exercise screen's options for a saved battlefield: scenario, credits, readout and description. */
-export function battlefieldExercise(pkg: BattlefieldPackage): Omit<ExerciseUiOptions, 'onLeave'> {
-  const scenario = scenarioForTerrain(pkg.terrain, `battlefield-${pkg.id}`);
+/** Lat/lon readout for a battlefield's local metres. */
+export function describePointFor(pkg: BattlefieldPackage): (p: Vec2) => string {
   const frame = createFrame(pkg.request.centre, pkg.request.widthM, pkg.request.heightM);
+  return (p) => formatCoordinates(toGeo(frame, p));
+}
+
+/** The exercise screen's options for a battlefield and its scenario: credits, readout and description. */
+export function battlefieldExercise(
+  pkg: BattlefieldPackage,
+  scenario: AmbushScenario,
+): Omit<ExerciseUiOptions, 'onLeave'> {
   const e = pkg.elevation;
   const datasets = e.datasets.filter((d) => d.resolutionM < 200).map((d) => d.name);
   const resolution =
@@ -89,7 +97,7 @@ export function battlefieldExercise(pkg: BattlefieldPackage): Omit<ExerciseUiOpt
     scenario,
     title: pkg.name,
     attribution: pkg.attribution,
-    describePoint: (p) => formatCoordinates(toGeo(frame, p)),
+    describePoint: describePointFor(pkg),
     infoHtml: info,
   };
 }

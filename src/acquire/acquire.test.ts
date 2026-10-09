@@ -384,3 +384,17 @@ describe('generating a battlefield', () => {
     await expect(store.get(pkg.id)).rejects.toThrow(/terrain is invalid/);
   });
 });
+
+describe('saved scenarios', () => {
+  it('are kept per battlefield, apart from the package, and deleted with it', async () => {
+    const store = createMemoryStore();
+    await store.putScenario('bf-a', 'bf-a/1', { name: 'one', route: [1, 2] });
+    await store.putScenario('bf-b', 'bf-b/1', { name: 'other' });
+    await store.putScenario('bf-a', 'bf-a/1', { name: 'one, edited', route: [1, 2, 3] });
+    expect(await store.listScenarios('bf-a')).toEqual([{ name: 'one, edited', route: [1, 2, 3] }]);
+    expect(await store.listScenarios('bf-c')).toEqual([]);
+    await store.delete('bf-a');
+    expect(await store.listScenarios('bf-a')).toEqual([]);
+    expect(await store.listScenarios('bf-b')).toEqual([{ name: 'other' }]);
+  });
+});

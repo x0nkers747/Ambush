@@ -45,6 +45,8 @@ export interface ExerciseUiOptions {
   readonly infoHtml?: string;
   /** Returns to the battlefield selection. */
   readonly onLeave: () => void;
+  /** Returns to scenario editing (docs/adr/0015); absent for the demo. */
+  readonly onEditScenario?: () => void;
 }
 
 export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): void {
@@ -61,7 +63,8 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
   app.innerHTML = `
   <header>
     <h1>AMBUSH!</h1>
-    <button class="battlefield-button" data-ui="leave" title="Choose another battlefield">◂ <span data-ui="battlefield-name"></span></button>
+    <button class="battlefield-button" data-ui="leave" title="Back to terrain selection">◂ <span data-ui="battlefield-name"></span></button>
+    <button data-ui="edit-scenario" title="Back to scenario editing (ORP, OPFOR, route)" hidden>◂ Scenario</button>
     <span class="phase" data-ui="phase"></span>
     <span class="clock" data-ui="clock" title="Simulation time"></span>
     <div class="group">
@@ -241,9 +244,35 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     map.fitView();
   });
   ui('battlefield-name').textContent = options.title;
-  ui('leave').addEventListener('click', () => {
-    options.onLeave();
-  });
+  /**
+   * Leaving discards the exercise: once it has begun (a plan executed), the
+   * first click asks for confirmation and the second leaves.
+   */
+  const leaveWithConfirmation = (button: HTMLElement, go: () => void) => {
+    const label = button.innerHTML;
+    let armed = false;
+    button.addEventListener('click', () => {
+      if (exercise.revisions.length === 0 || armed) {
+        go();
+        return;
+      }
+      armed = true;
+      button.textContent = 'Discard this exercise?';
+      button.classList.add('danger');
+      setTimeout(() => {
+        armed = false;
+        button.innerHTML = label;
+        button.classList.remove('danger');
+        ui('battlefield-name').textContent = options.title;
+      }, 4000);
+    });
+  };
+  leaveWithConfirmation(ui('leave'), options.onLeave);
+  const { onEditScenario } = options;
+  if (onEditScenario) {
+    ui('edit-scenario').hidden = false;
+    leaveWithConfirmation(ui('edit-scenario'), onEditScenario);
+  }
   if (options.attribution.length > 0) {
     // Compact on the map; the full list is in the battlefield panel.
     ui('attribution').hidden = false;

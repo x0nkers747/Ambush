@@ -14,6 +14,26 @@ export {
   ScenarioPlacementError,
 } from './battlefield-scenario';
 export { DEMO_SCENARIO } from './demo-scenario';
+export {
+  addRouteWaypoint,
+  buildScenario,
+  clearRoute,
+  defaultScenarioDefinition,
+  deleteRouteWaypoint,
+  moveRouteWaypoint,
+  OPFOR_FORCES,
+  orpPlacementProblem,
+  parseScenarioDefinition,
+  SCENARIO_SCHEMA,
+  SCENARIO_SCHEMA_VERSION,
+  ScenarioDefinitionError,
+  scenarioProblems,
+  setOpforStart,
+  setOrp,
+  type EditResult,
+  type OpforForce,
+  type ScenarioDefinition,
+} from './scenario-definition';
 export { DEFAULT_MOVEMENT, squadInstance, USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 export {
   defaultFacing,

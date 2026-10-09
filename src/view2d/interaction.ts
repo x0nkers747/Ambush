@@ -79,6 +79,8 @@ export interface MapController {
   readonly cursor: MapCursor;
   /** Whether the destination is being dragged (e.g. to show a quicker preview meanwhile). */
   readonly draggingDestination: boolean;
+  /** Ends the current gesture without acting on it (e.g. a click another handler took). */
+  cancel(): void;
 }
 
 export function createMapController(scene: () => MapScene, actions: MapActions): MapController {
@@ -126,6 +128,10 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     },
     get draggingDestination() {
       return mode.kind === 'destination';
+    },
+
+    cancel() {
+      mode = { kind: 'idle' };
     },
 
     pointerDown(input) {

@@ -563,8 +563,26 @@
         font-size: 11px;
         line-height: 1.5;
       }
+      /* Scenario editing (docs/adr/0015). */
+      .phase[data-phase='editing'] {
+        background: #c9a2e6;
+      }
+      .route-list {
+        margin: 0 0 6px;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .ok {
+        color: var(--executing);
+      }
+      button.primary.armed {
+        box-shadow: 0 0 0 2px rgba(63, 174, 106, 0.45);
+      }
       /* Exercise screen additions. */
       .battlefield-button {
+        min-width: 110px;
         max-width: 280px;
         overflow: hidden;
         text-overflow: ellipsis;

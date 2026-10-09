@@ -33,7 +33,15 @@ export interface BattlefieldStore {
   get(id: string): Promise<BattlefieldPackage>;
   getSources(id: string): Promise<BattlefieldSources | undefined>;
   put(pkg: BattlefieldPackage, sources: BattlefieldSources): Promise<void>;
+  /** Deletes a battlefield and its scenarios. */
   delete(id: string): Promise<void>;
+  /**
+   * Scenarios saved for a battlefield (docs/adr/0015), as stored: this layer
+   * does not know the scenario format, so the caller validates them.
+   */
+  listScenarios(battlefieldId: string): Promise<unknown[]>;
+  /** Saves (or replaces) a scenario of a battlefield. Kept apart from the battlefield package. */
+  putScenario(battlefieldId: string, scenarioId: string, data: unknown): Promise<void>;
 }
 
 export function summarize(pkg: BattlefieldPackage): BattlefieldSummary {
@@ -57,6 +65,7 @@ const newestFirst = (a: BattlefieldSummary, b: BattlefieldSummary) =>
 export function createMemoryStore(): BattlefieldStore {
   const packages = new Map<string, unknown>();
   const sources = new Map<string, BattlefieldSources>();
+  const scenarios = new Map<string, { battlefieldId: string; data: unknown }>();
   return {
     list: () =>
       Promise.resolve(
@@ -76,16 +85,30 @@ export function createMemoryStore(): BattlefieldStore {
     delete: (id) => {
       packages.delete(id);
       sources.delete(id);
+      for (const [key, s] of scenarios) if (s.battlefieldId === id) scenarios.delete(key);
+      return Promise.resolve();
+    },
+    listScenarios: (battlefieldId) =>
+      Promise.resolve(
+        [...scenarios.entries()]
+          .filter(([, s]) => s.battlefieldId === battlefieldId)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([, s]) => structuredClone(s.data)),
+      ),
+    putScenario: (battlefieldId, scenarioId, data) => {
+      scenarios.set(scenarioId, { battlefieldId, data: structuredClone(data) });
       return Promise.resolve();
     },
   };
 }
 
 const DB_NAME = 'ambush';
-const DB_VERSION = 1;
+/** 2 added the scenarios store (existing battlefields are kept). */
+const DB_VERSION = 2;
 const SUMMARIES = 'battlefieldSummaries';
 const PACKAGES = 'battlefieldPackages';
 const SOURCES = 'battlefieldSources';
+const SCENARIOS = 'scenarios';
 
 const request = <T>(r: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -117,7 +140,7 @@ export async function openIndexedDbStore(
   const open = factory.open(DB_NAME, DB_VERSION);
   open.onupgradeneeded = () => {
     const db = open.result;
-    for (const name of [SUMMARIES, PACKAGES, SOURCES]) {
+    for (const name of [SUMMARIES, PACKAGES, SOURCES, SCENARIOS]) {
       if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
     }
   };
@@ -150,8 +173,30 @@ export async function openIndexedDbStore(
       await done(tx);
     },
     async delete(id) {
-      const tx = db.transaction([SUMMARIES, PACKAGES, SOURCES], 'readwrite');
+      const tx = db.transaction([SUMMARIES, PACKAGES, SOURCES, SCENARIOS], 'readwrite');
       for (const name of [SUMMARIES, PACKAGES, SOURCES]) tx.objectStore(name).delete(id);
+      const scenarios = tx.objectStore(SCENARIOS);
+      const keys = (await request(scenarios.getAllKeys())) as string[];
+      const values = (await request(scenarios.getAll())) as { battlefieldId: string }[];
+      keys.forEach((key, i) => {
+        if (values[i]?.battlefieldId === id) scenarios.delete(key);
+      });
+      await done(tx);
+    },
+    async listScenarios(battlefieldId) {
+      const tx = db.transaction(SCENARIOS, 'readonly');
+      const store = tx.objectStore(SCENARIOS);
+      const keys = (await request(store.getAllKeys())) as string[];
+      const values = (await request(store.getAll())) as { battlefieldId: string; data: unknown }[];
+      return keys
+        .map((key, i) => ({ key, value: values[i] }))
+        .filter(({ value }) => value?.battlefieldId === battlefieldId)
+        .sort((a, b) => a.key.localeCompare(b.key))
+        .map(({ value }) => value?.data);
+    },
+    async putScenario(battlefieldId, scenarioId, data) {
+      const tx = db.transaction(SCENARIOS, 'readwrite');
+      tx.objectStore(SCENARIOS).put({ battlefieldId, data }, scenarioId);
       await done(tx);
     },
   };

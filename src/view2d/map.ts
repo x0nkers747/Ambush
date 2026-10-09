@@ -11,7 +11,7 @@ import {
   type Viewport,
 } from './camera';
 import { createMapActions } from './actions';
-import { createMapController } from './interaction';
+import { createMapController, DRAG_THRESHOLD_PX } from './interaction';
 import { createTerrainLayer, drawMap } from './render';
 import { buildScene, type MapScene, type VisibilityView } from './scene';
 import { createViewshedService } from './viewshed-service';
@@ -30,6 +30,26 @@ export interface TacticalMapOptions {
   readonly setSession: (session: Session) => void;
   /** Shows the trainee why a map edit was refused. */
   readonly notify?: (message: string) => void;
+  /** Editor hooks: clicks and drags go to the editor instead of the exercise. */
+  readonly editor?: MapEditor;
+}
+
+/**
+ * Hooks that take over clicks and drags for an editor (e.g. the scenario
+ * editor, docs/adr/0015) while the map keeps panning and zooming. Points are
+ * map metres; `screen` is in canvas pixels.
+ */
+export interface MapEditor {
+  /** A button pressed at a point: return `true` to take the gesture (then `drag` and `drop` follow). */
+  press?(point: Vec2, screen: Vec2, button: number): boolean;
+  drag?(point: Vec2): void;
+  drop?(point: Vec2): void;
+  /** A left click (no drag) at a point. The map's own click handling (selection, destinations) is skipped. */
+  click(point: Vec2, screen: Vec2): void;
+  /** Drawing on top of the map, in canvas pixels. */
+  draw?(ctx: CanvasRenderingContext2D, toScreen: (p: Vec2) => Vec2): void;
+  /** Cursor over a point, or `null` for the map's own. */
+  cursor?(point: Vec2, screen: Vec2): string | null;
 }
 
 /** Map point under the pointer, for a coordinate readout. */
@@ -54,6 +74,13 @@ export interface TacticalMap {
   setView(point: Vec2, metersPerPixel: number): void;
   /** Whether a map point is currently on screen. */
   isInView(point: Vec2): boolean;
+  /** Canvas pixel position of a map point. */
+  toScreen(point: Vec2): Vec2;
+  /**
+   * Shows another exercise on the same terrain (e.g. the scenario editor's
+   * preview after an edit), keeping the view.
+   */
+  setExercise(next: Exercise): void;
   dispose(): void;
 }
 
@@ -63,9 +90,11 @@ export function createTacticalMap({
   getSession,
   setSession,
   notify,
+  editor,
 }: TacticalMapOptions): TacticalMap {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D is not available');
+  let current = exercise;
   const world = exercise.simulation.world;
   const layer = createTerrainLayer(world.terrain);
 
@@ -76,7 +105,7 @@ export function createTacticalMap({
 
   const viewsheds = createViewshedService(world.terrain);
   let visibility: VisibilityView | null = null;
-  const scene = (): MapScene => buildScene(exercise, getSession(), camera, viewport, visibility);
+  const scene = (): MapScene => buildScene(current, getSession(), camera, viewport, visibility);
 
   /**
    * The selected soldier's viewshed from its destination (or where it stands): a
@@ -87,7 +116,7 @@ export function createTacticalMap({
   const updateVisibility = () => {
     const session = getSession();
     const id = session.selectedSoldierId;
-    const observer = session.showVisibility && id !== null ? exercise.observer(id) : undefined;
+    const observer = session.showVisibility && id !== null ? current.observer(id) : undefined;
     if (!observer || id === null) {
       visibility = null;
       return;
@@ -97,15 +126,19 @@ export function createTacticalMap({
     visibility = { observer: observer.point, planned: observer.planned, viewshed, pending };
   };
 
-  const actions = createMapActions(
-    exercise,
-    { get: getSession, set: setSession },
-    (next) => {
-      camera = next;
-    },
-    notify,
-  );
-  const controller = createMapController(scene, actions);
+  const makeController = () =>
+    createMapController(
+      scene,
+      createMapActions(
+        current,
+        { get: getSession, set: setSession },
+        (next) => {
+          camera = next;
+        },
+        notify,
+      ),
+    );
+  let controller = makeController();
 
   const local = (event: MouseEvent): Vec2 => {
     const rect = canvas.getBoundingClientRect();
@@ -122,21 +155,56 @@ export function createTacticalMap({
       : null;
   };
 
+  const toWorld = (screen: Vec2) => screenToWorld(camera, viewport, screen);
+  /** Editor gesture state: a drag the editor took, or where a press that may be a click began. */
+  let editorDragging = false;
+  let pressedAt: Vec2 | null = null;
+  const editorCursor = (p: Vec2) => editor?.cursor?.(toWorld(p), p) ?? null;
+
   const onPointerDown = (event: PointerEvent) => {
     canvas.setPointerCapture(event.pointerId);
-    controller.pointerDown({ ...local(event), button: event.button });
+    const p = local(event);
+    if (editor && event.button !== 1 && editor.press?.(toWorld(p), p, event.button)) {
+      editorDragging = true;
+      return;
+    }
+    pressedAt = event.button === 0 ? p : null;
+    controller.pointerDown({ ...p, button: event.button });
     canvas.style.cursor = controller.cursor;
     if (event.button === 1) event.preventDefault();
   };
   const onPointerMove = (event: PointerEvent) => {
     const p = local(event);
-    controller.pointerMove({ ...p, button: event.button });
     updatePointer(p);
-    canvas.style.cursor = controller.cursor;
+    if (editorDragging) {
+      editor?.drag?.(toWorld(p));
+      return;
+    }
+    controller.pointerMove({ ...p, button: event.button });
+    canvas.style.cursor = editorCursor(p) ?? controller.cursor;
   };
   const onPointerUp = (event: PointerEvent) => {
-    controller.pointerUp({ ...local(event), button: event.button });
-    canvas.style.cursor = controller.cursor;
+    const p = local(event);
+    if (editorDragging) {
+      editorDragging = false;
+      editor?.drop?.(toWorld(p));
+      return;
+    }
+    const start = pressedAt;
+    pressedAt = null;
+    if (
+      editor &&
+      start &&
+      event.button === 0 &&
+      Math.hypot(p.x - start.x, p.y - start.y) < DRAG_THRESHOLD_PX
+    ) {
+      // A click: the editor's, not the exercise's.
+      controller.cancel();
+      editor.click(toWorld(start), start);
+    } else {
+      controller.pointerUp({ ...p, button: event.button });
+    }
+    canvas.style.cursor = editorCursor(p) ?? controller.cursor;
   };
   const onPointerLeave = () => {
     updatePointer(null);
@@ -167,6 +235,10 @@ export function createTacticalMap({
     const dpr = canvas.width / viewport.width;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawMap(ctx, scene(), layer);
+    if (editor?.draw) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      editor.draw(ctx, (p) => worldToScreen(camera, viewport, p));
+    }
   };
 
   const resize = () => {
@@ -208,6 +280,13 @@ export function createTacticalMap({
           MAX_METERS_PER_PIXEL,
         ),
       };
+    },
+    toScreen(point) {
+      return worldToScreen(camera, viewport, point);
+    },
+    setExercise(next) {
+      current = next;
+      controller = makeController();
     },
     isInView(point) {
       const p = worldToScreen(camera, viewport, point);

@@ -12,8 +12,8 @@ trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical or
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
 with Ambush!'s own role icons (not APP-6, see
 [ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow
-runs through AMBUSH TRIGGERED on the demo; generated battlefields have no OPFOR yet. No combat
-or 3D yet.
+runs through AMBUSH TRIGGERED, on the demo or on any battlefield once its scenario (ORP, OPFOR and
+route) is set up in the scenario editor. No combat or 3D yet.
 
 ## Requirements
 
@@ -27,23 +27,30 @@ npm install
 npm run dev
 ```
 
-## Choosing a battlefield
+## Choosing a battlefield, setting up the scenario, playing it
 
-Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. The start
-screen offers:
+Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. Ambush! has
+three stages ([ADR 0015](docs/adr/0015-three-stage-workflow-and-scenario-editing.md)):
 
-- **The demo battlefield**: synthetic terrain with an OPFOR patrol; the full ambush exercise below.
-- **A new battlefield**: enter a latitude and longitude in decimal degrees (e.g. `38.5223`,
-  `-77.2934`), or search for a place and pick a result. Check the location (there is a link to view
-  it on OpenStreetMap), then press **Generate battlefield**. Ambush! downloads the elevation tiles
-  and OpenStreetMap features, builds a 1,000 × 1,000 m battlefield, saves it and opens it, usually
-  within seconds. **Cancel** stops it; if OpenStreetMap is unavailable you can retry or continue
-  with terrain only. The squad starts at an ORP on open ground near the centre. There is no OPFOR
-  yet: movement, facing, visibility and the kill zone work as on the demo.
-- **Saved battlefields**: open one (no network needed) or delete it.
+1. **Terrain selection.** Open the **demo** (it goes straight to planning, with its own scenario),
+   **generate a new battlefield** (enter a latitude and longitude in decimal degrees, e.g.
+   `38.5223`, `-77.2934`, or search for a place; check the location, press **Generate
+   battlefield**; **Cancel** stops it; if OpenStreetMap is unavailable you can retry or continue
+   with terrain only), or open a **saved battlefield** (no network needed). Opening or generating
+   a battlefield goes to its scenario.
+2. **Scenario editing.** On the tactical map:
+   - **Place ORP**: click where the squad assembles (or drag the ORP).
+   - **Place OPFOR**: click where the OPFOR patrol (three soldiers) starts (or drag it).
+   - **Edit OPFOR route**: click to add waypoints in order; drag a waypoint to move it; right-click
+     to delete it. The patrol walks straight between waypoints, round buildings where needed.
+   - **Clear route** keeps the OPFOR where it starts; **Reset scenario** (two clicks) starts over.
+   - **Continue to BLUEFOR planning** once the panel says the scenario is ready. Changes are saved
+     as you make them; **◂ Terrain** goes back.
+3. **BLUEFOR planning and execution**: the exercise below, with the squad in your ORP and the OPFOR
+   at the start of your route. **◂ Scenario** returns to editing and **◂ <battlefield>** to terrain
+   selection; once a plan has been executed, both ask you to confirm discarding the exercise.
 
-The battlefield button at the top left of the exercise returns to the start screen. Each
-battlefield's panel lists its sources, their resolution and accuracy, and the credits their
+Each battlefield's panel lists its sources, their resolution and accuracy, and the credits their
 licences require. Service endpoints can be changed per browser: see
 [ADR 0014](docs/adr/0014-real-world-terrain-import.md#data-sources-and-services).
 
@@ -138,3 +145,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 12. [Doctrinal organization, ORP and single-destination deployment](docs/adr/0012-organization-orp-and-single-destination-planning.md)
 13. [Custom individual soldier icons](docs/adr/0013-individual-soldier-icons.md)
 14. [Real-world terrain import (1 km battlefields)](docs/adr/0014-real-world-terrain-import.md)
+15. [Three-stage workflow and scenario editing](docs/adr/0015-three-stage-workflow-and-scenario-editing.md)

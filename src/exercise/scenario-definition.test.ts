@@ -1,0 +1,230 @@
+import { describe, expect, it } from 'vitest';
+import {
+  createSyntheticTerrain,
+  flatElevation,
+  hashSimState,
+  rectangle,
+  type TerrainDataset,
+  type Vec2,
+} from '#sim';
+import { createExercise } from './exercise';
+import { orpContains } from './orp';
+import {
+  addRouteWaypoint,
+  buildScenario,
+  clearRoute,
+  defaultScenarioDefinition,
+  deleteRouteWaypoint,
+  moveRouteWaypoint,
+  orpPlacementProblem,
+  parseScenarioDefinition,
+  scenarioProblems,
+  setOpforStart,
+  setOrp,
+  type EditResult,
+  type ScenarioDefinition,
+} from './scenario-definition';
+
+// Scenario definitions (docs/adr/0015): ORP and OPFOR placement and route
+// editing on a battlefield, and the playable scenario built from them.
+
+const square = (cx: number, cy: number, half: number): Vec2[] => [
+  { x: cx - half, y: cy - half },
+  { x: cx + half, y: cy - half },
+  { x: cx + half, y: cy + half },
+  { x: cx - half, y: cy + half },
+];
+
+/** A 1 km battlefield with a lake in the north-west and a building east of centre. */
+function terrain(): TerrainDataset {
+  const base = createSyntheticTerrain(
+    { originX: -500, originY: -500, cellSize: 10, columns: 101, rows: 101 },
+    flatElevation(50),
+  );
+  return {
+    ...base,
+    formatVersion: 3,
+    features: {
+      roads: [],
+      buildings: [{ id: 'B1', footprint: rectangle(150, 0, 20, 20, 0), heightMeters: 6 }],
+      vegetation: [],
+      water: [{ id: 'lake', kind: 'water', boundary: square(-300, 300, 60) }],
+      waterways: [],
+      landUse: [],
+    },
+  };
+}
+
+const T = terrain();
+const expectOk = (r: EditResult): ScenarioDefinition => {
+  if (!r.ok) throw new Error(`refused: ${r.problem}`);
+  return r.definition;
+};
+
+/** A scenario with the ORP south of centre and OPFOR coming down from the north. */
+function playable(): ScenarioDefinition {
+  let d = defaultScenarioDefinition(T, 'bf-test');
+  d = expectOk(setOrp(T, d, { x: 0, y: -300 }));
+  d = expectOk(setOpforStart(T, d, { x: 0, y: 400 }));
+  d = expectOk(addRouteWaypoint(T, d, { x: 0, y: 100 }));
+  return expectOk(addRouteWaypoint(T, d, { x: 300, y: 50 }));
+}
+
+describe('scenario creation', () => {
+  it('starts with the ORP on open ground near the centre and no OPFOR', () => {
+    const d = defaultScenarioDefinition(T, 'bf-test');
+    expect(d.battlefieldId).toBe('bf-test');
+    expect(d.orp).toEqual({ east: 0, north: 0 });
+    expect(d.opfor).toEqual({ force: 'patrol-3', route: [] });
+    expect(scenarioProblems(T, d)).toEqual(['Place the OPFOR.']);
+  });
+});
+
+describe('ORP placement', () => {
+  it('accepts open ground and moves the ORP', () => {
+    const d = expectOk(setOrp(T, defaultScenarioDefinition(T, 'bf'), { x: 200, y: -200 }));
+    expect(d.orp).toEqual({ east: 200, north: -200 });
+  });
+
+  it('refuses water, buildings and the map edge, leaving the ORP where it was', () => {
+    const d = defaultScenarioDefinition(T, 'bf');
+    for (const [p, why] of [
+      [{ x: -300, y: 300 }, /centre is in water \(lake\)/],
+      [{ x: 150, y: 0 }, /centre is inside building B1/],
+      [{ x: 495, y: 0 }, /does not fit here/],
+      [{ x: 600, y: 0 }, /must be on the map/],
+    ] as const) {
+      const r = setOrp(T, d, p);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.problem).toMatch(why);
+    }
+    expect(orpPlacementProblem(T, { x: 0, y: 0 })).toBeNull();
+  });
+});
+
+describe('OPFOR route editing', () => {
+  it('starts the route where the OPFOR is placed, then appends waypoints', () => {
+    const d = playable();
+    expect(d.opfor.route).toEqual([
+      { east: 0, north: 400 },
+      { east: 0, north: 100 },
+      { east: 300, north: 50 },
+    ]);
+    expect(scenarioProblems(T, d)).toEqual([]);
+  });
+
+  it('moves, deletes and clears waypoints; moving the start moves the OPFOR', () => {
+    let d = playable();
+    d = expectOk(moveRouteWaypoint(T, d, 1, { x: 50, y: 150 }));
+    expect(d.opfor.route[1]).toEqual({ east: 50, north: 150 });
+    d = expectOk(setOpforStart(T, d, { x: -50, y: 450 }));
+    expect(d.opfor.route[0]).toEqual({ east: -50, north: 450 });
+    d = expectOk(deleteRouteWaypoint(T, d, 1));
+    expect(d.opfor.route).toHaveLength(2);
+    d = clearRoute(d);
+    expect(d.opfor.route).toEqual([{ east: -50, north: 450 }]);
+    expect(scenarioProblems(T, d)).toEqual([
+      'Give the OPFOR a route: at least one waypoint after its start.',
+    ]);
+  });
+
+  it('refuses waypoints in buildings or water, and routes the OPFOR cannot walk', () => {
+    const d = playable();
+    const inside = addRouteWaypoint(T, d, { x: 150, y: 0 });
+    expect(inside.ok ? '' : inside.problem).toMatch(/inside building B1/);
+    const wet = addRouteWaypoint(T, d, { x: -300, y: 300 });
+    expect(wet.ok ? '' : wet.problem).toMatch(/in water \(lake\)/);
+    const start = setOpforStart(T, d, { x: -300, y: 300 });
+    expect(start.ok).toBe(false);
+    expect(moveRouteWaypoint(T, d, 7, { x: 0, y: 0 }).ok).toBe(false);
+    // The route crossing the map past the building is fine: legs are planned round it.
+    expect(addRouteWaypoint(T, d, { x: 300, y: -50 }).ok).toBe(true);
+  });
+});
+
+describe('the playable scenario', () => {
+  it('puts the squad in the ORP and the OPFOR patrol at the route start, on the route', () => {
+    const d = playable();
+    const s = buildScenario(T, d);
+    const squad = s.soldiers.filter((x) => x.side === 'BLUEFOR');
+    const opfor = s.soldiers.filter((x) => x.side === 'OPFOR');
+    expect(squad).toHaveLength(13);
+    for (const m of squad) expect(orpContains(s.orp, m.position)).toBe(true);
+    expect(s.orp.centre).toEqual({ east: 0, north: -300 });
+    expect(opfor.map((o) => o.id)).toEqual(['EN-1', 'EN-2', 'EN-3']);
+    expect(opfor[0]?.position).toEqual({ x: 0, y: 400 });
+    // The rest follow in file, 12 m apart, behind the leader (north, since the route heads south).
+    expect(opfor[1]?.position.y).toBeCloseTo(412, 6);
+    expect(opfor[2]?.position.y).toBeCloseTo(424, 6);
+    expect(opfor[0]?.azimuthDeg).toBeCloseTo(180, 6);
+    expect(s.opforRoutes).toHaveLength(3);
+    expect(s.opforRoutes[0]?.waypoints.map((w) => [w.x, w.y])).toEqual([
+      [0, 100],
+      [300, 50],
+    ]);
+    expect(s.units.find((u) => u.id === 'EN-TM')?.leaderId).toBe('EN-1');
+  });
+
+  it('is deterministic', () => {
+    expect(buildScenario(T, playable())).toEqual(buildScenario(T, playable()));
+  });
+
+  it('builds a preview without OPFOR, and refuses a definition without an ORP', () => {
+    const preview = buildScenario(T, defaultScenarioDefinition(T, 'bf'));
+    expect(preview.soldiers.filter((x) => x.side === 'OPFOR')).toEqual([]);
+    expect(() => buildScenario(T, { ...playable(), orp: null })).toThrow(/no ORP/);
+  });
+
+  it('plays as an ambush: execute, ready, START OPFOR, the patrol walks its route and springs the ambush', () => {
+    const exercise = createExercise({
+      config: { tickRateHz: 30, seed: 1 },
+      scenario: buildScenario(T, playable()),
+    });
+    // A kill zone across the route's first leg (x = 0, from y = 400 down to 100).
+    for (const p of square(0, 250, 40)) exercise.addKillZoneVertex(p);
+    expect(exercise.execute().ok).toBe(true);
+    for (let i = 0; i < 200 && exercise.phase === 'bluforOccupation'; i += 1)
+      exercise.advance(1, 16);
+    expect(exercise.phase).toBe('bluforReady');
+    const start = exercise.startOpfor();
+    expect(start.ok).toBe(true);
+    for (let i = 0; i < 4000 && exercise.phase === 'opforApproach'; i += 1) exercise.advance(1, 16);
+    expect(exercise.phase).toBe('ambushTriggered');
+    expect(exercise.trigger?.soldierId).toBe('EN-1');
+    expect(exercise.trigger?.point.y).toBeCloseTo(290, 6);
+    // Deterministic: the same scenario plays out identically.
+    const again = createExercise({
+      config: { tickRateHz: 30, seed: 1 },
+      scenario: buildScenario(T, playable()),
+    });
+    for (const p of square(0, 250, 40)) again.addKillZoneVertex(p);
+    again.execute();
+    for (let i = 0; i < 200 && again.phase === 'bluforOccupation'; i += 1) again.advance(1, 16);
+    again.startOpfor();
+    for (let i = 0; i < 4000 && again.phase === 'opforApproach'; i += 1) again.advance(1, 16);
+    expect(hashSimState(again.simulation.state as never)).toBe(
+      hashSimState(exercise.simulation.state as never),
+    );
+  });
+});
+
+describe('saving and reloading', () => {
+  it('round-trips through JSON and rebuilds the same scenario', () => {
+    const d = playable();
+    const back = parseScenarioDefinition(JSON.parse(JSON.stringify(d)));
+    expect(back).toEqual(d);
+    expect(buildScenario(T, back)).toEqual(buildScenario(T, d));
+  });
+
+  it('refuses malformed or incompatible data with a reason', () => {
+    const d = JSON.parse(JSON.stringify(playable())) as Record<string, unknown>;
+    expect(() => parseScenarioDefinition({ ...d, schemaVersion: 2 })).toThrow(/schema version 2/);
+    expect(() => parseScenarioDefinition({ ...d, opfor: { force: 'tanks', route: [] } })).toThrow(
+      /force is unknown/,
+    );
+    expect(() => parseScenarioDefinition({ ...d, orp: { east: 'x' } })).toThrow(
+      /ORP is not a map point/,
+    );
+    expect(() => parseScenarioDefinition(null)).toThrow(/not an object/);
+  });
+});
