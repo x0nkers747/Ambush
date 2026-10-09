@@ -15,9 +15,9 @@ export const ENGAGEMENT_WEDGE_WIDTH_DEG = 35;
 
 export interface EngagementWedge {
   readonly soldierId: SoldierId;
-  /** The soldier's current position (map metres). */
+  /** Where the wedge starts (map metres): see `engagementWedge`. */
   readonly origin: Vec2;
-  /** The soldier's current facing: radians clockwise from grid north (docs/adr/0002). */
+  /** The way it points: radians clockwise from grid north (docs/adr/0002). */
   readonly azimuth: Azimuth;
   /** Half the angular width, in radians. */
   readonly halfWidth: number;
@@ -29,9 +29,15 @@ export interface EngagementWedge {
 }
 
 /**
- * The wedge of a selected trainee soldier, from where he stands and the way he
- * faces now, or `null` when nothing is selected, the soldier is not the
- * trainee's or not active, or his loadout has no known primary firearm.
+ * The wedge of a selected trainee soldier, or `null` when nothing is
+ * selected, the soldier is not the trainee's or not active, or his loadout
+ * has no known primary firearm.
+ *
+ * While plans can be edited it shows the planned pose (`plannedPose`): at the
+ * planned destination, facing the planned way, so it follows every change to
+ * the plan at once; without a destination, where he stands, facing the
+ * planned or current way. While the exercise runs it shows where he is and
+ * the way he faces now.
  */
 export function engagementWedge(
   exercise: Exercise,
@@ -45,10 +51,13 @@ export function engagementWedge(
   const member = exercise.rosterMember(selectedId);
   const weapon = member ? primaryWeapon(member.loadout) : null;
   if (weapon?.kind !== 'weapon') return null;
+  const pose = exercise.canEditPlans ? exercise.plannedPose(selectedId) : undefined;
   return {
     soldierId: soldier.id,
-    origin: { x: soldier.position.x, y: soldier.position.y },
-    azimuth: soldier.azimuth,
+    origin: pose
+      ? { x: pose.point.x, y: pose.point.y }
+      : { x: soldier.position.x, y: soldier.position.y },
+    azimuth: pose ? pose.azimuth : soldier.azimuth,
     halfWidth: ((ENGAGEMENT_WEDGE_WIDTH_DEG / 2) * Math.PI) / 180,
     rangeM: weapon.maxEngagementRangeM,
     weaponRef: weapon.ref,

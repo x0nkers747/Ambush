@@ -330,6 +330,16 @@ export interface Exercise {
    * or where it stands if it has none.
    */
   observer(soldierId: SoldierId): { readonly point: Vec2; readonly planned: boolean } | undefined;
+  /**
+   * Where a trainee soldier will stand, and which way he will face, once his
+   * displayed plan is carried out: the plan's destination (or where he stands
+   * without one) and its facing (the trainee's, or the default: the direction
+   * of arrival, or his current facing without a destination). The one source
+   * of the planned pose for planning displays (visibility, engagement wedge).
+   */
+  plannedPose(
+    soldierId: SoldierId,
+  ): { readonly point: Vec2; readonly azimuth: Azimuth; readonly planned: boolean } | undefined;
   /** Line of sight from the soldier's observation point (see `observer`) to a map point. */
   lineOfSightFrom(soldierId: SoldierId, target: Vec2): LosResult | undefined;
   /**
@@ -838,6 +848,13 @@ export function createExercise({
     opforRoutePaths,
 
     observer,
+    plannedPose(id) {
+      const from = observer(id);
+      const facing = from ? facingOf(id) : undefined;
+      return from && facing
+        ? { point: from.point, azimuth: facing.azimuth, planned: from.planned }
+        : undefined;
+    },
     lineOfSightFrom(id, target) {
       const from = observer(id);
       if (!from || pointProblem(terrain, target)?.kind === 'offTerrain') return undefined;

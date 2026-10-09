@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createExercise, DEMO_SCENARIO, type Exercise } from '#exercise';
 import { clearSelection, createSession, selectSoldier, setShowVisibility } from '#session';
-import { soldierId, type Viewshed } from '#sim';
+import { azimuthOf, soldierId, type Viewshed } from '#sim';
 import { worldToScreen, type Camera } from './camera';
 import {
   ENGAGEMENT_WEDGE_WIDTH_DEG,
@@ -165,12 +165,10 @@ describe('the engagement wedge in the scene', () => {
   });
 });
 
-/** A wedge for a soldier standing at (100, −50) facing `degrees`. */
+/** The squad leader's wedge, in the ORP, with a planned facing of `degrees`. */
 function wedgeFacing(degrees: number, exercise = setup().exercise): EngagementWedge {
-  const soldiers = exercise.simulation.state.soldiers.map((s) =>
-    s.id === 'M01' ? { ...s, position: { x: 100, y: -50, z: 0 }, azimuth: deg(degrees) } : s,
-  );
-  const wedge = engagementWedge(exercise, soldiers, soldierId('M01'));
+  exercise.setFacing(soldierId('M01'), deg(degrees));
+  const wedge = engagementWedge(exercise, exercise.simulation.state.soldiers, soldierId('M01'));
   if (!wedge) throw new Error('no wedge');
   return wedge;
 }
@@ -348,5 +346,168 @@ describe('the wedge and combat (docs/adr/0019)', () => {
       s.id === 'M01' ? { ...s, status: 'incapacitated' as const } : s,
     );
     expect(engagementWedge(exercise, soldiers, soldierId('M01'))).toBeNull();
+  });
+});
+
+describe('the wedge follows the planned destination and facing', () => {
+  const M05 = soldierId('M05');
+  const wedgeOf = (exercise: Exercise, id: string, camera: Camera = CAMERA) =>
+    buildScene(exercise, select(exercise, id), camera, viewport).engagement;
+  const where = (exercise: Exercise, id: string) => {
+    const s = exercise.simulation.state.soldiers.find((x) => x.id === id) ?? fail();
+    return { position: { x: s.position.x, y: s.position.y }, azimuth: s.azimuth };
+  };
+  /** A destination 30 m north-east of where M05 stands. */
+  const destinationFor = (exercise: Exercise) => {
+    const { position } = where(exercise, 'M05');
+    return { x: position.x + 20, y: position.y + 22 };
+  };
+
+  it('without a destination, stands where the Marine is and faces his current way', () => {
+    const { exercise } = setup();
+    const now = where(exercise, 'M05');
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({ origin: now.position, azimuth: now.azimuth });
+  });
+
+  it('moves to a new destination at once, facing the way he will arrive', () => {
+    const { exercise } = setup();
+    const before = where(exercise, 'M05');
+    const destination = destinationFor(exercise);
+    exercise.setDestination(M05, destination);
+    const wedge = wedgeOf(exercise, 'M05');
+    expect(wedge?.origin).toEqual(destination);
+    // No facing chosen: the planning convention, the direction of arrival (the facing arrow's).
+    const planned = exercise.displayedFacing(M05) ?? fail();
+    expect(planned.explicit).toBe(false);
+    expect(wedge?.azimuth).toBe(planned.azimuth);
+    const route = exercise.displayedRoute(M05) ?? fail();
+    const leg = route.legs[0] ?? fail();
+    const path = [route.start, ...(leg.turns ?? []), leg.to];
+    const last = path[path.length - 1] ?? fail();
+    const previous = path[path.length - 2] ?? fail();
+    expect(wedge?.azimuth).toBeCloseTo(azimuthOf(last.x - previous.x, last.y - previous.y), 12);
+    // The Marine himself has not moved or turned.
+    expect(where(exercise, 'M05')).toEqual(before);
+  });
+
+  it('turns to the planned facing at once, at the destination or where he stands', () => {
+    const { exercise } = setup();
+    exercise.setFacing(M05, deg(200));
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({
+      origin: where(exercise, 'M05').position,
+      azimuth: expect.closeTo(deg(200), 12) as number,
+    });
+    const destination = destinationFor(exercise);
+    exercise.setDestination(M05, destination);
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({
+      origin: destination,
+      azimuth: expect.closeTo(deg(200), 12) as number,
+    });
+    exercise.setFacing(M05, deg(15));
+    expect(wedgeOf(exercise, 'M05')?.azimuth).toBeCloseTo(deg(15), 12);
+    // Back to the default facing: the direction of arrival again.
+    exercise.clearFacing(M05);
+    expect(wedgeOf(exercise, 'M05')?.azimuth).toBe(exercise.displayedFacing(M05)?.azimuth);
+  });
+
+  it('follows the destination when it is moved, and the last one set', () => {
+    const { exercise } = setup();
+    const first = destinationFor(exercise);
+    exercise.setDestination(M05, first);
+    const second = { x: first.x - 15, y: first.y + 6 };
+    exercise.setDestination(M05, second);
+    expect(wedgeOf(exercise, 'M05')?.origin).toEqual(second);
+    const third = { x: second.x + 3, y: second.y - 9 };
+    exercise.setDestination(M05, third);
+    expect(wedgeOf(exercise, 'M05')?.origin).toEqual(third);
+  });
+
+  it('returns to where the Marine stands when the destination is deleted or the plan reset', () => {
+    const { exercise } = setup();
+    const now = where(exercise, 'M05');
+    exercise.setDestination(M05, destinationFor(exercise));
+    exercise.clearDestination(M05);
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({ origin: now.position, azimuth: now.azimuth });
+    // A chosen facing survives deleting the destination, as in the plan.
+    exercise.setDestination(M05, destinationFor(exercise));
+    exercise.setFacing(M05, deg(300));
+    exercise.clearDestination(M05);
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({
+      origin: now.position,
+      azimuth: expect.closeTo(deg(300), 12) as number,
+    });
+    exercise.resetPlan(M05);
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({ origin: now.position, azimuth: now.azimuth });
+  });
+
+  it('shows each selected Marine’s own plan, and nothing when deselected', () => {
+    const { exercise } = setup();
+    const destination = destinationFor(exercise);
+    exercise.setDestination(M05, destination);
+    exercise.setFacing(soldierId('M03'), deg(45));
+    expect(wedgeOf(exercise, 'M05')?.origin).toEqual(destination);
+    const other = wedgeOf(exercise, 'M03');
+    expect(other?.origin).toEqual(where(exercise, 'M03').position);
+    expect(other?.azimuth).toBeCloseTo(deg(45), 12);
+    const session = clearSelection(select(exercise, 'M05'));
+    expect(buildScene(exercise, session, CAMERA, viewport).engagement).toBeNull();
+  });
+
+  it('keeps the weapon, its range and the 35° width at the destination', () => {
+    const { exercise } = setup();
+    exercise.setDestination(M05, destinationFor(exercise));
+    exercise.setFacing(M05, deg(80));
+    const rifle = wedgeOf(exercise, 'M05') ?? fail();
+    expect(rifle).toMatchObject({ weaponRef: 'm16-rifle', rangeM: 550 });
+    const [left, right] = wedgeEdges(rifle);
+    expect(right - left).toBeCloseTo(deg(35), 12);
+    expect((left + right) / 2).toBeCloseTo(deg(80), 12);
+    const saw = soldierId('M03');
+    const { position } = where(exercise, 'M03');
+    exercise.setDestination(saw, { x: position.x - 20, y: position.y + 20 });
+    expect(wedgeOf(exercise, 'M03')).toMatchObject({
+      weaponRef: 'squad-automatic-weapon',
+      rangeM: 600,
+    });
+  });
+
+  it('stays at the destination on screen when panning and zooming', () => {
+    const { exercise } = setup();
+    const destination = destinationFor(exercise);
+    exercise.setDestination(M05, destination);
+    for (const camera of [
+      CAMERA,
+      { centerX: destination.x, centerY: destination.y, metersPerPixel: 0.05 },
+      { centerX: 300, centerY: -200, metersPerPixel: 2.5 },
+    ]) {
+      const wedge = wedgeOf(exercise, 'M05', camera) ?? fail();
+      const { apex, radius } = wedgeOnScreen(wedge, camera, viewport);
+      const at = worldToScreen(camera, viewport, destination);
+      expect(apex.x).toBeCloseTo(at.x, 9);
+      expect(apex.y).toBeCloseTo(at.y, 9);
+      expect(radius).toBeCloseTo(550 / camera.metersPerPixel, 9);
+    }
+  });
+
+  it('shares its point with the visibility overlay', () => {
+    const { exercise } = setup();
+    exercise.setDestination(M05, destinationFor(exercise));
+    expect(wedgeOf(exercise, 'M05')?.origin).toEqual(exercise.observer(M05)?.point);
+  });
+
+  it('shows where the Marine really is while the exercise runs', () => {
+    const { exercise } = setup();
+    exercise.setDestination(M05, destinationFor(exercise));
+    exercise.setFacing(M05, deg(120));
+    expect(exercise.execute().ok).toBe(true);
+    exercise.advance(1, 4); // part of the way
+    expect(exercise.canEditPlans).toBe(false);
+    const now = where(exercise, 'M05');
+    expect(wedgeOf(exercise, 'M05')).toMatchObject({ origin: now.position, azimuth: now.azimuth });
+    // Paused, the plans are editable again and the wedge shows the plan.
+    exercise.pause();
+    const draft = { x: now.position.x - 5, y: now.position.y + 5 };
+    exercise.setDestination(M05, draft);
+    expect(wedgeOf(exercise, 'M05')?.origin).toEqual(draft);
   });
 });
