@@ -10,6 +10,22 @@ describe('fnv1a64', () => {
     expect(fnv1a64(ascii('a'))).toBe('af63dc4c8601ec8c');
     expect(fnv1a64(ascii('foobar'))).toBe('85944171f73967e8');
   });
+
+  it('matches a straightforward BigInt implementation on long and varied input', () => {
+    const reference = (bytes: number[]) => {
+      let hash = 0xcbf2_9ce4_8422_2325n;
+      for (const byte of bytes) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100_0000_01b3n);
+      return hash.toString(16).padStart(16, '0');
+    };
+    let s = 1;
+    const bytes = Array.from({ length: 5000 }, (_, i) => {
+      s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+      return i % 7 === 0 ? 0xff : s >>> 24;
+    });
+    for (const n of [1, 2, 3, 17, 255, 256, 4999, 5000]) {
+      expect(fnv1a64(bytes.slice(0, n))).toBe(reference(bytes.slice(0, n)));
+    }
+  });
 });
 
 describe('hashSimState', () => {

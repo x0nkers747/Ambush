@@ -2,6 +2,7 @@ import { azimuthFromDegrees, type Vec2 } from './geometry';
 import { pointProblem } from './navigation';
 import { clonePlainData } from './plain-data';
 import { createRngState } from './rng';
+import { deepFreeze, shareTerrain } from './shared-terrain';
 import {
   orgUnitId,
   soldierId,
@@ -145,17 +146,14 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
 
 /**
  * Builds the immutable reference data for a simulation from a scenario
- * already validated by `createInitialState`: a deep-frozen copy, so later
- * changes to the scenario object cannot affect a running simulation.
+ * already validated by `createInitialState`: deep-frozen copies, so later
+ * changes to the scenario object cannot affect a running simulation. The
+ * terrain is shared (`shareTerrain`): a terrain that is already shared is
+ * used as it is, so simulations on the same battlefield share one terrain.
  */
 export function createWorld(scenario: Scenario): SimWorld {
-  return deepFreeze(clonePlainData({ terrain: scenario.terrain, movement: scenario.movement }));
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value === 'object' && value !== null) {
-    for (const child of Object.values(value)) deepFreeze(child);
-    Object.freeze(value);
-  }
-  return value;
+  return Object.freeze({
+    terrain: shareTerrain(scenario.terrain),
+    movement: deepFreeze(clonePlainData(scenario.movement)),
+  });
 }

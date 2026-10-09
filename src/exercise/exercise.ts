@@ -3,7 +3,6 @@ import {
   createSimulation,
   engagementAreaId,
   fingerprintPlainData,
-  fingerprintWorld,
   lineOfSight,
   pointProblem,
   visibleCellsIn,
@@ -367,7 +366,7 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
   const traineeIds = new Set<SoldierId>(trainee);
   const scenarioFingerprint = fingerprintPlainData({
     scenarioId: scenario.id,
-    world: fingerprintWorld(sim.world),
+    world: sim.worldFingerprint,
     organizationTemplate: {
       id: scenario.organization.template.id,
       version: scenario.organization.template.version,

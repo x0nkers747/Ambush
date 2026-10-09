@@ -77,6 +77,7 @@ export {
   type ScenarioUnit,
 } from './scenario';
 export { createSimulation, type SimSnapshot, type Simulation } from './simulation';
+export { isSharedTerrain, shareTerrain } from './shared-terrain';
 export {
   isOnPolygonBoundary,
   isSimplePolygon,

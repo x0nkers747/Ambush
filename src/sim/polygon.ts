@@ -24,7 +24,14 @@ export function polygonArea(vertices: readonly Vec2[]): number {
 
 /** Whether `p` lies on the polygon's boundary (an edge or vertex). */
 export function isOnPolygonBoundary(p: Vec2, vertices: readonly Vec2[]): boolean {
-  return edges(vertices).some(([a, b]) => onSegment(p, a, b));
+  // Index loops rather than `edges()`: this runs in hot loops (path planning) and must not allocate.
+  const n = vertices.length;
+  for (let i = 0; i < n; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % n];
+    if (a && b && onSegment(p, a, b)) return true;
+  }
+  return false;
 }
 
 /** Whether `p` lies inside the closed polygon: boundary points count as inside. */
@@ -32,7 +39,11 @@ export function pointInPolygon(p: Vec2, vertices: readonly Vec2[]): boolean {
   if (isOnPolygonBoundary(p, vertices)) return true;
   // Even-odd ray cast toward +X. Off the boundary the half-open rule is exact.
   let inside = false;
-  for (const [a, b] of edges(vertices)) {
+  const n = vertices.length;
+  for (let i = 0; i < n; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % n];
+    if (!a || !b) continue;
     if (a.y > p.y !== b.y > p.y) {
       const x = a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y);
       if (x > p.x) inside = !inside;

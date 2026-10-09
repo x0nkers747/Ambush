@@ -3,7 +3,8 @@
 - Status: Accepted; trainee routes are now single destinations (ADR 0012), planned
   with the same navigation described here; terrain format 3 (ADR 0014) adds standing water (blocks
   movement), wetland, waterways and land use (display only) and vegetation clearings (holes, not
-  obscuring sight lines)
+  obscuring sight lines); the navigation grid, spatial queries and path search were made fast for
+  5 km battlefields with unchanged results (ADR 0016)
 - Date: 2026-10-07
 
 ## Context

@@ -4,6 +4,7 @@ import {
   flatElevation,
   hashSimState,
   rectangle,
+  shareTerrain,
   type TerrainDataset,
   type Vec2,
 } from '#sim';
@@ -205,6 +206,54 @@ describe('the playable scenario', () => {
     expect(hashSimState(again.simulation.state as never)).toBe(
       hashSimState(exercise.simulation.state as never),
     );
+  });
+});
+
+describe('repeated edits on one shared terrain', () => {
+  it('reuse its navigation data and give exactly the results of a fresh terrain', () => {
+    // The editor shares one frozen terrain for the whole page (docs/adr/0015);
+    // paths and grids remembered from earlier edits must change no answer.
+    const shared = shareTerrain(terrain());
+    const edits: ((t: TerrainDataset, d: ScenarioDefinition) => EditResult)[] = [
+      (t, d) => setOpforStart(t, d, { x: -450, y: 450 }),
+      (t, d) => addRouteWaypoint(t, d, { x: -150, y: 150 }), // round the lake
+      (t, d) => addRouteWaypoint(t, d, { x: -300, y: 300 }), // in the lake: refused
+      (t, d) => addRouteWaypoint(t, d, { x: 300, y: 0 }), // round the building
+      (t, d) => moveRouteWaypoint(t, d, 1, { x: -250, y: 150 }),
+      (t, d) => moveRouteWaypoint(t, d, 1, { x: -150, y: 150 }), // back again
+      (t, d) => addRouteWaypoint(t, d, { x: 150, y: 0 }), // in the building: refused
+      (t, d) => deleteRouteWaypoint(t, d, 1),
+      (t, d) => addRouteWaypoint(t, d, { x: -450, y: 200 }),
+    ];
+    let onShared = defaultScenarioDefinition(shared, 'bf');
+    let onFresh = defaultScenarioDefinition(terrain(), 'bf');
+    expect(onShared).toEqual(onFresh);
+    for (const edit of edits) {
+      const a = edit(shared, onShared);
+      const b = edit(terrain(), onFresh);
+      expect(a).toEqual(b);
+      if (a.ok && b.ok) {
+        onShared = a.definition;
+        onFresh = b.definition;
+      }
+      expect(scenarioProblems(shared, onShared)).toEqual(scenarioProblems(terrain(), onFresh));
+      if (onShared.opfor.route.length >= 2) {
+        const preview = createExercise({
+          config: { tickRateHz: 30, seed: 1 },
+          scenario: buildScenario(shared, onShared),
+        });
+        // The preview simulates on the shared terrain itself, not a copy.
+        expect(preview.simulation.world.terrain).toBe(shared);
+        const fresh = createExercise({
+          config: { tickRateHz: 30, seed: 1 },
+          scenario: buildScenario(terrain(), onFresh),
+        });
+        // The same planned paths for the patrol (turn points included).
+        expect([...preview.opforRoutePaths]).toEqual([...fresh.opforRoutePaths]);
+        expect(preview.scenarioFingerprint).toBe(fresh.scenarioFingerprint);
+      }
+    }
+    expect(onShared.opfor.route).toHaveLength(3);
   });
 });
 

@@ -146,3 +146,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 13. [Custom individual soldier icons](docs/adr/0013-individual-soldier-icons.md)
 14. [Real-world terrain import (1 km battlefields)](docs/adr/0014-real-world-terrain-import.md)
 15. [Three-stage workflow and scenario editing](docs/adr/0015-three-stage-workflow-and-scenario-editing.md)
+16. [Navigation performance on 5 km battlefields](docs/adr/0016-navigation-performance-5-km.md)

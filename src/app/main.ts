@@ -13,6 +13,7 @@ import {
   type ScenarioDefinition,
 } from '#exercise';
 import type { BattlefieldPackage } from '#geo';
+import { shareTerrain } from '#sim';
 import { startExerciseUi } from './exercise-ui';
 import { startScenarioEditor } from './scenario-editor';
 import { parseStage, stageHash, type Stage } from './stages';
@@ -76,6 +77,16 @@ async function loadScenario(
   return { definition: defaultScenarioDefinition(pkg.terrain, pkg.id), notice: null };
 }
 
+/**
+ * A saved battlefield, with its terrain shared (`shareTerrain`): everything
+ * on the page (scenario edits, previews, the exercise) then uses one frozen
+ * terrain, so its navigation grid and other per-terrain data are built once.
+ */
+async function openBattlefield(store: BattlefieldStore, id: string): Promise<BattlefieldPackage> {
+  const pkg = await store.get(id);
+  return { ...pkg, terrain: shareTerrain(pkg.terrain) };
+}
+
 function showFatal(root: HTMLElement, message: string): void {
   root.classList.add('start');
   root.innerHTML = `<div class="start-screen"><div class="start-card"><h2>Something went wrong</h2>
@@ -120,7 +131,7 @@ async function main(root: HTMLElement): Promise<void> {
       return;
 
     case 'edit': {
-      const pkg = await store.get(stage.battlefieldId);
+      const pkg = await openBattlefield(store, stage.battlefieldId);
       const { definition, notice } = await loadScenario(store, pkg);
       if (!definition.orp) {
         showFatal(
@@ -148,7 +159,7 @@ async function main(root: HTMLElement): Promise<void> {
     }
 
     case 'play': {
-      const pkg = await store.get(stage.battlefieldId);
+      const pkg = await openBattlefield(store, stage.battlefieldId);
       const { definition } = await loadScenario(store, pkg);
       // Only a complete scenario is played; otherwise back to editing it.
       if (scenarioProblems(pkg.terrain, definition).length > 0) {
