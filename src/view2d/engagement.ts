@@ -1,9 +1,9 @@
-import { engagementWeapon, TRAINEE_SIDE, type Exercise } from '#exercise';
+import { primaryWeapon, TRAINEE_SIDE, type Exercise } from '#exercise';
 import type { Azimuth, DeepReadonly, Soldier, SoldierId, Vec2 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
 
 // The selected Marine's weapon engagement wedge: a sector centred on where he
-// faces, out to his weapon's nominal effective range (`WEAPON_DISPLAY_RANGES`).
+// faces, out to his primary weapon's nominal effective range (`primaryWeapon`).
 // A planning aid drawn over the map, not a combat calculation: it ignores the
 // terrain and line of sight (the visibility overlay shows those).
 
@@ -28,7 +28,7 @@ export interface EngagementWedge {
 /**
  * The wedge of a selected trainee soldier, from where he stands and the way he
  * faces now, or `null` when nothing is selected, the soldier is not the
- * trainee's or not active, or his loadout has no weapon with a display range.
+ * trainee's or not active, or his loadout has no known primary firearm.
  */
 export function engagementWedge(
   exercise: Exercise,
@@ -38,9 +38,10 @@ export function engagementWedge(
   if (selectedId === null) return null;
   const soldier = soldiers.find((s) => s.id === selectedId);
   if (soldier?.side !== TRAINEE_SIDE || soldier.status !== 'active') return null;
+  // The slot's resolved loadout: its own when it overrides the role's default.
   const member = exercise.rosterMember(selectedId);
-  const weapon = member ? engagementWeapon(member.loadout) : null;
-  if (!weapon) return null;
+  const weapon = member ? primaryWeapon(member.loadout) : null;
+  if (weapon?.kind !== 'weapon') return null;
   return {
     soldierId: soldier.id,
     origin: { x: soldier.position.x, y: soldier.position.y },

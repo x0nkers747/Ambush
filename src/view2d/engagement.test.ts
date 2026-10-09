@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createExercise,
-  DEMO_SCENARIO,
-  engagementWeapon,
-  WEAPON_DISPLAY_RANGES,
-  type Exercise,
-} from '#exercise';
+import { createExercise, DEMO_SCENARIO, type Exercise } from '#exercise';
 import { clearSelection, createSession, selectSoldier, setShowVisibility } from '#session';
 import { soldierId, type Viewshed } from '#sim';
 import { worldToScreen, type Camera } from './camera';
@@ -33,6 +27,9 @@ function setup() {
   const exercise = createExercise({ config: { tickRateHz: 30, seed: 0 }, scenario: DEMO_SCENARIO });
   return { exercise, session: createSession() };
 }
+const fail = (): never => {
+  throw new Error('missing');
+};
 const select = (exercise: Exercise, id: string) =>
   selectSoldier(createSession(), exercise, soldierId(id));
 
@@ -65,14 +62,83 @@ describe('the engagement wedge in the scene', () => {
     expect(wedgeOf('M03')).toMatchObject({ weaponRef: 'squad-automatic-weapon', rangeM: 600 });
     // The fire team leader carries rifle and grenade launcher: the rifle, his primary weapon.
     expect(wedgeOf('M02')).toMatchObject({ weaponRef: 'm16-rifle', rangeM: 550 });
-    expect(WEAPON_DISPLAY_RANGES['m203-grenade-launcher']?.effectiveRangeM).toBe(150);
   });
 
-  it('draws none for a loadout without a weapon range, or for OPFOR', () => {
-    expect(engagementWeapon({ weaponProfileRefs: ['bayonet-knife', 'combat-knife'] })).toBeNull();
+  it('changes range when another Marine with another weapon is selected', () => {
+    const { exercise } = setup();
+    let session = select(exercise, 'M05');
+    const radiusOf = () =>
+      wedgeOnScreen(
+        buildScene(exercise, session, CAMERA, viewport).engagement ?? fail(),
+        CAMERA,
+        viewport,
+      ).radius;
+    expect(radiusOf()).toBeCloseTo(550 / CAMERA.metersPerPixel, 9);
+    session = selectSoldier(session, exercise, soldierId('M03'));
+    expect(radiusOf()).toBeCloseTo(600 / CAMERA.metersPerPixel, 9);
+    session = selectSoldier(session, exercise, soldierId('M02'));
+    expect(radiusOf()).toBeCloseTo(550 / CAMERA.metersPerPixel, 9);
+  });
+
+  it('follows a slot’s own loadout over its role’s default', () => {
+    // A fixture: the 1st fire team's rifleman (slot FT1.R) given a SAW instead of his role's rifle.
+    const { organization } = DEMO_SCENARIO;
+    const scenario = {
+      ...DEMO_SCENARIO,
+      organization: {
+        ...organization,
+        template: {
+          ...organization.template,
+          slots: organization.template.slots.map((s) =>
+            s.id === 'FT1.R'
+              ? {
+                  ...s,
+                  loadout: { weaponProfileRefs: ['squad-automatic-weapon', 'bayonet-knife'] },
+                }
+              : s,
+          ),
+        },
+      },
+    };
+    const holderOf = (slotId: string) =>
+      organization.members.find((m) => m.slotId === slotId)?.soldierId ?? fail();
+    const exercise = createExercise({ config: { tickRateHz: 30, seed: 0 }, scenario });
+    const wedgeOf = (slotId: string) =>
+      buildScene(exercise, select(exercise, holderOf(slotId)), CAMERA, viewport).engagement;
+    expect(wedgeOf('FT1.R')).toMatchObject({ weaponRef: 'squad-automatic-weapon', rangeM: 600 });
+    // The other riflemen keep their role's rifle; without the override, so does he.
+    expect(wedgeOf('FT2.R')).toMatchObject({ weaponRef: 'm16-rifle', rangeM: 550 });
+    expect(wedgeOf('FT3.R')).toMatchObject({ weaponRef: 'm16-rifle', rangeM: 550 });
+    const plain = setup().exercise;
     expect(
-      engagementWeapon({ weaponProfileRefs: ['m203-grenade-launcher', 'm16-rifle'] })?.ref,
-    ).toBe('m203-grenade-launcher');
+      buildScene(plain, select(plain, holderOf('FT1.R')), CAMERA, viewport).engagement,
+    ).toMatchObject({ weaponRef: 'm16-rifle', rangeM: 550 });
+  });
+
+  it('draws none without a known primary firearm, or for OPFOR', () => {
+    const withLoadout = (weaponProfileRefs: string[]) => {
+      const { organization } = DEMO_SCENARIO;
+      const scenario = {
+        ...DEMO_SCENARIO,
+        organization: {
+          ...organization,
+          template: {
+            ...organization.template,
+            slots: organization.template.slots.map((s) =>
+              s.id === 'SL' ? { ...s, loadout: { weaponProfileRefs } } : s,
+            ),
+          },
+        },
+      };
+      const exercise = createExercise({ config: { tickRateHz: 30, seed: 0 }, scenario });
+      return buildScene(exercise, select(exercise, 'M01'), CAMERA, viewport).engagement;
+    };
+    expect(withLoadout(['bayonet-knife'])).toBeNull();
+    expect(withLoadout(['m203-grenade-launcher', 'bayonet-knife'])).toBeNull();
+    expect(withLoadout(['m4-carbine', 'm203-grenade-launcher'])).toBeNull();
+    expect(withLoadout(['m203-grenade-launcher', 'm16-rifle'])).toMatchObject({
+      weaponRef: 'm16-rifle',
+    });
     const { exercise } = setup();
     const { soldiers } = exercise.simulation.state;
     expect(engagementWedge(exercise, soldiers, soldierId('EN-1'))).toBeNull();

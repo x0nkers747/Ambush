@@ -136,8 +136,10 @@ export {
   type Steppable,
 } from './runner';
 export {
-  engagementWeapon,
-  WEAPON_DISPLAY_RANGES,
+  primaryWeapon,
+  WEAPON_DISPLAY_PROFILES,
   type DisplayRangeBasis,
-  type WeaponDisplayRange,
+  type PrimaryWeapon,
+  type WeaponClass,
+  type WeaponDisplayProfile,
 } from './weapon-display';
