@@ -176,35 +176,35 @@ describe('the playable scenario', () => {
     expect(() => buildScenario(T, { ...playable(), orp: null })).toThrow(/no ORP/);
   });
 
-  it('plays as an ambush: execute, ready, START OPFOR, the patrol walks its route and springs the ambush', () => {
-    const exercise = createExercise({
-      config: { tickRateHz: 30, seed: 1 },
-      scenario: buildScenario(T, playable()),
-    });
-    // A kill zone across the route's first leg (x = 0, from y = 400 down to 100).
-    for (const p of square(0, 250, 40)) exercise.addKillZoneVertex(p);
-    expect(exercise.execute().ok).toBe(true);
-    for (let i = 0; i < 200 && exercise.phase === 'bluforOccupation'; i += 1)
-      exercise.advance(1, 16);
-    expect(exercise.phase).toBe('bluforReady');
-    const start = exercise.startOpfor();
-    expect(start.ok).toBe(true);
-    for (let i = 0; i < 4000 && exercise.phase === 'opforApproach'; i += 1) exercise.advance(1, 16);
-    // The trigger begins the engagement (docs/adr/0019); it used to freeze the exercise.
-    expect(exercise.phase).toBe('engagement');
-    expect(exercise.trigger?.soldierId).toBe('EN-1');
-    expect(exercise.trigger?.point.y).toBeCloseTo(290, 6);
+  it('plays as an ambush: execute, ready, START OPFOR, the patrol walks its route, the trainee springs the ambush', () => {
+    const play = () => {
+      const exercise = createExercise({
+        config: { tickRateHz: 30, seed: 1 },
+        scenario: buildScenario(T, playable()),
+      });
+      // A kill zone across the route's first leg (x = 0, from y = 400 down to 100).
+      for (const p of square(0, 250, 40)) exercise.addKillZoneVertex(p);
+      expect(exercise.execute().ok).toBe(true);
+      for (let i = 0; i < 200 && exercise.phase === 'bluforOccupation'; i += 1)
+        exercise.advance(1, 16);
+      expect(exercise.phase).toBe('bluforReady');
+      expect(exercise.startOpfor().ok).toBe(true);
+      // Entering the kill zone does not spring the ambush (docs/adr/0021): the
+      // trainee does, here once the first patrol member is in it.
+      for (let i = 0; i < 30 * 4000 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1)
+        exercise.advance(1 / 30);
+      expect(exercise.phase).toBe('opforApproach');
+      const entry = exercise.timeline.find((e) => e.type === 'killZoneEntered');
+      expect(entry?.type === 'killZoneEntered' && entry.soldierId).toBe('EN-1');
+      expect(exercise.triggerAmbush().ok).toBe(true);
+      exercise.advance(1 / 30);
+      expect(exercise.phase).toBe('engagement');
+      return exercise;
+    };
+    const exercise = play();
+    expect(exercise.trigger?.opforInKillZone).toBe(1);
     // Deterministic: the same scenario plays out identically.
-    const again = createExercise({
-      config: { tickRateHz: 30, seed: 1 },
-      scenario: buildScenario(T, playable()),
-    });
-    for (const p of square(0, 250, 40)) again.addKillZoneVertex(p);
-    again.execute();
-    for (let i = 0; i < 200 && again.phase === 'bluforOccupation'; i += 1) again.advance(1, 16);
-    again.startOpfor();
-    for (let i = 0; i < 4000 && again.phase === 'opforApproach'; i += 1) again.advance(1, 16);
-    expect(hashSimState(again.simulation.state as never)).toBe(
+    expect(hashSimState(play().simulation.state as never)).toBe(
       hashSimState(exercise.simulation.state as never),
     );
   });

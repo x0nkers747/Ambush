@@ -3,6 +3,7 @@ import {
   createSyntheticTerrain,
   fingerprintPlainData,
   hashSimState,
+  pointInPolygon,
   rectangle,
   soldierId,
   validateCombatConfig,
@@ -29,7 +30,8 @@ import {
 import { WEAPON_DISPLAY_PROFILES } from './weapon-display';
 
 // Combat in the exercise (docs/adr/0019): the default configuration, which
-// weapon each soldier fires, and complete engagements after the ambush trigger.
+// weapon each soldier fires, and complete engagements after the trainee's
+// TRIGGER AMBUSH (docs/adr/0021).
 
 /** A kill zone across the demo patrol's road, 40 m south of the ORP's northern edge. */
 const DEMO_KILL_ZONE: Vec2[] = [
@@ -39,14 +41,36 @@ const DEMO_KILL_ZONE: Vec2[] = [
   { x: -40, y: 30 },
 ];
 
-/** The demo, sprung: Execute, START OPFOR, then the approach. Returns at the trigger. */
-function sprungDemo(seed: number, scenario: AmbushScenario = DEMO_SCENARIO): Exercise {
+/** The demo with its kill zone: Execute, then START OPFOR. Returns as the approach begins. */
+function approachingDemo(seed: number, scenario: AmbushScenario = DEMO_SCENARIO): Exercise {
   const exercise = createExercise({ config: { tickRateHz: 30, seed }, scenario });
   for (const v of DEMO_KILL_ZONE) exercise.addKillZoneVertex(v);
   exercise.execute();
   exercise.advance(1 / 30);
   if (!exercise.startOpfor().ok) throw new Error('START OPFOR refused');
   return exercise;
+}
+
+/**
+ * The demo, sprung: the trainee presses TRIGGER AMBUSH once `inside` patrol
+ * members are in the kill zone, stepping one tick at a time so that the trigger
+ * tick does not depend on frame timing. Returns at the trigger.
+ */
+function sprungDemo(seed: number, scenario: AmbushScenario = DEMO_SCENARIO, inside = 1): Exercise {
+  const exercise = approachingDemo(seed, scenario);
+  for (let i = 0; i < 30 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < inside; i += 1)
+    exercise.advance(1 / 30);
+  if (!exercise.triggerAmbush().ok) throw new Error('TRIGGER AMBUSH refused');
+  return exercise;
+}
+
+/** Plays the approach at `timeScale` (60 frames per real second) to exactly `tick`, and triggers. */
+function triggerAtTick(exercise: Exercise, tick: number, timeScale: number): void {
+  const perFrame = Math.round((timeScale * 30) / 60);
+  while (exercise.simulation.tick + perFrame <= tick) exercise.advance(1 / 60, timeScale);
+  while (exercise.simulation.tick < tick) exercise.advance(1 / 30);
+  if (exercise.simulation.tick !== tick) throw new Error('overshot the trigger tick');
+  if (!exercise.triggerAmbush().ok) throw new Error('TRIGGER AMBUSH refused');
 }
 
 /** Plays at `timeScale` with 60 frames per real second until the engagement ends. */
@@ -174,17 +198,22 @@ describe('which weapon each soldier fires', () => {
 describe('an engagement in the exercise', () => {
   it('begins at the trigger and runs to a result that matches its combat log', () => {
     const exercise = sprungDemo(5);
-    for (let i = 0; i < 30 * 300 && exercise.phase === 'opforApproach'; i += 1)
-      exercise.advance(1 / 30);
-    expect(exercise.phase).toBe('engagement');
+    expect(exercise.phase).toBe('opforApproach');
+    expect(exercise.triggerState).toBe('queued');
     const trigger = exercise.trigger;
     expect(trigger).not.toBeNull();
+    exercise.advance(1 / 30);
+    expect(exercise.phase).toBe('engagement');
     playOut(exercise, 1);
     expect(exercise.phase).toBe('engagementComplete');
 
     const result = exercise.engagementResult;
     if (!result) throw new Error('no result');
-    expect(result.startTick).toBe((trigger?.tick ?? NaN) + 1);
+    // The engagement begins at the start of the tick the trainee triggered at.
+    expect(result.startTick).toBe(trigger?.tick);
+    expect(result.startSeconds).toBe(trigger?.atSeconds);
+    expect(trigger).toMatchObject({ opforInKillZone: 1, opforTotal: 3, whilePaused: false });
+    expect(trigger?.opforPositions.map((p) => p.soldierId)).toEqual(['EN-1', 'EN-2', 'EN-3']);
     expect(result.seed).toBe(5);
     expect(result.tickRateHz).toBe(30);
     expect(result.combatConfig).toEqual({
@@ -234,8 +263,11 @@ describe('an engagement in the exercise', () => {
   });
 
   it('gives identical results at 1×, 4×, 8× and 16× playback', () => {
+    const start = approachingDemo(6).simulation.tick;
     const outcomes = [1, 4, 8, 16].map((scale) => {
-      const exercise = sprungDemo(6);
+      const exercise = approachingDemo(6);
+      // The approach, too, is played at that speed; the trigger lands on the same tick.
+      triggerAtTick(exercise, start + 30 * 40, scale);
       const events = playOut(exercise, scale);
       return {
         hash: hashSimState(exercise.simulation.state),
@@ -256,8 +288,6 @@ describe('an engagement in the exercise', () => {
     const straight = sprungDemo(7);
     playOut(straight);
     const paused = sprungDemo(7);
-    for (let i = 0; i < 30 * 300 && paused.phase === 'opforApproach'; i += 1)
-      paused.advance(1 / 30);
     paused.advance(1, 2);
     if (paused.phase === 'engagement') {
       paused.pause();
@@ -266,6 +296,75 @@ describe('an engagement in the exercise', () => {
     }
     playOut(paused);
     expect(hashSimState(paused.simulation.state)).toBe(hashSimState(straight.simulation.state));
+  });
+
+  it('is triggered while paused: queued until resumed, then identical to triggering at that tick', () => {
+    const straight = approachingDemo(8);
+    const tick = straight.simulation.tick + 30 * 45;
+    triggerAtTick(straight, tick, 1);
+    playOut(straight);
+
+    const paused = approachingDemo(8);
+    while (paused.simulation.tick < tick) paused.advance(1 / 30);
+    paused.pause();
+    expect(paused.triggerAmbush().ok).toBe(true);
+    expect(paused.trigger?.whilePaused).toBe(true);
+    expect(paused.triggerState).toBe('queued');
+    expect(paused.advance(3)).toEqual([]);
+    expect(paused.simulation.state.engagement).toBeUndefined();
+    paused.resume();
+    playOut(paused);
+    expect(paused.engagementResult?.startTick).toBe(tick);
+    expect(hashSimState(paused.simulation.state)).toBe(hashSimState(straight.simulation.state));
+    expect(paused.combatLog).toEqual(straight.combatLog);
+  });
+
+  it('turns out differently when triggered at a different moment', () => {
+    const outcomes = [35, 45, 55].map((seconds) => {
+      const exercise = approachingDemo(9);
+      triggerAtTick(exercise, exercise.simulation.tick + 30 * seconds, 4);
+      playOut(exercise);
+      return hashSimState(exercise.simulation.state);
+    });
+    expect(new Set(outcomes).size).toBe(3);
+  });
+
+  it('counts only active OPFOR in the kill zone: the incapacitated and escaped drop out', () => {
+    let checked = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const exercise = sprungDemo(seed, DEMO_SCENARIO, 3);
+      expect(exercise.killZoneOccupancy()).toEqual({ inside: 3, total: 3 });
+      expect(exercise.trigger?.opforInKillZone).toBe(3);
+      while (exercise.phase !== 'engagementComplete') {
+        exercise.advance(1 / 30);
+        const combatants = exercise.simulation.state.engagement?.combatants ?? [];
+        const out = new Set(
+          combatants
+            .filter((c) => c.behavior === 'escaped' || c.behavior === 'incapacitated')
+            .map((c) => c.soldierId),
+        );
+        const inside = exercise.simulation.state.soldiers.filter(
+          (s) =>
+            s.side === 'OPFOR' &&
+            s.status === 'active' &&
+            !out.has(s.id) &&
+            pointInPolygon(s.position, DEMO_KILL_ZONE),
+        ).length;
+        expect(exercise.killZoneOccupancy()).toEqual({ inside, total: 3 });
+        if (out.size > 0) checked += 1;
+      }
+      // Falling or escaping inside the kill zone is not walking out of it.
+      for (const left of exercise.timeline) {
+        if (left.type !== 'killZoneLeft') continue;
+        const out = exercise.combatLog.find(
+          (e) =>
+            (e.type === 'soldierIncapacitated' || e.type === 'soldierEscaped') &&
+            e.soldierId === left.soldierId,
+        );
+        expect(out === undefined || out.tick > left.tick).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('turns out differently with different seeds', () => {
@@ -345,9 +444,15 @@ describe('a complete engagement on a 5 km battlefield', () => {
       exercise.advance(1, 16);
     expect(exercise.phase).toBe('bluforReady');
     expect(exercise.startOpfor().ok).toBe(true);
-    for (let i = 0; i < 4000 && exercise.phase === 'opforApproach'; i += 1) exercise.advance(1, 16);
+    // The patrol walks into the kill zone; the trainee triggers once two are in it.
+    for (let i = 0; i < 30 * 4000 && (exercise.killZoneOccupancy()?.inside ?? 0) < 2; i += 1)
+      exercise.advance(1 / 30);
+    expect(exercise.phase).toBe('opforApproach');
+    expect(exercise.simulation.state.engagement).toBeUndefined();
+    expect(exercise.triggerAmbush().ok).toBe(true);
+    expect(exercise.trigger).toMatchObject({ opforInKillZone: 2, opforTotal: 3 });
+    exercise.advance(1 / 30);
     expect(exercise.phase).toBe('engagement');
-    expect(exercise.trigger?.soldierId).toBe('EN-1');
     for (let i = 0; i < 200 && exercise.phase === 'engagement'; i += 1) exercise.advance(1, 16);
     expect(exercise.phase).toBe('engagementComplete');
     const result = exercise.engagementResult;

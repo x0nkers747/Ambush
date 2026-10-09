@@ -1,7 +1,8 @@
 # ADR 0010: Ambush exercise flow, kill zone and trigger
 
 - Status: Accepted; amended by ADR 0019 (the trigger now begins the engagement instead of
-  freezing the exercise in Ambush Triggered)
+  freezing the exercise in Ambush Triggered) and ADR 0021 (the trainee triggers the ambush;
+  entering the kill zone no longer does)
 - Date: 2026-10-07
 
 ## Context

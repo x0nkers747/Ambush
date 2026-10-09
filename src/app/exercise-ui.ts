@@ -86,6 +86,13 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       <button class="primary" data-ui="resume" title="Commit changed plans and continue (Space)">Resume</button>
       <button class="start-opfor" data-ui="start-opfor" title="Declare the ambush ready and start the OPFOR approach">START OPFOR</button>
     </div>
+    <div class="group ambush" data-ui="ambush">
+      <button class="trigger-ambush" data-ui="trigger-ambush" aria-describedby="ambush-state">TRIGGER AMBUSH</button>
+      <span class="engagement-state" data-ui="engagement-state" role="status" hidden></span>
+      <span class="ambush-readout" id="ambush-state" data-ui="ambush-state" aria-live="polite"></span>
+      <span class="ambush-readout" data-ui="kill-zone-count" title="Active OPFOR (neither incapacitated nor escaped) inside the kill zone, boundary included. Information only: it never blocks the trigger."></span>
+      <span class="ambush-readout" data-ui="approach-time" title="Simulation time since START OPFOR (frozen when the ambush is triggered)"></span>
+    </div>
     <div class="group" data-ui="speeds"><span class="label">Speed</span></div>
     <div class="group" data-ui="tools"><span class="label">Edit</span></div>
     <div class="group">
@@ -148,6 +155,12 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     <p class="muted">Green is the ground a standing Marine at the destination (or where they stand,
     if they have none) can see a standing person on. Terrain, buildings and vegetation block the
     view.</p>
+    <h2>Springing the ambush</h2>
+    <p class="muted">After START OPFOR the patrol walks its route; entering or leaving the kill zone
+    never opens fire. Press <b>TRIGGER AMBUSH</b> when you choose: BLUEFOR opens fire at that
+    moment. It works at any point of the approach, also while paused (fire then opens when you
+    resume). <b>OPFOR IN KILL ZONE</b> counts the active patrol members inside the zone; it is
+    information only.</p>
     <h2>Controls: map and time</h2>
     <dl class="help">
       <dt>Drag map</dt><dd>Pan (left or middle button)</dd>
@@ -250,10 +263,17 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     const result = exercise.startOpfor();
     problems = result.ok ? [] : [...result.problems];
   };
+  // No confirmation: an ambush is sprung at the moment the trainee chooses.
+  const triggerAmbush = () => {
+    if (exercise.triggerState !== 'available') return;
+    const result = exercise.triggerAmbush();
+    problems = result.ok ? [] : [result.problem];
+  };
   ui('execute').addEventListener('click', execute);
   ui('pause').addEventListener('click', pause);
   ui('resume').addEventListener('click', resume);
   ui('start-opfor').addEventListener('click', startOpfor);
+  ui('trigger-ambush').addEventListener('click', triggerAmbush);
   ui('fit').addEventListener('click', () => {
     map.fitView();
   });
@@ -366,6 +386,12 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       }
     }
   });
+
+  /** Whole minutes and seconds, `mm:ss`. */
+  function minutesSeconds(seconds: number): string {
+    const whole = Math.floor(seconds);
+    return `${String(Math.floor(whole / 60)).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
+  }
 
   function clock(seconds: number): string {
     const minutes = Math.floor(seconds / 60);
@@ -482,8 +508,14 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         return `${at}  BLUEFOR in position`;
       case 'opforStarted':
         return `${at}  START OPFOR: OPFOR approach begins`;
-      case 'ambushTriggered':
-        return `${clock(event.trigger.atSeconds)}  AMBUSH TRIGGERED by ${event.trigger.soldierId}`;
+      case 'killZoneEntered':
+        return `${at}  ${soldierName(event.soldierId)} entered the kill zone`;
+      case 'killZoneLeft':
+        return `${at}  ${soldierName(event.soldierId)} left the kill zone`;
+      case 'ambushTriggered': {
+        const { trigger } = event;
+        return `${clock(trigger.atSeconds)}  AMBUSH TRIGGERED${trigger.whilePaused ? ' (while paused; begins on resume)' : ''}: ${String(trigger.opforInKillZone)} of ${String(trigger.opforTotal)} OPFOR in the kill zone`;
+      }
       case 'engagementEnded':
         return `${at}  ENGAGEMENT ENDED: ${END_REASONS[event.result.endReason ?? 'timeLimit']}`;
     }
@@ -680,7 +712,7 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
           result.sides.OPFOR.escaped,
         )} escaped · ${String(result.sides.OPFOR.survivingNotEscaped)} still in the fight</span>`
       : exercise.trigger
-        ? `<span class="alert">${escapeHtml(exercise.trigger.soldierId)} entered the kill zone</span>`
+        ? `<span class="alert">Ambush triggered: ${String(exercise.trigger.opforInKillZone)} of ${String(exercise.trigger.opforTotal)} in the kill zone</span>`
         : exercise.opforStart
           ? `<span class="warn">Approaching along the scenario route</span>`
           : 'Waiting (not started)';
@@ -790,16 +822,62 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       <div class="muted">Results in the side panel. Seed ${String(result.seed)}.</div>`;
     }
     if (trigger) {
-      return `<div class="banner-title">AMBUSH TRIGGERED</div>
-      <div>T+ ${clock(trigger.atSeconds)} · ${escapeHtml(trigger.soldierId)} entered the kill zone at
-      E ${trigger.point.x.toFixed(0)} N ${trigger.point.y.toFixed(0)}</div>
-      <div class="muted">Engagement in progress.</div>`;
+      const queued = exercise.triggerState === 'queued';
+      return `<div class="banner-title">${queued ? 'AMBUSH QUEUED' : 'AMBUSH TRIGGERED'}</div>
+      <div>T+ ${clock(trigger.atSeconds)} · approach ${minutesSeconds(trigger.approachSeconds)} ·
+      ${String(trigger.opforInKillZone)} of ${String(trigger.opforTotal)} OPFOR in the kill zone</div>
+      <div class="muted">${queued ? (exercise.paused ? 'Fire opens when you resume.' : 'Fire opens now.') : 'Engagement in progress.'}</div>`;
     }
     if (exercise.phase === 'bluforReady') {
       return `<div class="banner-title ready">BLUEFOR IN POSITION</div>
       <div>Check the positions and kill zone, then press <b>START OPFOR</b>.</div>`;
     }
     return null;
+  }
+
+  /** The TRIGGER AMBUSH button and its readouts: kill-zone count and approach time. */
+  function updateAmbushControls(): void {
+    const state = exercise.triggerState;
+    const triggerButton = button('trigger-ambush');
+    const engagementState = ui('engagement-state');
+    triggerButton.hidden = state === 'triggered';
+    engagementState.hidden = state !== 'triggered';
+    triggerButton.disabled = state !== 'available';
+    triggerButton.dataset['state'] = state;
+    const label = state === 'queued' ? 'AMBUSH QUEUED' : 'TRIGGER AMBUSH';
+    if (triggerButton.textContent !== label) triggerButton.textContent = label;
+    triggerButton.title =
+      state === 'unavailable'
+        ? 'Available once the OPFOR approach has started'
+        : state === 'queued'
+          ? 'The ambush is triggered; fire opens when the simulation runs'
+          : 'Open fire now: begins the engagement at the current simulation time';
+    const engagementText =
+      exercise.phase === 'engagementComplete' ? 'ENGAGEMENT COMPLETE' : 'ENGAGEMENT IN PROGRESS';
+    if (engagementState.textContent !== engagementText)
+      engagementState.textContent = engagementText;
+    engagementState.dataset['phase'] = exercise.phase;
+
+    const stateText =
+      state === 'queued'
+        ? exercise.paused
+          ? 'Queued: begins on resume'
+          : 'Queued: begins now'
+        : '';
+    if (ui('ambush-state').textContent !== stateText) ui('ambush-state').textContent = stateText;
+    ui('ambush-state').hidden = stateText === '';
+
+    const occupancy = exercise.killZoneOccupancy();
+    const count = occupancy
+      ? `OPFOR IN KILL ZONE: ${String(occupancy.inside)} / ${String(occupancy.total)}`
+      : 'OPFOR IN KILL ZONE: –';
+    const countEl = ui('kill-zone-count');
+    if (countEl.textContent !== count) countEl.textContent = count;
+    countEl.dataset['occupied'] = String((occupancy?.inside ?? 0) > 0);
+    const approach = exercise.approachSeconds;
+    const approachText = `APPROACH TIME: ${approach === null ? '--:--' : minutesSeconds(approach)}`;
+    if (ui('approach-time').textContent !== approachText)
+      ui('approach-time').textContent = approachText;
   }
 
   const cached = new Map<string, string>();
@@ -824,6 +902,7 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       'armed',
       phase === 'bluforReady' && exercise.startOpforProblems().length === 0,
     );
+    updateAmbushControls();
     for (const { scale, speedButton } of speedButtons) {
       speedButton.setAttribute('aria-pressed', String(session.timeScale === scale));
     }

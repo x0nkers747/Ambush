@@ -192,6 +192,9 @@ describe('combat on the map (docs/adr/0019)', () => {
     exercise.startOpfor();
     let sawShots = false;
     for (let i = 0; i < 30 * 400 && exercise.phase !== 'engagementComplete'; i += 1) {
+      // The trainee springs the ambush once the patrol leader is in the kill zone.
+      if (exercise.triggerState === 'available' && (exercise.killZoneOccupancy()?.inside ?? 0) > 0)
+        exercise.triggerAmbush();
       exercise.advance(1 / 30);
       const combat = buildScene(exercise, createSession(), camera, viewport).combat;
       if (exercise.phase === 'engagement' && combat) {

@@ -1348,17 +1348,23 @@ function drawViewshed(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.restore();
 }
 
-/** Marks where the ambush was sprung. */
+/**
+ * Marks where each OPFOR soldier stood when the ambush was triggered: two rings
+ * for those in the kill zone, one dashed ring for the rest.
+ */
 function drawTrigger(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   if (!scene.trigger) return;
-  const p = worldToScreen(scene.camera, scene.viewport, scene.trigger.point);
   ctx.save();
   ctx.strokeStyle = COLORS.trigger;
   ctx.lineWidth = 3;
-  for (const r of [10, 18]) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
-    ctx.stroke();
+  for (const opfor of scene.trigger.opforPositions) {
+    const p = worldToScreen(scene.camera, scene.viewport, opfor.point);
+    ctx.setLineDash(opfor.inKillZone ? [] : [4, 4]);
+    for (const r of opfor.inKillZone ? [10, 18] : [14]) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }

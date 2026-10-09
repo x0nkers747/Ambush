@@ -1,6 +1,7 @@
 # ADR 0019: Combat v1, probabilistic two-sided engagements
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0021 (the engagement begins when the trainee triggers it,
+  at the start of the tick the request was made in, instead of after the first kill-zone entry)
 - Date: 2026-10-09
 - Builds on ADR 0003 (fixed time step), ADR 0004 (commands), ADR 0007 (simulation kernel, seeded
   random numbers), ADR 0010 (ambush flow and trigger), ADR 0011 (navigation and line of sight),

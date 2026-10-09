@@ -568,6 +568,110 @@ describe('two-sided combat', () => {
   });
 });
 
+// Nearest-eligible targeting, verified for the manual ambush trigger (docs/adr/0021):
+// every firing opportunity chooses again from current positions.
+describe('nearest-target selection', () => {
+  /** Never hits; OPFOR reacts too late to matter; the first shot at once. */
+  const steadyConfig = (maxDurationSeconds = 60) =>
+    testCombatConfig({
+      opfor: proneOnly({ minSeconds: 100, maxSeconds: 100 }),
+      engagement: { bluforFirstShotDelay: { minSeconds: 0, maxSeconds: 0 }, maxDurationSeconds },
+    });
+
+  it('lets several Marines engage the same target', () => {
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('B1', 0, 0, 'blank'), B('B2', 10, 0, 'blank'), B('B3', -10, 0, 'blank')],
+        opfor: [O('O1', 0, 150, null), O('O2', 0, 300, null)],
+        config: steadyConfig(3),
+      }),
+    );
+    begin(sim);
+    const shots = ofType(runToEnd(sim), 'shotFired');
+    expect(shots.length).toBeGreaterThanOrEqual(9);
+    expect(new Set(shots.map((s) => s.shooterId))).toEqual(new Set(['B1', 'B2', 'B3']));
+    expect(new Set(shots.map((s) => s.targetId))).toEqual(new Set(['O1']));
+  });
+
+  it('takes a target that has become nearer at the next firing opportunity', () => {
+    // O2 walks south towards B1 at 1.5 m/s, past O1's 200 m about 20.5 s in.
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('B1', 0, 0, 'blank')],
+        opfor: [O('O1', 0, 200, null), O('O2', 0, 230.75, null)],
+        config: steadyConfig(30),
+      }),
+    );
+    sim.submit({
+      type: 'setOrders',
+      tick: 0,
+      soldierId: soldierId('O2'),
+      orders: { waypoints: [{ id: waypointId('w'), x: 0, y: 120 }], finalFacing: Math.PI },
+    });
+    begin(sim);
+    const shots = ofType(runToEnd(sim), 'shotFired');
+    const switchAt = shots.findIndex((s) => s.targetId === 'O2');
+    expect(shots.slice(0, switchAt).every((s) => s.targetId === 'O1' && s.rangeM === 200)).toBe(
+      true,
+    );
+    expect(shots.slice(switchAt).every((s) => s.targetId === 'O2')).toBe(true);
+    expect(shots[switchAt]?.atSeconds).toBeGreaterThan(20);
+    expect(shots[switchAt]?.atSeconds).toBeLessThanOrEqual(22);
+    // The range is taken at the moment of the shot, from current positions.
+    expect(shots[switchAt]?.rangeM).toBeLessThan(200);
+    expect(shots.at(-1)?.rangeM).toBeLessThan(shots[switchAt]?.rangeM ?? NaN);
+  });
+
+  it('never chooses an escaped soldier, however near', () => {
+    const scenario = combatScenario({
+      blufor: [B('B1', 0, 0, 'blank')],
+      opfor: [O('O1', 0, 150, null), O('O2', 0, 300, null)],
+      config: testCombatConfig({
+        opfor: proneOnly({ minSeconds: 100, maxSeconds: 100 }),
+        engagement: { bluforFirstShotDelay: { minSeconds: 1, maxSeconds: 1 } },
+      }),
+    });
+    const sim = simOf(scenario);
+    begin(sim);
+    sim.step();
+    // O1 has escaped (as a fleeing soldier would): edit a snapshot, which is plain data.
+    const snapshot = sim.snapshot();
+    const state = snapshot.state as SimState;
+    const o1 = state.engagement?.combatants.find((c) => c.soldierId === 'O1');
+    if (!o1) throw new Error('fixture');
+    o1.behavior = 'escaped';
+    const escaped = simOf(scenario);
+    escaped.restore(snapshot);
+    const shots = ofType(runTo(escaped, 3.05), 'shotFired');
+    expect(shots.map((s) => s.targetId)).toEqual(['O2', 'O2', 'O2']);
+    // Without the escape, O1 (nearer) would have been the target.
+    expect(ofType(runTo(sim, 3.05), 'shotFired').map((s) => s.targetId)).toEqual([
+      'O1',
+      'O1',
+      'O1',
+    ]);
+  });
+
+  it('passes over a nearer enemy out of sight for the nearest one it can see and reach', () => {
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('Short', 0, 0, 'short-blank'), B('Long', 10, 0, 'blank')],
+        opfor: [O('Behind', -60, 60, null), O('Open', 0, 90, null), O('Far', 0, 150, null)],
+        config: steadyConfig(1),
+        // A wall between both Marines and "Behind" only.
+        features: withBuildings(building('wall', rectangle(-30, 30, 10, 10), 10)),
+      }),
+    );
+    begin(sim);
+    // Behind is nearest to Short (85 m) but hidden; Open (90 m) is the nearest it can
+    // see within its 100 m reach. Long sees Open nearest too: shared, not spread out.
+    expect(ofType(sim.step(), 'shotFired').map((s) => [s.shooterId, s.targetId])).toEqual([
+      ['Short', 'Open'],
+      ['Long', 'Open'],
+    ]);
+  });
+});
+
 describe('engagement termination', () => {
   it('ends at the configured time limit, however long firing pauses', () => {
     const sim = simOf(
@@ -757,6 +861,27 @@ describe('timing and determinism', () => {
     restored.restore(snapshot);
     expect(runToEnd(restored)).toEqual(tail);
     expect(hashSimState(restored.state)).toBe(whole.hash);
+  });
+
+  // A snapshot never holds pending commands: a trigger requested before the
+  // snapshot is resubmitted with the command log (docs/adr/0021).
+  it('is reproduced from a snapshot taken before the engagement begins, with the same trigger tick', () => {
+    const whole = fight(23);
+    const sim = simOf(skirmish(), 23);
+    runTo(sim, 0.2);
+    expect(sim.state.engagement).toBeUndefined();
+    const snapshot = sim.snapshot();
+    const restored = simOf(skirmish(), 99);
+    restored.restore(snapshot);
+    begin(restored, 3);
+    runToEnd(restored);
+    expect(hashSimState(restored.state)).toBe(whole.hash);
+    // A different trigger tick is a different engagement.
+    const later = simOf(skirmish(), 99);
+    later.restore(snapshot);
+    begin(later, 13);
+    runToEnd(later);
+    expect(hashSimState(later.state)).not.toBe(whole.hash);
   });
 
   it('is reproduced by replaying the command log', () => {

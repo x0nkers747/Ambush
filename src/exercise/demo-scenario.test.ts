@@ -201,7 +201,7 @@ describe('DEMO_SCENARIO', () => {
     });
   });
 
-  it('springs an ambush on a kill zone drawn across the draw', () => {
+  it('lets the trainee spring an ambush on a kill zone drawn across the draw', () => {
     const exercise = createExercise({
       config: { tickRateHz: 30, seed: 0 },
       scenario: DEMO_SCENARIO,
@@ -217,11 +217,20 @@ describe('DEMO_SCENARIO', () => {
     exercise.execute();
     exercise.advance(1 / 30);
     expect(exercise.startOpfor().ok).toBe(true);
-    for (let i = 0; i < 30 * 300 && exercise.phase === 'opforApproach'; i += 1)
+    // The patrol walks in; nothing happens until the trainee triggers (docs/adr/0021).
+    for (let i = 0; i < 30 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1)
       exercise.advance(1 / 30);
-    expect(exercise.trigger?.soldierId).toBe('EN-1');
-    // EN-1 enters through the north edge, y = 30.
-    expect(exercise.trigger?.point.y).toBeCloseTo(30, 6);
+    const entry = exercise.timeline.find((e) => e.type === 'killZoneEntered');
+    expect(entry?.type === 'killZoneEntered' && entry.soldierId).toBe('EN-1');
+    // EN-1 enters through the north edge, y = 30 (within the tick's walk).
+    const leader = exercise.simulation.state.soldiers.find((s) => s.id === 'EN-1');
+    expect(leader?.position.y).toBeLessThanOrEqual(30);
+    expect(leader?.position.y).toBeGreaterThan(29.9);
+    expect(exercise.phase).toBe('opforApproach');
+    expect(exercise.triggerAmbush().ok).toBe(true);
+    expect(exercise.trigger).toMatchObject({ opforInKillZone: 1, opforTotal: 3 });
+    exercise.advance(1 / 30);
+    expect(exercise.phase).toBe('engagement');
   });
 
   it('deploys part of the squad from the ORP to readiness, the same way every time', () => {

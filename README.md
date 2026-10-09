@@ -11,8 +11,9 @@ trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical or
 [ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
 with Ambush!'s own role icons (not APP-6, see
-[ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow
-runs through AMBUSH TRIGGERED into a probabilistic two-sided engagement of up to 60 simulated
+[ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The trainee
+springs the ambush with TRIGGER AMBUSH
+([ADR 0021](docs/adr/0021-manual-ambush-trigger.md)), starting a probabilistic two-sided engagement of up to 60 simulated
 seconds ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)), on the demo or on any
 battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. No 3D yet.
 
@@ -71,9 +72,13 @@ licences require. Service endpoints can be changed per browser: see
    destinations or facings, then Resume.
 3. **BLUEFOR ready.** When every Marine with a destination or facing has arrived and turned, the
    exercise stops and waits.
-4. **START OPFOR.** Declares the ambush ready; OPFOR follows its scenario route.
-5. **Ambush triggered.** The moment an OPFOR soldier enters the kill zone the engagement begins
-   ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)). Every Marine with a weapon fires at
+4. **START OPFOR.** Declares the ambush ready; OPFOR follows its scenario route, into and through
+   the kill zone. Entering it does not start combat. **OPFOR IN KILL ZONE: n / total** counts
+   the active patrol members inside it, and **APPROACH TIME** runs from START OPFOR.
+5. **TRIGGER AMBUSH.** Press the red button when you choose: the engagement begins at that moment
+   ([ADR 0021](docs/adr/0021-manual-ambush-trigger.md),
+   [ADR 0019](docs/adr/0019-probabilistic-engagements.md)). It works at any time during the
+   approach, also while paused; fire then opens when you resume. Every Marine with a weapon fires at
    the nearest enemy he can see within his weapon's range; the chance of a hit falls with range and
    halves against a prone target. Each OPFOR soldier, after a short delay, either drops prone and
    returns fire or flees. Shots show as fading lines; incapacitated soldiers are crossed out.
@@ -164,3 +169,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 18. [The selected Marine's weapon engagement wedge](docs/adr/0018-weapon-engagement-wedge.md)
 19. [Combat v1: probabilistic two-sided engagements](docs/adr/0019-probabilistic-engagements.md)
 20. [Viewsheds on 5 km battlefields](docs/adr/0020-viewshed-performance-5-km.md)
+21. [The trainee triggers the ambush](docs/adr/0021-manual-ambush-trigger.md)

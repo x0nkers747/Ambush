@@ -68,7 +68,7 @@ export interface MapScene {
   readonly visibility: VisibilityView | null;
   /** The selected Marine's weapon engagement wedge, or `null` (nothing selected, or no weapon range). */
   readonly engagement: EngagementWedge | null;
-  /** The ambush trigger, once it has happened. */
+  /** The trainee's ambush trigger, once requested (with OPFOR positions at that moment). */
   readonly trigger: AmbushTrigger | null;
   /** What combat shows, from the start of the engagement (docs/adr/0019); `null` before. */
   readonly combat: CombatView | null;

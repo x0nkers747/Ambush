@@ -6,13 +6,13 @@ import {
   fingerprintWorld,
   summarizeEngagement,
   lineOfSight,
+  pointInPolygon,
   pointProblem,
   visibleCellsIn,
   soldierId,
   waypointId,
   type Azimuth,
   type CombatConfig,
-  type EngagementAreaEnteredEvent,
   type EngagementSummary,
   type EngagementAreaId,
   type LosResult,
@@ -122,16 +122,55 @@ export interface OpforStart {
   readonly routeIds: readonly string[];
 }
 
-/** The moment the ambush was sprung. */
-export interface AmbushTrigger {
-  /** Tick during which the entry happened; the engagement begins with the next tick. */
-  readonly tick: number;
-  /** Exact simulation time of the entry. */
-  readonly atSeconds: number;
+/** Where an OPFOR soldier stood when the ambush was triggered. */
+export interface OpforPositionAtTrigger {
   readonly soldierId: SoldierId;
-  readonly killZoneId: EngagementAreaId;
-  /** Where the soldier crossed into the kill zone. */
   readonly point: Vec2;
+  /** Active, not escaped, and inside the kill zone (boundary included). */
+  readonly inKillZone: boolean;
+}
+
+/**
+ * The trainee's TRIGGER AMBUSH action (docs/adr/0021). The engagement begins at
+ * the start of tick `tick`, the tick the simulation was at when the trainee
+ * pressed the button (or, if paused, the tick it resumes from).
+ */
+export interface AmbushTrigger {
+  /** Tick at whose start the engagement begins. */
+  readonly tick: number;
+  /** Simulation time at which the engagement begins. */
+  readonly atSeconds: number;
+  /** Seconds since OPFOR began its approach. */
+  readonly approachSeconds: number;
+  /** Whether the trainee triggered while the simulation was paused. */
+  readonly whilePaused: boolean;
+  readonly killZoneId: EngagementAreaId;
+  /** Active OPFOR in the kill zone at the trigger. */
+  readonly opforInKillZone: number;
+  /** Every OPFOR soldier of the scenario. */
+  readonly opforTotal: number;
+  /** Every OPFOR soldier's position at the trigger, in scenario order. */
+  readonly opforPositions: readonly OpforPositionAtTrigger[];
+}
+
+/**
+ * Whether the trainee can trigger the ambush now:
+ *
+ * - `unavailable`: before the OPFOR approach;
+ * - `available`: during the approach, not yet triggered;
+ * - `queued`: triggered; the engagement begins with the next tick (on resume, if paused);
+ * - `triggered`: the engagement has begun.
+ */
+export type AmbushTriggerState = 'unavailable' | 'available' | 'queued' | 'triggered';
+
+export type TriggerAmbushResult =
+  | { readonly ok: true; readonly trigger: AmbushTrigger }
+  | { readonly ok: false; readonly problem: string };
+
+/** Active OPFOR inside the kill zone, out of every OPFOR soldier of the scenario. */
+export interface KillZoneOccupancy {
+  readonly inside: number;
+  readonly total: number;
 }
 
 /** Tick-stamped exercise milestones, for the event log and the future AAR. */
@@ -149,6 +188,17 @@ export type ExerciseEvent =
       readonly tick: number;
       readonly timeSeconds: number;
       readonly start: OpforStart;
+    }
+  | {
+      /**
+       * An active OPFOR soldier came into (or walked out of) the kill zone during the
+       * approach or engagement, as seen at the end of a tick. Being incapacitated or
+       * escaping inside it is not leaving it.
+       */
+      readonly type: 'killZoneEntered' | 'killZoneLeft';
+      readonly tick: number;
+      readonly timeSeconds: number;
+      readonly soldierId: SoldierId;
     }
   | {
       readonly type: 'ambushTriggered';
@@ -279,7 +329,20 @@ export interface Exercise {
   scenarioStart(soldierId: string): Vec2 | undefined;
   readonly revisions: readonly PlanRevision[];
   readonly opforStart: OpforStart | null;
+  /** The trainee's TRIGGER AMBUSH action, from the moment it is requested. */
   readonly trigger: AmbushTrigger | null;
+  readonly triggerState: AmbushTriggerState;
+  /**
+   * Active OPFOR (neither incapacitated nor escaped) inside the kill zone now,
+   * boundary included, out of every OPFOR soldier; `null` without a valid kill zone.
+   * Information only: it never gates the trigger.
+   */
+  killZoneOccupancy(): KillZoneOccupancy | null;
+  /**
+   * Simulation seconds since OPFOR began its approach (frozen at the
+   * trigger); `null` before the approach.
+   */
+  readonly approachSeconds: number | null;
   /** The combat configuration in force. */
   readonly combatConfig: CombatConfig;
   /**
@@ -400,6 +463,12 @@ export interface Exercise {
   resume(): CommitResult;
   /** BLUEFOR Ready → OPFOR Approach: the trainee declares the ambush ready. */
   startOpfor(): StartOpforResult;
+  /**
+   * TRIGGER AMBUSH: from the start of the OPFOR approach, whether or not anyone
+   * is in the kill zone. Submits the engagement-start command for the current
+   * tick; while paused it waits there until the trainee resumes.
+   */
+  triggerAmbush(): TriggerAmbushResult;
 
   /**
    * Advances simulation time by `realDtSeconds × timeScale` (whole ticks) while
@@ -559,32 +628,58 @@ export function createExercise({
   };
   const uncommittedChanges = () => trainee.some(changed);
 
+  /** The kill zone OPFOR is approaching (or, before then, the one being planned), if valid. */
+  const occupancyZone = (): readonly Vec2[] | null => {
+    const zone = opforStart?.killZone ?? killZone;
+    return zone && killZoneProblems(zone, []).length === 0 ? zone.vertices : null;
+  };
+  /** Every OPFOR soldier's position now, and whether it counts as in the kill zone. */
+  const opforNow = (zone: readonly Vec2[]): OpforPositionAtTrigger[] => {
+    const combatants = sim.state.engagement?.combatants;
+    return sim.state.soldiers
+      .filter((s) => s.side === ENEMY_SIDE)
+      .map((s) => {
+        const behavior = combatants?.find((c) => c.soldierId === s.id)?.behavior;
+        const point = { x: s.position.x, y: s.position.y };
+        const out = s.status !== 'active' || behavior === 'escaped' || behavior === 'incapacitated';
+        return { soldierId: s.id, point, inKillZone: !out && pointInPolygon(point, zone) };
+      });
+  };
+  /** Who was in the kill zone at the end of the previous tick. */
+  let inKillZone = new Set<SoldierId>();
+  /** Records active OPFOR coming into and leaving the kill zone, for the timeline and AAR. */
+  const trackKillZone = () => {
+    const zone = opforStart?.killZone.vertices;
+    if (!zone) return;
+    const opfor = opforNow(zone);
+    const inside = new Set(opfor.filter((o) => o.inKillZone).map((o) => o.soldierId));
+    for (const id of inside) {
+      if (!inKillZone.has(id)) timeline.push({ type: 'killZoneEntered', ...now(), soldierId: id });
+    }
+    for (const id of inKillZone) {
+      // Incapacitated or escaped soldiers drop out of the count but did not walk out.
+      const outside = opfor.some((o) => o.soldierId === id && !pointInPolygon(o.point, zone));
+      if (!inside.has(id) && outside)
+        timeline.push({ type: 'killZoneLeft', ...now(), soldierId: id });
+    }
+    inKillZone = inside;
+  };
+
   const afterTick = (events: readonly SimEvent[]) => {
     if (phase === 'bluforOccupation' && movementComplete()) {
       phase = 'bluforReady';
       resetDrafts();
       timeline.push({ type: 'bluforInPosition', ...now() });
-    } else if (phase === 'opforApproach' && opforStart) {
-      const zoneId = opforStart.killZone.id;
-      // Entries arrive in the order they happened, so the first is the trigger.
-      const entry = events.find(
-        (e): e is EngagementAreaEnteredEvent =>
-          e.type === 'engagementAreaEntered' && e.areaId === zoneId,
-      );
-      if (entry) {
-        trigger = deepFreeze({
-          tick: entry.tick,
-          atSeconds: entry.atSeconds,
-          soldierId: entry.soldierId,
-          killZoneId: zoneId,
-          point: { ...entry.point },
-        });
-        phase = 'engagement';
-        timeline.push({ type: 'ambushTriggered', ...now(), trigger });
-        // The engagement begins at the start of the next tick.
-        sim.submit({ type: 'beginEngagement', tick: sim.tick });
-      }
-    } else if (phase === 'engagement') {
+      return;
+    }
+    if (phase !== 'opforApproach' && phase !== 'engagement') return;
+    // Entering or leaving the kill zone never starts combat: only the trainee's
+    // TRIGGER AMBUSH does (docs/adr/0021).
+    trackKillZone();
+    if (phase === 'opforApproach' && events.some((e) => e.type === 'engagementStarted')) {
+      phase = 'engagement';
+    }
+    if (phase === 'engagement') {
       for (const event of events) {
         if (COMBAT_EVENT_TYPES.has(event.type)) combatLog.push(event as CombatEvent);
       }
@@ -805,6 +900,21 @@ export function createExercise({
     get trigger() {
       return trigger;
     },
+    get triggerState(): AmbushTriggerState {
+      if (phase === 'engagement' || phase === 'engagementComplete') return 'triggered';
+      if (phase !== 'opforApproach') return 'unavailable';
+      return trigger ? 'queued' : 'available';
+    },
+    killZoneOccupancy() {
+      const zone = occupancyZone();
+      if (!zone) return null;
+      const opfor = opforNow(zone);
+      return { inside: opfor.filter((o) => o.inKillZone).length, total: opfor.length };
+    },
+    get approachSeconds() {
+      if (!opforStart) return null;
+      return (trigger?.atSeconds ?? sim.timeSeconds) - opforStart.timeSeconds;
+    },
     combatConfig: combat,
     combatWeapons,
     get engagementResult() {
@@ -1015,6 +1125,29 @@ export function createExercise({
       run();
       timeline.push({ type: 'opforStarted', ...now(), start });
       return { ok: true, start };
+    },
+
+    triggerAmbush() {
+      if (phase !== 'opforApproach' || !opforStart) {
+        return { ok: false, problem: `the ambush cannot be triggered during ${phase}` };
+      }
+      if (trigger) return { ok: false, problem: 'the ambush has already been triggered' };
+      const opforPositions = opforNow(opforStart.killZone.vertices);
+      // The simulation is at the start of tick `sim.tick` (it only ever steps
+      // whole ticks, and is frozen while paused): the engagement begins there.
+      sim.submit({ type: 'beginEngagement', tick: sim.tick });
+      trigger = deepFreeze({
+        tick: sim.tick,
+        atSeconds: sim.timeSeconds,
+        approachSeconds: sim.timeSeconds - opforStart.timeSeconds,
+        whilePaused: paused,
+        killZoneId: opforStart.killZone.id,
+        opforInKillZone: opforPositions.filter((o) => o.inKillZone).length,
+        opforTotal: opforPositions.length,
+        opforPositions,
+      });
+      timeline.push({ type: 'ambushTriggered', ...now(), trigger });
+      return { ok: true, trigger };
     },
 
     advance(realDtSeconds, timeScale = 1) {
