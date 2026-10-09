@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeViewshed,
-  computeViewshedRows,
+  computeUnionRows,
   createSyntheticTerrain,
   rectangle,
   viewshedGrid,
@@ -67,14 +67,14 @@ function fakes() {
         worker.onerror?.(new Error('worker crashed'));
         return true;
       }
-      const data = computeViewshedRows(
+      const data = computeUnionRows(
         TERRAIN,
-        message.observer,
+        message.observers,
         message.grid,
         message.rowStart,
         message.rowEnd,
-        {},
         message.rowStep,
+        message.known ?? null,
       );
       const reply: WorkerReply = {
         type: 'rows',

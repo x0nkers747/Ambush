@@ -5,6 +5,7 @@ import {
   type AmbushTrigger,
   type DisplayedFacing,
   type Exercise,
+  type FireTeamFormation,
   type IndividualIcon,
   type KillZone,
   type OpforRoute,
@@ -42,6 +43,8 @@ export interface MapScene {
   readonly viewport: Viewport;
   readonly soldiers: readonly DeepReadonly<Soldier>[];
   readonly selectedId: SoldierId | null;
+  /** The selected fire team (docs/adr/0022), or `null`; never set together with `selectedId`. */
+  readonly selectedTeam: SelectedTeamView | null;
   /** Plans shown for every trainee soldier (drafts while editable, else committed plans). */
   readonly plans: readonly SoldierDeploymentPlan[];
   /** The selected soldier's entry in `plans`. */
@@ -68,6 +71,11 @@ export interface MapScene {
   readonly visibility: VisibilityView | null;
   /** The selected Marine's weapon engagement wedge, or `null` (nothing selected, or no weapon range). */
   readonly engagement: EngagementWedge | null;
+  /**
+   * Every wedge to draw: the selected Marine's, or one for each Marine of the
+   * selected fire team that has one, in slot order.
+   */
+  readonly engagements: readonly EngagementWedge[];
   /** The trainee's ambush trigger, once requested (with OPFOR positions at that moment). */
   readonly trigger: AmbushTrigger | null;
   /** What combat shows, from the start of the engagement (docs/adr/0019); `null` before. */
@@ -98,10 +106,26 @@ export interface CombatView {
   readonly ended: boolean;
 }
 
-/** The visibility overlay for the selected soldier. */
+/** The selected fire team as the map shows it. */
+export interface SelectedTeamView {
+  readonly unitId: string;
+  readonly name: string;
+  /** Its Marines, in formation slot order. */
+  readonly memberIds: readonly SoldierId[];
+  /** Its formation while plans are editable and a Marine still follows it. */
+  readonly formation: FireTeamFormation | undefined;
+  /** Whether a map click places the team, and the formation's handles can be dragged. */
+  readonly editable: boolean;
+}
+
+/** The visibility overlay for the selected soldier, or the union for the selected fire team. */
 export interface VisibilityView {
-  /** Where the soldier observes from: its destination, or where it stands. */
+  /** Where the soldier observes from: its destination, or where it stands (a fire team: its first Marine). */
   readonly observer: Vec2;
+  /** For a fire team: where each of its Marines observes from. */
+  readonly observers?: readonly Vec2[];
+  /** For a fire team: its unit id; the viewshed is then the union of its Marines' (docs/adr/0022). */
+  readonly team?: string;
   readonly planned: boolean;
   /** The viewshed to draw: from `observer` once ready, otherwise the previous one. */
   readonly viewshed: Viewshed | null;
@@ -125,11 +149,23 @@ export function buildScene(
   const plans = state.soldiers.flatMap((s) => exercise.displayedPlan(s.id) ?? []);
   const selectedPlan = plans.find((p) => p.soldierId === session.selectedSoldierId);
   const orp = exercise.orp;
+  const team = exercise.fireTeams.find((t) => t.unitId === session.selectedFireTeamId);
+  const selectedTeam: SelectedTeamView | null = team
+    ? {
+        unitId: team.unitId,
+        name: team.name,
+        memberIds: team.memberIds,
+        formation: exercise.formation(team.unitId),
+        editable: exercise.canEditPlans && session.tool === 'deploy',
+      }
+    : null;
+  const engagement = engagementWedge(exercise, state.soldiers, session.selectedSoldierId);
   return {
     camera,
     viewport,
     soldiers: state.soldiers,
     selectedId: session.selectedSoldierId,
+    selectedTeam,
     plans,
     selectedPlan,
     editable: exercise.canEditPlans && selectedPlan !== undefined && session.tool === 'deploy',
@@ -166,7 +202,12 @@ export function buildScene(
       return route.shownToTrainee && path ? [{ route, path }] : [];
     }),
     visibility: session.showVisibility ? visibility : null,
-    engagement: engagementWedge(exercise, state.soldiers, session.selectedSoldierId),
+    engagement,
+    engagements: selectedTeam
+      ? selectedTeam.memberIds.flatMap((id) => engagementWedge(exercise, state.soldiers, id) ?? [])
+      : engagement
+        ? [engagement]
+        : [],
     trigger: exercise.trigger,
     combat: combatView(exercise),
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
@@ -252,6 +293,51 @@ export interface DeploymentGeometry {
 /** The icon colour of a soldier's side: the trainee's side is friendly, the other enemy. */
 export function affiliationOf(side: Side): Affiliation {
   return side === TRAINEE_SIDE ? 'friendly' : 'enemy';
+}
+
+/** Whether a soldier is selected: the selected Marine, or a member of the selected fire team. */
+export function isSelected(scene: MapScene, id: SoldierId): boolean {
+  return id === scene.selectedId || (scene.selectedTeam?.memberIds.includes(id) ?? false);
+}
+
+/** The selected fire team's formation on screen: its centre, line and facing handle. */
+export interface FormationGeometry {
+  readonly centre: Vec2;
+  /** Every slot's point, in slot order. */
+  readonly slots: readonly Vec2[];
+  /** Tip of the facing arrow from the centre (the drag handle). */
+  readonly facingTip: Vec2;
+  readonly azimuth: number;
+}
+
+export function formationGeometry(scene: MapScene): FormationGeometry | undefined {
+  const formation = scene.selectedTeam?.formation;
+  if (!formation) return undefined;
+  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
+  const centre = toScreen(formation.centre);
+  return {
+    centre,
+    slots: formation.slots.map((s) => toScreen(s.point)),
+    facingTip: {
+      x: centre.x + Math.sin(formation.azimuth) * FACING_ARROW_PX,
+      y: centre.y - Math.cos(formation.azimuth) * FACING_ARROW_PX,
+    },
+    azimuth: formation.azimuth,
+  };
+}
+
+/** Whether `screen` is on the selected fire team's formation centre (its drag handle). */
+export function isOnFormationCentre(scene: MapScene, screen: Vec2): boolean {
+  const geometry = formationGeometry(scene);
+  return geometry !== undefined && distance(geometry.centre, screen) <= DESTINATION_HIT_RADIUS_PX;
+}
+
+/** Whether `screen` is on the formation's facing handle. */
+export function isOnFormationFacingHandle(scene: MapScene, screen: Vec2): boolean {
+  const geometry = formationGeometry(scene);
+  return (
+    geometry !== undefined && distance(geometry.facingTip, screen) <= FACING_HANDLE_HIT_RADIUS_PX
+  );
 }
 
 export function selectedSoldier(scene: MapScene): DeepReadonly<Soldier> | undefined {
@@ -350,18 +436,19 @@ export interface SymbolPlacement {
 
 /**
  * Declutters every soldier's symbol, whatever its side, without moving it:
- * the selected soldier first, then in scene order, each gets a full symbol
+ * the selected soldiers (a Marine, or a fire team's Marines) first, then in
+ * scene order, each gets a full symbol
  * unless it would overlap a full symbol already placed, in which case it is
  * drawn compact (a dot at its true position). A label is shown where it
- * overlaps no symbol or label placed before it; the selected soldier's label
- * is always shown. Compact soldiers hidden under a full symbol are listed on
+ * overlaps no symbol or label placed before it; selected soldiers' labels
+ * are always shown. Compact soldiers hidden under a full symbol are listed on
  * that symbol (`hidden`), so a cluster always shows how many it holds, and of
  * which affiliation.
  */
 export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlacement> {
   const ordered = [
-    ...scene.soldiers.filter((s) => s.id === scene.selectedId),
-    ...scene.soldiers.filter((s) => s.id !== scene.selectedId),
+    ...scene.soldiers.filter((s) => isSelected(scene, s.id)),
+    ...scene.soldiers.filter((s) => !isSelected(scene, s.id)),
   ];
   const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
   const symbols: Box[] = [];
@@ -374,7 +461,7 @@ export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlac
     const at = worldToScreen(scene.camera, scene.viewport, soldier.position);
     const affiliation = affiliationOf(soldier.side);
     const box = { x0: at.x - half, y0: at.y - half, x1: at.x + half, y1: at.y + half };
-    const selected = soldier.id === scene.selectedId;
+    const selected = isSelected(scene, soldier.id);
     const full = selected || !symbols.some((b) => overlaps(b, box));
     if (full) {
       symbols.push(box);

@@ -173,6 +173,7 @@ export type { CombatSetup, MovementParams, SimWorld } from './world';
 export {
   cellCentre,
   computeViewshed,
+  computeUnionRows,
   computeViewshedRows,
   prepareViewsheds,
   viewshedGrid,

@@ -6,6 +6,7 @@ import {
   fingerprintWorld,
   summarizeEngagement,
   lineOfSight,
+  normalizeAzimuth,
   pointInPolygon,
   pointProblem,
   visibleCellsIn,
@@ -51,6 +52,12 @@ import {
 } from './kill-zone';
 import { rosterMembers, rosterTree, type RosterMember, type RosterUnit } from './organization';
 import { orpContains, type ObjectiveRallyPoint } from './orp';
+import {
+  DEFAULT_FORMATION_SPACING_M,
+  fireTeamsOf,
+  lineFormationPoints,
+  type FireTeam,
+} from './formation';
 import {
   createPathCache,
   describePathProblem,
@@ -303,6 +310,32 @@ export interface ExerciseOptions {
   readonly scenario: AmbushScenario;
   /** The combat model's parameters; `DEFAULT_COMBAT_CONFIG` when not given. */
   readonly combat?: CombatConfig;
+  /** Distance between neighbours in a fire-team line formation; `DEFAULT_FORMATION_SPACING_M` when not given. */
+  readonly formationSpacingM?: number;
+}
+
+/**
+ * A fire team's line formation (docs/adr/0022): the group placement that
+ * generated its Marines' destinations and facings. Planning metadata only:
+ * the Marines' own plans remain their orders.
+ */
+export interface FireTeamFormation {
+  /** The fire team's template unit id. */
+  readonly unitId: string;
+  /** The middle of the line, map metres. */
+  readonly centre: Vec2;
+  /** The common facing, exactly as the Marines' plans store it (see `facingDegreesOf`). */
+  readonly azimuth: Azimuth;
+  readonly spacingM: number;
+  /** Every slot in member order, with the destination it generates. */
+  readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
+  /**
+   * The Marines whose plans are still exactly the generated ones, in slot
+   * order. Only they follow moves and turns of the formation; a Marine whose
+   * plan is edited on its own is detached for good (until the team is placed
+   * again with a new map click).
+   */
+  readonly linked: readonly SoldierId[];
 }
 
 export interface Exercise {
@@ -426,6 +459,28 @@ export interface Exercise {
   clearFacing(soldierId: SoldierId): void;
   /** Discards uncommitted edits for the soldier: back to its last committed plan. */
   resetPlan(soldierId: SoldierId): void;
+
+  /** The trainee organization's fire teams, in template order (docs/adr/0022). */
+  readonly fireTeams: readonly FireTeam[];
+  /** The fire team a soldier belongs to, if any. */
+  fireTeamOf(soldierId: SoldierId): FireTeam | undefined;
+  /** The fire team's formation while editable and at least one Marine still follows it. */
+  formation(unitId: string): FireTeamFormation | undefined;
+  /**
+   * Places the whole fire team in a line centred on `centre`, facing `azimuth`
+   * (default: the formation's facing if it has one, else the direction from
+   * the team's current centre to `centre`): a destination and explicit facing
+   * for every Marine of the team, re-linking any detached ones. All or
+   * nothing: refused with an `ExerciseError` naming each slot that cannot be
+   * used (off the map, in or against a building, unreachable).
+   */
+  placeFormation(unitId: string, centre: Vec2, azimuth?: Azimuth): FireTeamFormation;
+  /** Moves the formation's centre, keeping its facing; only linked Marines follow. All or nothing. */
+  moveFormation(unitId: string, centre: Vec2): FireTeamFormation;
+  /** Turns the formation round its centre; only linked Marines follow. All or nothing. */
+  setFormationFacing(unitId: string, azimuth: Azimuth): FireTeamFormation;
+  /** Deletes the formation: its linked Marines lose their destinations and facings. */
+  clearFormation(unitId: string): void;
   /** The displayed plans of every trainee soldier, in roster order, for saving. */
   deploymentPlans(): DeploymentPlanSet;
   /**
@@ -484,7 +539,13 @@ export function createExercise({
   config,
   scenario,
   combat = DEFAULT_COMBAT_CONFIG,
+  formationSpacingM = DEFAULT_FORMATION_SPACING_M,
 }: ExerciseOptions): Exercise {
+  if (!(formationSpacingM > 0) || !Number.isFinite(formationSpacingM)) {
+    throw new RangeError(
+      `formation spacing must be a finite number of metres > 0, got ${String(formationSpacingM)}`,
+    );
+  }
   validateOpforRoutes(scenario, TRAINEE_SIDE);
   validateTraineeSetup(scenario, TRAINEE_SIDE);
   const roster = deepFreeze(rosterTree(scenario.organization));
@@ -739,6 +800,114 @@ export function createExercise({
     const problem = pointProblem(terrain, point);
     if (problem) return describePathProblem(problem);
     return pathFor(position(id), point).ok ? null : describePathProblem({ kind: 'unreachable' });
+  };
+
+  // Fire-team formations (docs/adr/0022): the metadata of each team's last
+  // group placement. The Marines' drafts stay the only plans.
+  const fireTeams: readonly FireTeam[] = deepFreeze(fireTeamsOf(roster));
+  const teamOfSoldier = new Map(
+    fireTeams.flatMap((t) => t.memberIds.map((id) => [id, t] as const)),
+  );
+  interface Formation {
+    readonly unitId: string;
+    readonly centre: Vec2;
+    readonly azimuth: Azimuth;
+    readonly spacingM: number;
+    readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
+    readonly linked: Set<SoldierId>;
+  }
+  const formations = new Map<string, Formation>();
+
+  const fireTeam = (unitId: string): FireTeam => {
+    const team = fireTeams.find((t) => t.unitId === unitId);
+    if (!team) throw new ExerciseError(`"${unitId}" is not a fire team`);
+    return team;
+  };
+  /** The plan a formation generates for one of its slots. */
+  const generatedPlan = (id: SoldierId, point: Vec2, azimuth: Azimuth): SoldierDeploymentPlan => ({
+    soldierId: id,
+    destination: toMapPoint(point),
+    facingDegrees: facingDegreesOf(azimuth),
+  });
+  /**
+   * The formation with every Marine whose draft is no longer the generated
+   * plan detached for good; dropped once nobody follows it. Only while plans
+   * are editable (otherwise the drafts are not what is shown).
+   */
+  const liveFormation = (unitId: string): Formation | undefined => {
+    const formation = formations.get(unitId);
+    if (!formation || !editable()) return undefined;
+    for (const slot of formation.slots) {
+      if (!formation.linked.has(slot.soldierId)) continue;
+      const draft = drafts.get(slot.soldierId);
+      const plan = generatedPlan(slot.soldierId, slot.point, formation.azimuth);
+      if (!draft || !samePlan(draft, plan)) formation.linked.delete(slot.soldierId);
+    }
+    if (formation.linked.size === 0) {
+      formations.delete(unitId);
+      return undefined;
+    }
+    return formation;
+  };
+  const formationView = (f: Formation): FireTeamFormation =>
+    deepFreeze({
+      unitId: f.unitId,
+      centre: { x: f.centre.x, y: f.centre.y },
+      azimuth: f.azimuth,
+      spacingM: f.spacingM,
+      slots: f.slots.map((slot) => ({ soldierId: slot.soldierId, point: { ...slot.point } })),
+      linked: f.slots.filter((slot) => f.linked.has(slot.soldierId)).map((slot) => slot.soldierId),
+    });
+  /**
+   * Lays the team out on a line and gives every Marine in `follow` its slot's
+   * destination and the common facing, all or nothing: if any of their slots
+   * cannot be used, nothing changes and an `ExerciseError` names each one.
+   */
+  const layOut = (
+    team: FireTeam,
+    centre: Vec2,
+    azimuthIn: Azimuth,
+    follow: ReadonlySet<SoldierId>,
+    what: string,
+  ): FireTeamFormation => {
+    requireEditable();
+    if (!Number.isFinite(centre.x) || !Number.isFinite(centre.y) || !Number.isFinite(azimuthIn)) {
+      throw new ExerciseError(`${what}: not a map point and facing.`);
+    }
+    // The facing as plans store it, so the line and every Marine agree exactly.
+    const azimuth = azimuthFromDegrees(facingDegreesOf(azimuthIn));
+    const points = lineFormationPoints(centre, azimuth, team.memberIds.length, formationSpacingM);
+    const slots = team.memberIds.map((soldierId, i) => ({
+      soldierId,
+      point: points[i] ?? centre,
+    }));
+    const problems = slots.flatMap(({ soldierId: id, point }) => {
+      if (!follow.has(id)) return [];
+      const problem = destinationProblem(id, point);
+      return problem ? [`${members.get(id)?.slot.label ?? id} would be ${problem}`] : [];
+    });
+    if (problems.length > 0) throw new ExerciseError(`${what}: ${problems.join('; ')}.`);
+    for (const { soldierId: id, point } of slots) {
+      if (follow.has(id)) drafts.set(id, generatedPlan(id, point, azimuth));
+    }
+    const formation: Formation = {
+      unitId: team.unitId,
+      centre: { x: centre.x, y: centre.y },
+      azimuth,
+      spacingM: formationSpacingM,
+      slots,
+      linked: new Set(follow),
+    };
+    formations.set(team.unitId, formation);
+    return formationView(formation);
+  };
+  /** A formation to move or turn: refused when there is none (or nobody follows it). */
+  const editableFormation = (unitId: string): Formation => {
+    requireEditable();
+    fireTeam(unitId);
+    const formation = liveFormation(unitId);
+    if (!formation) throw new ExerciseError('Formation not changed: place the fire team first.');
+    return formation;
   };
 
   /**
@@ -1004,6 +1173,54 @@ export function createExercise({
     resetPlan(id) {
       editableDraft(id);
       drafts.set(id, committedPlan(id));
+    },
+
+    fireTeams,
+    fireTeamOf: (id) => teamOfSoldier.get(id),
+    formation(unitId) {
+      const formation = liveFormation(unitId);
+      return formation && formationView(formation);
+    },
+    placeFormation(unitId, centre, azimuth) {
+      const team = fireTeam(unitId);
+      requireEditable();
+      let facing = azimuth ?? liveFormation(unitId)?.azimuth;
+      if (facing === undefined) {
+        // The way the team will walk: from its centre now to the new one.
+        const here = team.memberIds.map(position);
+        const x = here.reduce((sum, p) => sum + p.x, 0) / here.length;
+        const y = here.reduce((sum, p) => sum + p.y, 0) / here.length;
+        const dx = centre.x - x;
+        const dy = centre.y - y;
+        facing = Math.hypot(dx, dy) > 1e-9 ? normalizeAzimuth(Math.atan2(dx, dy)) : 0;
+      }
+      // A new placement is a new order for the whole team, detached Marines included.
+      return layOut(team, centre, facing, new Set(team.memberIds), 'Formation not placed');
+    },
+    moveFormation(unitId, centre) {
+      const formation = editableFormation(unitId);
+      return layOut(
+        fireTeam(unitId),
+        centre,
+        formation.azimuth,
+        formation.linked,
+        'Formation not moved',
+      );
+    },
+    setFormationFacing(unitId, azimuth) {
+      const formation = editableFormation(unitId);
+      return layOut(
+        fireTeam(unitId),
+        formation.centre,
+        azimuth,
+        formation.linked,
+        'Formation not turned',
+      );
+    },
+    clearFormation(unitId) {
+      const formation = editableFormation(unitId);
+      for (const id of formation.linked) drafts.set(id, emptyPlan(id));
+      formations.delete(unitId);
     },
     deploymentPlans() {
       return {

@@ -12,6 +12,11 @@ export type MapTool = 'deploy' | 'killZone';
 export interface Session {
   /** The trainee soldier whose plan is being viewed and edited, if any. */
   readonly selectedSoldierId: SoldierId | null;
+  /**
+   * The fire team (template unit id) selected for formation planning
+   * (docs/adr/0022), if any. Never set together with `selectedSoldierId`.
+   */
+  readonly selectedFireTeamId: string | null;
   /** Ratio of simulation time to real time while executing. */
   readonly timeScale: TimeScale;
   readonly tool: MapTool;
@@ -22,6 +27,7 @@ export interface Session {
 export function createSession(): Session {
   return {
     selectedSoldierId: null,
+    selectedFireTeamId: null,
     timeScale: 1,
     tool: 'deploy',
     showVisibility: false,
@@ -33,11 +39,24 @@ export function createSession(): Session {
  * for any other soldier (e.g. OPFOR).
  */
 export function selectSoldier(session: Session, exercise: Exercise, id: SoldierId): Session {
-  return exercise.isPlannable(id) ? { ...session, selectedSoldierId: id } : session;
+  return exercise.isPlannable(id)
+    ? { ...session, selectedSoldierId: id, selectedFireTeamId: null }
+    : session;
+}
+
+/**
+ * Selects a whole fire team (one at a time) in place of any single soldier.
+ * Returns the session unchanged for anything that is not a fire team.
+ * Selecting never changes a plan.
+ */
+export function selectFireTeam(session: Session, exercise: Exercise, unitId: string): Session {
+  return exercise.fireTeams.some((t) => t.unitId === unitId)
+    ? { ...session, selectedSoldierId: null, selectedFireTeamId: unitId }
+    : session;
 }
 
 export function clearSelection(session: Session): Session {
-  return { ...session, selectedSoldierId: null };
+  return { ...session, selectedSoldierId: null, selectedFireTeamId: null };
 }
 
 export function setTimeScale(session: Session, timeScale: TimeScale): Session {

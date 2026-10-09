@@ -103,6 +103,7 @@ export {
   TRAINEE_SIDE,
   type AmbushTrigger,
   type AmbushTriggerState,
+  type FireTeamFormation,
   type KillZoneOccupancy,
   type OpforPositionAtTrigger,
   type TriggerAmbushResult,
@@ -120,6 +121,14 @@ export {
   type PlanRevision,
   type StartOpforResult,
 } from './exercise';
+export {
+  DEFAULT_FORMATION_SPACING_M,
+  FIRE_TEAM_ECHELON,
+  fireTeamsOf,
+  lineFormationPoints,
+  lineSlotOffset,
+  type FireTeam,
+} from './formation';
 export {
   killZoneProblems,
   polygonCentroid,

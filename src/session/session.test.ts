@@ -4,6 +4,7 @@ import { soldierId } from '#sim';
 import {
   clearSelection,
   createSession,
+  selectFireTeam,
   selectSoldier,
   setShowVisibility,
   setTimeScale,
@@ -18,6 +19,7 @@ describe('session', () => {
   it('starts with no selection at 1×', () => {
     expect(createSession()).toEqual({
       selectedSoldierId: null,
+      selectedFireTeamId: null,
       timeScale: 1,
       tool: 'deploy',
       showVisibility: false,
@@ -30,6 +32,28 @@ describe('session', () => {
     session = selectSoldier(session, exercise, soldierId('M07'));
     expect(session.selectedSoldierId).toBe('M07');
     expect(clearSelection(session).selectedSoldierId).toBeNull();
+  });
+
+  // Fire-team formation planning (docs/adr/0022): one team or one Marine at a time.
+  it('selects a whole fire team, switching between teams and back to single Marines', () => {
+    const plans = exercise.deploymentPlans();
+    let session = selectSoldier(createSession(), exercise, soldierId('M02'));
+    session = selectFireTeam(session, exercise, 'FT1');
+    expect(session).toMatchObject({ selectedFireTeamId: 'FT1', selectedSoldierId: null });
+    session = selectFireTeam(session, exercise, 'FT3');
+    expect(session.selectedFireTeamId).toBe('FT3');
+    session = selectSoldier(session, exercise, soldierId('M07'));
+    expect(session).toMatchObject({ selectedFireTeamId: null, selectedSoldierId: 'M07' });
+    session = selectFireTeam(session, exercise, 'FT2');
+    expect(clearSelection(session)).toMatchObject({
+      selectedFireTeamId: null,
+      selectedSoldierId: null,
+    });
+    // Not fire teams: the squad itself, or anything unknown.
+    expect(selectFireTeam(session, exercise, 'SQD')).toBe(session);
+    expect(selectFireTeam(session, exercise, 'nope')).toBe(session);
+    // Selection never changes a plan.
+    expect(exercise.deploymentPlans()).toEqual(plans);
   });
 
   it('ignores OPFOR and unknown soldiers', () => {

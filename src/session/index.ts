@@ -3,6 +3,7 @@
 export {
   clearSelection,
   createSession,
+  selectFireTeam,
   selectSoldier,
   setShowVisibility,
   setTimeScale,

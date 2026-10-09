@@ -1,5 +1,6 @@
 import {
   createExercise,
+  FIRE_TEAM_ECHELON,
   TRAINEE_SIDE,
   type AmbushScenario,
   type CommitResult,
@@ -11,6 +12,7 @@ import {
 import {
   clearSelection,
   createSession,
+  selectFireTeam,
   selectSoldier,
   setShowVisibility,
   setTimeScale,
@@ -134,6 +136,18 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       <dt>Right-click destination</dt><dd>Clear it</dd>
       <dt>Backspace / Del</dt><dd>Clear the destination</dd>
     </dl>
+    <h2>Controls: fire teams</h2>
+    <dl class="help">
+      <dt>Fire-team name</dt><dd>Select the whole team (in the roster)</dd>
+      <dt>Click map</dt><dd>Place the team in a line centred there, 10 m apart</dd>
+      <dt>Drag the diamond</dt><dd>Move the formation</dd>
+      <dt>Drag yellow handle</dt><dd>Turn the formation round its centre</dd>
+      <dt>Right-click diamond / Del</dt><dd>Delete the formation</dd>
+    </dl>
+    <p class="muted">A formation gives each Marine an ordinary destination and facing. Select a
+    single Marine to adjust that Marine alone: from then on, moving or turning the formation
+    leaves that Marine where you put them. A new click with the team selected places the whole
+    team again.</p>
     <p class="muted">One destination and one facing per Marine. Paths are planned automatically
     round buildings; their bends are not handles. Without a chosen facing a Marine faces the way
     it arrives (dashed arrow). Marines without a destination stay put and never hold up
@@ -377,6 +391,12 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         break;
       case 'Backspace':
       case 'Delete': {
+        const team = session.selectedFireTeamId;
+        if (session.tool === 'deploy' && team !== null && exercise.formation(team)) {
+          event.preventDefault();
+          exercise.clearFormation(team);
+          break;
+        }
         const destination = selected === null ? undefined : exercise.draft(selected)?.destination;
         if (session.tool === 'deploy' && selected !== null && destination) {
           event.preventDefault();
@@ -570,11 +590,15 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     const icon = sidc
       ? `<span class="unit-symbol" aria-hidden="true">${symbolSvg(sidc, 11)}</span>`
       : '';
+    const team = node.unit.echelon === FIRE_TEAM_ECHELON && node.members.length > 0;
+    const teamSelected = team && session.selectedFireTeamId === node.unit.id;
+    const inSelectedTeam = (id: SoldierId) =>
+      exercise.fireTeamOf(id)?.unitId === session.selectedFireTeamId;
     const rows = node.members
       .map((m) => {
         const id = soldierId(m.soldierId);
         const status = exercise.deploymentStatus(id) ?? 'atOrp';
-        const selected = session.selectedSoldierId === id;
+        const selected = session.selectedSoldierId === id || inSelectedTeam(id);
         const tip = `${m.role.name}${m.leads ? ` (leads ${node.unit.name})` : ''} · map label ${m.slot.label} · ${m.soldierId}`;
         const icon = soldierIconSvg({ role: m.icon, affiliation: 'friendly', facing: null }, 14);
         return `<button class="roster-row" data-soldier="${escapeHtml(m.soldierId)}" aria-pressed="${String(selected)}" title="${escapeHtml(tip)}">
@@ -587,8 +611,12 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       })
       .join('');
     const children = node.children.map((c) => rosterUnitHtml(c, depth + 1)).join('');
-    return `<div class="roster-unit" style="--depth:${String(depth)}">
-    <div class="roster-unit-name">${icon}${escapeHtml(node.unit.name)}</div>${rows}${children}</div>`;
+    // A fire team's name selects the whole team (docs/adr/0022).
+    const heading = team
+      ? `<button class="roster-unit-name team" data-fire-team="${escapeHtml(node.unit.id)}" aria-pressed="${String(teamSelected)}" title="Select the whole ${escapeHtml(node.unit.name)}: click the map to place it in a line">${icon}${escapeHtml(node.unit.name)}</button>`
+      : `<div class="roster-unit-name">${icon}${escapeHtml(node.unit.name)}</div>`;
+    return `<div class="roster-unit${teamSelected ? ' team-selected' : ''}" style="--depth:${String(depth)}">
+    ${heading}${rows}${children}</div>`;
   }
 
   function rosterHtml(): string {
@@ -606,6 +634,21 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
   }
 
   ui('roster').addEventListener('click', (event) => {
+    const heading =
+      event.target instanceof Element ? event.target.closest('[data-fire-team]') : null;
+    const unitId = heading instanceof HTMLElement ? heading.dataset['fireTeam'] : undefined;
+    if (unitId !== undefined) {
+      session = selectFireTeam(session, exercise, unitId);
+      const team = exercise.fireTeams.find((t) => t.unitId === unitId);
+      const points = team?.memberIds.flatMap((id) => exercise.observer(id)?.point ?? []) ?? [];
+      if (points.length > 0 && !points.some((p) => map.isInView(p))) {
+        map.centreOn({
+          x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+          y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+        });
+      }
+      return;
+    }
     const row = event.target instanceof Element ? event.target.closest('[data-soldier]') : null;
     const id = row instanceof HTMLElement ? row.dataset['soldier'] : undefined;
     if (id === undefined) return;
@@ -628,10 +671,48 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       );
   }
 
+  /** The selected fire team: its Marines and its formation. */
+  function teamHtml(unitId: string): string {
+    const team = exercise.fireTeams.find((t) => t.unitId === unitId);
+    if (!team) return '';
+    const editable = exercise.canEditPlans;
+    const formation = exercise.formation(unitId);
+    const linked = new Set(formation?.linked ?? []);
+    const rows = team.memberIds
+      .map((id, i) => {
+        const member = exercise.rosterMember(id);
+        const status = exercise.deploymentStatus(id) ?? 'atOrp';
+        const own = formation && !linked.has(id) ? ' · own orders' : '';
+        return `<li>${String(i + 1)}. ${escapeHtml(member?.slot.label ?? id)} (${escapeHtml(id)}) · ${STATUS_LABELS[status]}${own}</li>`;
+      })
+      .join('');
+    const detached = team.memberIds.filter((id) => formation && !linked.has(id));
+    const formationText = formation
+      ? `<p>Line, ${String(formation.spacingM)} m apart · centre E ${formation.centre.x.toFixed(0)} N ${formation.centre.y.toFixed(0)} · facing ${formatBearing(formation.azimuth)}</p>
+       <p class="muted">${
+         detached.length === 0
+           ? `Moving or turning the formation moves all ${String(linked.size)} Marines.`
+           : `Moving or turning the formation moves ${String(linked.size)} of ${String(team.memberIds.length)} Marines; ${detached.map((id) => escapeHtml(exercise.rosterMember(id)?.slot.label ?? id)).join(', ')} keep${detached.length === 1 ? 's' : ''} their own orders.`
+       }</p>`
+      : `<p class="muted">${editable && session.tool === 'deploy' ? 'Click the map to place the team in a line centred there, slot 1 on the left.' : 'No formation.'}</p>`;
+    const buttons = editable
+      ? `<p class="buttons"><button data-action="clear-formation" ${formation ? '' : 'disabled'}>Delete formation</button></p>`
+      : '<p class="muted">Plans can be changed while occupation is paused or once BLUEFOR is ready.</p>';
+    return `
+    <div class="soldier-title">${escapeHtml(team.name)}</div>
+    <div class="muted">${String(team.memberIds.length)} Marines, in formation slot order (left to right, facing the way the formation faces)</div>
+    <ol class="team-members">${rows}</ol>
+    <h2>Formation${editable ? ' (editable)' : ''}</h2>
+    ${formationText}
+    ${buttons}
+  `;
+  }
+
   function selectionHtml(): string {
+    if (session.selectedFireTeamId !== null) return teamHtml(session.selectedFireTeamId);
     const id = session.selectedSoldierId;
     if (id === null)
-      return '<p class="muted">Choose a Marine in the roster or click a blue symbol on the map.</p>';
+      return '<p class="muted">Choose a Marine or a fire team in the roster, or click a blue symbol on the map.</p>';
     const soldier = exercise.simulation.state.soldiers.find((s) => s.id === id);
     const plan = exercise.displayedPlan(id);
     const member = exercise.rosterMember(id);
@@ -683,6 +764,11 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
   ui('selection').addEventListener('click', (event) => {
     const id = session.selectedSoldierId;
     const action = event.target instanceof HTMLElement ? event.target.dataset['action'] : undefined;
+    const team = session.selectedFireTeamId;
+    if (team !== null && action === 'clear-formation' && exercise.formation(team)) {
+      exercise.clearFormation(team);
+      return;
+    }
     if (id === null || action === undefined) return;
     if (action === 'clear-destination') exercise.clearDestination(id);
     if (action === 'default-facing') exercise.clearFacing(id);
@@ -739,12 +825,14 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     }
     const id = session.selectedSoldierId;
     const view = map.visibility;
-    if (id === null || !view)
-      return '<p class="muted">Select a Marine to see their visible area.</p>';
-    const name = escapeHtml(soldierName(id));
-    const from = view.planned
-      ? `From ${name}'s <b>DESTINATION</b>.`
-      : `From ${name}'s <b>CURRENT POSITION</b> (no destination).`;
+    const team = exercise.fireTeams.find((t) => t.unitId === session.selectedFireTeamId);
+    if ((id === null && !team) || !view)
+      return '<p class="muted">Select a Marine or a fire team to see the visible area.</p>';
+    const from = team
+      ? `What any Marine of the <b>${escapeHtml(team.name)}</b> can see, each from ${view.planned ? 'their destination (or where they stand without one)' : 'where they stand'}.`
+      : view.planned
+        ? `From ${escapeHtml(soldierName(id ?? ''))}'s <b>DESTINATION</b>.`
+        : `From ${escapeHtml(soldierName(id ?? ''))}'s <b>CURRENT POSITION</b> (no destination).`;
     // The viewshed shown may still be the previous one while the new one is computed.
     const shown = view.viewshed;
     const current =

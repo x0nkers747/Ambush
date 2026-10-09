@@ -72,6 +72,14 @@ export function cellCentre(grid: ViewshedGrid, column: number, row: number): Vec
  * 0 not, the rows packed in order. Every cell is decided on its own, so a
  * viewshed can be computed in parts, in any order, and assembled into an
  * identical result.
+ *
+ * `alreadyVisible` (packed like the result) marks cells already known to be
+ * visible, e.g. to another Marine of a fire team (docs/adr/0022). They are
+ * reported visible without being decided, so the result is the union of
+ * `alreadyVisible` and this observer's visibility: every other cell is
+ * decided exactly as without it. (A skipped cell records no obstruction for
+ * its neighbours' proofs; proofs only ever show a cell hidden, so this can
+ * cost time but never change a result.)
  */
 export function computeViewshedRows(
   terrain: TerrainDataset,
@@ -81,6 +89,7 @@ export function computeViewshedRows(
   rowEnd: number,
   options: LosOptions = {},
   rowStep = 1,
+  alreadyVisible?: Uint8Array,
 ): Uint8Array {
   const eye = {
     x: observer.x,
@@ -118,13 +127,20 @@ export function computeViewshedRows(
   for (let r = rowStart; r < rowEnd; r += rowStep) {
     let left: Obstruction | undefined;
     for (let c = 0; c < grid.columns; c += 1) {
+      const here = current[c] ?? noObstruction();
+      const index = ((r - rowStart) / rowStep) * grid.columns + c;
+      if (alreadyVisible?.[index] === 1) {
+        here.kind = 0;
+        left = here;
+        out[index] = 1;
+        continue;
+      }
       // `cellCentre`, without the allocation.
       const x = grid.originX + (c + 0.5) * grid.cellSize;
       const y = grid.originY + (r + 0.5) * grid.cellSize;
       target.x = x;
       target.y = y;
       target.z = heightAt(terrain, x, y) + aim;
-      const here = current[c] ?? noObstruction();
       const under = below[c];
       let proof: Obstruction | undefined;
       if (x === eye.x && y === eye.y) {
@@ -146,11 +162,36 @@ export function computeViewshedRows(
         }
       }
       left = here;
-      out[((r - rowStart) / rowStep) * grid.columns + c] = proof ? 0 : 1;
+      out[index] = proof ? 0 : 1;
     }
     [below, current] = [current, below];
   }
   return out;
+}
+
+/**
+ * The union of several observers' visibility of the same rows (see
+ * `computeViewshedRows`): 1 where any of them sees, or where `known` (packed
+ * like the result) already is 1. Each observer after the first decides only
+ * the cells no earlier one sees, which saves most of the work when their
+ * visible areas overlap (docs/adr/0022). Exactly the union of each one's
+ * `computeViewshedRows`.
+ */
+export function computeUnionRows(
+  terrain: TerrainDataset,
+  observers: readonly Vec2[],
+  grid: ViewshedGrid,
+  rowStart: number,
+  rowEnd: number,
+  rowStep = 1,
+  known: Uint8Array | null = null,
+  options: LosOptions = {},
+): Uint8Array {
+  let out: Uint8Array | undefined = known ? known.slice() : undefined;
+  for (const observer of observers) {
+    out = computeViewshedRows(terrain, observer, grid, rowStart, rowEnd, options, rowStep, out);
+  }
+  return out ?? new Uint8Array(Math.ceil((rowEnd - rowStart) / rowStep) * grid.columns);
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   hasVisibilityOverlay,
 } from './render';
 import { buildScene, type MapScene, type VisibilityView } from './scene';
+import { createTeamVisibility } from './group-viewshed';
 import { createViewshedService } from './viewshed-service';
 
 /** Viewshed resolution in metres: full detail, and a quicker preview while dragging. */
@@ -156,8 +157,41 @@ export function createTacticalMap({
    * otherwise. Computed in the background: half-way, every other row is shown
    * as a preview; until then the latest finished viewshed.
    */
+  const teamVisibility = createTeamVisibility(viewsheds);
+  /** A selected fire team's visible area: the union of its Marines' viewsheds (`createTeamVisibility`). */
+  const updateTeamVisibility = (unitId: string): VisibilityView | null => {
+    const team = current.fireTeams.find((t) => t.unitId === unitId);
+    const observers = team?.memberIds.flatMap((id) => current.observer(id) ?? []) ?? [];
+    const first = observers[0];
+    if (!first) return null;
+    const cellSize = controller.draggingDestination ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
+    // Never another team's (or a single Marine's) result while this team's is computed.
+    const previous = visibility?.team === unitId ? visibility.viewshed : null;
+    const { viewshed, pending, failed, preview } = teamVisibility(
+      observers.map((o) => o.point),
+      cellSize,
+      previous,
+    );
+    return {
+      observer: first.point,
+      observers: observers.map((o) => o.point),
+      planned: observers.some((o) => o.planned),
+      viewshed,
+      pending,
+      failed,
+      preview,
+      team: unitId,
+    };
+  };
+
   const updateVisibility = () => {
     const session = getSession();
+    if (session.showVisibility && session.selectedFireTeamId !== null) {
+      const team = updateTeamVisibility(session.selectedFireTeamId);
+      if (!team && visibility !== null) viewsheds.cancel();
+      visibility = team;
+      return;
+    }
     const id = session.selectedSoldierId;
     const observer = session.showVisibility && id !== null ? current.observer(id) : undefined;
     if (!observer || id === null) {

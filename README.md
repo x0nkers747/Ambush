@@ -68,6 +68,11 @@ licences require. Service endpoints can be changed per browser: see
    out to his weapon's maximum engagement range (rifle 550 m, SAW 600 m; a planning aid, see
    [ADR 0018](docs/adr/0018-weapon-engagement-wedge.md); it does not limit where he can fire). Paths bend around buildings automatically; destinations cannot be placed in or
    against a building.
+   **Fire teams:** click a fire team's name in the roster to select all four Marines (their
+   wedges and, with V, everything any of them can see). Click the map to place the team in a
+   line 10 m apart centred there; drag the diamond to move it and the yellow handle to turn it
+   ([ADR 0022](docs/adr/0022-fire-team-formation-planning.md)). Select a single Marine to adjust
+   that Marine alone.
 2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
    destinations or facings, then Resume.
 3. **BLUEFOR ready.** When every Marine with a destination or facing has arrived and turned, the
@@ -170,3 +175,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 19. [Combat v1: probabilistic two-sided engagements](docs/adr/0019-probabilistic-engagements.md)
 20. [Viewsheds on 5 km battlefields](docs/adr/0020-viewshed-performance-5-km.md)
 21. [The trainee triggers the ambush](docs/adr/0021-manual-ambush-trigger.md)
+22. [Fire-team formation planning](docs/adr/0022-fire-team-formation-planning.md)

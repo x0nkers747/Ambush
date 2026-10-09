@@ -2,8 +2,11 @@ import type { Azimuth, SoldierId, Vec2 } from '#sim';
 import { facingToward } from './bearing';
 import { panBy, screenToWorld, zoomAt, type Camera } from './camera';
 import {
+  formationGeometry,
   isOnDestination,
   isOnFacingHandle,
+  isOnFormationCentre,
+  isOnFormationFacingHandle,
   killZoneInsertionIndexAt,
   killZoneVertexAt,
   nextSelectionAt,
@@ -27,6 +30,14 @@ import {
 //
 // Generated path turns are shown but are never handles: they are not intent.
 //
+// With a fire team selected (docs/adr/0022), the same gestures act on its
+// formation:
+//
+//   Left click the map                place the team in a line centred there
+//   Left drag the formation centre    move the formation
+//   Left drag its facing arrow tip    turn it round its centre
+//   Right click the formation centre  delete it
+//
 // With the kill-zone tool, clicks edit the kill zone instead of destinations:
 //
 //   Left click the map                add a corner after the last one
@@ -39,6 +50,11 @@ export interface MapActions {
   setDestination(point: Vec2): void;
   clearDestination(): void;
   setFacing(azimuth: Azimuth): void;
+  /** The selected fire team: a new line formation centred on `point`. */
+  placeFormation(point: Vec2): void;
+  moveFormation(point: Vec2): void;
+  setFormationFacing(azimuth: Azimuth): void;
+  clearFormation(): void;
   addKillZoneVertex(point: Vec2, index?: number): void;
   moveKillZoneVertex(index: number, point: Vec2): void;
   deleteKillZoneVertex(index: number): void;
@@ -65,6 +81,8 @@ type Mode =
   | { readonly kind: 'pan'; readonly last: Vec2 }
   | { readonly kind: 'destination' }
   | { readonly kind: 'facing' }
+  | { readonly kind: 'formationCentre' }
+  | { readonly kind: 'formationFacing' }
   | { readonly kind: 'killZoneVertex'; readonly index: number };
 
 export type MapCursor = 'default' | 'pointer' | 'crosshair' | 'grab' | 'grabbing' | 'move';
@@ -77,7 +95,7 @@ export interface MapController {
   wheel(screen: Vec2, deltaY: number): void;
   /** Cursor that suits what is under the pointer and the current drag. */
   readonly cursor: MapCursor;
-  /** Whether the destination is being dragged (e.g. to show a quicker preview meanwhile). */
+  /** Whether a destination or formation is being dragged (e.g. to show a quicker preview meanwhile). */
   readonly draggingDestination: boolean;
   /** Ends the current gesture without acting on it (e.g. a click another handler took). */
   cancel(): void;
@@ -94,9 +112,11 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       if (!s.killZoneEditable) return 'grab';
       return killZoneVertexAt(s, p) !== undefined ? 'move' : 'crosshair';
     }
+    const team = s.selectedTeam?.editable === true;
+    if (team && (isOnFormationFacingHandle(s, p) || isOnFormationCentre(s, p))) return 'move';
     if (s.editable && (isOnFacingHandle(s, p) || isOnDestination(s, p))) return 'move';
     if (selectableSoldiersAt(s, p).length > 0) return 'pointer';
-    return s.editable ? 'crosshair' : 'grab';
+    return s.editable || team ? 'crosshair' : 'grab';
   };
 
   const click = (s: MapScene, p: Vec2) => {
@@ -117,9 +137,10 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     }
     // A click on an OPFOR symbol selects nothing and sets no destination.
     if (soldierAt(s, p)) return;
-    if (!s.editable) return;
     const point = toWorld(s, p);
-    if (s.isOnMap(point)) actions.setDestination(point);
+    if (!s.isOnMap(point)) return;
+    if (s.selectedTeam?.editable) actions.placeFormation(point);
+    else if (s.editable) actions.setDestination(point);
   };
 
   return {
@@ -127,7 +148,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
       return cursor;
     },
     get draggingDestination() {
-      return mode.kind === 'destination';
+      return mode.kind === 'destination' || mode.kind === 'formationCentre';
     },
 
     cancel() {
@@ -143,6 +164,8 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
         if (s.tool === 'killZone') {
           const index = s.killZoneEditable ? killZoneVertexAt(s, p) : undefined;
           if (index !== undefined) actions.deleteKillZoneVertex(index);
+        } else if (s.selectedTeam?.editable) {
+          if (isOnFormationCentre(s, p)) actions.clearFormation();
         } else {
           if (s.editable && isOnDestination(s, p)) actions.clearDestination();
         }
@@ -151,7 +174,10 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
         mode =
           index === undefined ? { kind: 'press', start: p } : { kind: 'killZoneVertex', index };
       } else if (input.button === 0) {
-        if (s.editable && isOnFacingHandle(s, p)) mode = { kind: 'facing' };
+        const team = s.selectedTeam?.editable === true;
+        if (team && isOnFormationFacingHandle(s, p)) mode = { kind: 'formationFacing' };
+        else if (team && isOnFormationCentre(s, p)) mode = { kind: 'formationCentre' };
+        else if (s.editable && isOnFacingHandle(s, p)) mode = { kind: 'facing' };
         else if (s.editable && isOnDestination(s, p)) mode = { kind: 'destination' };
         else mode = { kind: 'press', start: p };
       }
@@ -190,6 +216,19 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
             : soldier.position;
           const azimuth = facingToward(anchor, toWorld(s, p));
           if (azimuth !== undefined) actions.setFacing(azimuth);
+          return;
+        }
+        case 'formationCentre': {
+          // Positions where the line would not fit are skipped.
+          const point = toWorld(s, p);
+          if (s.selectedTeam?.editable && s.isOnMap(point)) actions.moveFormation(point);
+          return;
+        }
+        case 'formationFacing': {
+          const formation = s.selectedTeam?.formation;
+          if (!s.selectedTeam?.editable || !formation || !formationGeometry(s)) return;
+          const azimuth = facingToward(formation.centre, toWorld(s, p));
+          if (azimuth !== undefined) actions.setFormationFacing(azimuth);
           return;
         }
         case 'killZoneVertex': {

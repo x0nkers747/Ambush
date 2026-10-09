@@ -1,16 +1,21 @@
 import {
-  computeViewshed,
+  computeUnionRows,
   viewshedGrid,
   type TerrainDataset,
   type Vec2,
   type Viewshed,
   type ViewshedGrid,
 } from '#sim';
+import { unionViewsheds } from './group-viewshed';
 import type { WorkerReply, WorkerRequest } from './viewshed.worker';
 
 // Computes viewsheds for the planning display without blocking the UI
 // (docs/adr/0020): rows are split into bands and handed to a small pool of
 // persistent Web Workers, which run the simulation's own visibility code.
+// A fire team's visible area, the union of its Marines' viewsheds, is
+// computed the same way as one job (docs/adr/0022): each band of rows is
+// computed for one Marine after another, each skipping cells an earlier one
+// already sees.
 // Results are cached by exact observer position and cell size. The latest
 // request wins: bands of superseded work are never handed out, and replies
 // for them are dropped. Results are identical however the work is split.
@@ -84,6 +89,17 @@ export interface ViewshedService {
   request(observer: Vec2, cellSize: number): ViewshedRequest;
   /** Whether that viewshed is cached (ready), without starting any work. */
   has(observer: Vec2, cellSize: number): boolean;
+  /**
+   * The union of the viewsheds from `observers` (a fire team's visible area:
+   * visible where any of them sees), exactly as `unionViewsheds` of each
+   * one's viewshed, on a grid of `cellSize` metres, if it is ready; otherwise
+   * as `request`. Single viewsheds already cached are used as they are; the
+   * rest are computed as one job, each band one observer after another, each
+   * skipping the cells an earlier one already sees (`computeViewshedRows`'s
+   * `alreadyVisible`), which is where most of the work would be. The result's
+   * observer is the first one. It is cached by the exact observers, in order.
+   */
+  requestUnion(observers: readonly Vec2[], cellSize: number): ViewshedRequest;
   /** Drops work in progress, e.g. when no viewshed is shown any more. Cached results stay. */
   cancel(): void;
   /** Number of cached viewsheds. */
@@ -100,10 +116,24 @@ interface Band {
   readonly pass: number;
 }
 
+/** What a job computes: one viewshed, or a union of several (`requestUnion`). */
+interface JobSpec {
+  readonly key: string;
+  /** The result's observer. */
+  readonly observer: Vec2;
+  /** The observers whose viewsheds are computed, in order (one for a single viewshed). */
+  readonly observers: readonly Vec2[];
+  /** Cells already known to be visible (from cached viewsheds), the whole grid; or none. */
+  readonly known: Uint8Array | null;
+  readonly grid: ViewshedGrid;
+}
+
 interface Job {
   readonly id: number;
   readonly key: string;
   readonly observer: Vec2;
+  readonly observers: readonly Vec2[];
+  readonly known: Uint8Array | null;
   readonly grid: ViewshedGrid;
   readonly visible: Uint8Array;
   /** Bands not yet handed out: every first-pass band before any second-pass band. */
@@ -120,6 +150,13 @@ interface Job {
 /** The cache key: the exact observer position and cell size, never rounded. */
 export function viewshedKey(observer: Vec2, cellSize: number): string {
   return `${String(cellSize)}:${String(observer.x)},${String(observer.y)}`;
+}
+
+/** The cache key of a union: every observer's key, in order. A single observer's is `viewshedKey`. */
+export function unionKey(observers: readonly Vec2[], cellSize: number): string {
+  return observers.length === 1 && observers[0]
+    ? viewshedKey(observers[0], cellSize)
+    : `union:${observers.map((o) => viewshedKey(o, cellSize)).join('|')}`;
 }
 
 export function createViewshedService(
@@ -161,9 +198,9 @@ export function createViewshedService(
   let failed = false;
 
   /** The latest request, waiting for a quick job to finish. */
-  let next: { key: string; observer: Vec2; grid: ViewshedGrid } | null = null;
+  let next: JobSpec | null = null;
 
-  const start = (key: string, observer: Vec2, grid: ViewshedGrid) => {
+  const start = ({ key, observer, observers, known, grid }: JobSpec) => {
     const queue: Band[] = [];
     for (let pass = 0; pass < PASSES; pass += 1) {
       for (let r = 0; r < grid.rows; r += BAND_ROWS) {
@@ -181,6 +218,8 @@ export function createViewshedService(
       id: nextJobId,
       key,
       observer: { x: observer.x, y: observer.y },
+      observers: observers.map((o) => ({ x: o.x, y: o.y })),
+      known,
       grid,
       visible: new Uint8Array(grid.rows * grid.columns),
       queue,
@@ -204,7 +243,8 @@ export function createViewshedService(
       worker.postMessage({
         type: 'rows',
         jobId: job.id,
-        observer: job.observer,
+        observers: job.observers,
+        ...(job.known ? { known: bandRows(job.known, job.grid, band) } : {}),
         grid: job.grid,
         rowStart: band.rowStart,
         rowEnd: band.rowEnd,
@@ -237,7 +277,7 @@ export function createViewshedService(
     job = null;
     const waiting = next;
     next = null;
-    if (waiting && !cache.has(waiting.key)) start(waiting.key, waiting.observer, waiting.grid);
+    if (waiting && !cache.has(waiting.key)) start(waiting);
   };
 
   const onReply = (worker: ViewshedWorker, reply: WorkerReply) => {
@@ -312,34 +352,65 @@ export function createViewshedService(
   }
   if (workerCount > 0 && workers.length === 0) failed = true;
 
+  /** The result of `spec` if cached; otherwise starts (or continues) computing it. */
+  const requestJob = (spec: JobSpec): ViewshedRequest => {
+    const { key, grid } = spec;
+    const cached = cache.get(key);
+    if (cached) {
+      remember(key, cached);
+      return { viewshed: cached, pending: false, failed: false, preview: false };
+    }
+    if (failed) return { viewshed: latest, pending: false, failed: true, preview: false };
+    if (workers.length === 0) {
+      // No workers (e.g. tests): compute synchronously.
+      const viewshed = {
+        grid,
+        observer: { x: spec.observer.x, y: spec.observer.y },
+        visible: computeUnionRows(terrain, spec.observers, grid, 0, grid.rows, 1, spec.known),
+      };
+      remember(key, viewshed);
+      return { viewshed, pending: false, failed: false, preview: false };
+    }
+    if (job?.key !== key) {
+      const running = job;
+      if (running && running.grid.rows * running.grid.columns <= FINISH_FIRST_MAX_CELLS) {
+        next = spec;
+      } else {
+        start(spec);
+      }
+    }
+    const half = job?.key === key ? job.preview : null;
+    return half
+      ? { viewshed: half, pending: true, failed: false, preview: true }
+      : { viewshed: latest, pending: true, failed: false, preview: false };
+  };
+
   return {
     request(observer, cellSize) {
       const key = viewshedKey(observer, cellSize);
-      const cached = cache.get(key);
-      if (cached) {
-        remember(key, cached);
-        return { viewshed: cached, pending: false, failed: false, preview: false };
-      }
-      if (failed) return { viewshed: latest, pending: false, failed: true, preview: false };
       const grid = viewshedGrid(terrain, cellSize);
-      if (workers.length === 0) {
-        // No workers (e.g. tests): compute synchronously.
-        const viewshed = computeViewshed(terrain, observer, grid);
+      return requestJob({ key, observer, observers: [observer], known: null, grid });
+    },
+    requestUnion(observers, cellSize) {
+      const first = observers[0];
+      if (!first) throw new RangeError('a union needs at least one observer');
+      const key = unionKey(observers, cellSize);
+      const cachedUnion = cache.get(key);
+      if (cachedUnion) {
+        remember(key, cachedUnion);
+        return { viewshed: cachedUnion, pending: false, failed: false, preview: false };
+      }
+      const grid = viewshedGrid(terrain, cellSize);
+      // Viewsheds already cached count as they are; only the rest are computed.
+      const ready = observers.flatMap((o) => cache.get(viewshedKey(o, cellSize)) ?? []);
+      const missing = observers.filter((o) => !cache.has(viewshedKey(o, cellSize)));
+      const known = ready.length > 0 ? unionViewsheds(ready).visible : null;
+      if (missing.length === 0 && known) {
+        const viewshed = { grid, observer: { x: first.x, y: first.y }, visible: known };
         remember(key, viewshed);
         return { viewshed, pending: false, failed: false, preview: false };
       }
-      if (job?.key !== key) {
-        const running = job;
-        if (running && running.grid.rows * running.grid.columns <= FINISH_FIRST_MAX_CELLS) {
-          next = { key, observer: { x: observer.x, y: observer.y }, grid };
-        } else {
-          start(key, observer, grid);
-        }
-      }
-      const half = job?.key === key ? job.preview : null;
-      return half
-        ? { viewshed: half, pending: true, failed: false, preview: true }
-        : { viewshed: latest, pending: true, failed: false, preview: false };
+      return requestJob({ key, observer: first, observers: missing, known, grid });
     },
     has(observer, cellSize) {
       return cache.has(viewshedKey(observer, cellSize));
@@ -372,6 +443,16 @@ function previewOf(job: Job): Viewshed {
     visible.copyWithin(r * columns, (r - 1) * columns, r * columns);
   }
   return { grid: job.grid, observer: job.observer, visible };
+}
+
+/** The rows of a whole-grid mask that a band covers, packed as the band's result is. */
+function bandRows(mask: Uint8Array, grid: ViewshedGrid, band: Band): Uint8Array {
+  const { columns } = grid;
+  const out = new Uint8Array(Math.ceil((band.rowEnd - band.rowStart) / band.rowStep) * columns);
+  for (let k = 0, r = band.rowStart; r < band.rowEnd; r += band.rowStep, k += 1) {
+    out.set(mask.subarray(r * columns, (r + 1) * columns), k * columns);
+  }
+  return out;
 }
 
 function defaultWorker(): ViewshedWorker {

@@ -1,4 +1,5 @@
 import {
+  computeUnionRows,
   computeViewshedRows,
   prepareViewsheds,
   viewshedGrid,
@@ -15,7 +16,10 @@ export type WorkerRequest =
   | {
       readonly type: 'rows';
       readonly jobId: number;
-      readonly observer: Vec2;
+      /** One observer for a single viewshed; several, in order, for a union (docs/adr/0022). */
+      readonly observers: readonly Vec2[];
+      /** Cells of these rows already known to be visible (packed like the result), if any. */
+      readonly known?: Uint8Array;
       readonly grid: ViewshedGrid;
       readonly rowStart: number;
       readonly rowEnd: number;
@@ -72,14 +76,14 @@ scope.onmessage = (event) => {
   }
   if (!terrain) return;
   const started = performance.now();
-  const data = computeViewshedRows(
+  const data = computeUnionRows(
     terrain,
-    message.observer,
+    message.observers,
     message.grid,
     message.rowStart,
     message.rowEnd,
-    {},
     message.rowStep,
+    message.known ?? null,
   );
   scope.postMessage(
     {

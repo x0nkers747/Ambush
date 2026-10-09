@@ -1,12 +1,13 @@
 import { ExerciseError, type Exercise } from '#exercise';
 import { selectSoldier, type Session } from '#session';
 import type { SoldierId } from '#sim';
+import { formatBearing } from './bearing';
 import type { Camera } from './camera';
 import type { MapActions } from './interaction';
 
 /**
  * Connects map interactions to the exercise (plan edits for the selected
- * soldier, kill-zone edits) and the session (selection).
+ * soldier or fire team, kill-zone edits) and the session (selection).
  * Edits the exercise refuses (a destination inside a building, a kill zone that
  * would cross itself, …) change nothing and are reported through `notify`, so
  * a drag simply stops at the last acceptable position.
@@ -15,7 +16,10 @@ export function createMapActions(
   exercise: Exercise,
   session: { get: () => Session; set: (session: Session) => void },
   setCamera: (camera: Camera) => void,
-  /** Tells the trainee why an edit was refused (e.g. a destination inside a building). */
+  /**
+   * Tells the trainee why an edit was refused (e.g. a destination inside a
+   * building), that a formation was placed, or that a Marine left one.
+   */
   notify: (message: string) => void = () => undefined,
 ): MapActions {
   const ignoreRefused = (change: () => void) => {
@@ -26,11 +30,32 @@ export function createMapActions(
       notify(error.message);
     }
   };
+  const label = (id: SoldierId) => exercise.rosterMember(id)?.slot.label ?? id;
+  /** Whether the soldier still follows the fire team's formation. */
+  const linked = (id: SoldierId) => {
+    const team = exercise.fireTeamOf(id);
+    return team ? (exercise.formation(team.unitId)?.linked.includes(id) ?? false) : false;
+  };
   const edit = (change: (soldierId: SoldierId) => void) => {
     const id = session.get().selectedSoldierId;
     if (id === null) return;
+    const wasLinked = linked(id);
     ignoreRefused(() => {
       change(id);
+    });
+    if (wasLinked && !linked(id)) {
+      const team = exercise.fireTeamOf(id);
+      notify(
+        `${label(id)} now has separate orders: moving or turning the ${team?.name ?? 'fire team'}'s formation no longer changes them.`,
+      );
+    }
+  };
+  /** An edit of the selected fire team's formation. */
+  const editTeam = (change: (unitId: string) => void) => {
+    const unitId = session.get().selectedFireTeamId;
+    if (unitId === null) return;
+    ignoreRefused(() => {
+      change(unitId);
     });
   };
   return {
@@ -50,6 +75,30 @@ export function createMapActions(
     setFacing: (azimuth) => {
       edit((id) => {
         exercise.setFacing(id, azimuth);
+      });
+    },
+    placeFormation: (point) => {
+      editTeam((unitId) => {
+        const formation = exercise.placeFormation(unitId, point);
+        const team = exercise.fireTeams.find((t) => t.unitId === unitId);
+        notify(
+          `${team?.name ?? unitId} placed: ${String(formation.slots.length)} Marines ${String(formation.spacingM)} m apart, facing ${formatBearing(formation.azimuth)}.`,
+        );
+      });
+    },
+    moveFormation: (point) => {
+      editTeam((unitId) => {
+        exercise.moveFormation(unitId, point);
+      });
+    },
+    setFormationFacing: (azimuth) => {
+      editTeam((unitId) => {
+        exercise.setFormationFacing(unitId, azimuth);
+      });
+    },
+    clearFormation: () => {
+      editTeam((unitId) => {
+        exercise.clearFormation(unitId);
       });
     },
     addKillZoneVertex: (point, index) => {

@@ -24,6 +24,8 @@ import {
 import {
   deploymentGeometry,
   DESTINATION_RADIUS_PX,
+  formationGeometry,
+  isSelected,
   SHOT_DISPLAY_SECONDS,
   SOLDIER_ICON_PX,
   SYMBOL_BOX_PX,
@@ -538,13 +540,22 @@ export function drawOverlays(
   drawKillZone(ctx, scene);
   for (const { path } of scene.opforRoutes) drawOpforRoute(ctx, scene, path);
   for (const plan of scene.plans) {
-    if (plan.soldierId !== scene.selectedId) drawOtherPlan(ctx, scene, plan.soldierId);
+    if (!isSelected(scene, plan.soldierId)) drawOtherPlan(ctx, scene, plan.soldierId);
   }
-  drawSelectedPlan(ctx, scene);
+  if (scene.selectedTeam) {
+    for (const id of scene.selectedTeam.memberIds) drawSelectedPlan(ctx, scene, id);
+  } else {
+    drawSelectedPlan(ctx, scene);
+  }
   drawObserver(ctx, scene);
   drawShots(ctx, scene);
   drawSoldiers(ctx, scene);
-  drawFacingArrow(ctx, scene);
+  if (scene.selectedTeam) {
+    for (const id of scene.selectedTeam.memberIds) drawFacingArrow(ctx, scene, id);
+    drawFormation(ctx, scene);
+  } else {
+    drawFacingArrow(ctx, scene);
+  }
   drawTrigger(ctx, scene);
   drawNorthArrow(ctx, width);
   drawScaleBar(ctx, scene, height);
@@ -765,62 +776,77 @@ export function gridSpacing(metersPerPixel: number): number {
 const WEDGE_BAND_ALPHAS = [0.13, 0.08, 0.04] as const;
 
 /**
- * The selected Marine's weapon engagement wedge (`engagement.ts`): translucent
- * BLUEFOR blue in distance bands that lighten outwards, thin edges, and a thin
- * arc at the weapon's maximum engagement range. Drawn over the map and beneath
- * everything tactical, so symbols, routes and the facing arrow stay on top.
- * The bands suggest that effectiveness falls with distance; they are not hit
- * probabilities.
+ * The selected Marine's weapon engagement wedge (`engagement.ts`), or each
+ * Marine's wedge of a selected fire team: translucent BLUEFOR blue in distance
+ * bands that lighten outwards, thin edges, and a thin arc at the weapon's
+ * maximum engagement range. Drawn over the map and beneath everything
+ * tactical, so symbols, routes and the facing arrows stay on top. The bands
+ * suggest that effectiveness falls with distance; they are not hit
+ * probabilities. Each band of every wedge is filled as one path (non-zero
+ * winding, all wedges turning the same way), so where wedges overlap the band
+ * is filled once and does not darken; each wedge keeps its own edges and arc.
  */
 function drawEngagementWedge(
   ctx: CanvasRenderingContext2D,
   scene: MapScene,
   layer: TerrainLayer,
 ): void {
-  const wedge = scene.engagement;
-  if (!wedge) return;
-  const { apex, radius, start, end } = wedgeOnScreen(wedge, scene.camera, scene.viewport);
-  if (!(radius > 0)) return;
+  const wedges = scene.engagements
+    .map((wedge) => ({ wedge, ...wedgeOnScreen(wedge, scene.camera, scene.viewport) }))
+    .filter(({ radius }) => radius > 0);
+  if (wedges.length === 0) return;
   ctx.save();
   // Within the map's edges (as the visibility overlay); the terrain itself does not clip it.
   clipToTerrain(ctx, scene, layer);
   const bands = WEDGE_BAND_ALPHAS.length;
   WEDGE_BAND_ALPHAS.forEach((alpha, i) => {
-    const inner = (radius * i) / bands;
-    const outer = (radius * (i + 1)) / bands;
     ctx.beginPath();
-    ctx.arc(apex.x, apex.y, outer, start, end);
-    ctx.arc(apex.x, apex.y, inner, end, start, true);
-    ctx.closePath();
+    for (const { apex, radius, start, end } of wedges) {
+      const inner = (radius * i) / bands;
+      const outer = (radius * (i + 1)) / bands;
+      ctx.moveTo(apex.x + outer * Math.cos(start), apex.y + outer * Math.sin(start));
+      ctx.arc(apex.x, apex.y, outer, start, end);
+      ctx.arc(apex.x, apex.y, inner, end, start, true);
+      ctx.closePath();
+    }
     ctx.fillStyle = `rgba(47, 111, 196, ${String(alpha)})`;
-    ctx.fill();
+    ctx.fill('nonzero');
   });
-  // Edges, then the range arc.
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(29, 64, 120, 0.35)';
-  ctx.beginPath();
-  ctx.moveTo(apex.x + radius * Math.cos(start), apex.y + radius * Math.sin(start));
-  ctx.lineTo(apex.x, apex.y);
-  ctx.lineTo(apex.x + radius * Math.cos(end), apex.y + radius * Math.sin(end));
-  ctx.stroke();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = 'rgba(29, 64, 120, 0.6)';
-  ctx.beginPath();
-  ctx.arc(apex.x, apex.y, radius, start, end);
-  ctx.stroke();
-  // The weapon and its range, just beyond the arc on the facing line.
-  const mid = (start + end) / 2;
-  const lx = apex.x + (radius + 12) * Math.cos(mid);
-  const ly = apex.y + (radius + 12) * Math.sin(mid);
-  const text = `${wedge.weaponName} · ${String(wedge.rangeM)} m`;
+  const labels: { x: number; y: number; text: string }[] = [];
+  for (const { wedge, apex, radius, start, end } of wedges) {
+    // Edges, then the range arc.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(29, 64, 120, 0.35)';
+    ctx.beginPath();
+    ctx.moveTo(apex.x + radius * Math.cos(start), apex.y + radius * Math.sin(start));
+    ctx.lineTo(apex.x, apex.y);
+    ctx.lineTo(apex.x + radius * Math.cos(end), apex.y + radius * Math.sin(end));
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(29, 64, 120, 0.6)';
+    ctx.beginPath();
+    ctx.arc(apex.x, apex.y, radius, start, end);
+    ctx.stroke();
+    // The weapon and its range, just beyond the arc on the facing line; a
+    // label that would sit on the same one of another wedge is left out.
+    const mid = (start + end) / 2;
+    const x = apex.x + (radius + 12) * Math.cos(mid);
+    const y = apex.y + (radius + 12) * Math.sin(mid);
+    const text = `${wedge.weaponName} · ${String(wedge.rangeM)} m`;
+    if (!labels.some((l) => l.text === text && Math.hypot(l.x - x, l.y - y) < 60)) {
+      labels.push({ x, y, text });
+    }
+  }
   ctx.font = '10px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = COLORS.labelHalo;
-  ctx.strokeText(text, lx, ly);
-  ctx.fillStyle = COLORS.orpEdge;
-  ctx.fillText(text, lx, ly);
+  for (const { x, y, text } of labels) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = COLORS.orpEdge;
+    ctx.fillText(text, x, y);
+  }
   ctx.restore();
 }
 
@@ -880,16 +906,21 @@ function drawOtherPlan(ctx: CanvasRenderingContext2D, scene: MapScene, id: Soldi
   ctx.restore();
 }
 
-/** The selected soldier's path (as it will be walked) and destination marker. */
-function drawSelectedPlan(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const geometry = deploymentGeometry(scene);
+/** A selected soldier's path (as it will be walked) and destination marker (default: the selected soldier's). */
+function drawSelectedPlan(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  id: SoldierId | null = scene.selectedId,
+): void {
+  const geometry = deploymentGeometry(scene, id);
   if (!geometry?.destination) return;
   const { path, impossible, destination: d } = geometry;
   const colour = impossible ? COLORS.impossible : COLORS.route;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.setLineDash(impossible ? [4, 4] : scene.editable ? [] : [8, 5]);
+  const editable = scene.editable || scene.selectedTeam?.editable === true;
+  ctx.setLineDash(impossible ? [4, 4] : editable ? [] : [8, 5]);
   ctx.strokeStyle = COLORS.routeHalo;
   ctx.lineWidth = 5;
   polyline(ctx, path);
@@ -951,12 +982,12 @@ function drawLabel(
 function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const layout = symbolLayout(scene);
   const rank = (id: SoldierId, mode: string) =>
-    id === scene.selectedId ? 2 : mode === 'full' ? 1 : 0;
+    isSelected(scene, id) ? 2 : mode === 'full' ? 1 : 0;
   const entries = [...layout].sort(([a, p], [b, q]) => rank(a, p.mode) - rank(b, q.mode));
   for (const [id, { at, mode, affiliation, label, showLabel, hidden }] of entries) {
     const soldier = scene.soldiers.find((s) => s.id === id);
     if (!soldier) continue;
-    const selected = id === scene.selectedId;
+    const selected = isSelected(scene, id);
     const full = mode === 'full';
     ctx.save();
 
@@ -1001,7 +1032,7 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
       ctx.stroke();
     }
     if (showLabel) {
-      // Keep the selected Marine's label clear of an eastward facing arrow.
+      // Keep a selected Marine's label clear of an eastward facing arrow.
       const facing = selected ? scene.facings.get(id) : undefined;
       const east = facing !== undefined && Math.sin(facing.azimuth) > 0.6;
       const offset = full
@@ -1136,9 +1167,19 @@ function drawHiddenBadges(
   }
 }
 
-function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const geometry = deploymentGeometry(scene);
+/**
+ * A selected soldier's facing arrow (default: the selected soldier's), with its
+ * drag handle while editable. A fire team's Marines get no handle and no
+ * bearing: the formation's own arrow turns them all.
+ */
+function drawFacingArrow(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  id: SoldierId | null = scene.selectedId,
+): void {
+  const geometry = deploymentGeometry(scene, id);
   if (!geometry) return;
+  const member = scene.selectedTeam !== null;
   const { facingAnchor: a, facingShaftStart: from, facingTip: tip, facing } = geometry;
   const angle = Math.atan2(tip.y - a.y, tip.x - a.x);
   ctx.save();
@@ -1163,6 +1204,10 @@ function drawFacingArrow(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.fill();
   ctx.restore();
 
+  if (member) {
+    ctx.restore();
+    return;
+  }
   if (scene.editable) {
     ctx.beginPath();
     ctx.arc(tip.x, tip.y, 6, 0, 2 * Math.PI);
@@ -1270,17 +1315,99 @@ function drawOpforRoute(ctx: CanvasRenderingContext2D, scene: MapScene, path: Pl
 function drawObserver(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const visibility = scene.visibility;
   if (!visibility) return;
-  const p = worldToScreen(scene.camera, scene.viewport, visibility.observer);
   ctx.save();
+  for (const observer of visibility.observers ?? [visibility.observer]) {
+    const p = worldToScreen(scene.camera, scene.viewport, observer);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 10, 0, 2 * Math.PI);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.visibleEdge;
+    ctx.setLineDash(visibility.planned ? [] : [3, 3]);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * The selected fire team's formation: a thin line through its slots, the
+ * centre as a diamond (the drag handle), and the common facing arrow from the
+ * centre with its handle and bearing.
+ */
+function drawFormation(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const geometry = formationGeometry(scene);
+  if (!geometry) return;
+  const editable = scene.selectedTeam?.editable === true;
+  const { centre: c, slots, facingTip: tip, azimuth } = geometry;
+  const first = slots[0];
+  const last = slots[slots.length - 1];
+  ctx.save();
+  ctx.lineCap = 'round';
+  if (first && last) {
+    ctx.setLineDash([2, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = COLORS.route;
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // The facing arrow from the centre.
+  const angle = Math.atan2(tip.y - c.y, tip.x - c.x);
+  ctx.strokeStyle = COLORS.route;
+  ctx.fillStyle = COLORS.route;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.arc(p.x, p.y, 10, 0, 2 * Math.PI);
+  ctx.moveTo(c.x + Math.cos(angle) * 8, c.y + Math.sin(angle) * 8);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(tip.x, tip.y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.lineTo(-9, -6);
+  ctx.lineTo(-9, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  // The centre: a diamond.
+  const r = DESTINATION_RADIUS_PX + 1;
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y - r);
+  ctx.lineTo(c.x + r, c.y);
+  ctx.lineTo(c.x, c.y + r);
+  ctx.lineTo(c.x - r, c.y);
+  ctx.closePath();
+  ctx.fillStyle = editable ? COLORS.selection : '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLORS.route;
+  ctx.stroke();
+  if (editable) {
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = COLORS.selection;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = COLORS.route;
+    ctx.stroke();
+  }
+  const label = formatBearing(azimuth);
+  const lx = tip.x + Math.cos(angle) * 16;
+  const ly = tip.y + Math.sin(angle) * 16;
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.lineWidth = 3;
   ctx.strokeStyle = COLORS.labelHalo;
-  ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = COLORS.visibleEdge;
-  ctx.setLineDash(visibility.planned ? [] : [3, 3]);
-  ctx.stroke();
+  ctx.strokeText(label, lx, ly);
+  ctx.fillStyle = COLORS.label;
+  ctx.fillText(label, lx, ly);
   ctx.restore();
 }
 

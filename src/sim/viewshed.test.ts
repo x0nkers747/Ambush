@@ -10,6 +10,7 @@ import {
 } from './synthetic-terrain';
 import {
   cellCentre,
+  computeUnionRows,
   computeViewshed,
   computeViewshedRows,
   viewshedGrid,
@@ -174,6 +175,68 @@ describe('computeViewshed', () => {
     expect(computeViewshed(t, { x: 60, y: -80 }, grid)).not.toEqual(
       computeViewshed(t, OBSERVER, grid),
     );
+  });
+});
+
+// A fire team's visible area (docs/adr/0022).
+describe('computeUnionRows', () => {
+  const t = terrain((x, y) => 100 + 4 * Math.sin(x / 17) + 3 * Math.cos(y / 13), {
+    buildings: [
+      { id: 'b1', footprint: rectangle(-20, 10, 16, 10), heightMeters: 7 },
+      { id: 'b2', footprint: rectangle(30, -20, 10, 24, 0.4), heightMeters: 5 },
+    ],
+    vegetation: [
+      {
+        id: 'v',
+        kind: 'woodland',
+        boundary: rectangle(40, 50, 40, 30),
+        canopyHeightMeters: 12,
+        seeThroughMeters: 20,
+      },
+    ],
+  });
+  const team = [
+    { x: -15, y: -60 },
+    { x: -5, y: -60 },
+    { x: 5, y: -60 },
+    { x: 60, y: -10 },
+  ];
+
+  it.each([
+    [4, 0, 50, 1],
+    [4, 1, 50, 2],
+    [2, 10, 77, 3],
+  ])(
+    "is exactly the union of each observer's rows (%i m grid, rows %i–%i every %i)",
+    (cell, from, to, step) => {
+      const grid = viewshedGrid(t, cell);
+      const each = team.map((o) => computeViewshedRows(t, o, grid, from, to, {}, step));
+      const expected = each.reduce((u, rows) => u.map((v, i) => v | (rows[i] ?? 0)));
+      expect(computeUnionRows(t, team, grid, from, to, step)).toEqual(expected);
+      // Starting from cells known to be visible (here: the first two observers').
+      const known = computeUnionRows(t, team.slice(0, 2), grid, from, to, step);
+      expect(computeUnionRows(t, team.slice(2), grid, from, to, step, known)).toEqual(expected);
+      // The known mask is not changed.
+      expect(known).toEqual(computeUnionRows(t, team.slice(0, 2), grid, from, to, step));
+    },
+  );
+
+  it('decides every cell not already visible exactly as without the mask', () => {
+    const grid = viewshedGrid(t, 4);
+    const alone = computeViewshedRows(t, team[3] ?? OBSERVER, grid, 0, grid.rows);
+    // An arbitrary mask: every third cell already visible.
+    const mask = alone.map((_, i) => (i % 3 === 0 ? 1 : 0));
+    const masked = computeViewshedRows(t, team[3] ?? OBSERVER, grid, 0, grid.rows, {}, 1, mask);
+    masked.forEach((v, i) => {
+      expect(v).toBe(i % 3 === 0 ? 1 : alone[i]);
+    });
+  });
+
+  it('with no observers is the known mask, or nothing visible', () => {
+    const grid = viewshedGrid(t, 4);
+    expect(computeUnionRows(t, [], grid, 0, 3)).toEqual(new Uint8Array(3 * grid.columns));
+    const known = new Uint8Array(3 * grid.columns).fill(1);
+    expect(computeUnionRows(t, [], grid, 0, 3, 1, known)).toEqual(known);
   });
 });
 
