@@ -21,6 +21,7 @@ import {
   GROUND_PHASES,
   drawOverlays,
   drawVisibility,
+  hasVisibilityOverlay,
 } from './render';
 import { buildScene, type MapScene, type VisibilityView } from './scene';
 import { createViewshedService } from './viewshed-service';
@@ -133,7 +134,7 @@ export function createTacticalMap({
       between: (c, s) => {
         drawVisibility(asCanvas(c), s, layer);
       },
-      hasBetween: (s) => s.visibility?.viewshed != null,
+      hasBetween: hasVisibilityOverlay,
     },
     (width, height) => {
       const offscreen = document.createElement('canvas');

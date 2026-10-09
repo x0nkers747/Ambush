@@ -22,6 +22,7 @@ import {
   type Viewshed,
 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
+import { engagementWedge, type EngagementWedge } from './engagement';
 import { FACING_REACH, type Affiliation } from './soldier-icons';
 
 // What the map shows and where, in screen pixels, plus hit-testing on it.
@@ -64,6 +65,8 @@ export interface MapScene {
   readonly opforRoutes: readonly { readonly route: OpforRoute; readonly path: PlannedRoute }[];
   /** The selected soldier's visible area, while the visibility overlay is on. */
   readonly visibility: VisibilityView | null;
+  /** The selected Marine's weapon engagement wedge, or `null` (nothing selected, or no weapon range). */
+  readonly engagement: EngagementWedge | null;
   /** The ambush trigger, once it has happened. */
   readonly trigger: AmbushTrigger | null;
   /** Whether a map point lies on the terrain. */
@@ -134,6 +137,7 @@ export function buildScene(
       return route.shownToTrainee && path ? [{ route, path }] : [];
     }),
     visibility: session.showVisibility ? visibility : null,
+    engagement: engagementWedge(exercise, state.soldiers, session.selectedSoldierId),
     trigger: exercise.trigger,
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
   };

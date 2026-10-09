@@ -135,3 +135,9 @@ export {
   type FixedStepRunnerOptions,
   type Steppable,
 } from './runner';
+export {
+  engagementWeapon,
+  WEAPON_DISPLAY_RANGES,
+  type DisplayRangeBasis,
+  type WeaponDisplayRange,
+} from './weapon-display';

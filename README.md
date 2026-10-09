@@ -62,7 +62,9 @@ licences require. Service endpoints can be changed per browser: see
    zone and draw it across the expected enemy route (the dark-red dashed line).
    Press **V** (Visibility) to shade green everything the selected Marine can see from their
    destination, with the share of the kill zone that is visible; drag the destination to compare
-   positions. Paths bend around buildings automatically; destinations cannot be placed in or
+   positions. The selected Marine also shows a faint blue 35° wedge around the way he faces now,
+   out to his weapon's nominal effective range (rifle 550 m, SAW 600 m; a planning aid, see
+   [ADR 0018](docs/adr/0018-weapon-engagement-wedge.md)). Paths bend around buildings automatically; destinations cannot be placed in or
    against a building.
 2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
    destinations or facings, then Resume.
@@ -148,3 +150,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 15. [Three-stage workflow and scenario editing](docs/adr/0015-three-stage-workflow-and-scenario-editing.md)
 16. [Navigation performance on 5 km battlefields](docs/adr/0016-navigation-performance-5-km.md)
 17. [Tactical map rendering on 5 km battlefields](docs/adr/0017-map-rendering-performance-5-km.md)
+18. [The selected Marine's weapon engagement wedge](docs/adr/0018-weapon-engagement-wedge.md)

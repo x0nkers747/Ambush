@@ -12,6 +12,7 @@ import {
   type WaterwayKind,
 } from '#sim';
 import { formatBearing } from './bearing';
+import { wedgeOnScreen } from './engagement';
 import {
   screenToWorld,
   terrainBounds,
@@ -417,6 +418,15 @@ export const GROUND_PHASES: readonly MapPhase[] = Array.from(
   },
 );
 
+/**
+ * Whether the scene has a visibility overlay to draw between the ground and
+ * the features (the only thing that changes how the map is cached; the
+ * weapon wedge and everything else tactical is drawn over it).
+ */
+export function hasVisibilityOverlay(scene: MapScene): boolean {
+  return scene.visibility?.viewshed != null;
+}
+
 /** The visibility overlay: on the shaded terrain, beneath contours and features. */
 export function drawVisibility(
   ctx: CanvasRenderingContext2D,
@@ -518,6 +528,7 @@ export function drawOverlays(
 ): void {
   const { width, height } = scene.viewport;
   drawGrid(ctx, scene, layer.bounds);
+  drawEngagementWedge(ctx, scene, layer);
   drawOrp(ctx, scene);
   drawKillZone(ctx, scene);
   for (const { path } of scene.opforRoutes) drawOpforRoute(ctx, scene, path);
@@ -742,6 +753,69 @@ export function gridSpacing(metersPerPixel: number): number {
   const target = 70 * metersPerPixel;
   for (const step of [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]) if (step >= target) return step;
   return 10000;
+}
+
+/** Opacity of the wedge's distance bands, nearest first: lighter with distance. */
+const WEDGE_BAND_ALPHAS = [0.13, 0.08, 0.04] as const;
+
+/**
+ * The selected Marine's weapon engagement wedge (`engagement.ts`): translucent
+ * BLUEFOR blue in distance bands that lighten outwards, thin edges, and a thin
+ * arc at the weapon's nominal effective range. Drawn over the map and beneath
+ * everything tactical, so symbols, routes and the facing arrow stay on top.
+ * The bands suggest that effectiveness falls with distance; they are not hit
+ * probabilities.
+ */
+function drawEngagementWedge(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+): void {
+  const wedge = scene.engagement;
+  if (!wedge) return;
+  const { apex, radius, start, end } = wedgeOnScreen(wedge, scene.camera, scene.viewport);
+  if (!(radius > 0)) return;
+  ctx.save();
+  // Within the map's edges (as the visibility overlay); the terrain itself does not clip it.
+  clipToTerrain(ctx, scene, layer);
+  const bands = WEDGE_BAND_ALPHAS.length;
+  WEDGE_BAND_ALPHAS.forEach((alpha, i) => {
+    const inner = (radius * i) / bands;
+    const outer = (radius * (i + 1)) / bands;
+    ctx.beginPath();
+    ctx.arc(apex.x, apex.y, outer, start, end);
+    ctx.arc(apex.x, apex.y, inner, end, start, true);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(47, 111, 196, ${String(alpha)})`;
+    ctx.fill();
+  });
+  // Edges, then the effective-range arc.
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(29, 64, 120, 0.35)';
+  ctx.beginPath();
+  ctx.moveTo(apex.x + radius * Math.cos(start), apex.y + radius * Math.sin(start));
+  ctx.lineTo(apex.x, apex.y);
+  ctx.lineTo(apex.x + radius * Math.cos(end), apex.y + radius * Math.sin(end));
+  ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(29, 64, 120, 0.6)';
+  ctx.beginPath();
+  ctx.arc(apex.x, apex.y, radius, start, end);
+  ctx.stroke();
+  // The weapon and its range, just beyond the arc on the facing line.
+  const mid = (start + end) / 2;
+  const lx = apex.x + (radius + 12) * Math.cos(mid);
+  const ly = apex.y + (radius + 12) * Math.sin(mid);
+  const text = `${wedge.weaponName} · ${String(wedge.rangeM)} m`;
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.labelHalo;
+  ctx.strokeText(text, lx, ly);
+  ctx.fillStyle = COLORS.orpEdge;
+  ctx.fillText(text, lx, ly);
+  ctx.restore();
 }
 
 /** A planned route as walked: start, then each leg's generated turns and its waypoint. */
