@@ -217,7 +217,7 @@ describe('DEMO_SCENARIO', () => {
     exercise.execute();
     exercise.advance(1 / 30);
     expect(exercise.startOpfor().ok).toBe(true);
-    for (let i = 0; i < 30 * 300 && exercise.phase !== 'ambushTriggered'; i += 1)
+    for (let i = 0; i < 30 * 300 && exercise.phase === 'opforApproach'; i += 1)
       exercise.advance(1 / 30);
     expect(exercise.trigger?.soldierId).toBe('EN-1');
     // EN-1 enters through the north edge, y = 30.

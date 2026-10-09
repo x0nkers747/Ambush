@@ -117,14 +117,14 @@ describe('catch-up budget', () => {
     expect(maxTicksPerAdvance(0.1, 0, 30)).toBe(1);
   });
 
-  it.each([1, 8, 16])('keeps up exactly at %i× with ordinary 60 fps frames', (scale) => {
+  it.each([1, 4, 8, 16])('keeps up exactly at %i× with ordinary 60 fps frames', (scale) => {
     const { target, runner } = setup(30, { timeScale: scale });
     for (const dt of frames(10)) runner.advance(dt);
     expect(target.ticks).toBe(30 * scale * 10);
     expect(runner.droppedSeconds).toBe(0);
   });
 
-  it.each([1, 8, 16])(
+  it.each([1, 4, 8, 16])(
     'keeps up exactly at %i× when every third refresh is missed (33 ms frames)',
     (scale) => {
       const { target, runner } = setup(30, { timeScale: scale });
@@ -136,7 +136,7 @@ describe('catch-up budget', () => {
     },
   );
 
-  it.each([1, 8, 16])('does not drop time for a frame of exactly the budget at %i×', (scale) => {
+  it.each([1, 4, 8, 16])('does not drop time for a frame of exactly the budget at %i×', (scale) => {
     const { target, runner } = setup(30, { timeScale: scale });
     expect(runner.advance(DEFAULT_MAX_CATCH_UP_SECONDS)).toBe(3 * scale);
     expect(target.ticks).toBe(3 * scale);

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { createExercise, DEMO_SCENARIO } from '#exercise';
 import { createSession, selectSoldier } from '#session';
 import { soldierId } from '#sim';
-import { buildScene, deploymentGeometry, SOLDIER_ICON_PX, symbolLayout } from './scene';
+import {
+  buildScene,
+  deploymentGeometry,
+  SHOT_DISPLAY_SECONDS,
+  SOLDIER_ICON_PX,
+  symbolLayout,
+} from './scene';
 import { FACING_REACH } from './soldier-icons';
 
 // The scene for the demo squad: symbols, labels and the selected Marine's plan.
@@ -162,5 +168,48 @@ describe('the facing arrow of the selected Marine', () => {
     const selected = selectSoldier(session, exercise, id);
     const g = deploymentGeometry(buildScene(exercise, selected, CLOSE, viewport));
     expect(g?.facingShaftStart).toEqual(g?.destination);
+  });
+});
+
+describe('combat on the map (docs/adr/0019)', () => {
+  it('shows nothing before the ambush, then recent shots and each soldier’s part', () => {
+    const exercise = createExercise({
+      config: { tickRateHz: 30, seed: 3 },
+      scenario: DEMO_SCENARIO,
+    });
+    const camera = { centerX: 0, centerY: 0, metersPerPixel: 1 };
+    const viewport = { width: 800, height: 600 };
+    expect(buildScene(exercise, createSession(), camera, viewport).combat).toBeNull();
+    for (const v of [
+      { x: -40, y: -20 },
+      { x: 40, y: -20 },
+      { x: 40, y: 30 },
+      { x: -40, y: 30 },
+    ])
+      exercise.addKillZoneVertex(v);
+    exercise.execute();
+    exercise.advance(1 / 30);
+    exercise.startOpfor();
+    let sawShots = false;
+    for (let i = 0; i < 30 * 400 && exercise.phase !== 'engagementComplete'; i += 1) {
+      exercise.advance(1 / 30);
+      const combat = buildScene(exercise, createSession(), camera, viewport).combat;
+      if (exercise.phase === 'engagement' && combat) {
+        for (const shot of combat.shots) {
+          expect(shot.ageSeconds).toBeGreaterThanOrEqual(0);
+          expect(shot.ageSeconds).toBeLessThan(SHOT_DISPLAY_SECONDS);
+        }
+        if (combat.shots.length > 0) sawShots = true;
+      }
+    }
+    expect(sawShots).toBe(true);
+    const combat = buildScene(exercise, createSession(), camera, viewport).combat;
+    expect(combat?.ended).toBe(true);
+    for (const s of exercise.simulation.state.soldiers) {
+      const behavior = combat?.behaviors.get(s.id);
+      if (s.status === 'incapacitated') expect(behavior).toBe('incapacitated');
+    }
+    // Incapacitated soldiers stay in the scene.
+    expect(buildScene(exercise, createSession(), camera, viewport).soldiers).toHaveLength(16);
   });
 });

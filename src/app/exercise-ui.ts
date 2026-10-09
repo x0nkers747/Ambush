@@ -4,6 +4,7 @@ import {
   type AmbushScenario,
   type CommitResult,
   type DeploymentStatus,
+  type EngagementResult,
   type ExerciseEvent,
   type RosterUnit,
 } from '#exercise';
@@ -21,8 +22,10 @@ import {
 } from '#session';
 import {
   DEFAULT_TICK_RATE_HZ,
+  MAX_SEED,
   polygonArea,
   soldierId,
+  type EngagementEndReason,
   type SimEvent,
   type SoldierId,
   type Vec2,
@@ -49,9 +52,19 @@ export interface ExerciseUiOptions {
   readonly onEditScenario?: () => void;
 }
 
+/**
+ * The simulation seed: `?seed=N` in the page address (an integer in
+ * [0, 2^32 − 1]) to reproduce or vary an engagement, otherwise 1.
+ */
+function seedFromAddress(): number {
+  const text = new URLSearchParams(window.location.search).get('seed');
+  const seed = text === null ? NaN : Number(text);
+  return Number.isInteger(seed) && seed >= 0 && seed <= MAX_SEED ? seed : 1;
+}
+
 export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): void {
   const exercise = createExercise({
-    config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 1 },
+    config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: seedFromAddress() },
     scenario: options.scenario,
   });
   let session: Session = createSession();
@@ -92,6 +105,7 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     <div data-ui="battlefield-info" hidden></div>
     <h2>Ambush status</h2>
     <dl class="status" data-ui="status"></dl>
+    <div data-ui="engagement" class="engagement" hidden></div>
     <div data-ui="start-check" class="start-check"></div>
     <h2>Roster</h2>
     <div data-ui="roster" class="roster"></div>
@@ -140,8 +154,8 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
       <dt>Wheel</dt><dd>Zoom at the cursor</dd>
       <dt>F</dt><dd>Fit the map</dd>
       <dt>Space</dt><dd>Pause / Resume</dd>
-      <dt>1 · 8</dt><dd>Time scale 1× · 8×</dd>
-      <dt>+ / −</dt><dd>Faster / slower (1× · 8× · 16×)</dd>
+      <dt>1 · 4 · 8</dt><dd>Time scale 1× · 4× · 8×</dd>
+      <dt>+ / −</dt><dd>Faster / slower (1× · 4× · 8× · 16×)</dd>
       <dt>Esc</dt><dd>Clear selection</dd>
     </dl>
     <p class="muted">Positions and the kill zone can be edited during planning, while occupation is
@@ -290,7 +304,9 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
   function isRunning(): boolean {
     return (
       !exercise.paused &&
-      (exercise.phase === 'bluforOccupation' || exercise.phase === 'opforApproach')
+      (exercise.phase === 'bluforOccupation' ||
+        exercise.phase === 'opforApproach' ||
+        exercise.phase === 'engagement')
     );
   }
 
@@ -324,6 +340,9 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         break;
       case '1':
         session = setTimeScale(session, 1);
+        break;
+      case '4':
+        session = setTimeScale(session, 4);
         break;
       case '8':
         session = setTimeScale(session, 8);
@@ -367,12 +386,84 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} in position`;
       case 'commandRejected':
         return `${clock(event.tick / exercise.simulation.config.tickRateHz)}  Command rejected (${event.reason})`;
+      case 'opforReacted':
+        return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} ${
+          event.reaction === 'flee'
+            ? event.fleeBlocked
+              ? 'tried to flee, found no way out, went prone'
+              : 'flees'
+            : 'drops prone and returns fire'
+        }`;
+      case 'soldierIncapacitated':
+        return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} INCAPACITATED by ${soldierName(event.byId)}`;
+      case 'soldierEscaped':
+        return `${clock(event.atSeconds)}  ${soldierName(event.soldierId)} escaped`;
       case 'ordersChanged':
       case 'engagementAreaChanged':
       case 'engagementAreaEntered':
+      case 'engagementStarted':
+      case 'engagementEnded':
         // Covered by the exercise's own milestones.
         return undefined;
+      case 'shotFired':
+        // Too many for the log; counted in the engagement panel and drawn on the map.
+        return undefined;
     }
+  }
+
+  const END_REASONS: Record<EngagementEndReason, string> = {
+    allOpforIncapacitated: 'all OPFOR incapacitated',
+    opforEscaped: 'every remaining OPFOR soldier escaped',
+    allBluforIncapacitated: 'all BLUEFOR incapacitated',
+    noCombatCapable: 'nobody left able to fire',
+    timeLimit: 'time limit reached',
+  };
+
+  function engagementHtml(result: EngagementResult): string {
+    const { BLUEFOR: blue, OPFOR: red } = result.sides;
+    const running = result.endSeconds === null;
+    const elapsed = (result.endSeconds ?? exercise.simulation.timeSeconds) - result.startSeconds;
+    const row = (label: string, b: string | number, r: string | number) =>
+      `<tr><th>${label}</th><td>${String(b)}</td><td>${String(r)}</td></tr>`;
+    const outcome = (s: EngagementResult['soldiers'][number]) =>
+      s.outcome === 'incapacitated'
+        ? 'incapacitated'
+        : s.outcome === 'escaped'
+          ? 'escaped'
+          : s.reaction === 'flee' && !s.fleeBlocked
+            ? 'fleeing'
+            : 'active';
+    const soldiers = result.soldiers
+      .filter((s) => s.stats.shotsFired > 0 || s.stats.timesHit > 0 || s.side === 'OPFOR')
+      .map(
+        (s) =>
+          `<tr data-side="${s.side}"><th>${escapeHtml(soldierName(s.soldierId))}</th><td>${String(
+            s.stats.shotsFired,
+          )}</td><td>${String(s.stats.hits)}</td><td>${String(s.stats.incapacitations)}</td><td>${outcome(s)}${
+            s.reaction
+              ? ` <span class="muted">(${s.fleeBlocked ? 'flee blocked' : s.reaction})</span>`
+              : ''
+          }</td></tr>`,
+      )
+      .join('');
+    return `<h2>Engagement${running ? ' (in progress)' : ''}</h2>
+    <p>${running ? `T+ ${elapsed.toFixed(1)} s of at most ${String(exercise.combatConfig.engagement.maxDurationSeconds)} s` : `<b>Ended:</b> ${END_REASONS[result.endReason ?? 'timeLimit']} after ${elapsed.toFixed(1)} s`}</p>
+    <table class="engagement-table">
+      <tr><th></th><td>BLUEFOR</td><td>OPFOR</td></tr>
+      ${row('Strength', blue.startingStrength, red.startingStrength)}
+      ${row('Incapacitated', blue.incapacitated, red.incapacitated)}
+      ${row('Escaped', '–', red.escaped)}
+      ${row('Still in the fight', blue.survivingNotEscaped, red.survivingNotEscaped)}
+      ${row('Shots fired', blue.shotsFired, red.shotsFired)}
+      ${row('Hits', blue.hits, red.hits)}
+      ${row('Enemies incapacitated', blue.incapacitations, red.incapacitations)}
+    </table>
+    <table class="engagement-table soldiers">
+      <tr><th>Soldier</th><td>Shots</td><td>Hits</td><td>Inc.</td><td>Status</td></tr>${soldiers}
+    </table>
+    <p class="muted">Seed ${String(result.seed)} · ${escapeHtml(result.combatConfig.id)} ${escapeHtml(
+      result.combatConfig.version,
+    )} · ${String(result.tickRateHz)} Hz</p>`;
   }
 
   function describeMilestone(event: ExerciseEvent): string {
@@ -393,6 +484,8 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         return `${at}  START OPFOR: OPFOR approach begins`;
       case 'ambushTriggered':
         return `${clock(event.trigger.atSeconds)}  AMBUSH TRIGGERED by ${event.trigger.soldierId}`;
+      case 'engagementEnded':
+        return `${at}  ENGAGEMENT ENDED: ${END_REASONS[event.result.endReason ?? 'timeLimit']}`;
     }
   }
 
@@ -410,8 +503,10 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         return 'BLUEFOR ready';
       case 'opforApproach':
         return exercise.paused ? 'OPFOR approach paused' : 'OPFOR approach';
-      case 'ambushTriggered':
-        return 'Ambush triggered';
+      case 'engagement':
+        return exercise.paused ? 'Engagement paused' : 'Engagement';
+      case 'engagementComplete':
+        return 'Engagement complete';
     }
   }
 
@@ -579,11 +674,16 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
         : exercise.phase === 'bluforReady'
           ? `<span class="ok">${parts.join(' · ')}</span>`
           : parts.join(' · ');
-    const opforText = exercise.trigger
-      ? `<span class="alert">${escapeHtml(exercise.trigger.soldierId)} entered the kill zone</span>`
-      : exercise.opforStart
-        ? `<span class="warn">Approaching along the scenario route</span>`
-        : 'Waiting (not started)';
+    const result = exercise.engagementResult;
+    const opforText = result
+      ? `<span class="alert">${String(result.sides.OPFOR.incapacitated)} incapacitated · ${String(
+          result.sides.OPFOR.escaped,
+        )} escaped · ${String(result.sides.OPFOR.survivingNotEscaped)} still in the fight</span>`
+      : exercise.trigger
+        ? `<span class="alert">${escapeHtml(exercise.trigger.soldierId)} entered the kill zone</span>`
+        : exercise.opforStart
+          ? `<span class="warn">Approaching along the scenario route</span>`
+          : 'Waiting (not started)';
     return `
     <dt>BLUEFOR</dt><dd>${bluforText}</dd>
     <dt>OPFOR</dt><dd>${opforText}</dd>
@@ -669,11 +769,20 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
 
   function bannerHtml(): string | null {
     const trigger = exercise.trigger;
+    const result = exercise.engagementResult;
+    if (exercise.phase === 'engagementComplete' && result) {
+      const { BLUEFOR: blue, OPFOR: red } = result.sides;
+      return `<div class="banner-title">ENGAGEMENT COMPLETE</div>
+      <div>${END_REASONS[result.endReason ?? 'timeLimit']} after ${(result.durationSeconds ?? 0).toFixed(1)} s ·
+      OPFOR: ${String(red.incapacitated)} of ${String(red.startingStrength)} incapacitated, ${String(red.escaped)} escaped ·
+      BLUEFOR: ${String(blue.incapacitated)} of ${String(blue.startingStrength)} incapacitated</div>
+      <div class="muted">Results in the side panel. Seed ${String(result.seed)}.</div>`;
+    }
     if (trigger) {
       return `<div class="banner-title">AMBUSH TRIGGERED</div>
       <div>T+ ${clock(trigger.atSeconds)} · ${escapeHtml(trigger.soldierId)} entered the kill zone at
       E ${trigger.point.x.toFixed(0)} N ${trigger.point.y.toFixed(0)}</div>
-      <div class="muted">Simulation stopped. Combat begins here in a later phase.</div>`;
+      <div class="muted">Engagement in progress.</div>`;
     }
     if (exercise.phase === 'bluforReady') {
       return `<div class="banner-title ready">BLUEFOR IN POSITION</div>
@@ -712,6 +821,9 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     }
 
     setHtml('status', statusHtml());
+    const result = exercise.engagementResult;
+    ui('engagement').hidden = result === null;
+    setHtml('engagement', result ? engagementHtml(result) : '');
     setHtml('start-check', startCheckHtml());
     setHtml('kill-zone', killZoneHtml());
     setHtml('visibility-panel', visibilityHtml());
@@ -728,7 +840,12 @@ export function startExerciseUi(app: HTMLElement, options: ExerciseUiOptions): v
     );
     const banner = bannerHtml();
     ui('banner').hidden = banner === null;
-    ui('banner').dataset['kind'] = exercise.trigger ? 'triggered' : 'ready';
+    ui('banner').dataset['kind'] =
+      exercise.phase === 'engagementComplete'
+        ? 'complete'
+        : exercise.trigger
+          ? 'triggered'
+          : 'ready';
     setHtml('banner', banner ?? '');
 
     const p = map.pointer;

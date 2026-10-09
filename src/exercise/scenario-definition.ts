@@ -31,7 +31,8 @@ export const SCENARIO_SCHEMA_VERSION = 1;
 
 /**
  * The OPFOR forces a scenario can use. `patrol-3` is the demo's patrol: three
- * soldiers (EN-1 leading, EN-2, EN-3) in a file 12 m apart, one fire team.
+ * soldiers (EN-1 leading, EN-2, EN-3) in a file 12 m apart, one fire team,
+ * each carrying the same loadout (docs/adr/0019).
  */
 export const OPFOR_FORCES = {
   'patrol-3': {
@@ -39,6 +40,7 @@ export const OPFOR_FORCES = {
     unitId: 'EN-TM',
     echelon: 'fireTeam',
     spacingM: 12,
+    loadout: { weaponProfileRefs: ['ak-assault-rifle'] },
   },
 } as const;
 export type OpforForce = keyof typeof OPFOR_FORCES;
@@ -334,6 +336,7 @@ export function buildScenario(terrain: TerrainDataset, d: ScenarioDefinition): A
     opforRoutes,
     orp,
     organization: squad.organization,
+    opforLoadouts: Object.fromEntries(soldiers.map((s) => [s.id, force.loadout])),
   };
 }
 

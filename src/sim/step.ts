@@ -1,3 +1,4 @@
+import { resolveCombat } from './combat';
 import { applyCommands, type SimCommand } from './commands';
 import { monitorEngagementAreas } from './engagement-areas';
 import type { SimEvent } from './events';
@@ -27,13 +28,15 @@ export function stepState(
   };
 
   // 1. External input: commands take effect at the start of their tick.
-  applyCommands(state, world, commands, events);
+  applyCommands(state, world, commands, time.startSeconds, events);
 
   // 2. Systems, as free functions in fixed order. They work in seconds, never
   //    in ticks, so behavior does not depend on the tick rate (docs/adr/0003).
-  //    Perception and combat follow in later phases.
+  //    Combat resolves the tick's firing opportunities against the positions
+  //    soldiers reached by its end (docs/adr/0019).
   const path = moveSoldiers(state, world, time, events);
   monitorEngagementAreas(state, path, time, events);
+  resolveCombat(state, world, time, events);
 
   // 3. Advance the clock.
   state.tick += 1;

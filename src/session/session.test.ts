@@ -44,19 +44,19 @@ describe('session', () => {
     expect(exercise.simulation.tick).toBe(tick);
   });
 
-  it('offers 1×, 8× and 16×, stepping between them and stopping at the ends', () => {
-    expect(TIME_SCALES).toEqual([1, 8, 16]);
+  it('offers 1×, 4×, 8× and 16×, stepping between them and stopping at the ends', () => {
+    expect(TIME_SCALES).toEqual([1, 4, 8, 16]);
     let session = createSession();
     const seen: number[] = [session.timeScale];
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 4; i += 1) {
       session = stepTimeScale(session, 1);
       seen.push(session.timeScale);
     }
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 4; i += 1) {
       session = stepTimeScale(session, -1);
       seen.push(session.timeScale);
     }
-    expect(seen).toEqual([1, 8, 16, 16, 8, 1, 1]);
+    expect(seen).toEqual([1, 4, 8, 16, 16, 8, 4, 1, 1]);
   });
 
   it('turns the visibility overlay on and off', () => {

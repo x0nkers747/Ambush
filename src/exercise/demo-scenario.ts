@@ -10,6 +10,7 @@ import {
 import { deployInOrp, type AmbushScenario, type OpforRoute } from './ambush-scenario';
 import { DEFAULT_MOVEMENT, squadInstance, USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
 import type { ObjectiveRallyPoint } from './orp';
+import { OPFOR_FORCES } from './scenario-definition';
 
 // Development content for the interactive ambush slice (Phases 3–3.7), not a
 // doctrinal ambush scenario. A 13-Marine rifle squad (the MCWP 3-11.2
@@ -231,4 +232,7 @@ export const DEMO_SCENARIO: AmbushScenario = {
   opforRoutes: [patrolRoute('EN-1'), patrolRoute('EN-2'), patrolRoute('EN-3')],
   orp: DEMO_ORP,
   organization: squad.organization,
+  opforLoadouts: Object.fromEntries(
+    ['EN-1', 'EN-2', 'EN-3'].map((id) => [id, OPFOR_FORCES['patrol-3'].loadout]),
+  ),
 };

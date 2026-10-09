@@ -14,6 +14,7 @@ import {
 import type { MapTool, Session } from '#session';
 import {
   isOnTerrain,
+  type CombatBehavior,
   type DeepReadonly,
   type Side,
   type Soldier,
@@ -69,8 +70,32 @@ export interface MapScene {
   readonly engagement: EngagementWedge | null;
   /** The ambush trigger, once it has happened. */
   readonly trigger: AmbushTrigger | null;
+  /** What combat shows, from the start of the engagement (docs/adr/0019); `null` before. */
+  readonly combat: CombatView | null;
   /** Whether a map point lies on the terrain. */
   isOnMap(point: Vec2): boolean;
+}
+
+/** How long a shot stays drawn, in simulation seconds. */
+export const SHOT_DISPLAY_SECONDS = 0.6;
+
+/** A recent shot, drawn as a line from shooter to target. */
+export interface ShotView {
+  readonly from: Vec2;
+  readonly to: Vec2;
+  readonly side: Side;
+  readonly hit: boolean;
+  /** Simulation seconds since the shot, in [0, SHOT_DISPLAY_SECONDS). */
+  readonly ageSeconds: number;
+}
+
+/** Combat as the map shows it. */
+export interface CombatView {
+  /** Shots of the last `SHOT_DISPLAY_SECONDS`, oldest first. */
+  readonly shots: readonly ShotView[];
+  /** Each soldier's part in the engagement. */
+  readonly behaviors: ReadonlyMap<SoldierId, CombatBehavior>;
+  readonly ended: boolean;
 }
 
 /** The visibility overlay for the selected soldier. */
@@ -139,7 +164,40 @@ export function buildScene(
     visibility: session.showVisibility ? visibility : null,
     engagement: engagementWedge(exercise, state.soldiers, session.selectedSoldierId),
     trigger: exercise.trigger,
+    combat: combatView(exercise),
     isOnMap: ({ x, y }) => isOnTerrain(world.terrain, x, y),
+  };
+}
+
+function combatView(exercise: Exercise): CombatView | null {
+  const { state, timeSeconds } = exercise.simulation;
+  const engagement = state.engagement;
+  if (!engagement) return null;
+  const position = new Map(state.soldiers.map((s) => [s.id, s.position]));
+  const shots: ShotView[] = [];
+  const log = exercise.combatLog;
+  // The log is in time order: walk back from the newest shot.
+  for (let i = log.length - 1; i >= 0; i -= 1) {
+    const event = log[i];
+    if (event === undefined) continue;
+    const age = timeSeconds - event.atSeconds;
+    if (age >= SHOT_DISPLAY_SECONDS) break;
+    if (event.type !== 'shotFired') continue;
+    const from = position.get(event.shooterId);
+    const to = position.get(event.targetId);
+    if (!from || !to) continue;
+    shots.unshift({
+      from: { x: from.x, y: from.y },
+      to: { x: to.x, y: to.y },
+      side: event.shooterSide,
+      hit: event.hit,
+      ageSeconds: Math.max(0, age),
+    });
+  }
+  return {
+    shots,
+    behaviors: new Map(engagement.combatants.map((c) => [c.soldierId, c.behavior])),
+    ended: engagement.end !== null,
   };
 }
 

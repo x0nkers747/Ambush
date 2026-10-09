@@ -2,6 +2,7 @@ import { isOnTerrain, type Scenario, type TerrainDataset } from '#sim';
 import {
   instantiateOrganization,
   validateOrganizationTemplate,
+  type Loadout,
   type OrganizationInstance,
   type OrganizationTemplate,
   type TraineeOrganization,
@@ -47,6 +48,11 @@ export interface AmbushScenario extends Scenario {
    * of the template, and stands in the unit that slot belongs to.
    */
   readonly organization: TraineeOrganization;
+  /**
+   * What each OPFOR soldier carries, by soldier id (docs/adr/0019). An OPFOR
+   * soldier without an entry is unarmed: it reacts to the ambush but never fires.
+   */
+  readonly opforLoadouts?: Readonly<Record<string, Loadout>>;
 }
 
 /**

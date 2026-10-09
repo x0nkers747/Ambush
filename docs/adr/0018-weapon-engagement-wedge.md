@@ -1,6 +1,7 @@
 # ADR 0018: The selected Marine's weapon engagement wedge
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0019 (the ranges now come from the combat configuration, and the
+  wedge's relationship to firing is stated there)
 - Date: 2026-10-09
 - Builds on ADR 0012 (organization and loadouts), ADR 0013 (individual soldier icons) and ADR 0017
   (map rendering: cached geographic map, tactical overlays drawn per frame).

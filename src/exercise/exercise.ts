@@ -3,13 +3,17 @@ import {
   createSimulation,
   engagementAreaId,
   fingerprintPlainData,
+  fingerprintWorld,
+  summarizeEngagement,
   lineOfSight,
   pointProblem,
   visibleCellsIn,
   soldierId,
   waypointId,
   type Azimuth,
+  type CombatConfig,
   type EngagementAreaEnteredEvent,
+  type EngagementSummary,
   type EngagementAreaId,
   type LosResult,
   type Side,
@@ -55,14 +59,17 @@ import {
   type PlannedRoute,
 } from './routes';
 import { createFixedStepRunner, type FixedStepRunner } from './runner';
+import { DEFAULT_COMBAT_CONFIG } from './combat';
+import { primaryWeapon } from './weapon-display';
 
 // The ambush exercise (docs/adr/0009, docs/adr/0010): phases, the trainee's
 // draft plans and kill zone, committed plan revisions, the OPFOR start and the
-// ambush trigger, and the simulation they drive. No DOM, no rendering.
+// ambush trigger, the engagement that follows (docs/adr/0019), and the
+// simulation they drive. No DOM, no rendering.
 
 /**
- * The ambush sequence. The simulation runs only during `bluforOccupation` and
- * `opforApproach`, and only while not paused.
+ * The ambush sequence. The simulation runs only during `bluforOccupation`,
+ * `opforApproach` and `engagement`, and only while not paused.
  *
  * - `bluforPlanning`: the trainee plans destinations, facings and the kill zone.
  * - `bluforOccupation`: BLUEFOR moves into position; OPFOR waits. Can pause and re-plan.
@@ -70,10 +77,17 @@ import { createFixedStepRunner, type FixedStepRunner } from './runner';
  *   arrived and turned (soldiers without one never hold this up). Frozen until the
  *   trainee declares the ambush ready (START OPFOR) or re-plans and resumes.
  * - `opforApproach`: OPFOR follows its scenario routes; BLUEFOR holds.
- * - `ambushTriggered`: an OPFOR soldier entered the kill zone. Frozen; combat comes later.
+ * - `engagement`: an OPFOR soldier entered the kill zone and the ambush is
+ *   sprung; combat runs (docs/adr/0019) from the next tick.
+ * - `engagementComplete`: the engagement has ended. Frozen; see `engagementResult`.
  */
 export type ExercisePhase =
-  'bluforPlanning' | 'bluforOccupation' | 'bluforReady' | 'opforApproach' | 'ambushTriggered';
+  | 'bluforPlanning'
+  | 'bluforOccupation'
+  | 'bluforReady'
+  | 'opforApproach'
+  | 'engagement'
+  | 'engagementComplete';
 
 /** The side the trainee plans for. */
 export const TRAINEE_SIDE: Side = 'BLUEFOR';
@@ -110,7 +124,7 @@ export interface OpforStart {
 
 /** The moment the ambush was sprung. */
 export interface AmbushTrigger {
-  /** Tick during which the entry happened; the simulation stops at its end. */
+  /** Tick during which the entry happened; the engagement begins with the next tick. */
   readonly tick: number;
   /** Exact simulation time of the entry. */
   readonly atSeconds: number;
@@ -141,7 +155,53 @@ export type ExerciseEvent =
       readonly tick: number;
       readonly timeSeconds: number;
       readonly trigger: AmbushTrigger;
+    }
+  | {
+      readonly type: 'engagementEnded';
+      readonly tick: number;
+      readonly timeSeconds: number;
+      readonly result: EngagementResult;
     };
+
+/**
+ * The facts of an engagement (docs/adr/0019), and what is needed to
+ * reproduce it: the seed and tick rate, and the combat configuration's
+ * identity and content fingerprint. No score or assessment.
+ */
+export interface EngagementResult extends EngagementSummary {
+  readonly seed: number;
+  readonly tickRateHz: number;
+  readonly combatConfig: {
+    readonly id: string;
+    readonly version: string;
+    /** `fingerprintPlainData` of the whole configuration. */
+    readonly fingerprint: string;
+  };
+  readonly trigger: AmbushTrigger | null;
+}
+
+/** The simulation event types that make up the engagement's combat log. */
+export type CombatEvent = Extract<
+  SimEvent,
+  {
+    type:
+      | 'engagementStarted'
+      | 'opforReacted'
+      | 'shotFired'
+      | 'soldierIncapacitated'
+      | 'soldierEscaped'
+      | 'engagementEnded';
+  }
+>;
+
+const COMBAT_EVENT_TYPES: ReadonlySet<SimEvent['type']> = new Set([
+  'engagementStarted',
+  'opforReacted',
+  'shotFired',
+  'soldierIncapacitated',
+  'soldierEscaped',
+  'engagementEnded',
+]);
 
 export type CommitResult =
   | { readonly ok: true; readonly revision: PlanRevision | null }
@@ -191,6 +251,8 @@ export interface DisplayedFacing {
 export interface ExerciseOptions {
   readonly config: SimConfig;
   readonly scenario: AmbushScenario;
+  /** The combat model's parameters; `DEFAULT_COMBAT_CONFIG` when not given. */
+  readonly combat?: CombatConfig;
 }
 
 export interface Exercise {
@@ -218,6 +280,20 @@ export interface Exercise {
   readonly revisions: readonly PlanRevision[];
   readonly opforStart: OpforStart | null;
   readonly trigger: AmbushTrigger | null;
+  /** The combat configuration in force. */
+  readonly combatConfig: CombatConfig;
+  /**
+   * The weapon each soldier fires (the primary weapon of its resolved
+   * loadout), by soldier id; `null` for a soldier without one.
+   */
+  readonly combatWeapons: Readonly<Record<string, string | null>>;
+  /**
+   * The engagement's facts so far, from the moment it begins (with `endSeconds`
+   * `null` while it runs); `null` before the ambush.
+   */
+  readonly engagementResult: EngagementResult | null;
+  /** Every combat event of the engagement, in the order they happened. */
+  readonly combatLog: readonly CombatEvent[];
   readonly timeline: readonly ExerciseEvent[];
   /**
    * Simulation seconds skipped because a frame exceeded the runner's catch-up
@@ -317,18 +393,47 @@ export interface Exercise {
 
   /**
    * Advances simulation time by `realDtSeconds × timeScale` (whole ticks) while
-   * the simulation runs; does nothing otherwise. Phase changes (BLUEFOR in
-   * position, ambush triggered) stop it at the end of the tick in which they
-   * happen. Returns the simulation events produced.
+   * the simulation runs; does nothing otherwise. Phase changes that freeze it
+   * (BLUEFOR in position, engagement complete) stop it at the end of the tick
+   * in which they happen; the ambush trigger does not, as the engagement runs
+   * on. Returns the simulation events produced.
    */
   advance(realDtSeconds: number, timeScale?: number): SimEvent[];
 }
 
-export function createExercise({ config, scenario }: ExerciseOptions): Exercise {
+export function createExercise({
+  config,
+  scenario,
+  combat = DEFAULT_COMBAT_CONFIG,
+}: ExerciseOptions): Exercise {
   validateOpforRoutes(scenario, TRAINEE_SIDE);
   validateTraineeSetup(scenario, TRAINEE_SIDE);
-  const sim = createSimulation(config, scenario);
+  const roster = deepFreeze(rosterTree(scenario.organization));
+  const members = new Map(rosterMembers(roster).map((m) => [m.soldierId, m]));
+  // Every soldier fires the primary weapon of its resolved loadout: the same
+  // rule as the engagement wedge (`primaryWeapon`), so the two cannot differ.
+  const weaponOf = (loadout: Parameters<typeof primaryWeapon>[0] | undefined) => {
+    const weapon = loadout ? primaryWeapon(loadout, combat) : null;
+    return weapon?.kind === 'weapon' ? weapon.ref : null;
+  };
+  const combatWeapons: Record<string, string | null> = deepFreeze(
+    Object.fromEntries(
+      scenario.soldiers.map((s) => [
+        s.id,
+        weaponOf(members.get(s.id)?.loadout ?? scenario.opforLoadouts?.[s.id]),
+      ]),
+    ),
+  );
+  const sim = createSimulation(config, {
+    ...scenario,
+    combat: { config: combat, weapons: combatWeapons },
+  });
   const terrain = sim.world.terrain;
+  const combatConfigIdentity = deepFreeze({
+    id: combat.id,
+    version: combat.version,
+    fingerprint: fingerprintPlainData(combat),
+  });
   const pathFor = createPathCache(terrain);
 
   let phase: ExercisePhase = 'bluforPlanning';
@@ -359,14 +464,13 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     opforRoutePaths.set(route.id, planned);
   }
 
-  const roster = deepFreeze(rosterTree(scenario.organization));
-  const members = new Map(rosterMembers(roster).map((m) => [m.soldierId, m]));
   /** Trainee soldiers in roster order. */
   const trainee = rosterMembers(roster).map((m) => soldierId(m.soldierId));
   const traineeIds = new Set<SoldierId>(trainee);
   const scenarioFingerprint = fingerprintPlainData({
     scenarioId: scenario.id,
-    world: sim.worldFingerprint,
+    // Terrain and movement only: plans do not depend on the combat model.
+    world: fingerprintWorld({ terrain, movement: sim.world.movement }),
     organizationTemplate: {
       id: scenario.organization.template.id,
       version: scenario.organization.template.version,
@@ -389,8 +493,23 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
   );
   const drafts = new Map<SoldierId, SoldierDeploymentPlan>(committed);
 
+  const combatLog: CombatEvent[] = [];
   const now = () => ({ tick: sim.tick, timeSeconds: sim.timeSeconds });
-  const running = () => !paused && (phase === 'bluforOccupation' || phase === 'opforApproach');
+  const running = () =>
+    !paused &&
+    (phase === 'bluforOccupation' || phase === 'opforApproach' || phase === 'engagement');
+
+  const engagementResult = (): EngagementResult | null => {
+    const engagement = sim.state.engagement;
+    if (!engagement) return null;
+    return {
+      ...summarizeEngagement(engagement),
+      seed: config.seed,
+      tickRateHz: config.tickRateHz,
+      combatConfig: combatConfigIdentity,
+      trigger,
+    };
+  };
 
   const soldierState = (id: SoldierId) => {
     const soldier = sim.state.soldiers.find((s) => s.id === id);
@@ -450,8 +569,20 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
           killZoneId: zoneId,
           point: { ...entry.point },
         });
-        phase = 'ambushTriggered';
+        phase = 'engagement';
         timeline.push({ type: 'ambushTriggered', ...now(), trigger });
+        // The engagement begins at the start of the next tick.
+        sim.submit({ type: 'beginEngagement', tick: sim.tick });
+      }
+    } else if (phase === 'engagement') {
+      for (const event of events) {
+        if (COMBAT_EVENT_TYPES.has(event.type)) combatLog.push(event as CombatEvent);
+      }
+      if (events.some((e) => e.type === 'engagementEnded')) {
+        phase = 'engagementComplete';
+        const result = engagementResult();
+        if (result)
+          timeline.push({ type: 'engagementEnded', ...now(), result: deepFreeze(result) });
       }
     }
   };
@@ -627,7 +758,8 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
         break;
       }
       case 'opforApproach':
-      case 'ambushTriggered':
+      case 'engagement':
+      case 'engagementComplete':
         return ['OPFOR has already been started.'];
       case 'bluforReady':
         if (uncommittedChanges())
@@ -663,6 +795,12 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
     get trigger() {
       return trigger;
     },
+    combatConfig: combat,
+    combatWeapons,
+    get engagementResult() {
+      return engagementResult();
+    },
+    combatLog,
     timeline,
     get droppedSeconds() {
       return droppedBefore + runner.droppedSeconds;
@@ -815,7 +953,7 @@ export function createExercise({ config, scenario }: ExerciseOptions): Exercise 
       if (phase === 'bluforOccupation') resetDrafts();
     },
     resume() {
-      if (phase === 'opforApproach' && paused) {
+      if ((phase === 'opforApproach' || phase === 'engagement') && paused) {
         run();
         timeline.push({ type: 'resumed', ...now() });
         return { ok: true, revision: null };

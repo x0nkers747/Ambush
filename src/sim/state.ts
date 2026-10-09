@@ -20,11 +20,19 @@ export const engagementAreaId = (id: string): EngagementAreaId => id as Engageme
 
 export type Side = 'BLUEFOR' | 'OPFOR';
 
-/** Stored only; posture behavior arrives in later phases. */
+/**
+ * A soldier's posture. In combat it scales the hit probability of shots at
+ * the soldier (`CombatConfig.postureHitMultipliers`); OPFOR soldiers drop
+ * prone as a reaction (docs/adr/0019). It does not change movement or line of sight.
+ */
 export type Posture = 'standing' | 'kneeling' | 'prone';
 
-/** Every soldier starts `active`; nothing changes status until combat (later phases). */
-export type SoldierStatus = 'active' | 'wounded' | 'killed';
+/**
+ * Every soldier starts `active`. An `incapacitated` soldier (combat v1,
+ * docs/adr/0019) no longer moves, fires, reacts or escapes, and is not a
+ * target; it stays where it fell.
+ */
+export type SoldierStatus = 'active' | 'incapacitated';
 
 /**
  * An organizational echelon label (e.g. "squad", "fireTeam"), defined by the
@@ -71,6 +79,11 @@ export interface ActiveOrders {
   readonly legPaths: readonly (readonly Vec2[])[];
   /** Index into `legPaths[nextWaypointIndex]` of the next turn point. */
   nextTurnIndex: number;
+  /**
+   * Ground speed for these orders, in metres per second, when not the world's
+   * movement speed (a fleeing soldier's, docs/adr/0019). Absent otherwise.
+   */
+  readonly speed?: number;
 }
 
 /** An individual soldier: the unit of simulation. */
@@ -116,6 +129,82 @@ export interface EngagementArea {
   readonly monitoredSide: Side;
 }
 
+/** Why an engagement ended (docs/adr/0019), in the order the conditions are checked. */
+export type EngagementEndReason =
+  /** Every OPFOR soldier is incapacitated. */
+  | 'allOpforIncapacitated'
+  /** Every OPFOR soldier not incapacitated has escaped (at least one escaped). */
+  | 'opforEscaped'
+  /** Every BLUEFOR soldier is incapacitated. */
+  | 'allBluforIncapacitated'
+  /** No soldier on either side is still able to fire (see `isCombatCapable`). */
+  | 'noCombatCapable'
+  /** The configured maximum duration has passed. */
+  | 'timeLimit';
+
+/**
+ * What a combatant is doing in the engagement:
+ *
+ * - `engaging`: BLUEFOR, firing at valid targets as its cadence allows;
+ * - `awaitingReaction`: OPFOR before its reaction delay has passed; keeps
+ *   doing what it did (e.g. walking its route) and does not fire;
+ * - `prone`: OPFOR that dropped prone; stays in place and returns fire;
+ * - `fleeing`: OPFOR moving away from the threat; does not fire;
+ * - `escaped`: OPFOR that got away; out of the engagement, not a target;
+ * - `incapacitated`: out of the engagement, not a target.
+ */
+export type CombatBehavior =
+  'engaging' | 'awaitingReaction' | 'prone' | 'fleeing' | 'escaped' | 'incapacitated';
+
+/** An OPFOR soldier's initial reaction to the ambush, drawn when the engagement starts. */
+export type OpforReaction = 'prone' | 'flee';
+
+/** Per-soldier combat counts. */
+export interface CombatantStats {
+  shotsFired: number;
+  /** Shots by this soldier that hit. */
+  hits: number;
+  /** Enemies this soldier incapacitated. */
+  incapacitations: number;
+  /** Shots that hit this soldier. */
+  timesHit: number;
+}
+
+/** A soldier's part in the engagement. Every soldier of the scenario has one, in soldier order. */
+export interface Combatant {
+  readonly soldierId: SoldierId;
+  readonly side: Side;
+  /** The weapon fired (the soldier's primary weapon), or `null` when unarmed or unknown. */
+  readonly weaponProfileRef: string | null;
+  behavior: CombatBehavior;
+  /** OPFOR: the reaction drawn at the start; `null` for BLUEFOR. */
+  readonly reaction: OpforReaction | null;
+  /** OPFOR: when the reaction happens (simulation seconds); `null` for BLUEFOR. */
+  readonly reactAtSeconds: number | null;
+  /** Whether a flee found no route and the soldier dropped prone instead. */
+  fleeBlocked: boolean;
+  /** Time of the next firing opportunity, or `null` when the soldier does not fire. */
+  nextShotSeconds: number | null;
+  /** When the soldier escaped or was incapacitated. */
+  outAtSeconds: number | null;
+  stats: CombatantStats;
+}
+
+/** The engagement that follows the ambush (docs/adr/0019). Absent before it begins. */
+export interface EngagementState {
+  readonly startTick: number;
+  readonly startSeconds: number;
+  /** `startSeconds` + the configured maximum duration. */
+  readonly endsBySeconds: number;
+  combatants: Combatant[];
+  /** Set when the engagement ends; combat stops then. */
+  end: {
+    readonly tick: number;
+    readonly atSeconds: number;
+    readonly reason: EngagementEndReason;
+  } | null;
+}
+
 export interface SimState {
   /** Number of completed ticks. Simulation time is `tick / tickRateHz`. */
   tick: number;
@@ -123,6 +212,11 @@ export interface SimState {
   units: OrgUnit[];
   soldiers: Soldier[];
   engagementAreas: EngagementArea[];
+  /**
+   * The engagement, once begun (`beginEngagement`). The property is absent
+   * before then, so states without combat encode and hash as before it existed.
+   */
+  engagement?: EngagementState;
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

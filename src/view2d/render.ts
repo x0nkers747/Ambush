@@ -1,6 +1,7 @@
 import { polygonCentroid, type PlannedRoute } from '#exercise';
 import {
   boundsOf,
+  type CombatBehavior,
   type LandUseKind,
   type RoadClass,
   type SoldierId,
@@ -23,6 +24,7 @@ import {
 import {
   deploymentGeometry,
   DESTINATION_RADIUS_PX,
+  SHOT_DISPLAY_SECONDS,
   SOLDIER_ICON_PX,
   SYMBOL_BOX_PX,
   symbolLayout,
@@ -62,6 +64,9 @@ export const COLORS = {
   killZoneLabel: '#9c1c16',
   opforRoute: 'rgba(122, 22, 40, 0.8)',
   trigger: '#d6301f',
+  bluforShot: '#f5d90a',
+  opforShot: '#ff5a3c',
+  incapacitated: '#d6301f',
   woodlandFill: 'rgba(70, 125, 60, 0.42)',
   woodlandEdge: 'rgba(36, 82, 32, 0.85)',
   treeLineFill: 'rgba(52, 106, 46, 0.6)',
@@ -537,6 +542,7 @@ export function drawOverlays(
   }
   drawSelectedPlan(ctx, scene);
   drawObserver(ctx, scene);
+  drawShots(ctx, scene);
   drawSoldiers(ctx, scene);
   drawFacingArrow(ctx, scene);
   drawTrigger(ctx, scene);
@@ -761,7 +767,7 @@ const WEDGE_BAND_ALPHAS = [0.13, 0.08, 0.04] as const;
 /**
  * The selected Marine's weapon engagement wedge (`engagement.ts`): translucent
  * BLUEFOR blue in distance bands that lighten outwards, thin edges, and a thin
- * arc at the weapon's nominal effective range. Drawn over the map and beneath
+ * arc at the weapon's maximum engagement range. Drawn over the map and beneath
  * everything tactical, so symbols, routes and the facing arrow stay on top.
  * The bands suggest that effectiveness falls with distance; they are not hit
  * probabilities.
@@ -789,7 +795,7 @@ function drawEngagementWedge(
     ctx.fillStyle = `rgba(47, 111, 196, ${String(alpha)})`;
     ctx.fill();
   });
-  // Edges, then the effective-range arc.
+  // Edges, then the range arc.
   ctx.lineWidth = 1;
   ctx.strokeStyle = 'rgba(29, 64, 120, 0.35)';
   ctx.beginPath();
@@ -963,6 +969,9 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
       ctx.stroke();
     }
 
+    const behavior = scene.combat?.behaviors.get(id);
+    // An incapacitated soldier stays on the map, faded and crossed out.
+    if (behavior === 'incapacitated') ctx.globalAlpha = 0.45;
     if (full) {
       // Soldiers outside the trainee's organization (OPFOR) have no role: the plain circle.
       const role = scene.markings.get(id)?.icon ?? null;
@@ -1006,9 +1015,83 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
         drawLabel(ctx, label, at.x + offset, at.y, selected);
       }
     }
+    ctx.globalAlpha = 1;
+    if (behavior !== undefined) drawCombatMarker(ctx, behavior, at, full);
     if (hidden.length > 0) drawHiddenBadges(ctx, hidden, at);
     ctx.restore();
   }
+}
+
+/** Combat feedback on a soldier's symbol: an X when incapacitated, a tag when prone, fleeing or escaped. */
+function drawCombatMarker(
+  ctx: CanvasRenderingContext2D,
+  behavior: CombatBehavior,
+  at: Vec2,
+  full: boolean,
+): void {
+  const radius = full ? SOLDIER_ICON_PX / 2 : COMPACT_RADIUS_PX;
+  if (behavior === 'incapacitated') {
+    const r = radius + 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(at.x - r, at.y - r);
+    ctx.lineTo(at.x + r, at.y + r);
+    ctx.moveTo(at.x + r, at.y - r);
+    ctx.lineTo(at.x - r, at.y + r);
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.stroke();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = COLORS.incapacitated;
+    ctx.stroke();
+    return;
+  }
+  const tag =
+    behavior === 'prone'
+      ? 'PRONE'
+      : behavior === 'fleeing'
+        ? 'FLEEING'
+        : behavior === 'escaped'
+          ? 'ESCAPED'
+          : null;
+  if (tag === null) return;
+  ctx.font = 'bold 9px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = COLORS.labelHalo;
+  ctx.strokeText(tag, at.x, at.y + radius + 3);
+  ctx.fillStyle = COLORS.killZoneLabel;
+  ctx.fillText(tag, at.x, at.y + radius + 3);
+}
+
+/**
+ * Recent shots (docs/adr/0019): a line from shooter to target in the side's
+ * colour, fading over `SHOT_DISPLAY_SECONDS`; a hit ends in a small dot.
+ */
+function drawShots(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const shots = scene.combat?.shots;
+  if (!shots || shots.length === 0) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const shot of shots) {
+    const from = worldToScreen(scene.camera, scene.viewport, shot.from);
+    const to = worldToScreen(scene.camera, scene.viewport, shot.to);
+    ctx.globalAlpha = Math.max(0.15, 1 - shot.ageSeconds / SHOT_DISPLAY_SECONDS);
+    ctx.strokeStyle = shot.side === 'BLUEFOR' ? COLORS.bluforShot : COLORS.opforShot;
+    ctx.lineWidth = shot.hit ? 2 : 1.25;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    if (shot.hit) {
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, 3.5, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 /** Badge colours, darker than the icons so white "+n" text reads on them. */

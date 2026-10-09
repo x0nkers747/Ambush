@@ -131,7 +131,9 @@ describe('phases', () => {
     expect(exercise.simulation.tick).toBe(0);
   });
 
-  it('runs Planning → Occupation → Ready → Approach → Triggered', () => {
+  // Until combat v1 the exercise ended, frozen, in an `ambushTriggered` phase. The
+  // trigger now starts the engagement (docs/adr/0019), which runs to its own end.
+  it('runs Planning → Occupation → Ready → Approach → Engagement → Complete', () => {
     const exercise = setup();
     planA(exercise);
     drawKillZone(exercise);
@@ -144,13 +146,17 @@ describe('phases', () => {
     expect(exercise.startOpfor().ok).toBe(true);
     expect(exercise.phase).toBe('opforApproach');
     expect(exercise.canEditPlans).toBe(false);
-    run(exercise, 30);
-    expect(exercise.phase).toBe('ambushTriggered');
+    while (exercise.phase === 'opforApproach') run(exercise, 1 / TICK_RATE);
+    expect(exercise.phase).toBe('engagement');
+    expect(exercise.canEditPlans).toBe(false);
+    run(exercise, 70);
+    expect(exercise.phase).toBe('engagementComplete');
     expect(exercise.timeline.map((e) => e.type)).toEqual([
       'planCommitted',
       'bluforInPosition',
       'opforStarted',
       'ambushTriggered',
+      'engagementEnded',
     ]);
   });
 
@@ -800,7 +806,7 @@ describe('ambush trigger', () => {
     const start = exercise.startOpfor();
     if (!start.ok) throw new Error('start failed');
     run(exercise, 40);
-    expect(exercise.phase).toBe('ambushTriggered');
+    expect(exercise.phase).not.toBe('opforApproach');
     // E walks 50 m from y = 150 to the north edge at y = 100: 25 s.
     // The entry falls on a tick boundary, so it may be reported by the tick ending or
     // the tick starting there; its exact time is what matters.
@@ -816,12 +822,21 @@ describe('ambush trigger', () => {
     expect([start.start.tick + 249, start.start.tick + 250]).toContain(tick);
   });
 
-  it('stops the simulation at the end of the trigger tick', () => {
+  // Replaces "stops the simulation at the end of the trigger tick": the trigger
+  // now begins the engagement, and the simulation stops when that ends.
+  it('begins the engagement with the tick after the trigger, and stops when it ends', () => {
     const exercise = readyExercise();
     exercise.startOpfor();
-    run(exercise, 40);
+    while (exercise.phase === 'opforApproach') run(exercise, 1 / TICK_RATE);
+    const triggerTick = exercise.trigger?.tick ?? Number.NaN;
+    expect(exercise.simulation.tick).toBe(triggerTick + 1);
+    expect(exercise.simulation.state.engagement).toBeUndefined();
+    run(exercise, 1 / TICK_RATE);
+    expect(exercise.simulation.state.engagement?.startTick).toBe(triggerTick + 1);
+    run(exercise, 70);
+    expect(exercise.phase).toBe('engagementComplete');
     const tick = exercise.simulation.tick;
-    expect(tick).toBe((exercise.trigger?.tick ?? Number.NaN) + 1);
+    expect(tick).toBe((exercise.simulation.state.engagement?.end?.tick ?? Number.NaN) + 1);
     expect(run(exercise, 30)).toEqual([]);
     expect(exercise.simulation.tick).toBe(tick);
     expect(() => {

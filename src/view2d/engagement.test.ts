@@ -328,3 +328,25 @@ describe('the wedge and the rest of the map', () => {
     expect(cache.stats).toMatchObject({ renders: 1, reuses: 21 });
   });
 });
+
+describe('the wedge and combat (docs/adr/0019)', () => {
+  it('shows the weapon each Marine fires, out to its maximum engagement range', () => {
+    const { exercise } = setup();
+    for (const soldier of exercise.simulation.state.soldiers.filter((s) => s.side === 'BLUEFOR')) {
+      const wedge = buildScene(exercise, select(exercise, soldier.id), CAMERA, viewport).engagement;
+      const fired = exercise.combatWeapons[soldier.id] ?? null;
+      const profile = exercise.combatConfig.weapons.find((w) => w.weaponProfileRef === fired);
+      expect(wedge?.weaponRef, soldier.id).toBe(fired);
+      expect(wedge?.rangeM, soldier.id).toBe(profile?.maxEngagementRangeM);
+    }
+  });
+
+  it('is not shown for an incapacitated Marine', () => {
+    const { exercise } = setup();
+    const scene = buildScene(exercise, select(exercise, 'M01'), CAMERA, viewport);
+    const soldiers = scene.soldiers.map((s) =>
+      s.id === 'M01' ? { ...s, status: 'incapacitated' as const } : s,
+    );
+    expect(engagementWedge(exercise, soldiers, soldierId('M01'))).toBeNull();
+  });
+});

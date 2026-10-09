@@ -66,7 +66,8 @@ function moveSoldier(
   const active = soldier.orders;
   if (active === null || active.behavior === 'inPosition') return;
 
-  const { speed, maxTurnRate } = world.movement;
+  const { maxTurnRate } = world.movement;
+  const speed = active.speed ?? world.movement.speed;
   const { waypoints, finalFacing } = active.orders;
   /** Seconds of this tick used so far. */
   let elapsed = 0;

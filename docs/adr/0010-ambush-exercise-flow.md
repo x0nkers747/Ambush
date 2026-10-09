@@ -1,6 +1,7 @@
 # ADR 0010: Ambush exercise flow, kill zone and trigger
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0019 (the trigger now begins the engagement instead of
+  freezing the exercise in Ambush Triggered)
 - Date: 2026-10-07
 
 ## Context

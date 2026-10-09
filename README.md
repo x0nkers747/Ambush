@@ -12,8 +12,9 @@ trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical or
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
 with Ambush!'s own role icons (not APP-6, see
 [ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The ambush flow
-runs through AMBUSH TRIGGERED, on the demo or on any battlefield once its scenario (ORP, OPFOR and
-route) is set up in the scenario editor. No combat or 3D yet.
+runs through AMBUSH TRIGGERED into a probabilistic two-sided engagement of up to 60 simulated
+seconds ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)), on the demo or on any
+battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. No 3D yet.
 
 ## Requirements
 
@@ -63,16 +64,26 @@ licences require. Service endpoints can be changed per browser: see
    Press **V** (Visibility) to shade green everything the selected Marine can see from their
    destination, with the share of the kill zone that is visible; drag the destination to compare
    positions. The selected Marine also shows a faint blue 35° wedge around the way he faces now,
-   out to his weapon's nominal effective range (rifle 550 m, SAW 600 m; a planning aid, see
-   [ADR 0018](docs/adr/0018-weapon-engagement-wedge.md)). Paths bend around buildings automatically; destinations cannot be placed in or
+   out to his weapon's maximum engagement range (rifle 550 m, SAW 600 m; a planning aid, see
+   [ADR 0018](docs/adr/0018-weapon-engagement-wedge.md); it does not limit where he can fire). Paths bend around buildings automatically; destinations cannot be placed in or
    against a building.
 2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
    destinations or facings, then Resume.
 3. **BLUEFOR ready.** When every Marine with a destination or facing has arrived and turned, the
    exercise stops and waits.
 4. **START OPFOR.** Declares the ambush ready; OPFOR follows its scenario route.
-5. **Ambush triggered.** The moment an OPFOR soldier enters the kill zone, the simulation stops
-   and shows who entered and when.
+5. **Ambush triggered.** The moment an OPFOR soldier enters the kill zone the engagement begins
+   ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)). Every Marine with a weapon fires at
+   the nearest enemy he can see within his weapon's range; the chance of a hit falls with range and
+   halves against a prone target. Each OPFOR soldier, after a short delay, either drops prone and
+   returns fire or flees. Shots show as fading lines; incapacitated soldiers are crossed out.
+6. **Engagement complete.** After 60 simulated seconds, or earlier when every OPFOR soldier is
+   incapacitated or has escaped, every Marine is incapacitated or nobody can fire any more. The
+   side panel shows the results: casualties, escapes, shots and hits by side and by soldier, and
+   the seed. Add `?seed=N` to the page address (before the `#`) to replay an engagement exactly or
+   try another roll of the dice; all combat values are in
+   [`src/exercise/combat/combat-v1.json`](src/exercise/combat/combat-v1.json)
+   ([reference](docs/combat-configuration.md)).
 
 | Action                          | Effect                                              |
 | ------------------------------- | --------------------------------------------------- |
@@ -89,8 +100,8 @@ licences require. Service endpoints can be changed per browser: see
 | Mouse wheel                     | Zoom at the cursor                                  |
 | F                               | Fit the whole map                                   |
 | Space                           | Pause / Resume                                      |
-| 1 · 8                           | Time scale 1× · 8×                                  |
-| + / −                           | Faster / slower through 1× · 8× · 16×               |
+| 1 · 4 · 8                       | Time scale 1× · 4× · 8×                             |
+| + / −                           | Faster / slower through 1× · 4× · 8× · 16×          |
 | Esc                             | Clear the selection                                 |
 
 ## Scripts
@@ -151,3 +162,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 16. [Navigation performance on 5 km battlefields](docs/adr/0016-navigation-performance-5-km.md)
 17. [Tactical map rendering on 5 km battlefields](docs/adr/0017-map-rendering-performance-5-km.md)
 18. [The selected Marine's weapon engagement wedge](docs/adr/0018-weapon-engagement-wedge.md)
+19. [Combat v1: probabilistic two-sided engagements](docs/adr/0019-probabilistic-engagements.md)

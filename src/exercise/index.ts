@@ -13,6 +13,7 @@ export {
   scenarioForTerrain,
   ScenarioPlacementError,
 } from './battlefield-scenario';
+export { DEFAULT_COMBAT_CONFIG } from './combat';
 export { DEMO_SCENARIO } from './demo-scenario';
 export {
   addRouteWaypoint,
@@ -101,7 +102,9 @@ export {
   ExerciseError,
   TRAINEE_SIDE,
   type AmbushTrigger,
+  type CombatEvent,
   type CommitResult,
+  type EngagementResult,
   type DeploymentStatus,
   type DisplayedFacing,
   type Exercise,
@@ -138,7 +141,6 @@ export {
 export {
   primaryWeapon,
   WEAPON_DISPLAY_PROFILES,
-  type DisplayRangeBasis,
   type PrimaryWeapon,
   type WeaponClass,
   type WeaponDisplayProfile,

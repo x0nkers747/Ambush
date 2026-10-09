@@ -1,5 +1,34 @@
 // Public API of the simulation layer. Other layers import only from here (`#sim`).
-export type { SetEngagementAreaCommand, SetOrdersCommand, SimCommand } from './commands';
+export type {
+  BeginEngagementCommand,
+  SetEngagementAreaCommand,
+  SetOrdersCommand,
+  SimCommand,
+} from './commands';
+export {
+  FLEE_HEADING_OFFSETS_DEG,
+  isCombatCapable,
+  summarizeEngagement,
+  type EngagementSummary,
+  type SideCombatSummary,
+  type SoldierCombatSummary,
+} from './combat';
+export {
+  COMBAT_CONFIG_SCHEMA,
+  COMBAT_CONFIG_SCHEMA_VERSION,
+  CombatConfigError,
+  hitProbabilityAt,
+  TARGET_SELECTION_POLICIES,
+  validateCombatConfig,
+  weaponCombatProfile,
+  type CombatConfig,
+  type EngagementConfig,
+  type OpforBehaviorConfig,
+  type RangeProbability,
+  type TargetSelectionPolicy,
+  type UniformSeconds,
+  type WeaponCombatProfile,
+} from './combat-config';
 export {
   DEFAULT_TICK_RATE_HZ,
   MAX_TICK_RATE_HZ,
@@ -11,7 +40,13 @@ export type {
   CommandRejectedEvent,
   EngagementAreaChangedEvent,
   EngagementAreaEnteredEvent,
+  EngagementEndedEvent,
+  EngagementStartedEvent,
+  OpforReactedEvent,
   OrdersChangedEvent,
+  ShotFiredEvent,
+  SoldierEscapedEvent,
+  SoldierIncapacitatedEvent,
   SimEvent,
   SoldierInPositionEvent,
   WaypointReachedEvent,
@@ -93,10 +128,16 @@ export {
   soldierId,
   waypointId,
   type ActiveOrders,
+  type CombatBehavior,
+  type Combatant,
+  type CombatantStats,
   type DeepReadonly,
   type Echelon,
   type EngagementArea,
   type EngagementAreaId,
+  type EngagementEndReason,
+  type EngagementState,
+  type OpforReaction,
   type OrgUnit,
   type OrgUnitId,
   type Orders,
@@ -128,7 +169,7 @@ export {
   type TerrainDataset,
   type TerrainMetadata,
 } from './terrain';
-export type { MovementParams, SimWorld } from './world';
+export type { CombatSetup, MovementParams, SimWorld } from './world';
 export {
   cellCentre,
   computeViewshed,

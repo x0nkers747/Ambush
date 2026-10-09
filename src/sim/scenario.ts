@@ -1,3 +1,4 @@
+import { validateCombatConfig, weaponCombatProfile } from './combat-config';
 import { azimuthFromDegrees, type Vec2 } from './geometry';
 import { pointProblem } from './navigation';
 import { clonePlainData } from './plain-data';
@@ -14,7 +15,12 @@ import {
   type Soldier,
 } from './state';
 import { heightAt, isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
-import { validateMovementParams, type MovementParams, type SimWorld } from './world';
+import {
+  validateMovementParams,
+  type CombatSetup,
+  type MovementParams,
+  type SimWorld,
+} from './world';
 
 // Scenario: the human-authored, plain-data description of a simulation's
 // starting point. Ids are plain strings and angles are in degrees
@@ -44,6 +50,8 @@ export interface Scenario {
   readonly movement: MovementParams;
   readonly units: readonly ScenarioUnit[];
   readonly soldiers: readonly ScenarioSoldier[];
+  /** The combat model, for scenarios that can fight (docs/adr/0019). */
+  readonly combat?: CombatSetup;
 }
 
 /** Builds the tick-0 simulation state. Throws an Error describing the first invalid entry. */
@@ -109,6 +117,20 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     }
   }
 
+  if (scenario.combat) {
+    try {
+      validateCombatConfig(scenario.combat.config);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+    for (const [id, ref] of Object.entries(scenario.combat.weapons)) {
+      if (!soldiersById.has(id)) fail(`combat weapon assigned to unknown soldier "${id}"`);
+      if (ref !== null && !weaponCombatProfile(scenario.combat.config, ref)) {
+        fail(`soldier "${id}" fires "${ref}", which has no combat profile`);
+      }
+    }
+  }
+
   for (const unit of scenario.units) {
     if (unit.leaderId === null) continue;
     const leader =
@@ -152,8 +174,13 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
  * used as it is, so simulations on the same battlefield share one terrain.
  */
 export function createWorld(scenario: Scenario): SimWorld {
-  return Object.freeze({
+  const world = {
     terrain: shareTerrain(scenario.terrain),
     movement: deepFreeze(clonePlainData(scenario.movement)),
-  });
+  };
+  // Without combat the world has no `combat` property at all, so its
+  // fingerprint is what it was before combat existed.
+  return Object.freeze(
+    scenario.combat ? { ...world, combat: deepFreeze(clonePlainData(scenario.combat)) } : world,
+  );
 }

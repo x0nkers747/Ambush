@@ -3,7 +3,7 @@ import type { SoldierId } from '#sim';
 
 // Ephemeral UI state (docs/adr/0004): never recorded, never seen by the simulation.
 
-export const TIME_SCALES = [1, 8, 16] as const;
+export const TIME_SCALES = [1, 4, 8, 16] as const;
 export type TimeScale = (typeof TIME_SCALES)[number];
 
 /** What map clicks edit: the selected soldier's destination and facing, or the kill zone. */

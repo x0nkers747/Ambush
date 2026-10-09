@@ -1,3 +1,4 @@
+import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
 import { planPath } from './navigation';
@@ -38,7 +39,17 @@ export interface SetEngagementAreaCommand {
   readonly area: EngagementArea;
 }
 
-export type SimCommand = SetOrdersCommand | SetEngagementAreaCommand;
+/**
+ * Begins the engagement (docs/adr/0019): from this tick on, combat runs. The
+ * exercise submits it when the ambush is sprung. Rejected in a world without
+ * a combat model, or when an engagement has already begun.
+ */
+export interface BeginEngagementCommand {
+  readonly type: 'beginEngagement';
+  readonly tick: number;
+}
+
+export type SimCommand = SetOrdersCommand | SetEngagementAreaCommand | BeginEngagementCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -70,6 +81,8 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
       }
       return;
     }
+    case 'beginEngagement':
+      return;
   }
 }
 
@@ -96,6 +109,7 @@ export function applyCommands(
   state: SimState,
   world: SimWorld,
   commands: readonly SimCommand[],
+  startSeconds: number,
   events: SimEvent[],
 ): void {
   for (const command of commands) {
@@ -105,6 +119,9 @@ export function applyCommands(
         break;
       case 'setEngagementArea':
         applySetEngagementArea(state, world, command, events);
+        break;
+      case 'beginEngagement':
+        beginEngagement(state, world, command, startSeconds, events);
         break;
     }
   }

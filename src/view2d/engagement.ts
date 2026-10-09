@@ -3,9 +3,12 @@ import type { Azimuth, DeepReadonly, Soldier, SoldierId, Vec2 } from '#sim';
 import { worldToScreen, type Camera, type Viewport } from './camera';
 
 // The selected Marine's weapon engagement wedge: a sector centred on where he
-// faces, out to his primary weapon's nominal effective range (`primaryWeapon`).
+// faces, out to his primary weapon's maximum engagement range (`primaryWeapon`).
 // A planning aid drawn over the map, not a combat calculation: it ignores the
-// terrain and line of sight (the visibility overlay shows those).
+// terrain and line of sight (the visibility overlay shows those). Its radius
+// is the range out to which combat lets the weapon fire, but its 35° sector is
+// not a firing restriction: in combat a soldier fires at any valid target,
+// whichever way he faces, and turns to face it (docs/adr/0019).
 
 /** Total angular width of the wedge, in degrees: half on each side of the facing. */
 export const ENGAGEMENT_WEDGE_WIDTH_DEG = 35;
@@ -18,7 +21,7 @@ export interface EngagementWedge {
   readonly azimuth: Azimuth;
   /** Half the angular width, in radians. */
   readonly halfWidth: number;
-  /** The weapon's nominal effective range, in metres. */
+  /** The weapon's maximum engagement range in combat, in metres. */
   readonly rangeM: number;
   /** The weapon shown: its profile reference and name. */
   readonly weaponRef: string;
@@ -47,7 +50,7 @@ export function engagementWedge(
     origin: { x: soldier.position.x, y: soldier.position.y },
     azimuth: soldier.azimuth,
     halfWidth: ((ENGAGEMENT_WEDGE_WIDTH_DEG / 2) * Math.PI) / 180,
-    rangeM: weapon.effectiveRangeM,
+    rangeM: weapon.maxEngagementRangeM,
     weaponRef: weapon.ref,
     weaponName: weapon.name,
   };

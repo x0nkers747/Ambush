@@ -80,9 +80,12 @@
       .phase[data-phase='opforApproach'] {
         background: #e07a3a;
       }
-      .phase[data-phase='ambushTriggered'] {
+      .phase[data-phase='engagement'] {
         background: var(--danger);
         color: #fff;
+      }
+      .phase[data-phase='engagementComplete'] {
+        background: #c9ccd1;
       }
       button.start-opfor {
         font-weight: 700;
@@ -116,6 +119,34 @@
       .banner[data-kind='triggered'] {
         border-color: var(--danger);
         background: rgba(60, 12, 10, 0.9);
+      }
+      .banner[data-kind='complete'] {
+        border-color: #c9ccd1;
+      }
+      .engagement[hidden] {
+        display: none;
+      }
+      table.engagement-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        margin: 4px 0 8px;
+      }
+      table.engagement-table th {
+        text-align: left;
+        font-weight: normal;
+        color: var(--muted);
+      }
+      table.engagement-table td {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      table.engagement-table.soldiers td:last-child {
+        text-align: left;
+        padding-left: 8px;
+      }
+      table.engagement-table tr[data-side='OPFOR'] th {
+        color: #ff8a80;
       }
       .banner[hidden],
       .toast[hidden] {

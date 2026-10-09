@@ -14,7 +14,7 @@ const refs = (...weaponProfileRefs: string[]) => ({ weaponProfileRefs });
 
 describe('primaryWeapon', () => {
   it('shows the rifle of a rifle, grenade launcher and bayonet, in any order', () => {
-    const rifle = { kind: 'weapon', ref: 'm16-rifle', effectiveRangeM: 550 };
+    const rifle = { kind: 'weapon', ref: 'm16-rifle', maxEngagementRangeM: 550 };
     expect(
       primaryWeapon(refs('m16-rifle', 'm203-grenade-launcher', 'bayonet-knife')),
     ).toMatchObject(rifle);
@@ -29,14 +29,14 @@ describe('primaryWeapon', () => {
       kind: 'weapon',
       ref: 'squad-automatic-weapon',
       name: 'M249 SAW',
-      effectiveRangeM: 600,
+      maxEngagementRangeM: 600,
     });
   });
 
   it('takes the first of several primary firearms, not the longest-ranged', () => {
     expect(primaryWeapon(refs('m16-rifle', 'squad-automatic-weapon'))).toMatchObject({
       ref: 'm16-rifle',
-      effectiveRangeM: 550,
+      maxEngagementRangeM: 550,
     });
     expect(primaryWeapon(refs('squad-automatic-weapon', 'm16-rifle'))).toMatchObject({
       ref: 'squad-automatic-weapon',
@@ -84,7 +84,7 @@ describe('the USMC rifle squad template', () => {
         return [
           slot.id,
           weapon.kind === 'weapon'
-            ? `${weapon.ref} ${String(weapon.effectiveRangeM)}`
+            ? `${weapon.ref} ${String(weapon.maxEngagementRangeM)}`
             : weapon.kind,
         ];
       }),
@@ -117,7 +117,7 @@ describe('the USMC rifle squad template', () => {
       const slot = template.slots.find((s) => s.id === slotId);
       if (!slot) throw new Error(slotId);
       const weapon = primaryWeapon(resolveSlot(template, slot).loadout);
-      return weapon.kind === 'weapon' ? weapon.effectiveRangeM : null;
+      return weapon.kind === 'weapon' ? weapon.maxEngagementRangeM : null;
     };
     expect(rangeOf(withOverride, 'FT1.R')).toBe(600);
     // Others in the same role keep the role's default; without the override it comes back.

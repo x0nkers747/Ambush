@@ -1,0 +1,76 @@
+{
+  "schema": "ambush.combat-config",
+  "schemaVersion": 1,
+  "id": "ambush-combat-v1",
+  "version": "1.0.0",
+  "name": "Combat v1 gameplay defaults",
+  "notes": [
+    "Every number here is an illustrative gameplay placeholder, not validated empirical combat data.",
+    "Each parameter, its unit, valid range and default is documented in docs/combat-configuration.md.",
+    "A shot is one firing opportunity (one aimed shot or short burst), not a bullet."
+  ],
+  "weapons": [
+    {
+      "weaponProfileRef": "m16-rifle",
+      "hitProbabilityByRange": [
+        { "rangeM": 0, "probability": 0.75 },
+        { "rangeM": 50, "probability": 0.65 },
+        { "rangeM": 100, "probability": 0.45 },
+        { "rangeM": 200, "probability": 0.2 },
+        { "rangeM": 300, "probability": 0.1 },
+        { "rangeM": 500, "probability": 0.02 }
+      ],
+      "maxEngagementRangeM": 550,
+      "incapacitationProbabilityOnHit": 0.6,
+      "secondsBetweenShots": 1.5
+    },
+    {
+      "weaponProfileRef": "squad-automatic-weapon",
+      "hitProbabilityByRange": [
+        { "rangeM": 0, "probability": 0.6 },
+        { "rangeM": 50, "probability": 0.5 },
+        { "rangeM": 100, "probability": 0.35 },
+        { "rangeM": 200, "probability": 0.18 },
+        { "rangeM": 300, "probability": 0.1 },
+        { "rangeM": 500, "probability": 0.04 },
+        { "rangeM": 600, "probability": 0.02 }
+      ],
+      "maxEngagementRangeM": 600,
+      "incapacitationProbabilityOnHit": 0.55,
+      "secondsBetweenShots": 0.75
+    },
+    {
+      "weaponProfileRef": "ak-assault-rifle",
+      "hitProbabilityByRange": [
+        { "rangeM": 0, "probability": 0.7 },
+        { "rangeM": 50, "probability": 0.55 },
+        { "rangeM": 100, "probability": 0.35 },
+        { "rangeM": 200, "probability": 0.15 },
+        { "rangeM": 300, "probability": 0.06 },
+        { "rangeM": 400, "probability": 0.02 }
+      ],
+      "maxEngagementRangeM": 400,
+      "incapacitationProbabilityOnHit": 0.6,
+      "secondsBetweenShots": 1.5
+    }
+  ],
+  "postureHitMultipliers": {
+    "standing": 1,
+    "kneeling": 0.75,
+    "prone": 0.5
+  },
+  "opfor": {
+    "reactionProbabilities": { "prone": 0.6, "flee": 0.4 },
+    "reactionDelay": { "minSeconds": 0.5, "maxSeconds": 2 },
+    "returnFireDelaySeconds": 1,
+    "fleeSpeedMps": 4.5,
+    "fleeDistanceM": 600,
+    "escapeDistanceM": 300
+  },
+  "engagement": {
+    "maxDurationSeconds": 60,
+    "bluforFirstShotDelay": { "minSeconds": 0, "maxSeconds": 1 },
+    "targetRecheckSeconds": 0.5,
+    "targetSelection": { "BLUEFOR": "nearest", "OPFOR": "nearest" }
+  }
+}

@@ -190,7 +190,8 @@ describe('the playable scenario', () => {
     const start = exercise.startOpfor();
     expect(start.ok).toBe(true);
     for (let i = 0; i < 4000 && exercise.phase === 'opforApproach'; i += 1) exercise.advance(1, 16);
-    expect(exercise.phase).toBe('ambushTriggered');
+    // The trigger begins the engagement (docs/adr/0019); it used to freeze the exercise.
+    expect(exercise.phase).toBe('engagement');
     expect(exercise.trigger?.soldierId).toBe('EN-1');
     expect(exercise.trigger?.point.y).toBeCloseTo(290, 6);
     // Deterministic: the same scenario plays out identically.

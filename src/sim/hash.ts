@@ -14,25 +14,26 @@ export function hashSimState(state: SimState | DeepReadonly<SimState>): string {
 }
 
 /**
- * Content fingerprint of a simulation's immutable world (terrain and movement
- * parameters): the same hash as `hashSimState`, over the world instead of the
+ * Content fingerprint of a simulation's immutable world (terrain, movement
+ * parameters and combat model): the same hash as `hashSimState`, over the world instead of the
  * state. Identifies the context a snapshot belongs to (docs/adr/0008).
  */
 export function fingerprintWorld(world: SimWorld): string {
   // A shared terrain cannot change, so its world's fingerprint is remembered
-  // (per movement parameters) rather than recomputed for every simulation.
-  if (!isSharedTerrain(world.terrain) || Object.keys(world).length !== 2)
-    return fnv1a64Utf16le(canonicalEncode(world));
-  const movement = canonicalEncode(world.movement);
-  let known = worldFingerprints.get(world.terrain);
+  // (per the rest of the world: movement parameters and combat model) rather
+  // than recomputed for every simulation.
+  if (!isSharedTerrain(world.terrain)) return fnv1a64Utf16le(canonicalEncode(world));
+  const { terrain, ...rest } = world;
+  const key = canonicalEncode(rest);
+  let known = worldFingerprints.get(terrain);
   if (!known) {
     known = new Map();
-    worldFingerprints.set(world.terrain, known);
+    worldFingerprints.set(terrain, known);
   }
-  let fingerprint = known.get(movement);
+  let fingerprint = known.get(key);
   if (fingerprint === undefined) {
     fingerprint = fnv1a64Utf16le(canonicalEncode(world));
-    known.set(movement, fingerprint);
+    known.set(key, fingerprint);
   }
   return fingerprint;
 }

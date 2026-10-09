@@ -1,3 +1,4 @@
+import type { CombatConfig } from './combat-config';
 import type { TerrainDataset } from './terrain';
 
 /** Movement model parameters, in SI units (docs/adr/0008). */
@@ -15,6 +16,24 @@ export interface MovementParams {
 export interface SimWorld {
   readonly terrain: TerrainDataset;
   readonly movement: MovementParams;
+  /** The combat model; absent in worlds without combat (docs/adr/0019). */
+  readonly combat?: CombatSetup;
+}
+
+/**
+ * Everything combat needs beyond the state (docs/adr/0019): the validated
+ * configuration, and the weapon each soldier fires. Which weapon that is (the
+ * primary weapon of the soldier's resolved loadout) is decided outside the
+ * simulation; the simulation only fires it.
+ */
+export interface CombatSetup {
+  readonly config: CombatConfig;
+  /**
+   * The weapon profile reference each soldier fires, by soldier id; `null`
+   * (or no entry) for a soldier without a usable weapon, who never fires.
+   * Every reference must have a profile in `config.weapons`.
+   */
+  readonly weapons: Readonly<Record<string, string | null>>;
 }
 
 /** Throws a RangeError describing the first invalid field. */
