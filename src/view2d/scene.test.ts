@@ -5,6 +5,7 @@ import { soldierId } from '#sim';
 import {
   buildScene,
   deploymentGeometry,
+  opforStatus,
   SHOT_DISPLAY_SECONDS,
   SOLDIER_ICON_PX,
   symbolLayout,
@@ -191,6 +192,7 @@ describe('combat on the map (docs/adr/0019)', () => {
     exercise.advance(1 / 30);
     exercise.startOpfor();
     let sawShots = false;
+    const statusesSeen = new Set<string>();
     for (let i = 0; i < 30 * 400 && exercise.phase !== 'engagementComplete'; i += 1) {
       // The trainee springs the ambush once the patrol leader is in the kill zone.
       if (exercise.triggerState === 'available' && (exercise.killZoneOccupancy()?.inside ?? 0) > 0)
@@ -203,6 +205,14 @@ describe('combat on the map (docs/adr/0019)', () => {
           expect(shot.ageSeconds).toBeLessThan(SHOT_DISPLAY_SECONDS);
         }
         if (combat.shots.length > 0) sawShots = true;
+        // Every OPFOR soldier has a status label, and no Marine does.
+        for (const s of exercise.simulation.state.soldiers) {
+          const status = combat.opforStatuses.get(s.id);
+          if (s.side === 'OPFOR') {
+            expect(status).toBeDefined();
+            statusesSeen.add(status ?? '');
+          } else expect(status).toBeUndefined();
+        }
       }
     }
     expect(sawShots).toBe(true);
@@ -211,9 +221,24 @@ describe('combat on the map (docs/adr/0019)', () => {
     for (const s of exercise.simulation.state.soldiers) {
       const behavior = combat?.behaviors.get(s.id);
       if (s.status === 'incapacitated') expect(behavior).toBe('incapacitated');
+      if (s.side === 'OPFOR' && s.status === 'incapacitated') {
+        expect(combat?.opforStatuses.get(s.id)).toBe('DOWN');
+      }
     }
+    expect(statusesSeen.has('REACTING')).toBe(true);
     // Incapacitated soldiers stay in the scene.
     expect(buildScene(exercise, createSession(), camera, viewport).soldiers).toHaveLength(16);
+  });
+});
+
+describe('OPFOR status labels', () => {
+  it('say what each OPFOR soldier is doing', () => {
+    expect(opforStatus('awaitingReaction', false)).toBe('REACTING');
+    expect(opforStatus('prone', true)).toBe('FIRING');
+    expect(opforStatus('prone', false)).toBe('PRONE');
+    expect(opforStatus('fleeing', false)).toBe('FLEEING');
+    expect(opforStatus('escaped', false)).toBe('ESCAPED');
+    expect(opforStatus('incapacitated', true)).toBe('DOWN');
   });
 });
 

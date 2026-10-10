@@ -90,6 +90,14 @@ export interface MapScene {
 
 /** How long a shot stays drawn, in simulation seconds. */
 export const SHOT_DISPLAY_SECONDS = 0.6;
+/**
+ * A prone OPFOR soldier shows FIRING while its last shot is this recent:
+ * longer than the slowest cadence (1.5 s), so the label holds between shots.
+ */
+export const FIRING_DISPLAY_SECONDS = 2;
+
+/** What an OPFOR soldier is doing once the ambush is sprung, as the map labels it. */
+export type OpforStatus = 'REACTING' | 'FIRING' | 'PRONE' | 'FLEEING' | 'ESCAPED' | 'DOWN';
 
 /** A recent shot, drawn as a line from shooter to target. */
 export interface ShotView {
@@ -107,6 +115,8 @@ export interface CombatView {
   readonly shots: readonly ShotView[];
   /** Each soldier's part in the engagement. */
   readonly behaviors: ReadonlyMap<SoldierId, CombatBehavior>;
+  /** Each OPFOR soldier's status label. */
+  readonly opforStatuses: ReadonlyMap<SoldierId, OpforStatus>;
   readonly ended: boolean;
 }
 
@@ -228,20 +238,40 @@ export function buildScene(
   };
 }
 
+/** The map's label for an OPFOR soldier in `behavior`; `firedRecently`: within `FIRING_DISPLAY_SECONDS`. */
+export function opforStatus(behavior: CombatBehavior, firedRecently: boolean): OpforStatus {
+  switch (behavior) {
+    case 'awaitingReaction':
+      return 'REACTING';
+    case 'prone':
+    case 'engaging':
+      return firedRecently ? 'FIRING' : 'PRONE';
+    case 'fleeing':
+      return 'FLEEING';
+    case 'escaped':
+      return 'ESCAPED';
+    case 'incapacitated':
+      return 'DOWN';
+  }
+}
+
 function combatView(exercise: Exercise): CombatView | null {
   const { state, timeSeconds } = exercise.simulation;
   const engagement = state.engagement;
   if (!engagement) return null;
   const position = new Map(state.soldiers.map((s) => [s.id, s.position]));
   const shots: ShotView[] = [];
+  const firing = new Set<SoldierId>();
   const log = exercise.combatLog;
   // The log is in time order: walk back from the newest shot.
   for (let i = log.length - 1; i >= 0; i -= 1) {
     const event = log[i];
     if (event === undefined) continue;
     const age = timeSeconds - event.atSeconds;
-    if (age >= SHOT_DISPLAY_SECONDS) break;
+    if (age >= FIRING_DISPLAY_SECONDS) break;
     if (event.type !== 'shotFired') continue;
+    firing.add(event.shooterId);
+    if (age >= SHOT_DISPLAY_SECONDS) continue;
     const from = position.get(event.shooterId);
     const to = position.get(event.targetId);
     if (!from || !to) continue;
@@ -256,6 +286,11 @@ function combatView(exercise: Exercise): CombatView | null {
   return {
     shots,
     behaviors: new Map(engagement.combatants.map((c) => [c.soldierId, c.behavior])),
+    opforStatuses: new Map(
+      engagement.combatants.flatMap((c) =>
+        c.side === 'OPFOR' ? [[c.soldierId, opforStatus(c.behavior, firing.has(c.soldierId))]] : [],
+      ),
+    ),
     ended: engagement.end !== null,
   };
 }

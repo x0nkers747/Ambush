@@ -32,6 +32,7 @@ import {
   SYMBOL_BOX_PX,
   symbolLayout,
   type MapScene,
+  type OpforStatus,
 } from './scene';
 import {
   AFFILIATION_COLORS,
@@ -1092,16 +1093,22 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
       }
     }
     ctx.globalAlpha = 1;
-    if (behavior !== undefined) drawCombatMarker(ctx, behavior, at, full);
+    if (behavior !== undefined) {
+      drawCombatMarker(ctx, behavior, scene.combat?.opforStatuses.get(id) ?? null, at, full);
+    }
     if (hidden.length > 0) drawHiddenBadges(ctx, hidden, at);
     ctx.restore();
   }
 }
 
-/** Combat feedback on a soldier's symbol: an X when incapacitated, a tag when prone, fleeing or escaped. */
+/**
+ * Combat feedback on a soldier's symbol: an X when incapacitated, and under
+ * every OPFOR soldier a label of what it is doing (`OpforStatus`).
+ */
 function drawCombatMarker(
   ctx: CanvasRenderingContext2D,
   behavior: CombatBehavior,
+  status: OpforStatus | null,
   at: Vec2,
   full: boolean,
 ): void {
@@ -1120,26 +1127,35 @@ function drawCombatMarker(
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = COLORS.incapacitated;
     ctx.stroke();
-    return;
   }
-  const tag =
-    behavior === 'prone'
-      ? 'PRONE'
-      : behavior === 'fleeing'
-        ? 'FLEEING'
-        : behavior === 'escaped'
-          ? 'ESCAPED'
-          : null;
-  if (tag === null) return;
-  ctx.font = 'bold 9px system-ui, sans-serif';
+  if (status === null) return;
+  // A pill under the symbol: white text on the status colour.
+  ctx.font = 'bold 10px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.lineWidth = 3;
+  ctx.textBaseline = 'middle';
+  const width = ctx.measureText(status).width + 8;
+  const height = 14;
+  const top = at.y + radius + 4;
+  ctx.beginPath();
+  ctx.roundRect(at.x - width / 2, top, width, height, 3);
+  ctx.fillStyle = STATUS_COLORS[status];
+  ctx.fill();
+  ctx.lineWidth = 1;
   ctx.strokeStyle = COLORS.labelHalo;
-  ctx.strokeText(tag, at.x, at.y + radius + 3);
-  ctx.fillStyle = COLORS.killZoneLabel;
-  ctx.fillText(tag, at.x, at.y + radius + 3);
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(status, at.x, top + height / 2 + 0.5);
 }
+
+/** The OPFOR status pill's background: red while fighting, amber while running, grey once out. */
+const STATUS_COLORS: Readonly<Record<OpforStatus, string>> = {
+  REACTING: '#6b5a2a',
+  FIRING: '#b3261e',
+  PRONE: '#7a3b36',
+  FLEEING: '#b06d00',
+  ESCAPED: '#4a5560',
+  DOWN: '#3a3f44',
+};
 
 /**
  * Recent shots (docs/adr/0019): a line from shooter to target in the side's
