@@ -31,6 +31,15 @@ holders of its slots, in the template's slot order. Nothing is hard-coded:
 - not the team size;
 - not the squad leader, whose slot belongs to the squad, so is in no fire team.
 
+**The squad is a formation too** (added 2026-10-10). The units that can be selected and placed as
+a formation are those of echelon `squad` or `fireTeam` (`formationGroupsOf`, the exercise's
+`formationGroups`), the squad first. The squad's formation holds all its Marines in slot order,
+the squad leader first, so its line is 13 Marines, 10 m apart; everything below (selection,
+placing, moving, turning, detaching, deleting, visibility) is the same as for a fire team. A
+Marine is then in two groups. No extra rule is needed: a formation drops any Marine whose plan no
+longer matches it, so whichever of the two was placed last gives that Marine's orders. Plans
+carried into a rebuilt exercise place the squad's formation before the fire teams'.
+
 ### Selection
 
 The session holds either one Marine (`selectedSoldierId`) or one fire team

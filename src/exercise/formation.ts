@@ -6,8 +6,14 @@ import { rosterMembers, type RosterUnit } from './organization';
 // destinations and facings for the team's Marines (docs/adr/0012), which stay
 // the only orders; there is no formation unit in the simulation.
 
-/** The echelon of a template unit that can be selected and placed as a formation. */
+/** The echelon of a fire team in the organization template. */
 export const FIRE_TEAM_ECHELON = 'fireTeam';
+
+/**
+ * Echelons of the template units that can be selected and placed as a
+ * formation: the squad as a whole, and each fire team.
+ */
+export const FORMATION_ECHELONS: readonly string[] = ['squad', FIRE_TEAM_ECHELON];
 
 /** Default distance between adjacent Marines of a line formation, metres. */
 export const DEFAULT_FORMATION_SPACING_M = 10;
@@ -43,6 +49,27 @@ export function fireTeamsOf(roster: RosterUnit): FireTeam[] {
   };
   visit(roster);
   return teams;
+}
+
+/**
+ * Every unit that can be placed as a formation (`FORMATION_ECHELONS`), in
+ * template order, so the squad comes before its fire teams: each with all the
+ * soldiers holding its slots and those of the units below it, in slot order.
+ * The squad's line therefore holds every Marine, the squad leader first.
+ * Units without soldiers are left out.
+ */
+export function formationGroupsOf(roster: RosterUnit): FireTeam[] {
+  const groups: FireTeam[] = [];
+  const visit = (node: RosterUnit) => {
+    if (FORMATION_ECHELONS.includes(node.unit.echelon)) {
+      const memberIds = rosterMembers(node).map((m) => m.soldierId as SoldierId);
+      if (memberIds.length > 0)
+        groups.push({ unitId: node.unit.id, name: node.unit.name, memberIds });
+    }
+    node.children.forEach(visit);
+  };
+  visit(roster);
+  return groups;
 }
 
 /**

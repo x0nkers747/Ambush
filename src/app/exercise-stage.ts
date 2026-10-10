@@ -208,10 +208,10 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
       ? '<p class="muted">Pause to change positions; they can be changed while occupation is paused or once BLUEFOR is in position.</p>'
       : '';
 
-  /** The selected fire team: its Marines and its formation. */
+  /** The selected squad or fire team: its Marines and its formation. */
   const teamHtml = (unitId: string, editing: boolean): string => {
     const e = ex();
-    const team = e.fireTeams.find((t) => t.unitId === unitId);
+    const team = e.formationGroups.find((t) => t.unitId === unitId);
     if (!team) return '';
     const editable = editing && e.canEditPlans;
     const formation = e.formation(unitId);
@@ -232,7 +232,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
            ? `Moving or turning the formation moves all ${String(linked.size)} Marines.`
            : `Moving or turning the formation moves ${String(linked.size)} of ${String(team.memberIds.length)} Marines; ${detached.map((id) => escapeHtml(e.rosterMember(id)?.slot.label ?? id)).join(', ')} keep${detached.length === 1 ? 's' : ''} their own orders.`
        }</p>`
-      : `<p class="muted">${editable && o.session().tool === 'deploy' ? 'Click the map to place the team in a line centred there, slot 1 on the left.' : 'No formation.'}</p>`;
+      : `<p class="muted">${editable && o.session().tool === 'deploy' ? `Click the map to place the ${escapeHtml(team.name)} in a line centred there, slot 1 on the left.` : 'No formation.'}</p>`;
     const buttons = editable
       ? `<p class="buttons"><button data-action="clear-formation" title="Delete the formation" ${formation ? '' : 'disabled'}>Reset</button></p>`
       : lockedNote(editing);
@@ -293,9 +293,9 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     if (!session.showVisibility) return '';
     const id = session.selectedSoldierId;
     const view = o.map.visibility;
-    const team = e.fireTeams.find((t) => t.unitId === session.selectedFireTeamId);
+    const team = e.formationGroups.find((t) => t.unitId === session.selectedFireTeamId);
     if ((id === null && !team) || !view)
-      return '<p class="muted">Select a Marine or a fire team to see the visible area.</p>';
+      return '<p class="muted">Select a Marine, a fire team or the squad to see the visible area.</p>';
     if (view.failed) {
       return '<p class="alert">Visibility cannot be calculated in this browser (its background workers failed).</p>';
     }
@@ -523,21 +523,21 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
 
 /** Shown above the roster in BLUEFOR planning while nothing is selected. */
 export const SELECT_HINT =
-  'Select a Marine or a fire team in the roster, or click a blue symbol on the map.';
+  'Select a Marine, a fire team or the squad in the roster, or click a blue symbol on the map.';
 
 export const PLANNING_HELP = `<h3>Positions</h3>
 <dl class="help">
   <dt>Roster / symbol</dt><dd>Select a Marine</dd>
-  <dt>Double-click in roster</dt><dd>Select and centre the map on the Marine or fire team</dd>
+  <dt>Double-click in roster</dt><dd>Select and centre the map on the Marine, fire team or squad</dd>
   <dt>Click map</dt><dd>Set the Marine's destination (click again to move it)</dd>
   <dt>Drag destination</dt><dd>Move it</dd>
   <dt>Drag yellow handle</dt><dd>Set the facing (kept when the destination moves)</dd>
   <dt>Right-click destination</dt><dd>Clear it</dd>
   <dt>Backspace / Del</dt><dd>Clear the destination</dd>
 </dl>
-<h3>Fire teams</h3>
+<h3>Squad and fire teams</h3>
 <dl class="help">
-  <dt>Fire-team name</dt><dd>Select the whole team (in the roster)</dd>
+  <dt>Squad or fire-team name</dt><dd>Select all of it (in the roster)</dd>
   <dt>Click map</dt><dd>Place the team in a line centred there, 10 m apart</dd>
   <dt>Drag the diamond</dt><dd>Move the formation</dd>
   <dt>Drag yellow handle</dt><dd>Turn the formation round its centre</dd>

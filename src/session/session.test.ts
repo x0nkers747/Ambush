@@ -49,8 +49,11 @@ describe('session', () => {
       selectedFireTeamId: null,
       selectedSoldierId: null,
     });
-    // Not fire teams: the squad itself, or anything unknown.
-    expect(selectFireTeam(session, exercise, 'SQD')).toBe(session);
+    // The squad as a whole can be selected too; anything unknown cannot.
+    expect(selectFireTeam(session, exercise, 'SQD')).toMatchObject({
+      selectedFireTeamId: 'SQD',
+      selectedSoldierId: null,
+    });
     expect(selectFireTeam(session, exercise, 'nope')).toBe(session);
     // Selection never changes a plan.
     expect(exercise.deploymentPlans()).toEqual(plans);

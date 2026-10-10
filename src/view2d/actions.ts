@@ -31,22 +31,23 @@ export function createMapActions(
     }
   };
   const label = (id: SoldierId) => exercise.rosterMember(id)?.slot.label ?? id;
-  /** Whether the soldier still follows the fire team's formation. */
-  const linked = (id: SoldierId) => {
-    const team = exercise.fireTeamOf(id);
-    return team ? (exercise.formation(team.unitId)?.linked.includes(id) ?? false) : false;
-  };
+  /** The formations (squad's, fire team's) the soldier still follows. */
+  const following = (id: SoldierId) =>
+    exercise.formationGroups.filter(
+      (g) => exercise.formation(g.unitId)?.linked.includes(id) ?? false,
+    );
   const edit = (change: (soldierId: SoldierId) => void) => {
     const id = session.get().selectedSoldierId;
     if (id === null) return;
-    const wasLinked = linked(id);
+    const before = following(id);
     ignoreRefused(() => {
       change(id);
     });
-    if (wasLinked && !linked(id)) {
-      const team = exercise.fireTeamOf(id);
+    const left = before.filter((g) => !following(id).includes(g));
+    const group = left[0];
+    if (group) {
       notify(
-        `${label(id)} now has separate orders: moving or turning the ${team?.name ?? 'fire team'}'s formation no longer changes them.`,
+        `${label(id)} now has separate orders: moving or turning the ${group.name}'s formation no longer changes them.`,
       );
     }
   };
@@ -80,7 +81,7 @@ export function createMapActions(
     placeFormation: (point) => {
       editTeam((unitId) => {
         const formation = exercise.placeFormation(unitId, point);
-        const team = exercise.fireTeams.find((t) => t.unitId === unitId);
+        const team = exercise.formationGroups.find((t) => t.unitId === unitId);
         notify(
           `${team?.name ?? unitId} placed: ${String(formation.slots.length)} Marines ${String(formation.spacingM)} m apart, facing ${formatBearing(formation.azimuth)}.`,
         );

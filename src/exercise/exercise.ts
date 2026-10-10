@@ -55,6 +55,7 @@ import { orpContains, type ObjectiveRallyPoint } from './orp';
 import {
   DEFAULT_FORMATION_SPACING_M,
   fireTeamsOf,
+  formationGroupsOf,
   lineFormationPoints,
   type FireTeam,
 } from './formation';
@@ -462,12 +463,19 @@ export interface Exercise {
 
   /** The trainee organization's fire teams, in template order (docs/adr/0022). */
   readonly fireTeams: readonly FireTeam[];
+  /**
+   * Everything that can be selected and placed as a formation, in template
+   * order: the squad as a whole, then each fire team. The formation methods
+   * below take any of their unit ids. A Marine can be in the squad's
+   * formation and its fire team's; whichever was placed last gives its orders.
+   */
+  readonly formationGroups: readonly FireTeam[];
   /** The fire team a soldier belongs to, if any. */
   fireTeamOf(soldierId: SoldierId): FireTeam | undefined;
-  /** The fire team's formation while editable and at least one Marine still follows it. */
+  /** The group's formation while editable and at least one Marine still follows it. */
   formation(unitId: string): FireTeamFormation | undefined;
   /**
-   * Places the whole fire team in a line centred on `centre`, facing `azimuth`
+   * Places the whole group (squad or fire team) in a line centred on `centre`, facing `azimuth`
    * (default: the formation's facing if it has one, else the direction from
    * the team's current centre to `centre`): a destination and explicit facing
    * for every Marine of the team, re-linking any detached ones. All or
@@ -805,6 +813,8 @@ export function createExercise({
   // Fire-team formations (docs/adr/0022): the metadata of each team's last
   // group placement. The Marines' drafts stay the only plans.
   const fireTeams: readonly FireTeam[] = deepFreeze(fireTeamsOf(roster));
+  /** The squad and its fire teams: the units a formation can be placed for. */
+  const formationGroups: readonly FireTeam[] = deepFreeze(formationGroupsOf(roster));
   const teamOfSoldier = new Map(
     fireTeams.flatMap((t) => t.memberIds.map((id) => [id, t] as const)),
   );
@@ -819,8 +829,8 @@ export function createExercise({
   const formations = new Map<string, Formation>();
 
   const fireTeam = (unitId: string): FireTeam => {
-    const team = fireTeams.find((t) => t.unitId === unitId);
-    if (!team) throw new ExerciseError(`"${unitId}" is not a fire team`);
+    const team = formationGroups.find((t) => t.unitId === unitId);
+    if (!team) throw new ExerciseError(`"${unitId}" is not a squad or fire team`);
     return team;
   };
   /** The plan a formation generates for one of its slots. */
@@ -906,7 +916,7 @@ export function createExercise({
     requireEditable();
     fireTeam(unitId);
     const formation = liveFormation(unitId);
-    if (!formation) throw new ExerciseError('Formation not changed: place the fire team first.');
+    if (!formation) throw new ExerciseError('Formation not changed: place it first.');
     return formation;
   };
 
@@ -1176,6 +1186,7 @@ export function createExercise({
     },
 
     fireTeams,
+    formationGroups,
     fireTeamOf: (id) => teamOfSoldier.get(id),
     formation(unitId) {
       const formation = liveFormation(unitId);

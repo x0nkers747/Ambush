@@ -161,7 +161,7 @@ export function buildScene(
   const plans = state.soldiers.flatMap((s) => exercise.displayedPlan(s.id) ?? []);
   const selectedPlan = plans.find((p) => p.soldierId === session.selectedSoldierId);
   const orp = exercise.orp;
-  const team = exercise.fireTeams.find((t) => t.unitId === session.selectedFireTeamId);
+  const team = exercise.formationGroups.find((t) => t.unitId === session.selectedFireTeamId);
   const selectedTeam: SelectedTeamView | null = team
     ? {
         unitId: team.unitId,

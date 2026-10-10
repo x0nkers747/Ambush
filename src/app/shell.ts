@@ -89,7 +89,7 @@ export function wireHeader(
     o.go(target);
   };
   el('wf-prev').addEventListener('click', () => {
-    goTo(previousStage(current), previousBlocker(current));
+    goTo(previousStage(current), facts ? previousBlocker(current, facts) : null);
   });
   el('wf-next').addEventListener('click', () => {
     goTo(nextStage(current), facts ? nextBlocker(current, facts) : null);
@@ -126,7 +126,7 @@ export function wireHeader(
       show(
         'wf-prev',
         prevTarget ? `Previous: ${STAGE_NAMES[prevTarget]}` : 'Previous',
-        previousBlocker(stage),
+        previousBlocker(stage, f),
       );
       show('wf-next', nextTarget ? `Next: ${STAGE_NAMES[nextTarget]}` : 'Next', next);
       for (const s of WORKFLOW_STAGES) {

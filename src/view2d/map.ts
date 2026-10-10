@@ -200,7 +200,7 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
   const teamVisibility = createTeamVisibility(viewsheds);
   /** A selected fire team's visible area: the union of its Marines' viewsheds (`createTeamVisibility`). */
   const updateTeamVisibility = (unitId: string): VisibilityView | null => {
-    const team = current.fireTeams.find((t) => t.unitId === unitId);
+    const team = current.formationGroups.find((t) => t.unitId === unitId);
     const observers = team?.memberIds.flatMap((id) => current.observer(id) ?? []) ?? [];
     const first = observers[0];
     if (!first) return null;

@@ -39,9 +39,9 @@ describe('the workflow', () => {
   });
 
   it('blocks Previous only at the first stage and Next only at the last or on an unmet prerequisite', () => {
-    expect(previousBlocker('terrain')).toBe('This is the first stage.');
+    expect(previousBlocker('terrain', facts())).toBe('This is the first stage.');
     for (const s of ['scenario', 'bluefor', 'opfor', 'aar'] as const)
-      expect(previousBlocker(s)).toBeNull();
+      expect(previousBlocker(s, facts())).toBeNull();
     expect(nextBlocker('aar', facts())).toBe('This is the last stage.');
   });
 
@@ -126,5 +126,20 @@ describe('the workflow', () => {
     ).toBe('Place the OPFOR.');
     expect(stageBlocker('scenario', 'opfor', open)).toBe('Go through BLUEFOR Planning first.');
     expect(stageBlocker('terrain', 'aar', open)).toBe('Go through Edit Scenario first.');
+  });
+
+  it('allows no way back to the scenario or BLUEFOR planning once OPFOR has started', () => {
+    const started = facts({ opforStarted: () => true, engagementComplete: () => true });
+    expect(previousBlocker('opfor', started)).toMatch(
+      /^OPFOR has started: there is no going back to BLUEFOR Planning\. Choose Terrain/,
+    );
+    expect(stageBlocker('opfor', 'scenario', started)).toMatch(/no going back to Edit Scenario/);
+    expect(stageBlocker('aar', 'bluefor', started)).toMatch(/no going back to BLUEFOR Planning/);
+    // Terrain selection (leaving the battlefield) and the AAR's way back to combat stay open.
+    expect(stageBlocker('opfor', 'terrain', started)).toBeNull();
+    expect(previousBlocker('aar', started)).toBeNull();
+    // Before OPFOR starts, every earlier stage is open.
+    expect(stageBlocker('opfor', 'scenario', facts())).toBeNull();
+    expect(previousBlocker('opfor', facts())).toBeNull();
   });
 });

@@ -1,5 +1,4 @@
 import {
-  FIRE_TEAM_ECHELON,
   type AmbushScenario,
   type DeploymentStatus,
   type Exercise,
@@ -33,10 +32,13 @@ function rosterUnitHtml(
   const icon = sidc
     ? `<span class="unit-symbol" aria-hidden="true">${symbolSvg(sidc, 11)}</span>`
     : '';
-  const team = node.unit.echelon === FIRE_TEAM_ECHELON && node.members.length > 0;
+  // The squad and each fire team can be selected as a whole (docs/adr/0022).
+  const team = exercise.formationGroups.some((g) => g.unitId === node.unit.id);
   const teamSelected = team && session.selectedFireTeamId === node.unit.id;
-  const inSelectedTeam = (id: SoldierId) =>
-    exercise.fireTeamOf(id)?.unitId === session.selectedFireTeamId;
+  const selectedGroup = exercise.formationGroups.find(
+    (g) => g.unitId === session.selectedFireTeamId,
+  );
+  const inSelectedTeam = (id: SoldierId) => selectedGroup?.memberIds.includes(id) ?? false;
   const rows = node.members
     .map((m) => {
       const id = soldierId(m.soldierId);
@@ -56,7 +58,7 @@ function rosterUnitHtml(
   const children = node.children
     .map((c) => rosterUnitHtml(exercise, session, c, depth + 1))
     .join('');
-  // A fire team's name selects the whole team (docs/adr/0022).
+  // A squad's or fire team's name selects all of it (docs/adr/0022).
   const heading = team
     ? `<button class="roster-unit-name team" data-fire-team="${escapeHtml(node.unit.id)}" aria-pressed="${String(teamSelected)}" title="Select the whole ${escapeHtml(node.unit.name)}">${icon}${escapeHtml(node.unit.name)}</button>`
     : `<div class="roster-unit-name">${icon}${escapeHtml(node.unit.name)}</div>`;
@@ -101,7 +103,7 @@ export function wireRoster(
     const unitId = heading instanceof HTMLElement ? heading.dataset['fireTeam'] : undefined;
     if (unitId !== undefined) {
       o.setSession(selectFireTeam(o.session(), exercise, unitId));
-      const team = exercise.fireTeams.find((t) => t.unitId === unitId);
+      const team = exercise.formationGroups.find((t) => t.unitId === unitId);
       const points = team?.memberIds.flatMap((id) => exercise.observer(id)?.point ?? []) ?? [];
       if (centre && points.length > 0) {
         o.map.centreOn({

@@ -83,15 +83,28 @@ export function nextBlocker(stage: WorkflowStage, facts: WorkflowFacts): string 
 }
 
 /** Why Previous is not available from `stage`, or `null` when it is. */
-export function previousBlocker(stage: WorkflowStage): string | null {
-  return previousStage(stage) === null ? 'This is the first stage.' : null;
+export function previousBlocker(stage: WorkflowStage, facts: WorkflowFacts): string | null {
+  const previous = previousStage(stage);
+  return previous === null ? 'This is the first stage.' : backBlocker(previous, facts);
+}
+
+/**
+ * Why an earlier stage cannot be returned to, or `null` when it can: once
+ * OPFOR has started, the scenario and the BLUEFOR plan are behind the
+ * trainee for good. Terrain selection stays open (leaving the battlefield).
+ */
+export function backBlocker(to: WorkflowStage, facts: WorkflowFacts): string | null {
+  return facts.opforStarted() && (to === 'scenario' || to === 'bluefor')
+    ? `OPFOR has started: there is no going back to ${STAGE_NAMES[to]}. Choose Terrain to leave the battlefield.`
+    : null;
 }
 
 /**
  * Why the header cannot go straight from `from` to `to`, or `null` when it
- * can. Any earlier stage is open, as Previous is. The next stage has Next's
- * gate. A later one is reached only through the next, since entering a stage
- * does work (building the exercise) that skipping would miss.
+ * can. An earlier stage is open unless `backBlocker` says no, as for
+ * Previous. The next stage has Next's gate. A later one is reached only
+ * through the next, since entering a stage does work (building the exercise)
+ * that skipping would miss.
  */
 export function stageBlocker(
   from: WorkflowStage,
@@ -99,7 +112,8 @@ export function stageBlocker(
   facts: WorkflowFacts,
 ): string | null {
   const next = nextStage(from);
-  if (stageNumber(to) <= stageNumber(from)) return null;
+  if (to === from) return null;
+  if (stageNumber(to) < stageNumber(from)) return backBlocker(to, facts);
   if (to === next) return nextBlocker(from, facts);
   return next === null
     ? null

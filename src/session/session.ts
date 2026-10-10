@@ -54,7 +54,7 @@ export function selectSoldier(session: Session, exercise: Exercise, id: SoldierI
  * Selecting never changes a plan.
  */
 export function selectFireTeam(session: Session, exercise: Exercise, unitId: string): Session {
-  return exercise.fireTeams.some((t) => t.unitId === unitId)
+  return exercise.formationGroups.some((t) => t.unitId === unitId)
     ? { ...session, selectedSoldierId: null, selectedFireTeamId: unitId }
     : session;
 }

@@ -306,9 +306,9 @@ describe('placing a fire-team formation', () => {
     ).toThrow(RangeError);
   });
 
-  it('is refused for anything but a fire team, and when plans are not editable', () => {
+  it('is refused for anything but a squad or fire team, and when plans are not editable', () => {
     const exercise = setup();
-    expect(() => exercise.placeFormation('SQD', { x: 0, y: -100 })).toThrow(ExerciseError);
+    expect(() => exercise.placeFormation('nope', { x: 0, y: -100 })).toThrow(ExerciseError);
     exercise.placeFormation('FT1', { x: 0, y: -100 }, deg(0));
     exercise.execute();
     expect(() => exercise.placeFormation('FT2', { x: 0, y: -100 })).toThrow(ExerciseError);
@@ -378,9 +378,7 @@ describe('editing a formation', () => {
       expect(exercise.draft(id)).toEqual({ soldierId: id, destination: null, facingDegrees: null });
     }
     expect(exercise.formation('FT1')).toBeUndefined();
-    expect(() => exercise.moveFormation('FT1', { x: 0, y: 0 })).toThrow(
-      /place the fire team first/,
-    );
+    expect(() => exercise.moveFormation('FT1', { x: 0, y: 0 })).toThrow(/place it first/);
   });
 });
 
@@ -532,5 +530,52 @@ describe('formation plans in the rest of the exercise', () => {
     }
     // Ready: the committed formation is editable again, still linked.
     expect(exercise.formation('FT1')?.linked).toHaveLength(4);
+  });
+});
+
+describe('the squad as a formation', () => {
+  it('is a formation group before its fire teams, with every Marine in slot order', () => {
+    const exercise = setup();
+    const labels = (ids: readonly SoldierId[]) =>
+      ids.map((id) => exercise.rosterMember(id)?.slot.label);
+    const [squad, ...teams] = exercise.formationGroups;
+    expect(squad?.unitId).toBe('SQD');
+    expect(labels(squad?.memberIds ?? [])).toEqual([
+      'SL',
+      ...['1', '2', '3'].flatMap((t) => [`${t}-FTL`, `${t}-AR`, `${t}-AAR`, `${t}-R`]),
+    ]);
+    expect(teams.map((t) => t.unitId)).toEqual(['FT1', 'FT2', 'FT3']);
+    // The fire teams alone are unchanged.
+    expect(exercise.fireTeams.map((t) => t.unitId)).toEqual(['FT1', 'FT2', 'FT3']);
+  });
+
+  it('is placed like a fire team: one destination per Marine, in a line', () => {
+    const exercise = setup();
+    const squad = exercise.formationGroups[0];
+    if (!squad) throw new Error('no squad');
+    const formation = exercise.placeFormation('SQD', { x: 0, y: -120 }, deg(0));
+    expect(formation.slots).toHaveLength(13);
+    expect(formation.linked).toHaveLength(13);
+    expect(destinations(exercise, squad.memberIds)).toEqual(
+      lineFormationPoints({ x: 0, y: -120 }, deg(0), 13, 10),
+    );
+    // Moving and turning work as for a fire team.
+    exercise.moveFormation('SQD', { x: 10, y: -120 });
+    expect(exercise.formation('SQD')?.centre).toEqual({ x: 10, y: -120 });
+  });
+
+  it('gives way to a fire team placed after it, and takes over when placed after one', () => {
+    const exercise = setup();
+    exercise.placeFormation('SQD', { x: 0, y: -120 }, deg(0));
+    exercise.placeFormation('FT2', { x: -40, y: -60 }, deg(0));
+    const ft2 = exercise.formationGroups.find((g) => g.unitId === 'FT2')?.memberIds ?? [];
+    // The fire team's Marines now follow their team's formation, not the squad's.
+    expect(exercise.formation('FT2')?.linked).toEqual(ft2);
+    expect(exercise.formation('SQD')?.linked).toHaveLength(9);
+    expect(exercise.formation('SQD')?.linked.some((id) => ft2.includes(id))).toBe(false);
+    // Placing the squad again re-links everyone; the fire team's formation then has nobody.
+    exercise.placeFormation('SQD', { x: 0, y: -100 }, deg(0));
+    expect(exercise.formation('SQD')?.linked).toHaveLength(13);
+    expect(exercise.formation('FT2')).toBeUndefined();
   });
 });

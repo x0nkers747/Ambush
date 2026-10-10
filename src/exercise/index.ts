@@ -126,6 +126,8 @@ export {
   DEFAULT_FORMATION_SPACING_M,
   FIRE_TEAM_ECHELON,
   fireTeamsOf,
+  FORMATION_ECHELONS,
+  formationGroupsOf,
   lineFormationPoints,
   lineSlotOffset,
   type FireTeam,

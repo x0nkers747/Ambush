@@ -50,7 +50,13 @@ import {
   TRASH_ICON,
   wireHeader,
 } from './shell';
-import { nextBlocker, STAGE_NAMES, type WorkflowFacts, type WorkflowStage } from './workflow';
+import {
+  backBlocker,
+  nextBlocker,
+  STAGE_NAMES,
+  type WorkflowFacts,
+  type WorkflowStage,
+} from './workflow';
 
 // Stages 2–5 of one battlefield (docs/adr/0025): the workflow header, the
 // tactical map and a contextual side panel. Scenario editing (stage 2) and
@@ -417,6 +423,12 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     (exercise.revisions.length > 0 || exercise.hasUncommittedChanges || exercise.killZone !== null);
 
   const enter = (target: WorkflowStage) => {
+    // Once OPFOR has started there is no way back to planning or the scenario (workflow.ts).
+    const back = backBlocker(target, facts);
+    if (back !== null) {
+      notify(back);
+      return;
+    }
     if (target === 'terrain') {
       const leave = () => {
         stop();
