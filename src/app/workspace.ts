@@ -146,7 +146,6 @@ const PLANNING_TOOLS: readonly { tool: 'deploy' | 'killZone'; label: string; key
 
 export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   app.className = 'workspace';
-  const editable = o.scenario.kind === 'editable';
   app.innerHTML = `
   ${headerHtml(o.title)}
   <main class="ws-map">
@@ -488,16 +487,25 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       return;
     }
     if (target === 'terrain') {
+      // Leaving resets the battlefield's scenario (ORP, OPFOR and route): it
+      // opens next time as a new one, and terrain selection previews it empty.
+      const d = scenarioStage?.definition;
+      const scenarioPlaced = d !== undefined && (d.orp !== null || d.opfor.route.length > 0);
       const leave = () => {
         stop();
+        if (scenarioPlaced) scenarioStage?.reset();
         o.leave(map);
       };
-      if (!hasWork()) {
+      if (!hasWork() && !scenarioPlaced) {
         leave();
         return;
       }
       confirm({
-        message: `Leave ${o.title}? The BLUEFOR plans and the exercise are discarded${editable ? '; the scenario is saved' : ''}.`,
+        message: `Leave ${o.title}? ${
+          scenarioStage
+            ? 'The scenario (ORP, OPFOR and route), the BLUEFOR plans and the exercise are discarded.'
+            : 'The BLUEFOR plans and the exercise are discarded.'
+        }`,
         action: 'Leave battlefield',
         onConfirm: leave,
       });

@@ -101,8 +101,9 @@ Navigating keeps state. Changing data invalidates what depends on it. Restarting
 - **After Start OPFOR** there is no going back to stages 2 and 3 (`backBlocker`): Previous and
   their header segments are blocked with the reason. Terrain selection stays open, with its usual
   confirmation, and starting again means leaving the battlefield.
-- **Leaving for terrain selection** asks first when there are plans or an exercise to lose. The
-  scenario is always saved.
+- **Leaving for terrain selection** resets the battlefield's scenario to a new one (no ORP, no
+  OPFOR, no route), saved, so terrain selection previews the bare terrain and the battlefield
+  opens empty next time. It asks first when there is a scenario, plans or an exercise to lose.
 
 Confirmations are a small in-page dialog (`createConfirm`) used only for these discarding actions
 and for Reset scenario. Routine navigation is never confirmed.

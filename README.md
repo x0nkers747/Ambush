@@ -78,7 +78,8 @@ the scenario, the exercise is rebuilt and your positions, formations and kill zo
 over wherever they are still valid. Anything that could not be kept is reported. Once a plan has been
 executed, the scenario is locked until you **Restart exercise to edit**; after Start OPFOR,
 planning is locked until you **Restart exercise**. Both ask first. Leaving a battlefield for
-terrain selection asks first when there are plans to lose. A reload stays on the same stage, but
+terrain selection resets its scenario (ORP, OPFOR and route), so it opens as new next time; it asks
+first when there is a scenario or plans to lose. A reload stays on the same stage, but
 it starts the exercise again: plans are not stored.
 
 **Battlefield Information**, collapsed at the bottom of the side panel, lists each battlefield's
