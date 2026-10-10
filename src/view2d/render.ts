@@ -100,7 +100,8 @@ export const COLORS = {
   featureLabel: 'rgba(20, 24, 28, 0.85)',
   spotHeight: '#3b2a18',
   impossible: '#d6301f',
-  visibleEdge: '#0d6b30',
+  // The visible area is light purple: it stands out from the green of woods and grass.
+  visibleEdge: '#5e2ca5',
 } as const;
 
 /** Radius of a decluttered (compact) soldier symbol. */
@@ -108,7 +109,7 @@ const COMPACT_RADIUS_PX = 3.5;
 /** Building and vegetation ids appear from this zoom. */
 const FEATURE_LABEL_MAX_METERS_PER_PIXEL = 0.6;
 /** Opacity (0–255) of the visibility overlay, inside the visible area and along its edge. */
-const VISIBLE_ALPHA = 80;
+const VISIBLE_ALPHA = 95;
 const VISIBLE_EDGE_ALPHA = 150;
 
 /** Land-use tints: light, so terrain shading and contours read through them. */
@@ -1455,7 +1456,7 @@ function drawFormation(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.restore();
 }
 
-/** Translucent green over visible cells, a little stronger along the edge of the visible area. */
+/** Translucent light purple over visible cells, deeper along the edge of the visible area. */
 export function viewshedPixels(viewshed: Viewshed): Uint8ClampedArray {
   const { grid, visible } = viewshed;
   const { columns, rows } = grid;
@@ -1468,9 +1469,10 @@ export function viewshedPixels(viewshed: Viewshed): Uint8ClampedArray {
       const edge = !at(c - 1, r) || !at(c + 1, r) || !at(c, r - 1) || !at(c, r + 1);
       // Image row 0 is the northernmost grid row.
       const i = ((rows - 1 - r) * columns + c) * 4;
-      data[i] = 40;
-      data[i + 1] = edge ? 130 : 170;
-      data[i + 2] = 60;
+      // Light purple inside, a deeper purple along the edge.
+      data[i] = edge ? 120 : 185;
+      data[i + 1] = edge ? 60 : 135;
+      data[i + 2] = edge ? 200 : 255;
       data[i + 3] = edge ? VISIBLE_EDGE_ALPHA : VISIBLE_ALPHA;
     }
   }

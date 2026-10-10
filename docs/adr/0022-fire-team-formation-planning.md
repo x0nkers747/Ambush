@@ -116,8 +116,17 @@ Every slot the operation would change is checked as an individual destination is
 - not in or against a building;
 - reachable from where the Marine stands.
 
-If any slot fails, nothing changes, and the refusal names each failing slot. The formation is
-never snapped or squeezed to fit, so a drag simply stops at the last position that fits.
+**A slot in or against a building is moved clear of it** (changed 2026-10-10), rather than
+refusing the whole placement: the Marine goes to the nearest spot outside the building that it can
+reach, no closer than 2 m to another slot (`nearestPointClearOfBuildings`: just outside the
+nearest wall, else the nearest acceptable point on rings round the slot, up to 40 m). The
+formation keeps that spot as the slot's destination, so the Marine stays linked; the placement
+message names those moved. Placing, moving and turning all do this. A single Marine's destination
+in or against a building is still refused with the error.
+
+If any slot still fails (off the map, unreachable, or no spot clear of the building), nothing
+changes, and the refusal names each failing slot. The line is otherwise never squeezed to fit, so
+a drag simply stops at the last position that fits.
 Placing, moving, turning and deleting are each one operation on the drafts, so they cannot be
 left half done.
 

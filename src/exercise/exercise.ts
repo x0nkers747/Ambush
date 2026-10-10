@@ -8,6 +8,7 @@ import {
   lineOfSight,
   normalizeAzimuth,
   pointInPolygon,
+  nearestPointClearOfBuildings,
   pointProblem,
   visibleCellsIn,
   soldierId,
@@ -328,8 +329,14 @@ export interface FireTeamFormation {
   /** The common facing, exactly as the Marines' plans store it (see `facingDegreesOf`). */
   readonly azimuth: Azimuth;
   readonly spacingM: number;
-  /** Every slot in member order, with the destination it generates. */
+  /**
+   * Every slot in member order, with the destination it generates: its place
+   * on the line, or the nearest spot clear of a building when the line falls
+   * in or against one (see `movedClear`).
+   */
   readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
+  /** The Marines whose slot fell in or against a building and were moved clear of it. */
+  readonly movedClear: readonly SoldierId[];
   /**
    * The Marines whose plans are still exactly the generated ones, in slot
    * order. Only they follow moves and turns of the formation; a Marine whose
@@ -825,6 +832,7 @@ export function createExercise({
     readonly spacingM: number;
     readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
     readonly linked: Set<SoldierId>;
+    readonly movedClear: readonly SoldierId[];
   }
   const formations = new Map<string, Formation>();
 
@@ -867,10 +875,13 @@ export function createExercise({
       spacingM: f.spacingM,
       slots: f.slots.map((slot) => ({ soldierId: slot.soldierId, point: { ...slot.point } })),
       linked: f.slots.filter((slot) => f.linked.has(slot.soldierId)).map((slot) => slot.soldierId),
+      movedClear: [...f.movedClear],
     });
   /**
    * Lays the team out on a line and gives every Marine in `follow` its slot's
-   * destination and the common facing, all or nothing: if any of their slots
+   * destination and the common facing. A slot in or against a building moves
+   * to the nearest spot clear of it that the Marine can reach (and no closer
+   * than 2 m to another slot). Otherwise all or nothing: if any slot still
    * cannot be used, nothing changes and an `ExerciseError` names each one.
    */
   const layOut = (
@@ -887,14 +898,35 @@ export function createExercise({
     // The facing as plans store it, so the line and every Marine agree exactly.
     const azimuth = azimuthFromDegrees(facingDegreesOf(azimuthIn));
     const points = lineFormationPoints(centre, azimuth, team.memberIds.length, formationSpacingM);
-    const slots = team.memberIds.map((soldierId, i) => ({
-      soldierId,
-      point: points[i] ?? centre,
-    }));
-    const problems = slots.flatMap(({ soldierId: id, point }) => {
-      if (!follow.has(id)) return [];
-      const problem = destinationProblem(id, point);
-      return problem ? [`${members.get(id)?.slot.label ?? id} would be ${problem}`] : [];
+    const slots: { soldierId: SoldierId; point: Vec2 }[] = [];
+    const movedClear: SoldierId[] = [];
+    const problems: string[] = [];
+    team.memberIds.forEach((soldierId, i) => {
+      const onLine = points[i] ?? centre;
+      if (!follow.has(soldierId)) {
+        slots.push({ soldierId, point: onLine });
+        return;
+      }
+      const kind = pointProblem(terrain, onLine)?.kind;
+      if (kind === 'insideBuilding' || kind === 'tooCloseToBuilding') {
+        const others = [...slots.map((s) => s.point), ...points.slice(i + 1)];
+        const clear = nearestPointClearOfBuildings(
+          terrain,
+          onLine,
+          (q) =>
+            destinationProblem(soldierId, q) === null &&
+            others.every((o) => Math.hypot(o.x - q.x, o.y - q.y) >= 2),
+        );
+        if (clear) {
+          slots.push({ soldierId, point: clear });
+          movedClear.push(soldierId);
+          return;
+        }
+      }
+      slots.push({ soldierId, point: onLine });
+      const problem = destinationProblem(soldierId, onLine);
+      if (problem)
+        problems.push(`${members.get(soldierId)?.slot.label ?? soldierId} would be ${problem}`);
     });
     if (problems.length > 0) throw new ExerciseError(`${what}: ${problems.join('; ')}.`);
     for (const { soldierId: id, point } of slots) {
@@ -907,6 +939,7 @@ export function createExercise({
       spacingM: formationSpacingM,
       slots,
       linked: new Set(follow),
+      movedClear,
     };
     formations.set(team.unitId, formation);
     return formationView(formation);

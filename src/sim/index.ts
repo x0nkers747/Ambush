@@ -98,6 +98,7 @@ export {
   NAV_CELL_M,
   OBSTACLE_CLEARANCE_M,
   planPath,
+  nearestPointClearOfBuildings,
   pointProblem,
   stringPull,
   type PathResult,

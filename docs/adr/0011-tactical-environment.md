@@ -158,7 +158,7 @@ Posture-specific heights are not modelled yet.
 
 ### Planning tools: visibility (viewshed)
 
-**VISIBILITY** (key V) shades green, on the tactical map, all the ground the
+**VISIBILITY** (key V) shades light purple (green until 2026-10-10), on the tactical map, all the ground the
 selected BLUEFOR soldier can see. It looks from the soldier's planned final
 position (the last waypoint of the plan), or from where the soldier stands when
 there is no route; the side panel says which. Switching soldiers or moving the
@@ -198,7 +198,7 @@ tool. The exact point query `lineOfSight` remains the simulation's LOS API.
     one takes about 350 ms, including starting the workers and passing them
     the terrain.
 - **Rendering:**
-  - one translucent green pixel per visible cell (alpha 80 / 255), slightly
+  - one translucent light purple pixel per visible cell (alpha 95 / 255), deeper purple and
     stronger along the edge of the visible area (alpha 150);
   - drawn on the terrain shading, beneath contours, roads, vegetation,
     buildings, routes, symbols, the kill zone and labels, so none of them is

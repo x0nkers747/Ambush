@@ -232,16 +232,17 @@ describe('placing a formation on the map', () => {
     }
   });
 
-  it('is refused as a whole, with the reason, where the line does not fit', () => {
+  it('moves a slot that would stand in a building clear of it, and says so', () => {
     const ui = setup();
     ui.session = selectFireTeam(ui.session, ui.exercise, 'FT1');
-    const before = ui.exercise.deploymentPlans();
     // Facing north from the ORP, the east end would stand in the building.
     ui.exercise.placeFormation('FT1', { x: 0, y: -100 }, deg(0));
     ui.exercise.clearFormation('FT1');
     ui.click({ x: 130, y: 0 });
-    expect(ui.notices.at(-1)).toMatch(/^Formation not placed: .*inside building B1/);
-    expect(ui.exercise.deploymentPlans()).toEqual(before);
+    expect(ui.notices.at(-1)).toMatch(
+      /^1st fire team placed: 4 Marines .* 1-R was moved clear of a building\.$/,
+    );
+    expect(ui.exercise.formation('FT1')?.movedClear).toHaveLength(1);
   });
 
   it('moves with the diamond, turns with the handle, and is deleted with a right click', () => {

@@ -3,6 +3,8 @@ import {
   azimuthFromDegrees,
   createSyntheticTerrain,
   flatElevation,
+  OBSTACLE_CLEARANCE_M,
+  pointProblem,
   rectangle,
   soldierId,
   type SoldierId,
@@ -233,6 +235,7 @@ describe('placing a fire-team formation', () => {
         point: { x: -15 + 10 * i, y: -100 },
       })),
       linked: team.memberIds,
+      movedClear: [],
     });
     expect(exercise.formation('FT1')).toEqual(formation);
     // Nobody else's plan changes.
@@ -272,24 +275,36 @@ describe('placing a fire-team formation', () => {
     for (const id of team.memberIds) expect(exercise.draft(id)?.facingDegrees).toBe(90);
   });
 
-  it('is refused as a whole when any slot is in a building, off the map or unreachable', () => {
+  it('moves a slot in or against a building clear of it, and refuses one off the map', () => {
     const exercise = setup();
+    const team = team1(exercise);
     const before = plans(exercise);
-    // The east end of the line (x = 145) would be inside the building.
-    expect(() => exercise.placeFormation('FT1', { x: 130, y: 0 }, deg(0))).toThrow(
-      /Formation not placed: 1-R would be inside building B1/,
-    );
-    // The west end would be off the map.
+    // The west end would be off the map: refused as a whole, nothing changes.
     expect(() => exercise.placeFormation('FT1', { x: -490, y: 0 }, deg(0))).toThrow(
-      /1-FTL would be off the map/,
+      /Formation not placed: 1-FTL would be off the map/,
     );
     expect(plans(exercise)).toEqual(before);
     expect(exercise.formation('FT1')).toBeUndefined();
-    // Not distorted to fit either: a valid placement next to the building keeps 10 m.
+    // The east end (x = 145) would be inside the building (x 140–160): 1-R goes to the
+    // nearest spot clear of it, just west of the wall; the others keep their places.
+    const formation = exercise.placeFormation('FT1', { x: 130, y: 0 }, deg(0));
+    const rifleman = team.memberIds[3] ?? soldierId('x');
+    expect(formation.movedClear).toEqual([rifleman]);
+    const placed = destinations(exercise, team.memberIds);
+    expect(placed.slice(0, 3).map((p) => p?.x)).toEqual([115, 125, 135]);
+    expect(placed[3]?.x).toBeCloseTo(140 - OBSTACLE_CLEARANCE_M - 0.5);
+    expect(placed[3]?.y).toBeCloseTo(0);
+    expect(placed[3] && pointProblem(T, placed[3])).toBeNull();
+    // The moved Marine still follows the formation.
+    expect(formation.linked).toEqual(team.memberIds);
+    // A single Marine is still refused inside a building.
+    expect(() => {
+      exercise.setDestination(rifleman, { x: 150, y: 0 });
+    }).toThrow(/inside building B1/);
+    // Clear of the building, the line keeps its 10 m spacing.
     exercise.placeFormation('FT1', { x: 110, y: 0 }, deg(0));
-    expect(destinations(exercise, team1(exercise).memberIds).map((p) => p?.x)).toEqual([
-      95, 105, 115, 125,
-    ]);
+    expect(destinations(exercise, team.memberIds).map((p) => p?.x)).toEqual([95, 105, 115, 125]);
+    expect(exercise.formation('FT1')?.movedClear).toEqual([]);
   });
 
   it('honours a configured spacing', () => {
@@ -356,15 +371,20 @@ describe('editing a formation', () => {
     });
   });
 
-  it('is refused as a whole when the moved or turned line does not fit', () => {
+  it('moves and turns a line clear of buildings, and refuses one that would leave the map', () => {
     const exercise = setup();
     exercise.placeFormation('FT1', { x: 110, y: 0 }, deg(0));
     const before = plans(exercise);
     const formation = exercise.formation('FT1');
-    expect(() => exercise.moveFormation('FT1', { x: 130, y: 0 })).toThrow(/Formation not moved/);
-    // North of the building the line fits; turned to 90° it would run into it.
-    exercise.moveFormation('FT1', { x: 145, y: 20 });
+    expect(() => exercise.moveFormation('FT1', { x: -490, y: 0 })).toThrow(/Formation not moved/);
+    // Near the north edge the line fits; turned to 90° it would run off the map.
+    exercise.moveFormation('FT1', { x: 0, y: 488 });
     expect(() => exercise.setFormationFacing('FT1', deg(90))).toThrow(/Formation not turned/);
+    // Moved or turned into the building, the slot inside is moved clear of it instead.
+    expect(exercise.moveFormation('FT1', { x: 130, y: 0 }).movedClear).toHaveLength(1);
+    exercise.moveFormation('FT1', { x: 145, y: 20 });
+    expect(exercise.setFormationFacing('FT1', deg(90)).movedClear).toHaveLength(1);
+    exercise.setFormationFacing('FT1', deg(0));
     exercise.moveFormation('FT1', { x: 110, y: 0 });
     expect(plans(exercise)).toEqual(before);
     expect(exercise.formation('FT1')).toEqual(formation);

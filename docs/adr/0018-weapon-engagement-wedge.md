@@ -63,7 +63,7 @@ has:
 The bands suggest that effectiveness falls with distance; they are not hit probabilities.
 
 The visibility overlay is unchanged and independent. It shows when it showed before. When both
-show, the viewshed is green beneath the contours and features, and the wedge is blue above them.
+show, the viewshed is light purple beneath the contours and features, and the wedge is blue above them.
 
 ## Consequences
 

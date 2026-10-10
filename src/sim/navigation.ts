@@ -58,6 +58,80 @@ export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | n
   return null;
 }
 
+/**
+ * For a point in or against a building: the nearest point clear of it where
+ * `accept` agrees (e.g. a soldier can stand there and reach it), or `null`
+ * when there is none within `maxDistanceM`. First the point just outside the
+ * building's outline nearest `p` (at the clearance, plus a small margin);
+ * failing that (another building, water, refused), the nearest acceptable
+ * point on rings round `p`, 1 m apart. A point not in or against a building
+ * is returned as it is when acceptable. Deterministic.
+ */
+export function nearestPointClearOfBuildings(
+  terrain: TerrainDataset,
+  p: Vec2,
+  accept: (q: Vec2) => boolean = () => true,
+  maxDistanceM = 40,
+): Vec2 | null {
+  const ok = (q: Vec2) => pointProblem(terrain, q) === null && accept(q);
+  const problem = pointProblem(terrain, p);
+  if (problem === null) return accept(p) ? p : null;
+  if (problem.kind !== 'insideBuilding' && problem.kind !== 'tooCloseToBuilding') return null;
+  const footprint = terrain.features.buildings.find((b) => b.id === problem.buildingId)?.footprint;
+  if (footprint) {
+    // The nearest point of the outline, then outwards from the building to the clearance.
+    let best: { point: Vec2; distance: number; outward: Vec2 } | null = null;
+    const n = footprint.length;
+    const ccw = signedArea(footprint) > 0;
+    for (let i = 0; i < n; i += 1) {
+      const a = footprint[i];
+      const b = footprint[(i + 1) % n];
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lengthSq = dx * dx + dy * dy;
+      if (lengthSq === 0) continue;
+      const t = Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq, 0), 1);
+      const point = { x: a.x + t * dx, y: a.y + t * dy };
+      const distance = Math.hypot(p.x - point.x, p.y - point.y);
+      // The edge's outward normal: right of the edge for a counter-clockwise outline.
+      const length = Math.sqrt(lengthSq);
+      const outward = ccw
+        ? { x: dy / length, y: -dx / length }
+        : { x: -dy / length, y: dx / length };
+      if (!best || distance < best.distance) best = { point, distance, outward };
+    }
+    if (best) {
+      const reach = OBSTACLE_CLEARANCE_M + 0.5;
+      const candidate = {
+        x: best.point.x + best.outward.x * reach,
+        y: best.point.y + best.outward.y * reach,
+      };
+      if (ok(candidate)) return candidate;
+    }
+  }
+  for (let r = 1; r <= maxDistanceM; r += 1) {
+    const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 1.5));
+    for (let k = 0; k < steps; k += 1) {
+      const angle = (2 * Math.PI * k) / steps;
+      const q = { x: p.x + r * Math.sin(angle), y: p.y + r * Math.cos(angle) };
+      if (ok(q)) return q;
+    }
+  }
+  return null;
+}
+
+/** Twice-the-sign of a ring's area: positive when counter-clockwise (x east, y north). */
+function signedArea(ring: readonly Vec2[]): number {
+  let s = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    if (a && b) s += a.x * b.y - b.x * a.y;
+  }
+  return s;
+}
+
 /** Whether a soldier can walk straight from `a` to `b`, keeping clear of every building and out of water. */
 export function isSegmentWalkable(terrain: TerrainDataset, a: Vec2, b: Vec2): boolean {
   // The terrain is a rectangle, so a segment between two points on it stays on it.

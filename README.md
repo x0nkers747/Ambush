@@ -84,7 +84,7 @@ sources, their resolution and accuracy, and the credits their licences require. 
    roster or on the map and click the map to give them a destination; drag the yellow handle to
    set their facing. Marines you leave alone stay in the ORP. Press **K** to switch to the kill
    zone and draw it across the expected enemy route (the dark-red dashed line).
-   Press **V** (Visibility) to shade green everything the selected Marine can see from their
+   Press **V** (Visibility) to shade light purple everything the selected Marine can see from their
    destination, with the share of the kill zone that is visible; drag the destination to compare
    positions. The selected Marine also shows a faint blue 35° wedge around the way he faces now,
    out to his weapon's maximum engagement range (rifle 550 m, SAW 600 m; a planning aid, see

@@ -3,6 +3,7 @@ import { NO_FEATURES, rectangle, validateFeatures, type EnvironmentFeatures } fr
 import type { Vec2 } from './geometry';
 import {
   isSegmentWalkable,
+  nearestPointClearOfBuildings,
   OBSTACLE_CLEARANCE_M,
   planPath,
   pointProblem,
@@ -335,5 +336,43 @@ describe('movement around buildings', () => {
       { type: 'commandRejected', tick: 0, command, reason: 'waypointBlocked' },
     ]);
     expect(sim.state.soldiers[0]?.orders).toBeNull();
+  });
+});
+
+describe('the nearest point clear of buildings', () => {
+  // WALL spans x −20..20, y −10..10.
+  const reach = OBSTACLE_CLEARANCE_M + 0.5;
+
+  it('is just outside the nearest wall, for a point inside or too close', () => {
+    const t = terrainWith({ buildings: [WALL] });
+    expect(nearestPointClearOfBuildings(t, { x: 0, y: 8 })).toEqual({ x: 0, y: 10 + reach });
+    expect(nearestPointClearOfBuildings(t, { x: 15, y: 0 })).toEqual({ x: 20 + reach, y: 0 });
+    const close = nearestPointClearOfBuildings(t, { x: 0, y: 10.3 });
+    expect(close?.x).toBeCloseTo(0);
+    expect(close?.y).toBeCloseTo(10 + reach);
+  });
+
+  it('searches round the point when that spot is blocked or refused', () => {
+    // A second building just north of the wall: its gap is too narrow to stand in.
+    const north = { id: 'B-2', footprint: rectangle(0, 13, 40, 2), heightMeters: 6 };
+    const t = terrainWith({ buildings: [WALL, north] });
+    const p = { x: 0, y: 8 };
+    const q = nearestPointClearOfBuildings(t, p);
+    expect(q).not.toBeNull();
+    expect(q && pointProblem(t, q)).toBeNull();
+    expect(q && Math.hypot(q.x - p.x, q.y - p.y)).toBeLessThan(25);
+    // A refusing `accept` is honoured too.
+    const notNorth = nearestPointClearOfBuildings(
+      terrainWith({ buildings: [WALL] }),
+      p,
+      (c) => c.y < 0,
+    );
+    expect(notNorth && notNorth.y < 0 && pointProblem(t, notNorth) === null).toBe(true);
+  });
+
+  it('leaves a good point as it is, and does nothing for problems other than buildings', () => {
+    const t = terrainWith({ buildings: [WALL] });
+    expect(nearestPointClearOfBuildings(t, { x: 50, y: 50 })).toEqual({ x: 50, y: 50 });
+    expect(nearestPointClearOfBuildings(t, { x: 500, y: 0 })).toBeNull();
   });
 });

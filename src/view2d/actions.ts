@@ -82,8 +82,13 @@ export function createMapActions(
       editTeam((unitId) => {
         const formation = exercise.placeFormation(unitId, point);
         const team = exercise.formationGroups.find((t) => t.unitId === unitId);
+        const moved = formation.movedClear.map(label);
         notify(
-          `${team?.name ?? unitId} placed: ${String(formation.slots.length)} Marines ${String(formation.spacingM)} m apart, facing ${formatBearing(formation.azimuth)}.`,
+          `${team?.name ?? unitId} placed: ${String(formation.slots.length)} Marines ${String(formation.spacingM)} m apart, facing ${formatBearing(formation.azimuth)}.${
+            moved.length > 0
+              ? ` ${moved.join(', ')} ${moved.length === 1 ? 'was' : 'were'} moved clear of a building.`
+              : ''
+          }`,
         );
       });
     },
