@@ -1,4 +1,5 @@
 import {
+  buildPreviewScenario,
   buildScenario,
   createExercise,
   OPFOR_FORCES,
@@ -145,7 +146,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         </div>
         <div class="tool-row">
           <button class="small" data-ui="clear-route" title="Remove the route's waypoints (the OPFOR stays where it starts)">Clear route</button>
-          <button class="small" data-ui="reset-scenario" title="Back to the default scenario: ORP near the centre, no OPFOR">Reset scenario</button>
+          <button class="small" data-ui="reset-scenario" title="Back to a new scenario: no ORP, no OPFOR">Reset scenario</button>
         </div>
         <p class="hint" data-ui="scenario-hint"></p>
       </div>
@@ -272,7 +273,9 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   const scenarioOf = (d: ScenarioDefinition) => buildScenario(o.terrain, d);
   /** Where the squad's organization comes from (the same for every scenario). */
   const source = rosterSource(
-    o.scenario.kind === 'fixed' ? o.scenario.scenario : scenarioOf(o.scenario.definition),
+    o.scenario.kind === 'fixed'
+      ? o.scenario.scenario
+      : buildPreviewScenario(o.terrain, o.scenario.definition).scenario,
   );
 
   /** The exercise of stages 3–5; created when first needed (on a battlefield). */
@@ -291,6 +294,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   /** What the map shows: the scenario preview while editing a battlefield's scenario. */
   const shown = (): Exercise =>
     stage === 'scenario' && scenarioStage ? scenarioStage.preview : ex();
+
+  /** Whether the squad is not shown: while editing a scenario whose ORP is not placed yet. */
+  const squadHidden = () =>
+    stage === 'scenario' && scenarioStage !== null && !scenarioStage.squadPlaced;
 
   /** Whether stage 2 must not change the scenario now, and why. */
   const scenarioLock = (): 'fixed' | 'executed' | null =>
@@ -324,6 +331,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     },
     notify,
     ...(editor ? { editor } : {}),
+    hideTrainee: () => squadHidden(),
   };
   const adopt = (handed: TacticalMap): TacticalMap => {
     // The preview's canvas takes the placeholder's place: same size, so the
@@ -470,8 +478,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   ui('reset-scenario').addEventListener('click', () => {
     if (!scenarioStage || scenarioLock() !== null) return;
     confirm({
-      message:
-        'Reset the scenario? The ORP goes back near the centre and the OPFOR and its route are removed.',
+      message: 'Reset the scenario? The ORP, the OPFOR and its route are removed.',
       action: 'Reset scenario',
       onConfirm: () => {
         scenarioStage.reset();
@@ -939,7 +946,12 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     setText(ui('primary-reason'), reason ?? '');
     ui('primary-reason').hidden = reason === null;
 
-    setHtml(ui('roster'), rosterHtml(shown(), session, source));
+    if (squadHidden()) {
+      // Nothing hidden stays selected (e.g. after Reset scenario).
+      if (session.selectedSoldierId !== null || session.selectedFireTeamId !== null)
+        session = clearSelection(session);
+      setHtml(ui('roster'), '<p class="muted">Place the ORP to deploy the squad.</p>');
+    } else setHtml(ui('roster'), rosterHtml(shown(), session, source));
 
     // The map banner (stages 3 and 4).
     const banner =

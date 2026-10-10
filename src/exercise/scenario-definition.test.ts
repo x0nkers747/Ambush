@@ -12,6 +12,7 @@ import { createExercise } from './exercise';
 import { orpContains } from './orp';
 import {
   addRouteWaypoint,
+  buildPreviewScenario,
   buildScenario,
   clearRoute,
   defaultScenarioDefinition,
@@ -276,5 +277,28 @@ describe('saving and reloading', () => {
       /ORP is not a map point/,
     );
     expect(() => parseScenarioDefinition(null)).toThrow(/not an object/);
+  });
+});
+
+describe('a new scenario without an ORP', () => {
+  it('has no ORP or OPFOR, and asks for the ORP before it can be played', () => {
+    const d = defaultScenarioDefinition(T, 'bf-new', undefined, { withOrp: false });
+    expect(d.orp).toBeNull();
+    expect(d.opfor.route).toEqual([]);
+    expect(scenarioProblems(T, d)[0]).toBe('Place the ORP.');
+    expect(() => buildScenario(T, d)).toThrow(/no ORP/);
+  });
+
+  it('previews with the squad built but not placed, until the ORP is placed', () => {
+    const d = defaultScenarioDefinition(T, 'bf-new', undefined, { withOrp: false });
+    const before = buildPreviewScenario(T, d);
+    expect(before.squadPlaced).toBe(false);
+    // The squad exists (so the exercise has its organization), at the suggested ORP.
+    expect(before.scenario.soldiers.some((s) => s.side === 'BLUEFOR')).toBe(true);
+    expect(before.scenario.orp.centre).toEqual(defaultScenarioDefinition(T, 'bf-new').orp);
+    const placed = expectOk(setOrp(T, d, { x: 0, y: 0 }));
+    const after = buildPreviewScenario(T, placed);
+    expect(after.squadPlaced).toBe(true);
+    expect(after.scenario).toEqual(buildScenario(T, placed));
   });
 });

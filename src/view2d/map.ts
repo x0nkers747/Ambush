@@ -46,6 +46,8 @@ export interface MapBinding {
   readonly notify?: (message: string) => void;
   /** Editor hooks: clicks and drags go to the editor instead of the exercise. */
   readonly editor?: MapEditor;
+  /** Whether the trainee's squad is not placed yet (no ORP): it and its ORP are then not drawn. */
+  readonly hideTrainee?: () => boolean;
 }
 
 export interface TacticalMapOptions extends MapBinding {
@@ -179,7 +181,15 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
 
   const viewsheds = createViewshedService(world.terrain);
   let visibility: VisibilityView | null = null;
-  const scene = (): MapScene => buildScene(current, getSession(), camera, viewport, visibility);
+  const scene = (): MapScene =>
+    buildScene(
+      current,
+      getSession(),
+      camera,
+      viewport,
+      visibility,
+      binding.hideTrainee?.() ?? false,
+    );
 
   /**
    * The selected soldier's viewshed from its destination (or where it stands): a

@@ -73,22 +73,27 @@ export type EditResult =
 const ok = (definition: ScenarioDefinition): EditResult => ({ ok: true, definition });
 const refused = (problem: string): EditResult => ({ ok: false, problem });
 
+/** The ORP on open ground nearest the centre (as the minimal scenario places it), or `null`. */
+export function suggestedOrp(terrain: TerrainDataset): MapPoint | null {
+  try {
+    return placeOrp(terrain, USMC_RIFLE_SQUAD_TEMPLATE.slots.length).centre;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * A new scenario on a battlefield: the ORP on open ground nearest the centre
- * (as the minimal scenario places it), no OPFOR yet.
+ * A new scenario on a battlefield, with no OPFOR yet: the ORP at the
+ * suggested spot (`suggestedOrp`), or with `withOrp: false` none, for the
+ * trainee to place.
  */
 export function defaultScenarioDefinition(
   terrain: TerrainDataset,
   battlefieldId: string,
   name = 'Scenario 1',
+  { withOrp = true }: { readonly withOrp?: boolean } = {},
 ): ScenarioDefinition {
-  const orp = (() => {
-    try {
-      return placeOrp(terrain, USMC_RIFLE_SQUAD_TEMPLATE.slots.length).centre;
-    } catch {
-      return null;
-    }
-  })();
+  const orp = withOrp ? suggestedOrp(terrain) : null;
   return {
     schema: SCENARIO_SCHEMA,
     schemaVersion: SCENARIO_SCHEMA_VERSION,
@@ -338,6 +343,25 @@ export function buildScenario(terrain: TerrainDataset, d: ScenarioDefinition): A
     organization: squad.organization,
     opforLoadouts: Object.fromEntries(soldiers.map((s) => [s.id, force.loadout])),
   };
+}
+
+/**
+ * A scenario for display while it is edited. Without an ORP the squad is
+ * still built, at the suggested ORP, so the exercise has its organization,
+ * but `squadPlaced` is false: the squad and the ORP are not to be shown.
+ * Throws a `ScenarioDefinitionError` when there is no open ground for it.
+ */
+export function buildPreviewScenario(
+  terrain: TerrainDataset,
+  d: ScenarioDefinition,
+): { readonly scenario: AmbushScenario; readonly squadPlaced: boolean } {
+  if (d.orp) return { scenario: buildScenario(terrain, d), squadPlaced: true };
+  const orp = suggestedOrp(terrain);
+  if (!orp)
+    throw new ScenarioDefinitionError(
+      'There is no open ground on this battlefield where the squad can assemble.',
+    );
+  return { scenario: buildScenario(terrain, { ...d, orp }), squadPlaced: false };
 }
 
 /**

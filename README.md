@@ -49,7 +49,8 @@ button.
    map, with its saved scenario, and opens with **Open battlefield**. The synthetic demo is not
    listed; it opens at the address `#demo`.
 2. **Edit Scenario.** On the tactical map, with the tools in the side panel:
-   - **Place ORP**: click where the squad assembles (or drag the ORP).
+   - **Place ORP**: click where the squad assembles (or drag the ORP). A new battlefield has no
+     ORP, so the squad is not shown until you place one.
    - **Place OPFOR**: click where the OPFOR patrol (three soldiers) starts (or drag it).
    - **Edit OPFOR route**: click to add waypoints in order; drag a waypoint to move it; right-click
      to delete it. The patrol walks straight between waypoints, round buildings where needed.

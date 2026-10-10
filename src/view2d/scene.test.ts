@@ -216,3 +216,16 @@ describe('combat on the map (docs/adr/0019)', () => {
     expect(buildScene(exercise, createSession(), camera, viewport).soldiers).toHaveLength(16);
   });
 });
+
+describe('a squad that is not placed yet', () => {
+  it('is left out of the scene, with its ORP; the OPFOR stays', () => {
+    const { exercise, session } = setup();
+    const shown = buildScene(exercise, session, FITTED, viewport);
+    const hidden = buildScene(exercise, session, FITTED, viewport, null, true);
+    expect(shown.orp).not.toBeNull();
+    expect(hidden.orp).toBeNull();
+    expect(hidden.soldiers.some((s) => s.side === 'BLUEFOR')).toBe(false);
+    expect(hidden.soldiers).toHaveLength(shown.soldiers.filter((s) => s.side !== 'BLUEFOR').length);
+    expect(hidden.plans).toEqual([]);
+  });
+});

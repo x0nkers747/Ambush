@@ -5,7 +5,7 @@ import {
   type BattlefieldStore,
 } from '#acquire';
 import {
-  buildScenario,
+  buildPreviewScenario,
   DEMO_SCENARIO,
   defaultScenarioDefinition,
   parseScenarioDefinition,
@@ -84,12 +84,16 @@ async function loadScenario(
       if (definition.battlefieldId === pkg.id) return { definition, notice: null };
     } catch (error) {
       return {
-        definition: defaultScenarioDefinition(pkg.terrain, pkg.id),
+        definition: defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false }),
         notice: `The saved scenario could not be read and was replaced by a new one: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
-  return { definition: defaultScenarioDefinition(pkg.terrain, pkg.id), notice: null };
+  // A new scenario: the trainee places the ORP (and the OPFOR) in stage 2.
+  return {
+    definition: defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false }),
+    notice: null,
+  };
 }
 
 /**
@@ -105,13 +109,20 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Bat
 /** What the terrain-selection preview shows of a battlefield and its scenario. */
 function previewData(pkg: BattlefieldPackage, definition: ScenarioDefinition): PreviewData {
   const waypoints = Math.max(0, definition.opfor.route.length - 1);
+  const { scenario, squadPlaced } = buildPreviewScenario(pkg.terrain, definition);
+  const opfor =
+    definition.opfor.route.length === 0
+      ? 'no OPFOR yet'
+      : `OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`;
   return {
-    scenario: buildScenario(pkg.terrain, definition),
+    scenario,
+    squadPlaced,
     attribution: pkg.attribution,
-    caption:
-      definition.opfor.route.length === 0
-        ? 'Saved scenario: ORP only, no OPFOR yet'
-        : `Saved scenario: ORP, OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`,
+    caption: squadPlaced
+      ? `Saved scenario: ORP, ${opfor}`
+      : definition.opfor.route.length === 0
+        ? 'No scenario yet: place the ORP and the OPFOR in Edit Scenario'
+        : `Saved scenario: no ORP yet, ${opfor}`,
   };
 }
 
@@ -184,15 +195,6 @@ async function main(root: HTMLElement): Promise<void> {
         // A map of another load of this battlefield shows another terrain object.
         map?.dispose();
         map = null;
-      }
-      if (!definition.orp) {
-        previous?.dispose();
-        map?.dispose();
-        showFatal(
-          root,
-          'There is no open ground on this battlefield where the squad can assemble.',
-        );
-        return;
       }
       let latest = definition;
       const save = (d: ScenarioDefinition) => {

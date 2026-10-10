@@ -552,8 +552,8 @@ describe('the ORP', () => {
   it('is in the scene as a reference outline and never takes clicks', () => {
     const ui = setup();
     const scene = buildScene(ui.exercise, ui.session, ui.camera, { width: 400, height: 400 });
-    expect(scene.orp.name).toBe('ORP');
-    expect(scene.orp.outline.length).toBeGreaterThan(8);
+    expect(scene.orp?.name).toBe('ORP');
+    expect(scene.orp?.outline.length).toBeGreaterThan(8);
     ui.click(0, 0);
     ui.click(25, 20); // inside the ORP, away from both soldiers: a destination like anywhere else
     expect(ui.destination()).toEqual([25, 20]);

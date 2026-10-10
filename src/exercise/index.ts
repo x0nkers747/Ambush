@@ -17,6 +17,7 @@ export { DEFAULT_COMBAT_CONFIG } from './combat';
 export { DEMO_SCENARIO } from './demo-scenario';
 export {
   addRouteWaypoint,
+  buildPreviewScenario,
   buildScenario,
   clearRoute,
   defaultScenarioDefinition,

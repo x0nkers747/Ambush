@@ -13,6 +13,8 @@ import { createTacticalMap, type TacticalMap } from '#view2d';
 export interface PreviewData {
   /** The battlefield's scenario as it would be played (its terrain is the battlefield's). */
   readonly scenario: AmbushScenario;
+  /** Whether its ORP is placed; until then the squad and the ORP are not shown. */
+  readonly squadPlaced: boolean;
   /** Source credits shown on the map. */
   readonly attribution: readonly string[];
   /** A short line about the scenario, e.g. "No OPFOR yet". */
@@ -101,6 +103,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       setSession: (next: Session) => {
         session = next;
       },
+      hideTrainee: () => !data.squadPlaced,
     };
     const canvas = existing?.canvas ?? document.createElement('canvas');
     canvas.id = '';

@@ -28,7 +28,10 @@ workflow to test and iterate on, not a polished editor.
 
 - `id` and `battlefieldId`;
 - `name`;
-- `orp`: the centre of a 14 m circle, or `null`;
+- `orp`: the centre of a 14 m circle, or `null`. A new scenario has none: the trainee places it.
+  Until then the squad and the ORP are not shown, in the scenario editor or the terrain-selection
+  preview (`buildPreviewScenario` builds the squad at the suggested ORP, so the exercise has its
+  organization, and marks it not placed; the map leaves it out);
 - `opfor: { force, route }`: the force id and the route as local map points, whose **first point
   is where the OPFOR starts**.
 

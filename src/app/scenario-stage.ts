@@ -1,7 +1,7 @@
 import {
   addRouteWaypoint,
   AUTO_ORP_RADIUS_M,
-  buildScenario,
+  buildPreviewScenario,
   clearRoute,
   createExercise,
   defaultScenarioDefinition,
@@ -61,13 +61,15 @@ export interface ScenarioStage {
   readonly definition: ScenarioDefinition;
   /** The exercise the map shows while editing: the scenario as it would be played. */
   readonly preview: Exercise;
+  /** Whether the ORP is placed; until then the squad is not shown (`buildPreviewScenario`). */
+  readonly squadPlaced: boolean;
   tool: ScenarioTool;
   /** Map hooks; the workspace decides when they are active. */
   readonly editor: MapEditor;
   /** `scenarioProblems` for the current definition (computed once per edit). */
   problems(): readonly string[];
   clearRoute(): void;
-  /** Back to the default scenario: ORP near the centre, no OPFOR. */
+  /** Back to a new scenario: no ORP, no OPFOR. */
   reset(): void;
   deleteWaypoint(index: number): void;
   /** Saves now (e.g. before playing); rejects with the reason it failed. */
@@ -80,7 +82,7 @@ export interface ScenarioStage {
 export function previewExercise(terrain: TerrainDataset, d: ScenarioDefinition): Exercise {
   return createExercise({
     config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 1 },
-    scenario: buildScenario(terrain, d),
+    scenario: buildPreviewScenario(terrain, d).scenario,
   });
 }
 
@@ -269,6 +271,9 @@ export function createScenarioStage(o: ScenarioStageOptions): ScenarioStage {
     get preview() {
       return preview;
     },
+    get squadPlaced() {
+      return definition.orp !== null;
+    },
     get tool() {
       return tool;
     },
@@ -284,9 +289,11 @@ export function createScenarioStage(o: ScenarioStageOptions): ScenarioStage {
       commit(clearRoute(definition));
     },
     reset() {
-      const fresh = defaultScenarioDefinition(terrain, definition.battlefieldId, definition.name);
+      const fresh = defaultScenarioDefinition(terrain, definition.battlefieldId, definition.name, {
+        withOrp: false,
+      });
       commit({ ...fresh, id: definition.id });
-      tool = fresh.orp ? 'opfor' : 'orp';
+      tool = 'orp';
     },
     deleteWaypoint(index) {
       apply(deleteRouteWaypoint(terrain, definition, index));

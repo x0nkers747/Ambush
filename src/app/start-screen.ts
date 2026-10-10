@@ -297,7 +297,7 @@ export function startBattlefieldSelection(
             <dt>Size</dt><dd>${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m · UTM ${String(frame.zone)}${frame.hemisphere}</dd>
             <dt>Elevation</dt><dd>${String(DEFAULT_CELL_SIZE_M)} m grid</dd>
           </dl>
-          <p class="muted">Your squad starts on open ground near the centre; there is no OPFOR yet.
+          <p class="muted">You place the squad's ORP and the OPFOR in Edit Scenario.
           <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">View on OpenStreetMap</a></p>`;
       }
     }

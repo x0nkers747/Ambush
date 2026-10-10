@@ -899,7 +899,9 @@ function walkedPoints(route: PlannedRoute): Vec2[] {
 
 /** The objective rally point: a subtle outline and fill with its name, beneath everything planned. */
 function drawOrp(ctx: CanvasRenderingContext2D, scene: MapScene): void {
-  const points = scene.orp.outline.map((p) => worldToScreen(scene.camera, scene.viewport, p));
+  const orp = scene.orp;
+  if (!orp) return;
+  const points = orp.outline.map((p) => worldToScreen(scene.camera, scene.viewport, p));
   if (points.length < 3) return;
   ctx.save();
   ctx.beginPath();
@@ -917,15 +919,15 @@ function drawOrp(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.setLineDash([]);
   // The name sits just outside the northern edge, clear of the soldiers inside.
   const top = points.reduce((a, b) => (b.y < a.y ? b : a));
-  const centre = worldToScreen(scene.camera, scene.viewport, scene.orp.centre);
+  const centre = worldToScreen(scene.camera, scene.viewport, orp.centre);
   ctx.font = 'bold 11px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.lineWidth = 3;
   ctx.strokeStyle = COLORS.labelHalo;
-  ctx.strokeText(scene.orp.name, centre.x, top.y - 3);
+  ctx.strokeText(orp.name, centre.x, top.y - 3);
   ctx.fillStyle = COLORS.orpEdge;
-  ctx.fillText(scene.orp.name, centre.x, top.y - 3);
+  ctx.fillText(orp.name, centre.x, top.y - 3);
   ctx.restore();
 }
 

@@ -63,8 +63,12 @@ export interface MapScene {
   readonly facings: ReadonlyMap<SoldierId, DisplayedFacing>;
   /** Icon and label of each trainee soldier, from the organization template. */
   readonly markings: ReadonlyMap<SoldierId, SoldierMarking>;
-  /** The trainee organization's objective rally point. */
-  readonly orp: { readonly name: string; readonly centre: Vec2; readonly outline: readonly Vec2[] };
+  /** The trainee organization's objective rally point, or `null` while the squad is hidden. */
+  readonly orp: {
+    readonly name: string;
+    readonly centre: Vec2;
+    readonly outline: readonly Vec2[];
+  } | null;
   /** Scenario OPFOR routes the trainee may see, with their walkable paths. */
   readonly opforRoutes: readonly { readonly route: OpforRoute; readonly path: PlannedRoute }[];
   /** The selected soldier's visible area, while the visibility overlay is on. */
@@ -144,8 +148,16 @@ export function buildScene(
   camera: Camera,
   viewport: Viewport,
   visibility: VisibilityView | null = null,
+  /** The trainee's squad is not placed yet: neither it nor its ORP is drawn (or can be selected). */
+  hideTrainee = false,
 ): MapScene {
-  const { state, world } = exercise.simulation;
+  const { world } = exercise.simulation;
+  const state = hideTrainee
+    ? {
+        ...exercise.simulation.state,
+        soldiers: exercise.simulation.state.soldiers.filter((s) => s.side !== TRAINEE_SIDE),
+      }
+    : exercise.simulation.state;
   const plans = state.soldiers.flatMap((s) => exercise.displayedPlan(s.id) ?? []);
   const selectedPlan = plans.find((p) => p.soldierId === session.selectedSoldierId);
   const orp = exercise.orp;
@@ -192,11 +204,13 @@ export function buildScene(
           : [];
       }),
     ),
-    orp: {
-      name: orp.name,
-      centre: { x: orp.centre.east, y: orp.centre.north },
-      outline: orpOutline(orp),
-    },
+    orp: hideTrainee
+      ? null
+      : {
+          name: orp.name,
+          centre: { x: orp.centre.east, y: orp.centre.north },
+          outline: orpOutline(orp),
+        },
     opforRoutes: exercise.opforRoutes.flatMap((route) => {
       const path = exercise.opforRoutePaths.get(route.id);
       return route.shownToTrainee && path ? [{ route, path }] : [];
