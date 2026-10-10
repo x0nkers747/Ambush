@@ -126,6 +126,13 @@ schemas and versions, invalid terrain, and content that no longer matches its id
   - tree rows and hedges become strips of rectangles;
   - water, wetland, waterways and land use are mapped as listed above.
 - **Multipolygons:** relation rings are assembled from member ways.
+- **The sea (`coastline.ts`):** OSM maps the sea only by its shore, `natural=coastline` ways
+  drawn with the land on the left. They are joined in drawing order, clipped, and closed along
+  the battlefield edge on the water side, so the sea becomes `water` areas (`osm-sea…`).
+  Coastline rings drawn counter-clockwise that lie entirely inside the battlefield are islands
+  (holes). A battlefield no coastline reaches is all land. Coastline data that ends inside the
+  battlefield gives no sea, with a warning, rather than a wrong one. Battlefields generated
+  before this change have no coastlines in their saved OSM data, and need generating again.
 - **Clipping:** everything is clipped to the battlefield. Polygons use a Weiler–Atherton walk
   specialised to the rectangle, so a polygon that leaves and re-enters becomes separate simple
   polygons. Lines use Liang–Barsky.

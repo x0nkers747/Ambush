@@ -16,12 +16,14 @@ import {
   type WaterwayKind,
 } from '#sim';
 import { clipPolygon, clipPolyline, dedupe, type Rect } from './clip';
+import { joinCoastlines, seaFromCoastlines } from './coastline';
 import { toLocal, type BattlefieldFrame, type GeoBox } from './frame';
 import type { LatLon } from './utm';
 
 // OpenStreetMap features from an Overpass API response (docs/adr/0014):
-// roads and tracks, buildings, woods and other vegetation, water, waterways
-// and land use, in the battlefield's local metres, clipped to it. OSM data is
+// roads and tracks, buildings, woods and other vegetation, water (lakes and
+// rivers, and the sea from coastlines), waterways and land use, in the
+// battlefield's local metres, clipped to it. OSM data is
 // often incomplete or imperfect: anything that cannot be turned into valid
 // geometry is dropped and reported, never allowed to fail the import, and
 // every value taken from a default rather than the data is marked estimated.
@@ -79,6 +81,8 @@ export function overpassQuery(
       `way["water"](${bbox});`,
       `relation["water"]["type"="multipolygon"](${bbox});`,
       `way["barrier"="hedge"](${bbox});`,
+      // The sea is not mapped as areas, only its shore (coastline.ts).
+      `way["natural"="coastline"](${bbox});`,
     ].join('\n  ');
   });
   return `[out:json][timeout:${String(timeoutSeconds)}];\n(\n  ${parts.join('\n  ')}\n);\nout geom;`;
@@ -304,6 +308,8 @@ export function featuresFromOsm(
   const warnings: string[] = [];
   let holesAtEdge = 0;
   let courtyards = 0;
+  /** Coastline ways, for the sea (coastline.ts). */
+  const coastlines: LatLon[][] = [];
 
   const elements = [...response.elements].sort(
     (a, b) => a.type.localeCompare(b.type) || a.id - b.id,
@@ -451,6 +457,12 @@ export function featuresFromOsm(
     if (el.type === 'way') {
       const ref = `osm:way/${String(el.id)}`;
       const base = `osm-w${String(el.id)}`;
+      if (tags['natural'] === 'coastline') {
+        if (el.geometry && !el.geometry.some((p) => p === null))
+          coastlines.push(el.geometry as LatLon[]);
+        else dropped.push({ ref, reason: 'missing geometry' });
+        continue;
+      }
       const isArea = closed(el.geometry) && tags['area'] !== 'no';
       // Lines first: roads, waterways, tree rows, hedges.
       const roadClass = roadClassOf(tags);
@@ -555,6 +567,24 @@ export function featuresFromOsm(
       });
       if (shapes.length > 0) addArea(tags, shapes, ref, `osm-r${String(el.id)}`);
     }
+  }
+
+  // The sea, from the coastlines.
+  if (coastlines.length > 0) {
+    const chains = joinCoastlines(coastlines).map((c) => c.map((p) => toLocal(frame, p)));
+    const sea = seaFromCoastlines(chains, rect);
+    if (sea.problem) warnings.push(sea.problem);
+    ids('osm-sea', sea.areas.length).forEach((id, i) => {
+      const area = sea.areas[i];
+      if (!area) return;
+      water.push({
+        id,
+        kind: 'water',
+        boundary: area.boundary,
+        ...(area.holes.length > 0 ? { holes: area.holes } : {}),
+        source: { ref: 'osm:natural=coastline' },
+      });
+    });
   }
 
   if (holesAtEdge > 0) {

@@ -60,6 +60,20 @@ function pointAt(a: Vec2, b: Vec2, t: number, r: Rect): Vec2 {
   };
 }
 
+/** Whether a point lies (numerically) on the rectangle's edge. */
+export function onEdge(p: Vec2, r: Rect): boolean {
+  const eps = 1e-9 * Math.max(1, r.maxX - r.minX, r.maxY - r.minY);
+  const within = (v: number, lo: number, hi: number) => v >= lo - eps && v <= hi + eps;
+  return (
+    within(p.x, r.minX, r.maxX) &&
+    within(p.y, r.minY, r.maxY) &&
+    (Math.abs(p.x - r.minX) <= eps ||
+      Math.abs(p.x - r.maxX) <= eps ||
+      Math.abs(p.y - r.minY) <= eps ||
+      Math.abs(p.y - r.maxY) <= eps)
+  );
+}
+
 /** Distance along the rectangle's edge, counter-clockwise from its south-west corner. */
 function perimeterParam(p: Vec2, r: Rect): number {
   const w = r.maxX - r.minX;
@@ -153,7 +167,17 @@ export function clipPolygon(ring: readonly Vec2[], r: Rect): Vec2[][] {
       : [];
   }
 
-  // Join chains: from each exit, follow the edge counter-clockwise to the next entry.
+  return joinAlongEdge(chains, r);
+}
+
+/**
+ * Closes chains that run inside the rectangle from an entry point on its edge
+ * to an exit point on its edge into rings: from each exit, the edge is
+ * followed counter-clockwise to the next entry. Each ring is counter-clockwise
+ * with the area left of its chains inside (an outline's interior; the sea for
+ * reversed coastlines).
+ */
+export function joinAlongEdge(chains: readonly (readonly Vec2[])[], r: Rect): Vec2[][] {
   const perimeter = 2 * (r.maxX - r.minX + r.maxY - r.minY);
   const corners = [
     { s: 0, p: { x: r.minX, y: r.minY } },
