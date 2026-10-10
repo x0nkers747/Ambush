@@ -31,6 +31,9 @@ npm install
 npm run dev
 ```
 
+It is also published to GitHub Pages, at https://x0nkers747.github.io/Ambush/, on every push to
+`main`: see [docs/GITHUB_PAGES_DEPLOYMENT.md](docs/GITHUB_PAGES_DEPLOYMENT.md).
+
 ## Choosing a battlefield, setting up the scenario, playing it
 
 Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. Ambush! is
