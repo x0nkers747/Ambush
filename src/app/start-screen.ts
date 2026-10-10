@@ -171,6 +171,13 @@ export function startBattlefieldSelection(
       <div class="primary-action">
         <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
         <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
+        <!-- Generation's progress and outcome, under its button so they stay in view. -->
+        <div data-ui="progress" hidden>
+          <ol class="bf-steps" data-ui="steps"></ol>
+          <div class="hint" data-ui="message" hidden></div>
+          <div class="bf-row"><button class="small" data-ui="cancel">Cancel</button></div>
+        </div>
+        <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </div>
       <section class="sec">
         <h2>Find a place</h2>
@@ -202,12 +209,6 @@ export function startBattlefieldSelection(
       <section class="sec">
         <h2>Selected</h2>
         <div class="sel-details" data-ui="preview"></div>
-        <div data-ui="progress" hidden>
-          <ol class="bf-steps" data-ui="steps"></ol>
-          <div class="hint" data-ui="message" hidden></div>
-          <div class="bf-row"><button class="small" data-ui="cancel">Cancel</button></div>
-        </div>
-        <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </section>
       <footer class="sel-credits muted">
         Map data © OpenStreetMap contributors (ODbL). Buildings: Overture Maps Foundation (ODbL).
@@ -329,8 +330,19 @@ export function startBattlefieldSelection(
 
   const markSelected = () => {
     const id = selection.kind === 'saved' ? selection.summary.id : null;
-    for (const b of app.querySelectorAll<HTMLElement>('[data-select]'))
-      b.setAttribute('aria-pressed', String(b.dataset['select'] === id));
+    for (const b of app.querySelectorAll<HTMLElement>('[data-select]')) {
+      const on = b.dataset['select'] === id;
+      b.setAttribute('aria-pressed', String(on));
+      if (on) keepInView(b);
+    }
+  };
+  /** Scrolls the saved list (only the list) so a battlefield's row is in view. */
+  const keepInView = (item: HTMLElement) => {
+    const list = ui('saved');
+    const row = item.closest<HTMLElement>('li') ?? item;
+    if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
+    else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight)
+      list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
   };
 
   const select = (next: Selection) => {
@@ -633,7 +645,7 @@ export function startBattlefieldSelection(
         .map(
           (
             b,
-          ) => `<li class="bf-saved-row"><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false">
+          ) => `<li class="bf-saved-row"><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false" title="${escapeHtml(b.name)}">
             <b>${escapeHtml(b.name)}</b>
             <span class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</span>
           </button><button class="bf-delete" data-delete="${escapeHtml(b.id)}" aria-label="Delete ${escapeHtml(b.name)}" title="Delete ${escapeHtml(b.name)}">${TRASH_ICON}</button></li>`,

@@ -903,6 +903,23 @@
         flex-direction: column;
         gap: 4px;
       }
+      /* The saved list shows five rows and scrolls on its own, so the rest of
+         the panel stays put however many battlefields there are. Rows are one
+         height (names are cut, not wrapped); the padding keeps focus outlines
+         inside the scrolling box. */
+      .bf-saved[data-ui='saved'] {
+        --bf-row-h: 47px;
+        position: relative;
+        max-height: calc(5 * var(--bf-row-h) + 4 * 4px + 4px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 2px 4px 2px 2px;
+        margin: -2px -4px -2px -2px;
+      }
+      .bf-saved-row {
+        flex: none;
+        height: var(--bf-row-h);
+      }
       .bf-saved-row {
         display: flex;
         align-items: stretch;
@@ -940,6 +957,13 @@
         color: #fff;
         background: var(--red-strong);
         border-color: #ff8a80;
+      }
+      .bf-item b,
+      .bf-item span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .bf-item span {
         font-size: 12px;
