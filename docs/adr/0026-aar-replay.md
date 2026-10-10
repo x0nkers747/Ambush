@@ -72,9 +72,9 @@ panel is hidden in stage 5. The status shows the engagement result as at the rep
 
 ### Back to planning
 
-**Return to Planning** (the stage's primary action) builds a new exercise with the plan as it was
+**Try again** (the stage's primary action, "← Try again") builds a new exercise with the plan as it was
 executed (`carryPlans`: each Marine's destination and facing, the formations, the kill zone) and
-opens BLUEFOR planning. Nobody is hurt or moved: the new exercise starts from the scenario.
+opens BLUEFOR planning with the Waypoints tool selected. Nobody is hurt or moved: the new exercise starts from the scenario.
 
 Formations are carried in the order they were last placed (`Exercise.plannedFormations`, which,
 unlike `formation`, also answers once the plan has been executed). Until now they were lost from
@@ -90,7 +90,7 @@ The three kinds of state stay apart:
 ## Consequences
 
 - A replay shows the run as it happened, including the simulation's current limitations.
-- The recording lives in memory with its exercise. Return to Planning replaces the exercise, so
+- The recording lives in memory with its exercise. Try again replaces the exercise, so
   the previous run's replay is no longer offered once the trainee is back in planning; the next
   run makes the next recording. Keeping earlier runs is left for later.
 - Reloading the page loses the recording, as it loses the exercise (ADR 0025).

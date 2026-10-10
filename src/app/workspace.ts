@@ -626,7 +626,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     scenario: 'Continue to BLUEFOR Planning →',
     bluefor: 'Continue to OPFOR & Combat →',
     opfor: 'View After Action Review →',
-    aar: '← Return to Planning',
+    aar: '← Try again',
   };
   /**
    * Back to BLUEFOR planning from the After Action Review: a new exercise with
@@ -637,6 +637,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   const returnToPlanning = () => {
     replay.playing = false;
     rebuild('Back to planning.');
+    // Back to placing Marines: the Waypoints tool, whichever was used last.
+    planningTool = 'deploy';
     enter('bluefor');
     if (!carryNotice)
       notify('Back to BLUEFOR Planning with your plan as it was executed: change it, then Move.');

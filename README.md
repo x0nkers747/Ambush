@@ -67,7 +67,7 @@ button.
    ambush, on the same map. Play, pause, step, jump to either end, drag the timeline to any moment
    (forward or back), and change the speed (0.25× to 4×). Select a Marine to see what they were
    doing at that moment, and tick **Follow the selected Marine** to keep the map on them.
-   **Return to Planning** takes you back to BLUEFOR planning with your plan as it was executed,
+   **Try again** takes you back to BLUEFOR planning with your plan as it was executed,
    ready to change and run again.
 
 Going back keeps your work. The exercise survives a step back to the scenario; if you then change

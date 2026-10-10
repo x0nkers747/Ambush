@@ -138,7 +138,7 @@ Stage tools and status by stage:
   there is one.
 - **Stage 5:** the replay controls (ADR 0026) and the selected Marine's state at the replay's
   moment; the floating simulation panel is hidden. Status shows the engagement result as at that
-  moment. The primary action is **Return to Planning**.
+  moment. The primary action is **Try again** (back to BLUEFOR planning, with the Waypoints tool).
 
 The roster (`roster.ts`) is shown in stage 3, with its selection, fire-team and squad selection
 and map sync; elsewhere Marines are selected on the map. Stage 1 has no squad yet. Help text that used to be permanent is now

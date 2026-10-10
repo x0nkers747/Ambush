@@ -568,7 +568,7 @@ export const REPLAY_HELP = `<h3>Replay (After Action Review)</h3>
   <dt>Blue symbol</dt><dd>Select a Marine to see what they were doing at that moment</dd>
 </dl>
 <p class="muted">The replay shows exactly what was recorded during the engagement; nothing is
-simulated again. Return to Planning goes back to BLUEFOR planning with your plan as it was
+simulated again. Try again goes back to BLUEFOR planning with your plan as it was
 executed, ready to change and run again.</p>`;
 
 /** Shown above the roster in BLUEFOR planning while nothing is selected. */
