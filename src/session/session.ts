@@ -6,8 +6,12 @@ import type { SoldierId } from '#sim';
 export const TIME_SCALES = [1, 4, 8, 16] as const;
 export type TimeScale = (typeof TIME_SCALES)[number];
 
-/** What map clicks edit: the selected soldier's destination and facing, or the kill zone. */
-export type MapTool = 'deploy' | 'killZone';
+/**
+ * What map clicks edit: the selected soldier's destination and facing, or the
+ * kill zone; with `view`, nothing (clicks only select), e.g. once planning is
+ * over (docs/adr/0025).
+ */
+export type MapTool = 'deploy' | 'killZone' | 'view';
 
 export interface Session {
   /** The trainee soldier whose plan is being viewed and edited, if any. */

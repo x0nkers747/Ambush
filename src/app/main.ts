@@ -5,7 +5,6 @@ import {
   type BattlefieldStore,
 } from '#acquire';
 import {
-  buildScenario,
   DEMO_SCENARIO,
   defaultScenarioDefinition,
   parseScenarioDefinition,
@@ -14,15 +13,16 @@ import {
 } from '#exercise';
 import type { BattlefieldPackage } from '#geo';
 import { shareTerrain } from '#sim';
-import { startExerciseUi } from './exercise-ui';
-import { startScenarioEditor } from './scenario-editor';
-import { parseStage, stageHash, type Stage } from './stages';
-import { battlefieldExercise, describePointFor, startBattlefieldSelection } from './start-screen';
+import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
+import { DEMO_ID, parseStage, stageHash, type Stage } from './stages';
+import { demoInfoHtml, startWorkspace } from './workspace';
 
-// Composition root: the three stages (docs/adr/0015). 1. terrain selection
-// (docs/adr/0014), 2. scenario editing, 3. BLUEFOR planning and execution.
-// Each stage has its own address (stages.ts); moving between stages saves what
-// matters first and reloads, so nothing from one stage keeps running in the next.
+// Composition root: the five-stage workflow (docs/adr/0025). Terrain
+// selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a battlefield
+// (scenario editing, BLUEFOR planning, OPFOR and combat, and the After Action
+// Review) share another (workspace.ts). Each page has its own address
+// (stages.ts); moving between pages saves what matters first and reloads, so
+// nothing from one page keeps running in the next.
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Missing #app element');
@@ -41,6 +41,11 @@ async function openStore(): Promise<{ store: BattlefieldStore; persistent: boole
   } catch {
     return { store: createMemoryStore(), persistent: false };
   }
+}
+
+/** Records an in-page stage change in the address without reloading, so a reload stays there. */
+function setAddress(stage: Stage): void {
+  window.history.replaceState(null, '', stageHash(stage) || window.location.pathname);
 }
 
 /** Goes to a stage: a new address and a fresh page. */
@@ -88,10 +93,10 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Bat
 }
 
 function showFatal(root: HTMLElement, message: string): void {
-  root.classList.add('start');
-  root.innerHTML = `<div class="start-screen"><div class="start-card"><h2>Something went wrong</h2>
+  root.className = 'select';
+  root.innerHTML = `<div class="fatal"><div class="sel-card"><h2>Something went wrong</h2>
     <p>${message.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`)}</p>
-    <div class="bf-row"><button class="primary" data-action="home">Back to terrain selection</button></div></div></div>`;
+    <div class="bf-row"><button class="primary-btn" data-action="home">Back to terrain selection</button></div></div></div>`;
   root.querySelector('[data-action="home"]')?.addEventListener('click', () => {
     go({ kind: 'select' });
   });
@@ -101,10 +106,6 @@ async function main(root: HTMLElement): Promise<void> {
   const { config, problems } = loadServiceConfig(localStorageOrNull());
   const { store, persistent } = await openStore();
   const stage = parseStage(window.location.hash);
-  const home = () => {
-    go({ kind: 'select' });
-  };
-
   switch (stage.kind) {
     case 'select':
       startBattlefieldSelection(root, {
@@ -112,6 +113,7 @@ async function main(root: HTMLElement): Promise<void> {
         configProblems: problems,
         store,
         persistent,
+        ...(stage.selected === undefined ? {} : { selected: stage.selected }),
         openDemo: () => {
           go({ kind: 'demo' });
         },
@@ -122,15 +124,24 @@ async function main(root: HTMLElement): Promise<void> {
       return;
 
     case 'demo':
-      startExerciseUi(root, {
-        scenario: DEMO_SCENARIO,
+      startWorkspace(root, {
         title: 'Demo battlefield',
+        terrain: DEMO_SCENARIO.terrain,
+        scenario: { kind: 'fixed', scenario: DEMO_SCENARIO },
         attribution: [],
-        onLeave: home,
+        infoHtml: demoInfoHtml(DEMO_SCENARIO),
+        initialStage: stage.play === true ? 'bluefor' : 'scenario',
+        leave: () => {
+          go({ kind: 'select', selected: DEMO_ID });
+        },
+        setAddress: (s) => {
+          setAddress({ kind: 'demo', play: s === 'bluefor' });
+        },
       });
       return;
 
-    case 'edit': {
+    case 'edit':
+    case 'play': {
       const pkg = await openBattlefield(store, stage.battlefieldId);
       const { definition, notice } = await loadScenario(store, pkg);
       if (!definition.orp) {
@@ -142,36 +153,22 @@ async function main(root: HTMLElement): Promise<void> {
       }
       const save = (d: ScenarioDefinition) => store.putScenario(pkg.id, d.id, d);
       await save(definition);
-      startScenarioEditor(root, {
+      // Only a complete scenario is played; otherwise it opens for editing.
+      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
+      startWorkspace(root, {
+        title: pkg.name,
         terrain: pkg.terrain,
-        battlefieldName: pkg.name,
-        definition,
+        scenario: { kind: 'editable', definition, save },
         attribution: pkg.attribution,
         describePoint: describePointFor(pkg),
-        save,
-        onBack: home,
-        onContinue: () => {
-          go({ kind: 'play', battlefieldId: pkg.id });
+        infoHtml: battlefieldInfoHtml(pkg),
+        initialStage: stage.kind === 'play' && playable ? 'bluefor' : 'scenario',
+        notice,
+        leave: () => {
+          go({ kind: 'select', selected: pkg.id });
         },
-      });
-      if (notice) root.querySelector('[data-ui="toast"]')?.replaceChildren(notice);
-      return;
-    }
-
-    case 'play': {
-      const pkg = await openBattlefield(store, stage.battlefieldId);
-      const { definition } = await loadScenario(store, pkg);
-      // Only a complete scenario is played; otherwise back to editing it.
-      if (scenarioProblems(pkg.terrain, definition).length > 0) {
-        go({ kind: 'edit', battlefieldId: pkg.id });
-        return;
-      }
-      const scenario = buildScenario(pkg.terrain, definition);
-      startExerciseUi(root, {
-        ...battlefieldExercise(pkg, scenario),
-        onLeave: home,
-        onEditScenario: () => {
-          go({ kind: 'edit', battlefieldId: pkg.id });
+        setAddress: (s) => {
+          setAddress({ kind: s === 'bluefor' ? 'play' : 'edit', battlefieldId: pkg.id });
         },
       });
       return;

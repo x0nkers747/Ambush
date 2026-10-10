@@ -61,6 +61,12 @@ export interface MapEditor {
   draw?(ctx: CanvasRenderingContext2D, toScreen: (p: Vec2) => Vec2): void;
   /** Cursor over a point, or `null` for the map's own. */
   cursor?(point: Vec2, screen: Vec2): string | null;
+  /**
+   * Whether the editor is in charge now (default: always). While it is not,
+   * the map behaves as if there were no editor (e.g. stages 3–5 of the
+   * workflow, docs/adr/0025).
+   */
+  active?(): boolean;
 }
 
 /** Map point under the pointer, for a coordinate readout. */
@@ -101,8 +107,10 @@ export function createTacticalMap({
   getSession,
   setSession,
   notify,
-  editor,
+  editor: editorHooks,
 }: TacticalMapOptions): TacticalMap {
+  const activeEditor = () =>
+    editorHooks && (editorHooks.active?.() ?? true) ? editorHooks : undefined;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D is not available');
   let current = exercise;
@@ -238,13 +246,17 @@ export function createTacticalMap({
   /** Editor gesture state: a drag the editor took, or where a press that may be a click began. */
   let editorDragging = false;
   let pressedAt: Vec2 | null = null;
-  const editorCursor = (p: Vec2) => editor?.cursor?.(toWorld(p), p) ?? null;
+  const editorCursor = (p: Vec2) => activeEditor()?.cursor?.(toWorld(p), p) ?? null;
+  /** The editor that took the current drag (it stays in charge until the drop). */
+  let dragEditor: MapEditor | undefined;
 
   const onPointerDown = (event: PointerEvent) => {
     canvas.setPointerCapture(event.pointerId);
     const p = local(event);
+    const editor = activeEditor();
     if (editor && event.button !== 1 && editor.press?.(toWorld(p), p, event.button)) {
       editorDragging = true;
+      dragEditor = editor;
       return;
     }
     pressedAt = event.button === 0 ? p : null;
@@ -256,7 +268,7 @@ export function createTacticalMap({
     const p = local(event);
     updatePointer(p);
     if (editorDragging) {
-      editor?.drag?.(toWorld(p));
+      dragEditor?.drag?.(toWorld(p));
       return;
     }
     controller.pointerMove({ ...p, button: event.button });
@@ -266,10 +278,12 @@ export function createTacticalMap({
     const p = local(event);
     if (editorDragging) {
       editorDragging = false;
-      editor?.drop?.(toWorld(p));
+      dragEditor?.drop?.(toWorld(p));
+      dragEditor = undefined;
       return;
     }
     const start = pressedAt;
+    const editor = activeEditor();
     pressedAt = null;
     if (
       editor &&
@@ -322,6 +336,7 @@ export function createTacticalMap({
     );
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOverlays(ctx, s, layer);
+    const editor = activeEditor();
     if (editor?.draw) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       editor.draw(ctx, (p) => worldToScreen(camera, viewport, p));

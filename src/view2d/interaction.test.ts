@@ -184,7 +184,7 @@ function setup() {
     setSession(next: Session) {
       session = next;
     },
-    useTool(tool: 'deploy' | 'killZone') {
+    useTool(tool: 'deploy' | 'killZone' | 'view') {
       session = setTool(session, tool);
     },
     useKillZoneTool() {
@@ -219,6 +219,34 @@ describe('selection', () => {
     const ui = setup();
     ui.click(30, 30);
     expect(ui.exercise.draft(A)?.destination).toBeNull();
+  });
+});
+
+// The view-only tool (docs/adr/0025): once planning is over, clicks select
+// but never edit plans or the kill zone.
+describe('the view tool', () => {
+  it('selects soldiers but sets no destination and draws no kill zone', () => {
+    const ui = setup();
+    ui.useTool('view');
+    ui.click(0, 0);
+    expect(ui.session.selectedSoldierId).toBe('A');
+    ui.click(-50, 40);
+    expect(ui.destination()).toBeNull();
+    ui.click(52, 3);
+    expect(ui.session.selectedSoldierId).toBe('B');
+    ui.click(30, 30);
+    ui.click(60, 30);
+    ui.click(60, 60);
+    expect(ui.corners()).toBeUndefined();
+  });
+
+  it('does not drag an existing destination', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.click(-40, 40);
+    ui.useTool('view');
+    ui.dragPixels(-40, 40, 25, -10);
+    expect(ui.destination()).toEqual([-40, 40]);
   });
 });
 

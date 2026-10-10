@@ -12,7 +12,6 @@ import {
   type PlaceResult,
   type ServiceConfig,
 } from '#acquire';
-import type { AmbushScenario } from '#exercise';
 import type { Vec2 } from '#sim';
 import {
   battlefieldRequest,
@@ -25,10 +24,14 @@ import {
   type BattlefieldPackage,
   type LatLon,
 } from '#geo';
-import type { ExerciseUiOptions } from './exercise-ui';
+import { createToast, escapeHtml, headerHtml, wireHeader } from './shell';
+import { DEMO_ID } from './stages';
+import type { WorkflowFacts } from './workflow';
 
-// The battlefield selection screen (docs/adr/0014): open the demo, generate a
-// new 5 km battlefield from a position or a place name, or open a saved one.
+// Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
+// enter a position and generate a new 5 km battlefield, or select the demo or
+// a saved battlefield and open it. The left panel chooses; the main area
+// describes the choice and holds its one primary action.
 
 export interface SelectionOptions {
   readonly config: ServiceConfig;
@@ -36,13 +39,12 @@ export interface SelectionOptions {
   readonly store: BattlefieldStore;
   /** Whether saved battlefields survive a reload (IndexedDB available). */
   readonly persistent: boolean;
+  /** The demo or a saved battlefield's id to select on arrival (e.g. coming back from stage 2). */
+  readonly selected?: string;
   readonly openDemo: () => void;
   /** Opens a battlefield; throws when no scenario can be made on it. */
   readonly openBattlefield: (pkg: BattlefieldPackage) => void;
 }
-
-const escapeHtml = (text: string) =>
-  text.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`);
 
 const SURFACE_LABEL: Record<string, string> = {
   DTM: 'bare earth (terrain model)',
@@ -57,11 +59,8 @@ export function describePointFor(pkg: BattlefieldPackage): (p: Vec2) => string {
   return (p) => formatCoordinates(toGeo(frame, p));
 }
 
-/** The exercise screen's options for a battlefield and its scenario: credits, readout and description. */
-export function battlefieldExercise(
-  pkg: BattlefieldPackage,
-  scenario: AmbushScenario,
-): Omit<ExerciseUiOptions, 'onLeave'> {
+/** A battlefield's description (sources, accuracy, credits) for Battlefield Information. */
+export function battlefieldInfoHtml(pkg: BattlefieldPackage): string {
   const e = pkg.elevation;
   const datasets = e.datasets.filter((d) => d.resolutionM < 200).map((d) => d.name);
   const resolution =
@@ -71,11 +70,11 @@ export function battlefieldExercise(
         ? `about ${String(e.finestResolutionM)}–${String(e.coarsestResolutionM)} m source data`
         : `about ${String(e.finestResolutionM)} m source data`;
   const c = pkg.processing.counts;
-  const info = `
-    <h2>Battlefield</h2>
-    <dl class="status">
+  return `
+    <dl class="kv">
       <dt>Location</dt><dd>${escapeHtml(formatCoordinates(pkg.request.centre))}</dd>
-      <dt>Size</dt><dd>${pkg.request.widthM.toLocaleString('en')} × ${pkg.request.heightM.toLocaleString('en')} m · UTM ${String(pkg.frame.zone)}${pkg.frame.hemisphere} (EPSG:${String(pkg.frame.epsg)})</dd>
+      <dt>Size</dt><dd>${pkg.request.widthM.toLocaleString('en')} × ${pkg.request.heightM.toLocaleString('en')} m</dd>
+      <dt>Coordinates</dt><dd>UTM ${String(pkg.frame.zone)}${pkg.frame.hemisphere} (EPSG:${String(pkg.frame.epsg)})</dd>
       <dt>Elevation</dt><dd>${String(pkg.request.cellSizeM)} m grid from ${escapeHtml(datasets.join(', ') || 'unrecognised sources')} (${resolution}; ${escapeHtml(SURFACE_LABEL[e.surfaceModel] ?? e.surfaceModel)}). ${String(Math.round(e.minM))}–${String(Math.round(e.maxM))} m.</dd>
       <dt>Buildings</dt><dd>${buildingsLine(pkg)}</dd>
       <dt>Map data</dt><dd>${
@@ -91,16 +90,9 @@ export function battlefieldExercise(
         : ''
     }
     <p class="muted">The ${String(pkg.request.cellSizeM)} m grid is resampled from the source; it adds no detail the source does not have. Ditches, banks and walls narrower than the source resolution are not in the terrain.</p>
-    <details class="bf-credits"><summary>Sources and credits</summary><ul>${pkg.attribution
+    <details class="sub"><summary>Sources and credits</summary><ul class="credits">${pkg.attribution
       .map((a) => `<li>${escapeHtml(a)}</li>`)
       .join('')}</ul></details>`;
-  return {
-    scenario,
-    title: pkg.name,
-    attribution: pkg.attribution,
-    describePoint: describePointFor(pkg),
-    infoHtml: info,
-  };
 }
 
 /** Where a battlefield's buildings came from (docs/adr/0023), with their count. */
@@ -126,63 +118,80 @@ const STEPS: readonly [GenerationStep, string][] = [
   ['saving', 'Saving'],
 ];
 
-export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions): void {
-  app.classList.add('start');
-  app.innerHTML = `
-    <div class="start-screen">
-      <header class="start-header">
-        <h1>AMBUSH!</h1>
-        <span class="muted">Choose a battlefield</span>
-      </header>
-      <div class="start-cards">
-        <section class="start-card">
-          <h2>Demo battlefield</h2>
-          <p>800 × 600 m of synthetic terrain: a valley road through a hamlet, woods, a ridge, and an
-          OPFOR patrol to ambush. The full exercise, from planning to the ambush.</p>
-          <button class="primary" data-action="demo">Open the demo</button>
-        </section>
+/** What is selected: the demo, a saved battlefield, or a new location to generate. */
+type Selection =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'demo' }
+  | { readonly kind: 'saved'; readonly summary: BattlefieldSummary }
+  | { readonly kind: 'location'; readonly position: LatLon; readonly name: string | null };
 
-        <section class="start-card">
-          <h2>New battlefield</h2>
-          <p class="muted">A ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m area anywhere from 80° S to 84° N, generated
-          from OpenStreetMap and freely available elevation data. Your squad starts on open ground
-          near the centre; there is no OPFOR yet.</p>
+const summaryLine = (b: BattlefieldSummary): string => {
+  const c = b.counts;
+  return `${b.widthM.toLocaleString('en')} × ${b.heightM.toLocaleString('en')} m · ${
+    b.osmAvailable
+      ? `${String(c.buildings)} buildings, ${String(c.roads)} roads`
+      : c.buildings > 0
+        ? `${String(c.buildings)} buildings, no OpenStreetMap features`
+        : 'terrain only'
+  }`;
+};
+
+export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions): void {
+  app.className = 'select';
+  app.innerHTML = `
+    ${headerHtml('')}
+    <div class="sel">
+      <aside class="sel-panel" aria-label="Choose a battlefield">
+        <section class="sec">
+          <h2>Find a place</h2>
+          <form class="bf-row" data-ui="search-form">
+            <label class="grow"><span class="sr-only">Place name</span><input id="bf-search" placeholder="e.g. Quantico, Virginia" autocomplete="off"></label>
+            <button type="submit" data-ui="search-button">Search</button>
+          </form>
+          <ul class="bf-results" data-ui="results" hidden></ul>
+        </section>
+        <section class="sec">
+          <h2>Position</h2>
           <form class="bf-row" data-ui="coords-form">
             <label>Latitude <input id="bf-lat" inputmode="decimal" placeholder="38.5223" autocomplete="off"></label>
             <label>Longitude <input id="bf-lon" inputmode="decimal" placeholder="-77.2934" autocomplete="off"></label>
             <button type="submit">Use position</button>
           </form>
-          <form class="bf-row" data-ui="search-form">
-            <label class="grow">or a place <input id="bf-search" placeholder="e.g. Quantico, Virginia" autocomplete="off"></label>
-            <button type="submit" data-ui="search-button">Search</button>
-          </form>
-          <ul class="bf-results" data-ui="results" hidden></ul>
-          <div class="bf-location" data-ui="location">No location chosen yet.</div>
-          <div class="bf-row">
-            <button class="primary" data-ui="generate" disabled>Generate battlefield</button>
-            <button data-ui="cancel" hidden>Cancel</button>
-          </div>
-          <ol class="bf-steps" data-ui="steps" hidden></ol>
-          <div class="bf-message" data-ui="message" hidden></div>
-          <div class="bf-error" data-ui="error" hidden></div>
+          <p><button class="link" data-ui="here">Use my current position</button></p>
+          <p class="hint" data-ui="position-message" hidden></p>
         </section>
-
-        <section class="start-card">
+        <section class="sec">
           <h2>Saved battlefields</h2>
           <ul class="bf-saved" data-ui="saved"><li class="muted">Loading…</li></ul>
           ${
             o.persistent
-              ? '<p class="muted">Saved in this browser: they open without a network connection.</p>'
-              : '<p class="bf-warn">This browser cannot store battlefields (storage is unavailable): generated battlefields are lost when the page is closed.</p>'
+              ? '<p class="hint">Saved in this browser: they open without a network connection.</p>'
+              : '<p class="hint warn">This browser cannot store battlefields (storage is unavailable): generated battlefields are lost when the page is closed.</p>'
           }
         </section>
-      </div>
-      <footer class="start-footer muted">
-        Map data © OpenStreetMap contributors (ODbL). Elevation: AWS Terrain Tiles (USGS, SRTM,
-        Copernicus EU-DEM and national sources; credits are listed with each battlefield). Place
-        search: Nominatim.
-        ${o.configProblems.length > 0 ? `<br><span class="bf-warn">Service settings ignored: ${escapeHtml(o.configProblems.join('; '))}</span>` : ''}
-      </footer>
+        <section class="sec">
+          <h2>Demo</h2>
+          <ul class="bf-saved"><li><button class="bf-item" data-select="${DEMO_ID}" aria-pressed="false">
+            <b>Demo battlefield</b><span class="muted">800 × 600 m of synthetic terrain</span>
+          </button></li></ul>
+        </section>
+        <footer class="sel-credits muted">
+          Map data © OpenStreetMap contributors (ODbL). Buildings: Overture Maps Foundation (ODbL).
+          Elevation: AWS Terrain Tiles (USGS, SRTM, Copernicus EU-DEM and national sources; credits
+          are listed with each battlefield). Place search: Nominatim.
+          ${o.configProblems.length > 0 ? `<br><span class="warn">Service settings ignored: ${escapeHtml(o.configProblems.join('; '))}</span>` : ''}
+        </footer>
+      </aside>
+      <main class="sel-main">
+        <div class="sel-card" data-ui="preview"></div>
+        <div class="sel-card" data-ui="progress" hidden>
+          <ol class="bf-steps" data-ui="steps"></ol>
+          <div class="hint" data-ui="message" hidden></div>
+          <div class="bf-row"><button data-ui="cancel">Cancel</button></div>
+        </div>
+        <div class="sel-card bf-error" data-ui="error" role="alert" hidden></div>
+        <div class="toast" data-ui="toast" role="status" hidden></div>
+      </main>
     </div>`;
 
   const ui = (name: string): HTMLElement => {
@@ -200,33 +209,114 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     el.hidden = html === null;
     el.innerHTML = html ?? '';
   };
+  const notify = createToast(ui('toast'));
 
-  let location: { position: LatLon; name: string | null } | null = null;
+  let selection: Selection = { kind: 'none' };
+  let saved: readonly BattlefieldSummary[] = [];
   let generating: AbortController | null = null;
+  let opening = false;
+
+  const facts: WorkflowFacts = {
+    battlefieldSelected: () => selection.kind === 'demo' || selection.kind === 'saved',
+    scenarioProblems: () => [],
+    startOpforProblems: () => [],
+    opforStarted: () => false,
+    engagementComplete: () => false,
+  };
+  const header = wireHeader(app, {
+    go: () => {
+      openSelection();
+    },
+    blocked: (reason) => {
+      notify(
+        selection.kind === 'location'
+          ? 'Generate the battlefield first: a new location has no terrain yet.'
+          : reason,
+      );
+    },
+  });
+
+  // --- The selection and its details -------------------------------------
+
+  const previewHtml = (): string => {
+    switch (selection.kind) {
+      case 'none':
+        return `<h2>Choose a battlefield</h2>
+          <p class="muted">Search for a place or enter a position to generate a new
+          ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m battlefield
+          anywhere from 80° S to 84° N, from OpenStreetMap, Overture Maps buildings and freely
+          available elevation data. Or select a saved battlefield or the demo.</p>`;
+      case 'demo':
+        return `<h2>Demo battlefield</h2>
+          <p>800 × 600 m of synthetic terrain: a valley road through a hamlet, woods, a ridge, and
+          an OPFOR patrol to ambush. Its scenario is fixed.</p>
+          <div class="bf-row"><button class="primary-btn" data-action="open">Open demo battlefield →</button></div>`;
+      case 'saved': {
+        const b = selection.summary;
+        return `<h2>${escapeHtml(b.name)}</h2>
+          <dl class="kv">
+            <dt>Location</dt><dd>${escapeHtml(formatCoordinates(b.centre, 4))}</dd>
+            <dt>Size</dt><dd>${summaryLine(b)}</dd>
+            <dt>Elevation</dt><dd>${b.elevationResolutionM === null ? 'resolution unknown' : `~${String(b.elevationResolutionM)} m source data`}</dd>
+            <dt>Generated</dt><dd>${escapeHtml(new Date(b.createdAt).toLocaleString())}</dd>
+          </dl>
+          <div class="bf-row"><button class="primary-btn" data-action="open">Open battlefield →</button>
+          <button class="small" data-action="delete" data-id="${escapeHtml(b.id)}">Delete…</button></div>`;
+      }
+      case 'location': {
+        const { position, name } = selection;
+        const frame = createFrame(position, DEFAULT_BATTLEFIELD_SIZE_M);
+        const lat = position.lat.toFixed(5);
+        const lon = position.lon.toFixed(5);
+        return `<h2>${escapeHtml(name ?? 'New battlefield')}</h2>
+          <dl class="kv">
+            <dt>Centre</dt><dd>${escapeHtml(formatCoordinates(position))}</dd>
+            <dt>Size</dt><dd>${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m · UTM ${String(frame.zone)}${frame.hemisphere}</dd>
+            <dt>Elevation</dt><dd>${String(DEFAULT_CELL_SIZE_M)} m grid</dd>
+          </dl>
+          <p class="muted">Your squad starts on open ground near the centre; there is no OPFOR yet.
+          <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">View on OpenStreetMap</a></p>
+          <div class="bf-row"><button class="primary-btn" data-action="generate" ${generating ? 'disabled' : ''}>Generate battlefield</button></div>`;
+      }
+    }
+  };
+
+  const markSelected = () => {
+    const id =
+      selection.kind === 'demo'
+        ? DEMO_ID
+        : selection.kind === 'saved'
+          ? selection.summary.id
+          : null;
+    for (const b of app.querySelectorAll<HTMLElement>('[data-select]'))
+      b.setAttribute('aria-pressed', String(b.dataset['select'] === id));
+  };
+
+  const select = (next: Selection) => {
+    selection = next;
+    show('preview', previewHtml());
+    if (next.kind !== 'location') show('error', null);
+    markSelected();
+    header.update('terrain', facts);
+  };
 
   const setLocation = (position: LatLon, name: string | null) => {
     try {
       validateLatLon(position);
     } catch (error) {
-      location = null;
-      (ui('generate') as HTMLButtonElement).disabled = true;
-      show('location', null);
-      ui('location').hidden = false;
-      ui('location').innerHTML =
-        `<span class="bf-warn">${escapeHtml(error instanceof Error ? error.message : String(error))}.</span>`;
+      positionMessage(`${error instanceof Error ? error.message : String(error)}.`);
       return;
     }
-    location = { position, name };
-    const frame = createFrame(position, DEFAULT_BATTLEFIELD_SIZE_M);
-    const lat = position.lat.toFixed(5);
-    const lon = position.lon.toFixed(5);
-    ui('location').innerHTML = `
-      <div><b>${escapeHtml(name ?? formatCoordinates(position))}</b></div>
-      <div class="muted">${escapeHtml(formatCoordinates(position))} · UTM ${String(frame.zone)}${frame.hemisphere} ·
-      ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m · ${String(DEFAULT_CELL_SIZE_M)} m elevation grid ·
-      <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">view on OpenStreetMap</a></div>`;
-    (ui('generate') as HTMLButtonElement).disabled = generating !== null;
+    positionMessage(null);
+    select({ kind: 'location', position, name });
   };
+  const positionMessage = (text: string | null) => {
+    ui('position-message').hidden = text === null;
+    ui('position-message').textContent = text ?? '';
+    ui('position-message').classList.toggle('warn', text !== null);
+  };
+
+  // --- Position, search, current position ---------------------------------
 
   // Coordinates: decimal degrees; "lat, lon" pasted into the first field is split.
   input('bf-lat').addEventListener('input', () => {
@@ -248,12 +338,34 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       !Number.isFinite(lat) ||
       !Number.isFinite(lon)
     ) {
-      ui('location').innerHTML =
-        '<span class="bf-warn">Enter latitude and longitude in decimal degrees, e.g. 38.5223 and -77.2934.</span>';
+      positionMessage(
+        'Enter latitude and longitude in decimal degrees, e.g. 38.5223 and -77.2934.',
+      );
       return;
     }
     show('results', null);
     setLocation({ lat, lon }, null);
+  });
+  ui('here').addEventListener('click', () => {
+    if (!('geolocation' in navigator)) {
+      positionMessage('This browser cannot tell its position. Enter coordinates instead.');
+      return;
+    }
+    positionMessage('Finding your position…');
+    ui('position-message').classList.remove('warn');
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        input('bf-lat').value = p.coords.latitude.toFixed(6);
+        input('bf-lon').value = p.coords.longitude.toFixed(6);
+        setLocation({ lat: p.coords.latitude, lon: p.coords.longitude }, 'Current position');
+      },
+      (error) => {
+        positionMessage(
+          `Your position is not available (${error.message || 'permission denied'}). Enter coordinates instead.`,
+        );
+      },
+      { enableHighAccuracy: false, timeout: 15000 },
+    );
   });
 
   // Place search: only on request (Nominatim forbids search-as-you-type).
@@ -295,7 +407,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       .catch((error: unknown) => {
         show(
           'results',
-          `<li class="bf-warn">${escapeHtml(error instanceof ServiceError ? error.message : `${NOMINATIM} failed.`)} You can still enter coordinates.</li>`,
+          `<li class="warn">${escapeHtml(error instanceof ServiceError ? error.message : `${NOMINATIM} failed.`)} You can still enter coordinates.</li>`,
         );
       })
       .finally(() => {
@@ -303,7 +415,8 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       });
   });
 
-  // Generation.
+  // --- Generation ----------------------------------------------------------
+
   const renderSteps = (current: GenerationStep | null, failed = false) => {
     const index = STEPS.findIndex(([s]) => s === current);
     show(
@@ -317,17 +430,18 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   let lastStep: GenerationStep | null = null;
 
   const generate = (allowMissingOsm: boolean) => {
-    if (!location || generating) return;
+    if (selection.kind !== 'location' || generating) return;
     const controller = new AbortController();
     generating = controller;
-    (ui('generate') as HTMLButtonElement).disabled = true;
+    show('preview', previewHtml());
+    ui('progress').hidden = false;
     ui('cancel').hidden = false;
     show('error', null);
     lastStep = 'elevation';
     renderSteps('elevation');
     const request = battlefieldRequest(
-      location.position,
-      location.name !== null ? { name: location.name } : {},
+      selection.position,
+      selection.name !== null ? { name: selection.name } : {},
     );
     generateBattlefield(request, {
       config: o.config,
@@ -350,12 +464,11 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       .catch((error: unknown) => {
         generating = null;
         ui('cancel').hidden = true;
-        (ui('generate') as HTMLButtonElement).disabled = location === null;
+        show('preview', previewHtml());
         show('message', null);
         if (isCancelled(error)) {
-          renderSteps(null);
-          show('steps', null);
-          show('error', '<span class="muted">Generation cancelled. Nothing was saved.</span>');
+          ui('progress').hidden = true;
+          show('error', '<p class="muted">Generation cancelled. Nothing was saved.</p>');
           return;
         }
         renderSteps(lastStep, true);
@@ -369,9 +482,6 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         );
       });
   };
-  ui('generate').addEventListener('click', () => {
-    generate(false);
-  });
   ui('cancel').addEventListener('click', () => {
     generating?.abort();
   });
@@ -383,20 +493,64 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     if (action === 'terrain-only') generate(true);
   });
 
-  // Opening.
+  // --- Opening and deleting ------------------------------------------------
+
   const open = (pkg: BattlefieldPackage) => {
     try {
       o.openBattlefield(pkg);
     } catch (error) {
+      opening = false;
       show('error', `<p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`);
     }
   };
-  app.querySelector('[data-action="demo"]')?.addEventListener('click', () => {
-    o.openDemo();
+  /** Opens the demo or the selected saved battlefield (stage 2). */
+  const openSelection = () => {
+    if (opening) return;
+    if (selection.kind === 'demo') {
+      opening = true;
+      o.openDemo();
+      return;
+    }
+    if (selection.kind !== 'saved') return;
+    const id = selection.summary.id;
+    opening = true;
+    o.store
+      .get(id)
+      .then(open)
+      .catch((error: unknown) => {
+        opening = false;
+        show(
+          'error',
+          `<p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p><p class="muted">You can delete it and generate it again.</p>`,
+        );
+      });
+  };
+
+  ui('preview').addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
+    const action = target?.dataset['action'];
+    if (action === 'open') openSelection();
+    if (action === 'generate') generate(false);
+    if (action === 'delete' && target && selection.kind === 'saved') {
+      // Two clicks: the first asks for confirmation.
+      if (target.dataset['confirm'] !== 'yes') {
+        target.dataset['confirm'] = 'yes';
+        target.textContent = `Confirm: delete ${selection.summary.name} and its scenario`;
+        target.classList.add('danger');
+        return;
+      }
+      const id = selection.summary.id;
+      target.disabled = true;
+      void o.store.delete(id).then(() => {
+        select({ kind: 'none' });
+        refresh();
+      });
+    }
   });
 
-  // Saved battlefields.
+  // Saved battlefields: a click selects, a double click opens.
   const renderSaved = (list: readonly BattlefieldSummary[]) => {
+    saved = list;
     if (list.length === 0) {
       show('saved', '<li class="muted">None yet. Generated battlefields appear here.</li>');
       return;
@@ -404,61 +558,51 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     show(
       'saved',
       list
-        .map((b) => {
-          const c = b.counts;
-          return `<li class="bf-saved-item">
-            <div class="grow"><b>${escapeHtml(b.name)}</b>
-              <div class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${b.widthM.toLocaleString('en')} × ${b.heightM.toLocaleString('en')} m ·
-              ${b.elevationResolutionM === null ? 'elevation resolution unknown' : `~${String(b.elevationResolutionM)} m elevation`} ·
-              ${b.osmAvailable ? `${String(c.buildings)} buildings, ${String(c.roads)} roads` : c.buildings > 0 ? `${String(c.buildings)} buildings, no OpenStreetMap features` : 'terrain only'} ·
-              ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</div>
-            </div>
-            <button class="primary" data-open="${escapeHtml(b.id)}">Open</button>
-            <button data-delete="${escapeHtml(b.id)}">Delete</button>
-          </li>`;
-        })
+        .map(
+          (
+            b,
+          ) => `<li><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false">
+            <b>${escapeHtml(b.name)}</b>
+            <span class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</span>
+          </button></li>`,
+        )
         .join(''),
     );
+    markSelected();
   };
-  const refresh = () => {
+  const refresh = (preselect?: string) => {
     o.store
       .list()
-      .then(renderSaved)
+      .then((list) => {
+        renderSaved(list);
+        const summary = list.find((b) => b.id === preselect);
+        if (summary) select({ kind: 'saved', summary });
+      })
       .catch((error: unknown) => {
         show(
           'saved',
-          `<li class="bf-warn">Saved battlefields could not be read: ${escapeHtml(error instanceof Error ? error.message : String(error))}</li>`,
+          `<li class="warn">Saved battlefields could not be read: ${escapeHtml(error instanceof Error ? error.message : String(error))}</li>`,
         );
       });
   };
-  ui('saved').addEventListener('click', (event) => {
-    const target = (event.target as HTMLElement).closest<HTMLButtonElement>('button');
-    if (!target) return;
-    const openId = target.dataset['open'];
-    const deleteId = target.dataset['delete'];
-    if (openId !== undefined) {
-      target.disabled = true;
-      o.store
-        .get(openId)
-        .then(open)
-        .catch((error: unknown) => {
-          target.disabled = false;
-          const item = target.closest('li');
-          item?.insertAdjacentHTML(
-            'beforeend',
-            `<div class="bf-warn bf-full">${escapeHtml(error instanceof Error ? error.message : String(error))} You can delete it and generate it again.</div>`,
-          );
-        });
-    } else if (deleteId !== undefined) {
-      // Two clicks: the first asks for confirmation.
-      if (target.dataset['confirm'] !== 'yes') {
-        target.dataset['confirm'] = 'yes';
-        target.textContent = 'Confirm delete';
-        target.classList.add('danger');
-        return;
-      }
-      void o.store.delete(deleteId).then(refresh);
+  const choose = (id: string | undefined) => {
+    if (id === DEMO_ID) select({ kind: 'demo' });
+    else {
+      const summary = saved.find((b) => b.id === id);
+      if (summary) select({ kind: 'saved', summary });
     }
+  };
+  app.querySelector('.sel-panel')?.addEventListener('click', (event) => {
+    const item = (event.target as HTMLElement).closest<HTMLElement>('[data-select]');
+    if (item) choose(item.dataset['select']);
   });
-  refresh();
+  app.querySelector('.sel-panel')?.addEventListener('dblclick', (event) => {
+    const item = (event.target as HTMLElement).closest<HTMLElement>('[data-select]');
+    if (!item) return;
+    choose(item.dataset['select']);
+    openSelection();
+  });
+
+  select(o.selected === DEMO_ID ? { kind: 'demo' } : { kind: 'none' });
+  refresh(o.selected);
 }

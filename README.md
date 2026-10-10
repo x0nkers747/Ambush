@@ -14,7 +14,7 @@ trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical or
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
 with Ambush!'s own role icons (not APP-6, see
 [ADR 0013](docs/adr/0013-individual-soldier-icons.md)) and listed in a roster. The trainee
-springs the ambush with TRIGGER AMBUSH
+springs the ambush with Trigger Ambush
 ([ADR 0021](docs/adr/0021-manual-ambush-trigger.md)), starting a probabilistic two-sided engagement of up to 60 simulated
 seconds ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)), on the demo or on any
 battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. No 3D yet.
@@ -33,35 +33,48 @@ npm run dev
 
 ## Choosing a battlefield, setting up the scenario, playing it
 
-Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. Ambush! has
-three stages ([ADR 0015](docs/adr/0015-three-stage-workflow-and-scenario-editing.md)):
+Run `npm run dev` and open the printed URL (http://localhost:5173) in Chrome or Edge. Ambush! is
+one five-stage workflow ([ADR 0025](docs/adr/0025-five-stage-workflow.md)). The header always
+shows the current stage, its number out of five, and **‹ Previous** and **Next ›** arrows. A
+blocked Next says what is missing, and the side panel says the same next to the stage's primary
+button.
 
-1. **Terrain selection.** Open the **demo** (it goes straight to planning, with its own scenario),
-   **generate a new battlefield** (enter a latitude and longitude in decimal degrees, e.g.
-   `38.5223`, `-77.2934`, or search for a place; check the location, press **Generate
-   battlefield**; **Cancel** stops it; buildings come from Overture Maps, or from OpenStreetMap
-   when Overture cannot be reached; if OpenStreetMap is unavailable you can retry or continue
-   without it), or open a **saved battlefield** (no network needed). Opening or generating
-   a battlefield goes to its scenario.
-2. **Scenario editing.** On the tactical map:
+1. **Select Terrain.** Search for a place, enter a latitude and longitude in decimal degrees
+   (e.g. `38.5223`, `-77.2934`; pasting "lat, lon" into the first field works), or use your
+   current position; then **Generate battlefield**. **Cancel** stops it; buildings come from
+   Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
+   unavailable you can retry or continue without it. Or select a **saved battlefield** (no
+   network needed; double-click to open it; **Delete…** asks to confirm) or the **demo**, and
+   open it.
+2. **Edit Scenario.** On the tactical map, with the tools in the side panel:
    - **Place ORP**: click where the squad assembles (or drag the ORP).
    - **Place OPFOR**: click where the OPFOR patrol (three soldiers) starts (or drag it).
    - **Edit OPFOR route**: click to add waypoints in order; drag a waypoint to move it; right-click
      to delete it. The patrol walks straight between waypoints, round buildings where needed.
-   - **Clear route** keeps the OPFOR where it starts; **Reset scenario** (two clicks) starts over.
-   - **Continue to BLUEFOR planning** once the panel says the scenario is ready. Changes are saved
-     as you make them; **◂ Terrain** goes back.
-3. **BLUEFOR planning and execution**: the exercise below, with the squad in your ORP and the OPFOR
-   at the start of your route. **◂ Scenario** returns to editing and **◂ <battlefield>** to terrain
-   selection; once a plan has been executed, both ask you to confirm discarding the exercise.
+   - **Clear route** keeps the OPFOR where it starts; **Reset scenario** asks first, then starts
+     over. Changes are saved as you make them. The demo's scenario is fixed and shown read-only.
+   - **Continue to BLUEFOR Planning** once the status says the scenario is ready.
+3. **BLUEFOR Planning**: plan positions, the kill zone and visibility, then **Execute plan**, pause,
+   re-plan and resume, all in this stage (see below). Continue once BLUEFOR is in position.
+4. **OPFOR & Combat**: **Start OPFOR**, then **Trigger Ambush** when you choose.
+5. **After Action Review**: not built yet. The stage says so, shows the engagement's recorded
+   results, and its replay controls are disabled.
 
-Each battlefield's panel lists its sources, their resolution and accuracy, and the credits their
-licences require. Service endpoints can be changed per browser: see
+Going back keeps your work. The exercise survives a step back to the scenario; if you then change
+the scenario, the exercise is rebuilt and your positions, formations and kill zone are carried
+over wherever they are still valid. Anything that could not be kept is reported. Once a plan has been
+executed, the scenario is locked until you **Restart exercise to edit**; after Start OPFOR,
+planning is locked until you **Restart exercise**. Both ask first. Leaving a battlefield for
+terrain selection asks first when there are plans to lose. A reload stays on the same stage, but
+it starts the exercise again: plans are not stored.
+
+**Battlefield Information**, collapsed at the bottom of the side panel, lists each battlefield's
+sources, their resolution and accuracy, and the credits their licences require. Service endpoints can be changed per browser: see
 [ADR 0014](docs/adr/0014-real-world-terrain-import.md#data-sources-and-services).
 
 ## Running an ambush exercise
 
-1. **BLUEFOR planning.** The squad starts in the ORP (dashed circle). Choose a Marine in the
+1. **BLUEFOR Planning (stage 3).** The squad starts in the ORP (dashed circle). Choose a Marine in the
    roster or on the map and click the map to give them a destination; drag the yellow handle to
    set their facing. Marines you leave alone stay in the ORP. Press **K** to switch to the kill
    zone and draw it across the expected enemy route (the dark-red dashed line).
@@ -76,14 +89,14 @@ licences require. Service endpoints can be changed per browser: see
    line 10 m apart centred there; drag the diamond to move it and the yellow handle to turn it
    ([ADR 0022](docs/adr/0022-fire-team-formation-planning.md)). Select a single Marine to adjust
    that Marine alone.
-2. **Execute.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
+2. **Execute plan.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
    destinations or facings, then Resume.
-3. **BLUEFOR ready.** When every Marine with a destination or facing has arrived and turned, the
-   exercise stops and waits.
-4. **START OPFOR.** Declares the ambush ready; OPFOR follows its scenario route, into and through
-   the kill zone. Entering it does not start combat. **OPFOR IN KILL ZONE: n / total** counts
-   the active patrol members inside it, and **APPROACH TIME** runs from START OPFOR.
-5. **TRIGGER AMBUSH.** Press the red button when you choose: the engagement begins at that moment
+3. **BLUEFOR in position.** When every Marine with a destination or facing has arrived and turned,
+   the exercise stops and waits; continue to **OPFOR & Combat** (stage 4).
+4. **Start OPFOR.** Declares the ambush ready; OPFOR follows its scenario route, into and through
+   the kill zone. Entering it does not start combat. **OPFOR in kill zone: n / total** counts
+   the active patrol members inside it, and **Approach time** runs from Start OPFOR.
+5. **Trigger Ambush.** Press the red button when you choose: the engagement begins at that moment
    ([ADR 0021](docs/adr/0021-manual-ambush-trigger.md),
    [ADR 0019](docs/adr/0019-probabilistic-engagements.md)). It works at any time during the
    approach, also while paused; fire then opens when you resume. Every Marine with a weapon fires at
@@ -92,7 +105,7 @@ licences require. Service endpoints can be changed per browser: see
    returns fire or flees. Shots show as fading lines; incapacitated soldiers are crossed out.
 6. **Engagement complete.** After 60 simulated seconds, or earlier when every OPFOR soldier is
    incapacitated or has escaped, every Marine is incapacitated or nobody can fire any more. The
-   side panel shows the results: casualties, escapes, shots and hits by side and by soldier, and
+   side panel's combat status shows the results: casualties, escapes, shots and hits by side and by soldier, and
    the seed. Add `?seed=N` to the page address (before the `#`) to replay an engagement exactly or
    try another roll of the dice; all combat values are in
    [`src/exercise/combat/combat-v1.json`](src/exercise/combat/combat-v1.json)
@@ -181,3 +194,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 22. [Fire-team formation planning](docs/adr/0022-fire-team-formation-planning.md)
 23. [Buildings from Overture Maps](docs/adr/0023-overture-buildings.md)
 24. [Spot heights on the tactical map](docs/adr/0024-spot-heights.md)
+25. [The five-stage workflow](docs/adr/0025-five-stage-workflow.md)

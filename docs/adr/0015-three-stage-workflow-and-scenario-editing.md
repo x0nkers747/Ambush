@@ -4,6 +4,8 @@
 - Date: 2026-10-08
 - Builds on ADR 0010 (ambush scenarios and OPFOR routes), ADR 0012 (ORP) and ADR 0014 (generated
   battlefields, whose minimal scenario this replaces for play).
+- Stages, navigation and screens superseded by ADR 0025 (five-stage workflow); the scenario model,
+  editing rules and storage still hold.
 
 ## Context
 
