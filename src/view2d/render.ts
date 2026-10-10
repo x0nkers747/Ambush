@@ -13,6 +13,7 @@ import {
   type WaterwayKind,
 } from '#sim';
 import { formatBearing } from './bearing';
+import { roadStrokes } from './roads';
 import { wedgeOnScreen } from './engagement';
 import {
   screenToWorld,
@@ -661,36 +662,19 @@ function drawRoads(
   layer: TerrainLayer,
   area: Bounds,
 ): void {
-  const mpp = scene.camera.metersPerPixel;
-  const edge = edgeMargin(scene);
-  for (const r of layer.roads) {
-    // The widest stroke of any road class: a major road's casing.
-    const reach = (Math.max(r.widthMeters, 4 * mpp) + 2 * mpp) / 2 + edge;
-    if (!overlaps(r.bounds, area, reach)) continue;
-    if (r.roadClass === 'path') {
-      ctx.strokeStyle = COLORS.path;
-      ctx.lineWidth = 1.2 * mpp;
-      ctx.setLineDash([2 * mpp, 3 * mpp]);
-      ctx.stroke(r.path);
-      ctx.setLineDash([]);
-      continue;
-    }
-    if (r.roadClass === 'track') {
-      ctx.strokeStyle = COLORS.track;
-      ctx.lineWidth = Math.max(r.widthMeters, 1.5 * mpp);
-      ctx.setLineDash([6 * mpp, 4 * mpp]);
-      ctx.stroke(r.path);
-      ctx.setLineDash([]);
-      continue;
-    }
-    const major = r.roadClass === 'major';
-    ctx.strokeStyle = major ? COLORS.majorRoadCasing : COLORS.roadCasing;
-    ctx.lineWidth = Math.max(r.widthMeters, (major ? 4 : 3) * mpp) + 2 * mpp;
-    ctx.stroke(r.path);
-    ctx.strokeStyle = major ? COLORS.majorRoadFill : COLORS.roadFill;
-    ctx.lineWidth = Math.max(r.widthMeters, (major ? 4 : 3) * mpp);
-    ctx.stroke(r.path);
+  // All casings before any fill, so connected ways and junctions show no seams (roads.ts).
+  for (const { road, style, width, dash } of roadStrokes(
+    layer.roads,
+    scene.camera.metersPerPixel,
+    area,
+    edgeMargin(scene),
+  )) {
+    ctx.strokeStyle = COLORS[style];
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash ?? []);
+    ctx.stroke(road.path);
   }
+  ctx.setLineDash([]);
 }
 
 function drawBuildings(
