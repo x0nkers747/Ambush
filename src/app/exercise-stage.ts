@@ -8,13 +8,7 @@ import {
   type RosterUnit,
 } from '#exercise';
 import type { Session } from '#session';
-import {
-  polygonArea,
-  soldierId,
-  type EngagementEndReason,
-  type SimEvent,
-  type SoldierId,
-} from '#sim';
+import { soldierId, type EngagementEndReason, type SimEvent, type SoldierId } from '#sim';
 import { formatBearing, type TacticalMap } from '#view2d';
 import { STATUS_LABELS } from './roster';
 import { escapeHtml } from './shell';
@@ -83,7 +77,6 @@ export interface ExerciseStage {
   opforHtml(): string;
   engagementHtml(): string;
   selectionHtml(editing: boolean): string;
-  killZoneHtml(editing: boolean): string;
   visibilityHtml(): string;
   /** The map banner for a stage, or `null`. */
   bannerHtml(stage: 'bluefor' | 'opfor'): string | null;
@@ -298,27 +291,6 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     ${buttons}`;
   };
 
-  const killZoneHtml = (editing: boolean): string => {
-    const e = ex();
-    const zone = e.killZone;
-    const hint =
-      editing && e.canEditPlans
-        ? o.session().tool === 'killZone'
-          ? '<p class="muted">Click the map to add corners.</p>'
-          : ''
-        : '';
-    if (!zone) return `<p>Kill zone: <span class="warn">not drawn</span></p>${hint}`;
-    const area =
-      zone.vertices.length >= 3
-        ? ` · ${Math.round(polygonArea(zone.vertices)).toLocaleString()} m²`
-        : '';
-    const clear =
-      editing && e.canEditPlans
-        ? ' <button class="link" data-action="clear-kill-zone">Clear</button>'
-        : '';
-    return `<p>Kill zone: ${String(zone.vertices.length)} corners${area}${clear}</p>${hint}`;
-  };
-
   const visibilityHtml = (): string => {
     const e = ex();
     const session = o.session();
@@ -328,41 +300,21 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     const team = e.fireTeams.find((t) => t.unitId === session.selectedFireTeamId);
     if ((id === null && !team) || !view)
       return '<p class="muted">Select a Marine or a fire team to see the visible area.</p>';
-    const from = team
-      ? `What any Marine of the <b>${escapeHtml(team.name)}</b> can see, each from ${view.planned ? 'their destination (or where they stand without one)' : 'where they stand'}.`
-      : view.planned
-        ? `From ${escapeHtml(soldierName(id ?? ''))}'s <b>destination</b>.`
-        : `From ${escapeHtml(soldierName(id ?? ''))}'s <b>current position</b> (no destination).`;
+    if (view.failed) {
+      return '<p class="alert">Visibility cannot be calculated in this browser (its background workers failed).</p>';
+    }
     // The viewshed shown may still be the previous one while the new one is computed.
     const shown = view.viewshed;
     const current =
       shown !== null && shown.observer.x === view.observer.x && shown.observer.y === view.observer.y
         ? shown
         : null;
-    const resolution = shown ? `${String(shown.grid.cellSize)} m` : '';
-    if (view.failed) {
-      return `<p>${from}</p><p class="alert">Visibility cannot be calculated in this browser (its background workers failed).</p>`;
-    }
-    const showing = !shown
-      ? ''
-      : current && view.preview
-        ? ' (showing a preview: half the rows of the full result)'
-        : current
-          ? ` (showing ${resolution} preview)`
-          : ` (showing ${resolution} result for the previous position)`;
-    const status = view.pending
-      ? `<p class="muted">Calculating…${showing}</p>`
-      : `<p class="muted">Ground sampled every ${resolution}.</p>`;
     // Kill-zone coverage only from a complete viewshed: a preview's rows between are copies.
-    const coverage = current && !view.preview ? e.killZoneCoverage(current) : undefined;
-    const zone = e.killZone
-      ? coverage
-        ? `<p><b>Kill zone visible: ${coverage.percent.toFixed(0)}%</b> <span class="muted">(${String(coverage.visibleCells)} of ${String(coverage.cells)} sample points)</span></p>`
-        : view.pending
-          ? ''
-          : '<p class="muted">Complete the kill zone to see how much of it is visible.</p>'
-      : '<p class="muted">Draw a kill zone to see how much of it is visible.</p>';
-    return `<p>${from}</p>${status}${zone}`;
+    const coverage =
+      e.killZone && current && !view.preview ? e.killZoneCoverage(current) : undefined;
+    return `${view.pending ? '<p class="muted">Calculating…</p>' : ''}${
+      coverage ? `<p><b>Kill zone visible: ${coverage.percent.toFixed(0)}%</b></p>` : ''
+    }`;
   };
 
   const bluforHtml = (): string => {
@@ -552,7 +504,6 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     opforHtml,
     engagementHtml,
     selectionHtml,
-    killZoneHtml,
     visibilityHtml,
     bannerHtml,
     wireSelection(element) {
@@ -561,10 +512,6 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
         const session = o.session();
         const action =
           event.target instanceof HTMLElement ? event.target.dataset['action'] : undefined;
-        if (action === 'clear-kill-zone') {
-          if (e.canEditPlans) e.clearKillZone();
-          return;
-        }
         const team = session.selectedFireTeamId;
         if (team !== null && action === 'clear-formation' && e.formation(team)) {
           e.clearFormation(team);

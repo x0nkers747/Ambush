@@ -45,6 +45,7 @@ import {
   escapeHtml,
   headerHtml,
   htmlSetter,
+  TRASH_ICON,
   wireHeader,
 } from './shell';
 import { nextBlocker, STAGE_NAMES, type WorkflowFacts, type WorkflowStage } from './workflow';
@@ -152,15 +153,17 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       </div>
       <div data-stage="bluefor">
         <div class="tool-grid" role="group" aria-label="Planning tools">
-          ${PLANNING_TOOLS.map(
-            (t) =>
-              `<button class="tool" data-ptool="${t.tool}" aria-pressed="false" title="${t.label}${t.tool === 'killZone' ? ' (K)' : ''}">${t.label}</button>`,
-          ).join('')}
+          ${PLANNING_TOOLS.map((t) => {
+            const button = `<button class="tool" data-ptool="${t.tool}" aria-pressed="false" title="${t.label}${t.tool === 'killZone' ? ' (K)' : ''}">${t.label}</button>`;
+            return t.tool === 'killZone'
+              ? `<div class="tool-with-action">${button}<button class="trash-btn" data-ui="clear-kill-zone" aria-label="Delete the kill zone" title="Delete the kill zone">${TRASH_ICON}</button></div>`
+              : button;
+          }).join('')}
           <button class="tool" data-ui="visibility" aria-pressed="false" title="Show what the selected Marine or fire team can see (V)">Visibility</button>
         </div>
         <div data-ui="planning-lock"></div>
         <div class="selection" data-ui="selection"></div>
-        <div data-ui="kill-zone"></div>
+        <div data-ui="roster-slot"></div>
         <div data-ui="visibility-panel"></div>
       </div>
       <div data-stage="opfor">
@@ -452,6 +455,19 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     map.setExercise(shown());
     if (target === 'scenario' || target === 'bluefor') o.setAddress(target);
     ui('confirm').hidden = true;
+    placeRoster();
+  };
+  /**
+   * In BLUEFOR planning the roster sits right under the selection panel, where
+   * its hint points to it; in the other stages it has its own section. The
+   * element itself moves, so its clicks and selection stay as they are.
+   */
+  const placeRoster = () => {
+    const roster = ui('roster');
+    const section = app.querySelector<HTMLElement>('[data-sec="roster"]');
+    const here = stage === 'bluefor' ? ui('roster-slot') : section;
+    if (here && roster.parentElement !== here) here.append(roster);
+    if (section) section.hidden = stage === 'bluefor';
   };
 
   const facts: WorkflowFacts = {
@@ -496,7 +512,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     session = setShowVisibility(session, !session.showVisibility);
   });
   exerciseStage.wireSelection(ui('selection'));
-  exerciseStage.wireSelection(ui('kill-zone'));
+  ui('clear-kill-zone').addEventListener('click', () => {
+    const e = exercise;
+    if (stage === 'bluefor' && e?.killZone && e.canEditPlans) e.clearKillZone();
+  });
 
   // Stage 4.
   ui('start-opfor').addEventListener('click', () => {
@@ -842,7 +861,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         : '',
     );
     setHtml(ui('selection'), exerciseStage.selectionHtml(!locked));
-    setHtml(ui('kill-zone'), exerciseStage.killZoneHtml(!locked));
+    // The kill zone's bin: greyed out with no kill zone, or once plans are locked.
+    disable(button('clear-kill-zone'), locked || !e.killZone || !e.canEditPlans);
     setHtml(ui('visibility-panel'), exerciseStage.visibilityHtml());
   };
 

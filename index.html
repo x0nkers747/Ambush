@@ -464,6 +464,16 @@
       .tool-grid .tool:last-child:nth-child(odd) {
         grid-column: 1 / -1;
       }
+      /* A tool button with a small action beside it (the kill zone and its bin). */
+      .tool-with-action {
+        display: flex;
+        gap: 4px;
+        min-width: 0;
+      }
+      .tool-with-action .tool {
+        flex: 1;
+        min-width: 0;
+      }
       .tool-row {
         display: flex;
         gap: 6px;
@@ -935,8 +945,9 @@
         background: transparent;
         border-color: var(--line);
       }
-      /* A saved battlefield's bin: grey, red on hover, solid red when armed. */
-      .bf-delete {
+      /* A bin button (saved battlefields, the kill zone): grey, red on hover,
+         solid red when armed, faded when there is nothing to delete. */
+      .trash-btn {
         flex: none;
         display: flex;
         align-items: center;
@@ -947,13 +958,13 @@
         background: transparent;
         border-color: var(--line);
       }
-      .bf-delete:hover:not(:disabled) {
+      .trash-btn:hover:not(:disabled) {
         color: var(--red);
         border-color: var(--red);
         background: transparent;
       }
-      .bf-delete[data-confirm='yes'],
-      .bf-delete[data-confirm='yes']:hover:not(:disabled) {
+      .trash-btn[data-confirm='yes'],
+      .trash-btn[data-confirm='yes']:hover:not(:disabled) {
         color: #fff;
         background: var(--red-strong);
         border-color: #ff8a80;

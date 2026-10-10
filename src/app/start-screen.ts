@@ -26,7 +26,7 @@ import {
   type LatLon,
 } from '#geo';
 import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
-import { createToast, escapeHtml, headerHtml, wireHeader } from './shell';
+import { createToast, escapeHtml, headerHtml, TRASH_ICON, wireHeader } from './shell';
 import type { WorkflowFacts } from './workflow';
 
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
@@ -132,9 +132,6 @@ const STEPS: readonly [GenerationStep, string][] = [
   ['processing', 'Building the battlefield'],
   ['saving', 'Saving'],
 ];
-
-/** A bin, drawn in `currentColor`. */
-const TRASH_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/></svg>`;
 
 /** What is selected: a saved battlefield, or a new location to generate. */
 type Selection =
@@ -648,7 +645,7 @@ export function startBattlefieldSelection(
           ) => `<li class="bf-saved-row"><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false" title="${escapeHtml(b.name)}">
             <b>${escapeHtml(b.name)}</b>
             <span class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</span>
-          </button><button class="bf-delete" data-delete="${escapeHtml(b.id)}" aria-label="Delete ${escapeHtml(b.name)}" title="Delete ${escapeHtml(b.name)}">${TRASH_ICON}</button></li>`,
+          </button><button class="trash-btn" data-delete="${escapeHtml(b.id)}" aria-label="Delete ${escapeHtml(b.name)}" title="Delete ${escapeHtml(b.name)}">${TRASH_ICON}</button></li>`,
         )
         .join(''),
     );
