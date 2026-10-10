@@ -39,7 +39,16 @@ import {
   ICON_INK,
   type Affiliation,
 } from './soldier-icons';
-import { contourIntervals, contourLines, terrainRaster } from './terrain-layer';
+import {
+  contourIntervals,
+  contourLines,
+  placeSpotHeights,
+  SPOT_LABEL_OFFSET_PX,
+  spotHeightLabel,
+  spotHeights,
+  terrainRaster,
+  type SpotHeight,
+} from './terrain-layer';
 
 // Canvas 2D rendering of the tactical map. Map coordinates are drawn through
 // the camera transform; symbols and labels are drawn in screen pixels so they
@@ -88,6 +97,7 @@ export const COLORS = {
   building: '#4b4b4b',
   buildingEdge: '#191919',
   featureLabel: 'rgba(20, 24, 28, 0.85)',
+  spotHeight: '#3b2a18',
   impossible: '#d6301f',
   visibleEdge: '#0d6b30',
 } as const;
@@ -135,6 +145,8 @@ export interface TerrainLayer {
   readonly bounds: Bounds;
   readonly image: HTMLCanvasElement;
   readonly contours: readonly ContourTile[];
+  /** Summits, most prominent first (docs/adr/0024). */
+  readonly spotHeights: readonly SpotHeight[];
   /**
    * Environment features as map-coordinate paths. Ids are drawn only for
    * hand-authored features (`label`), not for imported ones, whose ids are
@@ -265,6 +277,7 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
     bounds,
     image,
     contours,
+    spotHeights: spotHeights(terrain),
     vegetation: vegetation.map((v) => ({
       id: v.id,
       kind: v.kind,
@@ -524,6 +537,7 @@ export const FEATURE_PHASES: readonly MapPhase[] = [
       drawBuildings(ctx, scene, layer, area);
     });
     drawFeatureLabels(ctx, scene, layer, area);
+    drawSpotHeights(ctx, scene, layer, area);
   },
 ];
 
@@ -723,6 +737,50 @@ function drawFeatureLabels(
   };
   for (const v of layer.vegetation) if (v.label) label(v.id, v.anchor, COLORS.woodlandEdge);
   for (const b of layer.buildings) if (b.label) label(b.id, b.anchor, COLORS.featureLabel);
+  ctx.restore();
+}
+
+/**
+ * Spot heights (docs/adr/0024): a dot on each summit shown at this zoom
+ * (`placeSpotHeights`) with its height in whole metres beside it, haloed like
+ * the other labels. Placed for the whole map, then drawn where they meet `area`.
+ */
+function drawSpotHeights(
+  ctx: CanvasRenderingContext2D,
+  scene: MapScene,
+  layer: TerrainLayer,
+  area: Bounds,
+): void {
+  const mpp = scene.camera.metersPerPixel;
+  const reach = 60 * mpp;
+  const shown = placeSpotHeights(layer.spotHeights, mpp).filter(
+    (s) =>
+      s.x >= area.minX - reach &&
+      s.x <= area.maxX + reach &&
+      s.y >= area.minY - reach &&
+      s.y <= area.maxY + reach,
+  );
+  if (shown.length === 0) return;
+  ctx.save();
+  clipToTerrain(ctx, scene, layer);
+  ctx.font = 'bold 10px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (const s of shown) {
+    const p = worldToScreen(scene.camera, scene.viewport, s);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.5, 0, 2 * Math.PI);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.stroke();
+    ctx.fillStyle = COLORS.spotHeight;
+    ctx.fill();
+    const text = spotHeightLabel(s);
+    const x = p.x + SPOT_LABEL_OFFSET_PX;
+    ctx.lineWidth = 3;
+    ctx.strokeText(text, x, p.y);
+    ctx.fillText(text, x, p.y);
+  }
   ctx.restore();
 }
 

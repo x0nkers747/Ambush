@@ -10,7 +10,16 @@ import {
   terrainTriangleIndices,
   type TerrainDataset,
 } from '#sim';
-import { contourIntervals, contourLines, elevationRange, terrainRaster } from './terrain-layer';
+import {
+  contourIntervals,
+  contourLines,
+  elevationRange,
+  placeSpotHeights,
+  spotHeightLabel,
+  spotHeights,
+  terrainRaster,
+  type SpotHeight,
+} from './terrain-layer';
 import { gridSpacing } from './render';
 
 const GRID = { originX: 0, originY: 0, cellSize: 10, columns: 21, rows: 11 };
@@ -189,5 +198,103 @@ describe('contour intervals', () => {
   it('widens to keep the relief to at most 40 levels', () => {
     expect(contourIntervals(imported(3, 0, 300))).toEqual({ minor: 10, index: 50 });
     expect(contourIntervals(imported(30, 0, 1500))).toEqual({ minor: 50, index: 250 });
+  });
+});
+
+// Spot heights (docs/adr/0024).
+describe('spotHeights', () => {
+  /**
+   * Terrain shaped by a profile along x (heights at columns 0–20, 10 m apart),
+   * highest along the middle row (row 5) and falling 1 m per row away from
+   * it: summits lie on the middle row, and the ridge along it is the highest
+   * way between them, so its lowest point between two summits is their saddle.
+   */
+  const profiled = (profile: readonly number[]) =>
+    createSyntheticTerrain(
+      GRID,
+      (x, y) => (profile[Math.round(x / 10)] ?? 0) - Math.abs(Math.round(y / 10) - 5),
+    );
+  // Rises to 50 m at column 6, dips to 35 m at column 10, rises to 45 m at column 14.
+  const TWO_HILLS = [
+    0, 8, 16, 24, 32, 40, 50, 46, 42, 38, 35, 38, 41, 43, 45, 40, 30, 20, 10, 5, 0,
+  ];
+
+  it('finds each summit with its height and prominence, most prominent first', () => {
+    expect(spotHeights(profiled(TWO_HILLS))).toEqual([
+      // The highest summit: above the lowest sample (0 m at column 0, 5 m below the middle row).
+      { x: 60, y: 50, elevation: 50, prominence: 55 },
+      // The other: above the saddle at column 10.
+      { x: 140, y: 50, elevation: 45, prominence: 10 },
+    ]);
+  });
+
+  it('marks a flat top at its middle', () => {
+    const flat = [0, 10, 20, 30, 40, 45, 50, 50, 50, 50, 50, 50, 50, 45, 40, 30, 20, 10, 5, 2, 0];
+    expect(spotHeights(profiled(flat)).map((s) => [s.x, s.y, s.elevation])).toEqual([[90, 50, 50]]);
+  });
+
+  it('leaves out summits near the edge, low knolls and single-sample spikes', () => {
+    // A summit 20 m from the west edge, a 1 m knoll, and a 30 m spike on a slope.
+    const profile = [10, 15, 30, 20, 15, 12, 13, 12, 10, 8, 6, 4, 2, 1, 0, 0, 0, 0, 0, 0, 0];
+    const terrain = profiled(profile);
+    const spiked: TerrainDataset = {
+      ...terrain,
+      heightfield: {
+        ...terrain.heightfield,
+        elevations: terrain.heightfield.elevations.map((z, i) => (i === 5 * 21 + 10 ? z + 30 : z)),
+      },
+    };
+    expect(spotHeights(terrain)).toEqual([]);
+    expect(spotHeights(spiked)).toEqual([]);
+  });
+
+  it('is deterministic and puts every summit on a local maximum (the demo battlefield)', () => {
+    const terrain = DEMO_SCENARIO.terrain;
+    const spots = spotHeights(terrain);
+    expect(spots.length).toBeGreaterThan(0);
+    expect(spotHeights(terrain)).toEqual(spots);
+    const { originX, originY, cellSize, columns, elevations } = terrain.heightfield;
+    for (const s of spots) {
+      const c = Math.round((s.x - originX) / cellSize);
+      const r = Math.round((s.y - originY) / cellSize);
+      expect(s.elevation).toBe(elevations[r * columns + c]);
+      for (let dr = -1; dr <= 1; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          expect(s.elevation).toBeGreaterThanOrEqual(elevations[(r + dr) * columns + c + dc] ?? 0);
+        }
+      }
+      expect(s.prominence).toBeGreaterThanOrEqual(2);
+    }
+    const order = spots.map((s) => s.prominence);
+    expect(order).toEqual([...order].sort((a, b) => b - a));
+  });
+});
+
+describe('placeSpotHeights', () => {
+  const spot = (x: number, prominence: number, elevation = 100): SpotHeight => ({
+    x,
+    y: 0,
+    elevation,
+    prominence,
+  });
+
+  it('shows more modest summits as the map zooms in', () => {
+    const spots = [spot(0, 40), spot(1000, 12), spot(2000, 3)];
+    expect(placeSpotHeights(spots, 10).map((s) => s.prominence)).toEqual([40]);
+    expect(placeSpotHeights(spots, 5).map((s) => s.prominence)).toEqual([40, 12]);
+    expect(placeSpotHeights(spots, 1).map((s) => s.prominence)).toEqual([40, 12, 3]);
+  });
+
+  it('keeps marks from overlapping, the more prominent summit winning', () => {
+    const spots = [spot(0, 30, 123), spot(20, 10, 118)];
+    // 1 m per pixel: 20 px apart, closer than a label is wide.
+    expect(placeSpotHeights(spots, 1)).toEqual([spots[0]]);
+    // 0.1 m per pixel: 200 px apart.
+    expect(placeSpotHeights(spots, 0.1)).toEqual(spots);
+  });
+
+  it('labels heights in whole metres', () => {
+    expect(spotHeightLabel(spot(0, 5, 64.6))).toBe('65');
+    expect(spotHeightLabel(spot(0, 5, -3.2))).toBe('-3');
   });
 });

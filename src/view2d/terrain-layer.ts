@@ -164,3 +164,184 @@ export function elevationRange(terrain: TerrainDataset): { min: number; max: num
   }
   return { min, max };
 }
+
+// --- Spot heights (docs/adr/0024) --------------------------------------------
+
+/** A summit: where it is, its height, and how far it rises above the ground joining it to higher ground. */
+export interface SpotHeight {
+  readonly x: number;
+  readonly y: number;
+  /** Metres, as the heightfield gives it. */
+  readonly elevation: number;
+  /** Metres above the highest saddle leading to higher ground (the highest summit: above the lowest sample). */
+  readonly prominence: number;
+}
+
+/** Summits less prominent than this are never marked. */
+export const SPOT_HEIGHT_MIN_PROMINENCE_M = 2;
+/** Summits this close to the terrain's edge may be slopes rising beyond it, and are not marked. */
+export const SPOT_HEIGHT_EDGE_MARGIN_M = 50;
+/** A sample this far above all its neighbours is taken for a data spike, not a summit. */
+export const SPOT_HEIGHT_SPIKE_M = 15;
+
+/**
+ * The terrain's summits, most prominent first (then highest, then south-west
+ * first). Prominence is found by flooding the heightfield from the top: samples
+ * are taken highest first, each joining the "islands" of its eight
+ * neighbours taken before it; where two islands meet, the summit of the lower
+ * one gets its prominence (its height above the meeting point). A flat top is
+ * marked at its middle sample. Summits near the edge, data spikes and summits
+ * less prominent than `SPOT_HEIGHT_MIN_PROMINENCE_M` are left out.
+ * Deterministic: equal heights are taken in sample order.
+ */
+export function spotHeights(terrain: TerrainDataset): SpotHeight[] {
+  const { originX, originY, cellSize, columns: C, rows: R, elevations: E } = terrain.heightfield;
+  const n = C * R;
+  const z = (i: number) => E[i] ?? 0;
+  const order = new Uint32Array(n);
+  for (let i = 0; i < n; i += 1) order[i] = i;
+  order.sort((a, b) => z(b) - z(a) || a - b);
+  const parent = new Int32Array(n).fill(-1);
+  const summitOf = new Int32Array(n);
+  const find = (i: number): number => {
+    let r = i;
+    while (parent[r] !== r) r = parent[r] ?? r;
+    // Path compression.
+    let k = i;
+    while (parent[k] !== r) {
+      const next = parent[k] ?? r;
+      parent[k] = r;
+      k = next;
+    }
+    return r;
+  };
+  const prominence = new Map<number, number>();
+  for (const i of order) {
+    parent[i] = i;
+    summitOf[i] = i;
+    const c = i % C;
+    const r = (i - c) / C;
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        const cc = c + dc;
+        const rr = r + dr;
+        if ((dr === 0 && dc === 0) || cc < 0 || rr < 0 || cc >= C || rr >= R) continue;
+        const j = rr * C + cc;
+        if (parent[j] === -1) continue;
+        const a = find(i);
+        const b = find(j);
+        if (a === b) continue;
+        const sa = summitOf[a] ?? a;
+        const sb = summitOf[b] ?? b;
+        // The island with the higher summit (the earlier in order on a tie) absorbs the other.
+        const aHigher = z(sa) > z(sb) || (z(sa) === z(sb) && sa < sb);
+        const [high, low] = aHigher ? [a, b] : [b, a];
+        const lowSummit = summitOf[low] ?? low;
+        prominence.set(lowSummit, z(lowSummit) - z(i));
+        parent[low] = high;
+      }
+    }
+  }
+  const top = order[0];
+  const bottom = order[n - 1];
+  if (top !== undefined && bottom !== undefined) prominence.set(top, z(top) - z(bottom));
+
+  const margin = Math.ceil(SPOT_HEIGHT_EDGE_MARGIN_M / cellSize);
+  const spots: (SpotHeight & { readonly index: number })[] = [];
+  for (const [summit, p] of prominence) {
+    if (p < SPOT_HEIGHT_MIN_PROMINENCE_M) continue;
+    // The middle of a flat top: its samples of exactly the summit's height.
+    const flat = [summit];
+    const seen = new Set(flat);
+    // Iterating an array while appending to it visits the appended samples too.
+    for (const i of flat) {
+      const c = i % C;
+      const r = (i - c) / C;
+      for (let dr = -1; dr <= 1; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          const cc = c + dc;
+          const rr = r + dr;
+          const j = rr * C + cc;
+          if (cc < 0 || rr < 0 || cc >= C || rr >= R || seen.has(j) || z(j) !== z(summit)) continue;
+          seen.add(j);
+          flat.push(j);
+        }
+      }
+    }
+    const mc = flat.reduce((s, i) => s + (i % C), 0) / flat.length;
+    const mr = flat.reduce((s, i) => s + Math.floor(i / C), 0) / flat.length;
+    let at = summit;
+    let best = Number.POSITIVE_INFINITY;
+    for (const i of [...flat].sort((a, b) => a - b)) {
+      const d = Math.hypot((i % C) - mc, Math.floor(i / C) - mr);
+      if (d < best) {
+        best = d;
+        at = i;
+      }
+    }
+    const c = at % C;
+    const r = (at - c) / C;
+    if (c < margin || r < margin || c >= C - margin || r >= R - margin) continue;
+    // A single sample standing far above every neighbour is a data spike.
+    let neighbours = Number.NEGATIVE_INFINITY;
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        if (dr !== 0 || dc !== 0) neighbours = Math.max(neighbours, z((r + dr) * C + c + dc));
+      }
+    }
+    if (z(at) - neighbours > SPOT_HEIGHT_SPIKE_M) continue;
+    spots.push({
+      x: originX + c * cellSize,
+      y: originY + r * cellSize,
+      elevation: z(at),
+      prominence: p,
+      index: at,
+    });
+  }
+  spots.sort(
+    (a, b) => b.prominence - a.prominence || b.elevation - a.elevation || a.index - b.index,
+  );
+  return spots.map(({ x, y, elevation, prominence: p }) => ({ x, y, elevation, prominence: p }));
+}
+
+/** A spot height's label: whole metres. */
+export const spotHeightLabel = (s: SpotHeight): string => String(Math.round(s.elevation));
+
+/** Approximate label width per character (10 px font) and height, for decluttering. */
+const SPOT_CHAR_PX = 6;
+const SPOT_LABEL_HEIGHT_PX = 12;
+/** Gap from the dot to its label, and padding kept clear around each mark. */
+export const SPOT_LABEL_OFFSET_PX = 5;
+const SPOT_PADDING_PX = 4;
+
+/**
+ * The spot heights to show at a zoom (metres per screen pixel), most
+ * prominent first: those at least twice as prominent as a screen pixel is
+ * wide (so zooming in reveals smaller knolls), each placed only if its dot
+ * and label clear every mark already placed. The same for the whole map
+ * whatever part of it is drawn, so pieces of the map drawn separately agree.
+ */
+export function placeSpotHeights(
+  spots: readonly SpotHeight[],
+  metersPerPixel: number,
+): SpotHeight[] {
+  const minProminence = Math.max(SPOT_HEIGHT_MIN_PROMINENCE_M, 2 * metersPerPixel);
+  const placed: { s: SpotHeight; x0: number; x1: number; y0: number; y1: number }[] = [];
+  for (const s of spots) {
+    if (s.prominence < minProminence) continue;
+    // The dot and the label to its right, in metres at this zoom.
+    const width = SPOT_LABEL_OFFSET_PX + spotHeightLabel(s).length * SPOT_CHAR_PX;
+    const box = {
+      s,
+      x0: s.x - (3 + SPOT_PADDING_PX) * metersPerPixel,
+      x1: s.x + (width + SPOT_PADDING_PX) * metersPerPixel,
+      y0: s.y - (SPOT_LABEL_HEIGHT_PX / 2 + SPOT_PADDING_PX) * metersPerPixel,
+      y1: s.y + (SPOT_LABEL_HEIGHT_PX / 2 + SPOT_PADDING_PX) * metersPerPixel,
+    };
+    if (placed.some((p) => p.x0 < box.x1 && box.x0 < p.x1 && p.y0 < box.y1 && box.y0 < p.y1)) {
+      continue;
+    }
+    placed.push(box);
+  }
+  return placed.map((p) => p.s);
+}

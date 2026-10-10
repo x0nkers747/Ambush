@@ -180,3 +180,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 21. [The trainee triggers the ambush](docs/adr/0021-manual-ambush-trigger.md)
 22. [Fire-team formation planning](docs/adr/0022-fire-team-formation-planning.md)
 23. [Buildings from Overture Maps](docs/adr/0023-overture-buildings.md)
+24. [Spot heights on the tactical map](docs/adr/0024-spot-heights.md)
