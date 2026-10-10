@@ -2,6 +2,7 @@ import {
   buildPreviewScenario,
   buildScenario,
   createExercise,
+  NO_KILL_ZONE,
   OPFOR_FORCES,
   TRAINEE_SIDE,
   type AmbushScenario,
@@ -119,6 +120,20 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       <canvas id="map" aria-label="Tactical map"></canvas>
       <div class="attribution" data-ui="attribution" hidden></div>
       <div class="banner" data-ui="banner" hidden></div>
+      <section class="sim-float" data-sec="sim" aria-label="Simulation">
+        <h2>Simulation</h2>
+        <div class="sim-row">
+          <span class="clock" data-ui="clock" title="Simulation time"></span>
+          <span class="sim-state" data-ui="sim-state" role="status"></span>
+        </div>
+        <div class="sim-row">
+          <button class="action" data-ui="execute" title="Commit the BLUEFOR plans and move into position">Move</button>
+          <button data-ui="pause" title="Pause (Space)">Pause</button>
+          <button data-ui="resume" title="Commit changed plans and continue (Space)">Resume</button>
+        </div>
+        <div class="speed" role="group" aria-label="Time acceleration" data-ui="speeds"></div>
+        <p class="hint" data-ui="sim-note"></p>
+      </section>
       <div class="confirm" data-ui="confirm" hidden></div>
       <div class="toast" data-ui="toast" role="status" hidden></div>
     </div>
@@ -162,8 +177,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           <button class="tool" data-ui="visibility" aria-pressed="false" title="Show what the selected Marine or fire team can see (V)">Visibility</button>
         </div>
         <div data-ui="planning-lock"></div>
-        <div class="selection" data-ui="selection"></div>
         <div data-ui="roster-slot"></div>
+        <div class="selection" data-ui="selection"></div>
         <div data-ui="visibility-panel"></div>
       </div>
       <div data-stage="opfor">
@@ -184,20 +199,6 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         each Marine was, what they could see, when the ambush was sprung and how the engagement
         unfolded. It is not available yet.</p>
       </div>
-    </section>
-    <section class="sec" data-sec="sim">
-      <h2>Simulation</h2>
-      <div class="sim-row">
-        <span class="clock" data-ui="clock" title="Simulation time"></span>
-        <span class="sim-state" data-ui="sim-state" role="status"></span>
-      </div>
-      <div class="sim-row">
-        <button class="action" data-ui="execute" title="Commit the BLUEFOR plans and move into position">Execute plan</button>
-        <button data-ui="pause" title="Pause (Space)">Pause</button>
-        <button data-ui="resume" title="Commit changed plans and continue (Space)">Resume</button>
-      </div>
-      <div class="speed" role="group" aria-label="Time acceleration" data-ui="speeds"></div>
-      <p class="hint" data-ui="sim-note"></p>
     </section>
     <section class="sec" data-sec="status">
       <h2 data-ui="status-title">Status</h2>
@@ -241,7 +242,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   // --- State -------------------------------------------------------------
 
   let stage: WorkspaceStage = o.initialStage;
-  let session: Session = createSession();
+  // The exercise runs at the fastest time acceleration unless the trainee slows it.
+  let session: Session = setTimeScale(createSession(), 16);
   /** The planning tool last used in stage 3, restored on return. */
   let planningTool: 'deploy' | 'killZone' = 'deploy';
   /** Whether Visibility was on when stage 3 was left. */
@@ -458,8 +460,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     placeRoster();
   };
   /**
-   * In BLUEFOR planning the roster sits right under the selection panel, where
-   * its hint points to it; in the other stages it has its own section. The
+   * In BLUEFOR planning the roster sits right above the selection panel (the
+   * selected unit's details); in the other stages it has its own section. The
    * element itself moves, so its clicks and selection stay as they are.
    */
   const placeRoster = () => {
@@ -749,18 +751,22 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         ? 'Not executed'
         : `Executed (revision ${String(e.revisions.length)})${e.hasUncommittedChanges ? ' · <span class="warn">changes not executed</span>' : ''}`;
     const blockers = e.opforStart ? [] : e.startOpforProblems();
+    // The missing kill zone is not repeated here: Continue's reason gives it when it is the one left.
+    const listed = blockers.filter((b) => b !== NO_KILL_ZONE);
     const readiness = e.opforStart
       ? message('ok', 'OPFOR has started: continue to OPFOR & Combat.')
       : blockers.length === 0
         ? message('ok', 'Ready for OPFOR.')
-        : `${message('warn', blockers[0] ?? '')}${
-            blockers.length > 1
-              ? `<ul class="blockers">${blockers
-                  .slice(1)
-                  .map((b) => `<li>${escapeHtml(b)}</li>`)
-                  .join('')}</ul>`
-              : ''
-          }`;
+        : listed.length === 0
+          ? ''
+          : `${message('warn', listed[0] ?? '')}${
+              listed.length > 1
+                ? `<ul class="blockers">${listed
+                    .slice(1)
+                    .map((b) => `<li>${escapeHtml(b)}</li>`)
+                    .join('')}</ul>`
+                : ''
+            }`;
     return `<dl class="kv">
       <dt>Destinations</dt><dd>${String(assigned)} of ${String(trainee.length)} Marines</dd>
       <dt>In position</dt><dd>${String(inPosition)} of ${String(assigned)}</dd>

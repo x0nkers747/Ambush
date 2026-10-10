@@ -1017,7 +1017,7 @@ export function createExercise({
     const problems: string[] = [];
     switch (phase) {
       case 'bluforPlanning':
-        problems.push('BLUEFOR has not occupied its positions: Execute the plan first.');
+        problems.push('BLUEFOR has not occupied its positions: press Move first.');
         break;
       case 'bluforOccupation': {
         const moving = trainee.filter((id) => {

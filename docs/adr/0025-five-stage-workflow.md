@@ -112,13 +112,16 @@ The side panel is a fixed sequence of sections, shown or hidden by stage:
 
 1. Primary action (always first, and kept at the top while the panel scrolls, so the way on to
    the next stage is always in the same place)
-2. Stage tools
-3. Simulation (stages 3–5)
-4. Stage status
-5. Squad roster
-6. Event log (stages 3–5, collapsed)
-7. Help (collapsed)
-8. Battlefield Information (collapsed)
+2. Stage tools (in stage 3 the squad roster comes right before the selected unit's details)
+3. Stage status
+4. Squad roster (stages 2, 4 and 5)
+5. Event log (stages 3–5, collapsed)
+6. Help (collapsed)
+7. Battlefield Information (collapsed)
+
+The simulation controls (clock, state, **Move**, Pause, Resume and the time
+acceleration, 16× by default) float over the map in stages 3–5, left of the north arrow, so they
+never need scrolling to. The map's banner is then centred in the space to their left.
 
 Stage tools and status by stage:
 

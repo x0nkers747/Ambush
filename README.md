@@ -60,7 +60,7 @@ button.
    - **Clear route** keeps the OPFOR where it starts; **Reset scenario** asks first, then starts
      over. Changes are saved as you make them. The demo's scenario is fixed and shown read-only.
    - **Continue to BLUEFOR Planning** once the status says the scenario is ready.
-3. **BLUEFOR Planning**: plan positions, the kill zone and visibility, then **Execute plan**, pause,
+3. **BLUEFOR Planning**: plan positions, the kill zone and visibility, then **Move**, pause,
    re-plan and resume, all in this stage (see below). Continue once BLUEFOR is in position.
 4. **OPFOR & Combat**: **Start OPFOR**, then **Trigger Ambush** when you choose.
 5. **After Action Review**: not built yet. The stage says so, shows the engagement's recorded
@@ -95,7 +95,7 @@ sources, their resolution and accuracy, and the credits their licences require. 
    line 10 m apart centred there; drag the diamond to move it and the yellow handle to turn it
    ([ADR 0022](docs/adr/0022-fire-team-formation-planning.md)). Select a single Marine to adjust
    that Marine alone.
-2. **Execute plan.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
+2. **Move.** BLUEFOR moves into position while OPFOR waits. Pause (Space) to change
    destinations or facings, then Resume.
 3. **BLUEFOR in position.** When every Marine with a destination or facing has arrived and turned,
    the exercise stops and waits; continue to **OPFOR & Combat** (stage 4).

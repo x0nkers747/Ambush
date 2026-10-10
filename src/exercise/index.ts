@@ -132,6 +132,7 @@ export {
 } from './formation';
 export {
   killZoneProblems,
+  NO_KILL_ZONE,
   polygonCentroid,
   MIN_KILL_ZONE_AREA_M2,
   MIN_VERTEX_SPACING_M,

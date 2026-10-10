@@ -682,7 +682,7 @@ describe('START OPFOR validation', () => {
     const exercise = setup();
     drawKillZone(exercise);
     expect(exercise.startOpforProblems()).toEqual([
-      'BLUEFOR has not occupied its positions: Execute the plan first.',
+      'BLUEFOR has not occupied its positions: press Move first.',
     ]);
     planA(exercise);
     exercise.execute();

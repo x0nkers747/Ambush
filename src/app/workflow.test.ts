@@ -64,9 +64,9 @@ describe('the workflow', () => {
 
   it('uses the START OPFOR rules to leave BLUEFOR planning, and stays open once OPFOR has started', () => {
     const blocked = facts({
-      startOpforProblems: () => ['BLUEFOR has not occupied its positions: Execute the plan first.'],
+      startOpforProblems: () => ['BLUEFOR has not occupied its positions: press Move first.'],
     });
-    expect(nextBlocker('bluefor', blocked)).toMatch(/Execute the plan first/);
+    expect(nextBlocker('bluefor', blocked)).toMatch(/press Move first/);
     expect(nextBlocker('bluefor', facts())).toBeNull();
     // After START OPFOR the exercise reports "already started": that never blocks stage 4.
     expect(

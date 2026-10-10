@@ -91,12 +91,15 @@ function checked(
   return { ...zone, vertices };
 }
 
+/** The problem reported while no kill zone is drawn. */
+export const NO_KILL_ZONE = 'No kill zone: draw one on the map.';
+
 /** Why the kill zone cannot be used to start the OPFOR approach; empty when it can. */
 export function killZoneProblems(
   zone: KillZone | null,
   opfor: readonly DeepReadonly<Soldier>[],
 ): string[] {
-  if (zone === null) return ['No kill zone: draw one on the map.'];
+  if (zone === null) return [NO_KILL_ZONE];
   if (zone.vertices.length < 3) {
     return [`The kill zone needs at least 3 corners (it has ${String(zone.vertices.length)}).`];
   }
