@@ -29,6 +29,39 @@ export {
   type OverpassResponse,
 } from './osm';
 export {
+  decodeMvt,
+  MvtError,
+  ringArea,
+  type MvtFeature,
+  type MvtLayer,
+  type MvtValue,
+} from './mvt';
+export {
+  buildingsFromOverture,
+  dissolveSeams,
+  OVERTURE_ATTRIBUTION,
+  OVERTURE_BUILDINGS_ZOOM,
+  OVERTURE_MARGIN_M,
+  overtureAttribution,
+  overtureTilesFor,
+  type OvertureImportReport,
+  type OvertureTile,
+  type OvertureTileId,
+} from './overture';
+export {
+  findPmtilesEntry,
+  parsePmtilesDirectory,
+  parsePmtilesHeader,
+  PMTILES_COMPRESSION,
+  PMTILES_HEADER_BYTES,
+  PMTILES_ROOT_BYTES,
+  PMTILES_TILE_TYPE,
+  PmtilesError,
+  pmtilesTileId,
+  type PmtilesEntry,
+  type PmtilesHeader,
+} from './pmtiles';
+export {
   BATTLEFIELD_SCHEMA,
   BATTLEFIELD_SCHEMA_VERSION,
   BattlefieldPackageError,

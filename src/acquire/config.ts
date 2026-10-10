@@ -1,4 +1,4 @@
-// Geographic service endpoints (docs/adr/0014). The defaults are the free
+// Geographic service endpoints (docs/adr/0014, 0023). The defaults are the free
 // public services; each can be replaced (e.g. by a self-hosted or paid
 // Overpass instance before a commercial release) without code changes, by
 // storing a JSON object with any of these fields under
@@ -15,6 +15,16 @@ export interface ServiceConfig {
   readonly contactEmail: string;
   /** Tiles fetched at once. */
   readonly tileConcurrency: number;
+  /**
+   * Where buildings come from (docs/adr/0023): Overture Maps (with
+   * OpenStreetMap as the fallback when Overture cannot be reached), or
+   * OpenStreetMap only.
+   */
+  readonly buildingSource: 'overture' | 'openstreetmap';
+  /** Folder of Overture's published tiles: `${overtureTilesUrl}${release}/buildings.pmtiles`. */
+  readonly overtureTilesUrl: string;
+  /** Overture release to read (e.g. "2026-09-23.1"); empty for the newest published. */
+  readonly overtureRelease: string;
 }
 
 export const DEFAULT_SERVICES: ServiceConfig = {
@@ -23,6 +33,9 @@ export const DEFAULT_SERVICES: ServiceConfig = {
   terrainTileUrl: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
   contactEmail: '',
   tileConcurrency: 4,
+  buildingSource: 'overture',
+  overtureTilesUrl: 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/',
+  overtureRelease: '',
 };
 
 export const SERVICE_CONFIG_KEY = 'ambush.services';
@@ -79,6 +92,21 @@ export function loadServiceConfig(storage: Pick<Storage, 'getItem'> | null): {
     if (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 8)
       config.tileConcurrency = n;
     else problems.push('tileConcurrency must be an integer from 1 to 8');
+  }
+  if (o['buildingSource'] !== undefined) {
+    const b = o['buildingSource'];
+    if (b === 'overture' || b === 'openstreetmap') config.buildingSource = b;
+    else problems.push('buildingSource must be "overture" or "openstreetmap"');
+  }
+  if (o['overtureTilesUrl'] !== undefined) {
+    if (url(o['overtureTilesUrl'])) config.overtureTilesUrl = o['overtureTilesUrl'] as string;
+    else problems.push('overtureTilesUrl must be an http(s) URL');
+  }
+  if (o['overtureRelease'] !== undefined) {
+    const r = o['overtureRelease'];
+    if (typeof r === 'string' && (r === '' || /^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(r)))
+      config.overtureRelease = r;
+    else problems.push('overtureRelease must be empty or a release name such as "2026-09-23.1"');
   }
   return { config, problems };
 }

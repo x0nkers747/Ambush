@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { heightAt, isOnTerrain } from '#sim';
+import { encodeMvt } from '#geo/fixtures';
 import { toGeo } from './frame';
 import type { OverpassResponse } from './osm';
 import {
@@ -13,6 +14,7 @@ import {
   type BattlefieldInputs,
   type BattlefieldPackage,
 } from './package';
+import { OVERTURE_ATTRIBUTION, type OvertureTile } from './overture';
 import { battlefieldGrid, type ElevationTile } from './terrarium';
 import quantico from './test-data/quantico-va.overpass.json';
 import { TILE_SIZE } from './tiles';
@@ -51,6 +53,74 @@ const inputs = (over: Partial<BattlefieldInputs> = {}): BattlefieldInputs => ({
   createdAt: '2026-10-08T12:00:00Z',
   ...over,
 });
+
+/**
+ * Overture building tiles for the request: three buildings near the centre
+ * (two from OpenStreetMap, one machine-learned), in the centre tile; the
+ * other tiles have none.
+ */
+function overtureTiles(): OvertureTile[] {
+  const z = 14;
+  const extent = 4096;
+  const world = extent * 2 ** z;
+  const { lat, lon } = REQUEST.centre;
+  const gx = Math.round(((lon + 180) / 360) * world);
+  const phi = (lat * Math.PI) / 180;
+  const gy = Math.round(((1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2) * world);
+  const cx = Math.floor(gx / extent);
+  const cy = Math.floor(gy / extent);
+  const square = (dx: number, dy: number): [number, number][] => [
+    [gx - cx * extent + dx, gy - cy * extent + dy],
+    [gx - cx * extent + dx + 20, gy - cy * extent + dy],
+    [gx - cx * extent + dx + 20, gy - cy * extent + dy + 20],
+    [gx - cx * extent + dx, gy - cy * extent + dy + 20],
+  ];
+  const sources = (dataset: string) => JSON.stringify([{ dataset }]);
+  const data = encodeMvt([
+    {
+      name: 'building',
+      features: [
+        {
+          type: 3,
+          properties: {
+            id: 'a',
+            height: 9,
+            '@geometry_source': 'OpenStreetMap',
+            sources: sources('OpenStreetMap'),
+          },
+          geometry: [square(-100, 0)],
+        },
+        {
+          type: 3,
+          properties: {
+            id: 'b',
+            '@geometry_source': 'OpenStreetMap',
+            sources: sources('OpenStreetMap'),
+          },
+          geometry: [square(0, 0)],
+        },
+        {
+          type: 3,
+          properties: {
+            id: 'c',
+            height: 4,
+            '@geometry_source': 'Microsoft ML Buildings',
+            sources: sources('Microsoft ML Buildings'),
+          },
+          geometry: [square(100, 0)],
+        },
+      ],
+    },
+  ]);
+  return planBattlefield(REQUEST).buildingTiles.map((t) => ({
+    ...t,
+    data: t.x === cx && t.y === cy ? data : null,
+  }));
+}
+const OVERTURE = {
+  release: '2026-09-23.1',
+  url: 'https://overture.example.test/tiles/2026-09-23.1/buildings.pmtiles',
+};
 
 describe('battlefield packages', () => {
   it('plans a 1 km battlefield: 10 m grid, Terrarium zoom 15 at this latitude, a few tiles', () => {
@@ -138,6 +208,86 @@ describe('battlefield packages', () => {
     expect(pkg.processing.warnings).toContain(
       'OpenStreetMap data could not be fetched: the battlefield has terrain only.',
     );
+  });
+
+  // Buildings from Overture Maps (docs/adr/0023).
+  it('takes the buildings from Overture when given, and everything else from OSM', () => {
+    const osmOnly = buildBattlefield(inputs());
+    const pkg = buildBattlefield(inputs({ overture: { ...OVERTURE, tiles: overtureTiles() } }));
+    expect(pkg.terrain.features.buildings.map((b) => [b.id, b.heightMeters])).toEqual([
+      ['ovt-a', 9],
+      ['ovt-b', 6],
+      ['ovt-c', 4],
+    ]);
+    expect(pkg.processing.counts.buildings).toBe(3);
+    // OSM's own buildings are not used; the rest of OSM is.
+    expect({ ...pkg.terrain.features, buildings: [] }).toEqual({
+      ...osmOnly.terrain.features,
+      buildings: [],
+    });
+    expect(pkg.osm.query).toBe(planBattlefield(REQUEST).osmQueryWithoutBuildings);
+    expect(pkg.osm.query).not.toMatch(/building/);
+    expect(osmOnly.osm.query).toMatch(/way\["building"\]/);
+    expect(pkg.buildings).toEqual({
+      source: 'overture',
+      overture: {
+        ...OVERTURE,
+        zoom: 14,
+        tiles: planBattlefield(REQUEST).buildingTiles.map((t) => ({
+          z: t.z,
+          x: t.x,
+          y: t.y,
+          missing: !overtureTiles().find((o) => o.x === t.x && o.y === t.y)?.data,
+        })),
+        bySource: { OpenStreetMap: 2, 'Microsoft ML Buildings': 1 },
+        datasets: ['Microsoft ML Buildings', 'OpenStreetMap'],
+        merged: 0,
+        heights: { data: 2, floors: 0, defaulted: 1 },
+      },
+    });
+    expect(pkg.attribution.slice(0, 3)).toEqual([
+      OSM_ATTRIBUTION,
+      OVERTURE_ATTRIBUTION,
+      'Global ML Building Footprints, licensed by Microsoft under the ODbL',
+    ]);
+    expect(osmOnly.buildings).toEqual({ source: 'openstreetmap', overture: null });
+    // Deterministic, and survives a JSON round trip.
+    const again = buildBattlefield(inputs({ overture: { ...OVERTURE, tiles: overtureTiles() } }));
+    expect(again).toEqual(pkg);
+    expect(parseBattlefieldPackage(JSON.parse(JSON.stringify(pkg)))).toEqual(pkg);
+  });
+
+  it('says why when the buildings had to come from OSM', () => {
+    const pkg = buildBattlefield(
+      inputs({
+        overture: null,
+        overtureProblem: 'Buildings (Overture Maps) failed: network error',
+      }),
+    );
+    expect(pkg.buildings?.source).toBe('openstreetmap');
+    expect(pkg.processing.counts.buildings).toBeGreaterThan(100);
+    expect(pkg.processing.warnings).toContain(
+      'Buildings are from OpenStreetMap: Overture Maps could not be used (Buildings (Overture Maps) failed: network error).',
+    );
+  });
+
+  it('keeps Overture buildings when OSM is unavailable, crediting OSM for those drawn from it', () => {
+    const pkg = buildBattlefield(
+      inputs({ osm: null, overture: { ...OVERTURE, tiles: overtureTiles() } }),
+    );
+    expect(pkg.terrain.features.buildings).toHaveLength(3);
+    expect(pkg.terrain.features.roads).toEqual([]);
+    expect(pkg.osm.available).toBe(false);
+    expect(pkg.attribution[0]).toBe(OSM_ATTRIBUTION);
+    expect(pkg.processing.warnings).toContain(
+      'OpenStreetMap data could not be fetched: the battlefield has terrain and buildings only (no roads, vegetation or water).',
+    );
+  });
+
+  it('reads packages made before buildings were recorded (importer 1.0)', () => {
+    const old = JSON.parse(JSON.stringify(buildBattlefield(inputs()))) as Record<string, unknown>;
+    delete old['buildings'];
+    expect(parseBattlefieldPackage(old)).toEqual(old);
   });
 
   it('handles incomplete elevation data: fills small gaps, refuses large ones', () => {

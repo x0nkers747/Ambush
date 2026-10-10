@@ -13,15 +13,18 @@ import {
   type FetchLike,
   type Sleep,
 } from './http';
+import { fetchOvertureBuildings, type OvertureBuildings } from './overture';
 import { fetchOverpass, fetchTerrainTile, type DecodePng, type FetchedTile } from './services';
 import type { BattlefieldStore } from './store';
 
-// Generating a battlefield (docs/adr/0014): download the elevation tiles and
-// the OSM features, build the package, save it. Elevation comes first: without
-// it there is no battlefield. OSM problems can be accepted (terrain only) when
-// the player chooses to.
+// Generating a battlefield (docs/adr/0014): download the elevation tiles,
+// the buildings and the OSM features, build the package, save it. Elevation
+// comes first: without it there is no battlefield. Buildings come from
+// Overture Maps (docs/adr/0023); when Overture cannot be reached they come
+// from OpenStreetMap with the other features, and the battlefield says so.
+// OSM problems can be accepted (no OSM features) when the player chooses to.
 
-export type GenerationStep = 'elevation' | 'osm' | 'processing' | 'saving';
+export type GenerationStep = 'elevation' | 'buildings' | 'osm' | 'processing' | 'saving';
 
 export interface GenerationProgress {
   readonly step: GenerationStep;
@@ -100,11 +103,49 @@ export async function generateBattlefield(
   );
   check();
 
-  // 2. OpenStreetMap.
+  // 2. Buildings from Overture Maps; OpenStreetMap's are the fallback.
+  let overture: OvertureBuildings | null = null;
+  let overtureProblem: string | undefined;
+  if (o.config.buildingSource === 'overture') {
+    const tileCount = plan.buildingTiles.length;
+    report({
+      step: 'buildings',
+      message: `Downloading buildings from Overture Maps (0 of ${String(tileCount)} tiles)…`,
+      done: 0,
+      total: tileCount,
+    });
+    try {
+      overture = await fetchOvertureBuildings(plan.buildingTiles, o.config, {
+        ...client('buildings'),
+        onTile: (done, total) => {
+          report({
+            step: 'buildings',
+            message: `Downloading buildings from Overture Maps (${String(done)} of ${String(total)} tiles)…`,
+            done,
+            total,
+          });
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error;
+      overtureProblem = error.message.replace(/\.$/, '');
+      report({
+        step: 'buildings',
+        message: 'Overture Maps could not be reached: buildings will come from OpenStreetMap.',
+      });
+    }
+    check();
+  }
+
+  // 3. OpenStreetMap: everything else (and the buildings, without Overture's).
   report({ step: 'osm', message: 'Downloading map features from OpenStreetMap…' });
   let osm: { response: OverpassResponse; endpoint: string; text: string } | null = null;
   try {
-    osm = await fetchOverpass(plan.osmQuery, o.config, client('osm'));
+    osm = await fetchOverpass(
+      overture ? plan.osmQueryWithoutBuildings : plan.osmQuery,
+      o.config,
+      client('osm'),
+    );
   } catch (error) {
     if (!(error instanceof ServiceError) || !o.allowMissingOsm) {
       if (error instanceof ServiceError)
@@ -114,7 +155,7 @@ export async function generateBattlefield(
   }
   check();
 
-  // 3. Processing (pure; under a second for a 5 km battlefield, so it runs here).
+  // 4. Processing (pure; under a second for a 5 km battlefield, so it runs here).
   report({ step: 'processing', message: 'Building the battlefield…' });
   const pkg = buildBattlefield({
     request,
@@ -122,16 +163,19 @@ export async function generateBattlefield(
     elevationUrlTemplate: o.config.terrainTileUrl,
     osm: osm?.response ?? null,
     osmEndpoint: osm?.endpoint ?? o.config.overpassEndpoints[0] ?? '',
+    overture,
+    ...(overtureProblem !== undefined ? { overtureProblem } : {}),
     createdAt: (o.now ?? (() => new Date()))().toISOString(),
   });
   check();
 
-  // 4. Saving, with the source data for reprocessing.
+  // 5. Saving, with the source data for reprocessing.
   report({ step: 'saving', message: 'Saving the battlefield…' });
   await o.store.put(pkg, {
     overpassText: osm?.text ?? null,
     overpassEndpoint: osm?.endpoint ?? '',
     tiles: tiles.map((t) => ({ z: t.z, x: t.x, y: t.y, png: t.png, sources: t.sources })),
+    overture,
   });
   return pkg;
 }

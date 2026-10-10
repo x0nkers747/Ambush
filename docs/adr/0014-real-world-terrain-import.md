@@ -1,6 +1,7 @@
 # ADR 0014: Real-world terrain import (1 km battlefields)
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0023 (buildings come from Overture Maps, with OpenStreetMap
+  as the fallback)
 - Date: 2026-10-08
 - Implements ADR 0006 (georeference and import chain). Extends ADR 0011 (water, waterways, land
   use, vegetation holes) and ADR 0012 (the squad on imported terrain).

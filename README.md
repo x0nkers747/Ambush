@@ -6,7 +6,9 @@ drives a 2D tactical view and a 3D (Three.js) observer view.
 
 Status: **real-world terrain** ([ADR 0014](docs/adr/0014-real-world-terrain-import.md)): besides
 the synthetic demo, any 5 × 5 km area between 80° S and 84° N can be generated from
-OpenStreetMap and freely available elevation data, saved in the browser and played offline. The
+OpenStreetMap, Overture Maps buildings
+([ADR 0023](docs/adr/0023-overture-buildings.md)) and freely available elevation data, saved in
+the browser and played offline. The
 trainee commands the 13-Marine rifle squad of MCWP 3-11.2 (1991; a historical organization, see
 [ADR 0012](docs/adr/0012-organization-orp-and-single-destination-planning.md)), starting at an
 objective rally point, and gives each Marine one destination and one facing. Marines are shown
@@ -37,8 +39,9 @@ three stages ([ADR 0015](docs/adr/0015-three-stage-workflow-and-scenario-editing
 1. **Terrain selection.** Open the **demo** (it goes straight to planning, with its own scenario),
    **generate a new battlefield** (enter a latitude and longitude in decimal degrees, e.g.
    `38.5223`, `-77.2934`, or search for a place; check the location, press **Generate
-   battlefield**; **Cancel** stops it; if OpenStreetMap is unavailable you can retry or continue
-   with terrain only), or open a **saved battlefield** (no network needed). Opening or generating
+   battlefield**; **Cancel** stops it; buildings come from Overture Maps, or from OpenStreetMap
+   when Overture cannot be reached; if OpenStreetMap is unavailable you can retry or continue
+   without it), or open a **saved battlefield** (no network needed). Opening or generating
    a battlefield goes to its scenario.
 2. **Scenario editing.** On the tactical map:
    - **Place ORP**: click where the squad assembles (or drag the ORP).
@@ -176,3 +179,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 20. [Viewsheds on 5 km battlefields](docs/adr/0020-viewshed-performance-5-km.md)
 21. [The trainee triggers the ambush](docs/adr/0021-manual-ambush-trigger.md)
 22. [Fire-team formation planning](docs/adr/0022-fire-team-formation-planning.md)
+23. [Buildings from Overture Maps](docs/adr/0023-overture-buildings.md)

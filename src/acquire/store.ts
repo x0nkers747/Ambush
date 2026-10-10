@@ -1,8 +1,15 @@
-import { parseBattlefieldPackage, type BattlefieldPackage, type LatLon, type TileId } from '#geo';
+import {
+  parseBattlefieldPackage,
+  type BattlefieldPackage,
+  type LatLon,
+  type OvertureTile,
+  type TileId,
+} from '#geo';
 
 // Saved battlefields (docs/adr/0014). Each battlefield is stored as its
 // package (what is played) plus its source data (the Overpass response as
-// received and the elevation tiles as PNG), so it can be reprocessed later by
+// received, the elevation tiles as PNG and the Overture building tiles,
+// docs/adr/0023), so it can be reprocessed later by
 // a newer importer without downloading again. Stored packages are re-validated
 // on load: damaged or incompatible data is reported, never half-loaded.
 
@@ -24,6 +31,16 @@ export interface BattlefieldSources {
   readonly overpassText: string | null;
   readonly overpassEndpoint: string;
   readonly tiles: readonly (TileId & { readonly png: Blob | null; readonly sources: string })[];
+  /**
+   * The Overture building tiles as read (decompressed), with their release;
+   * absent for battlefields generated before importer 1.1, `null` when the
+   * buildings came from OpenStreetMap.
+   */
+  readonly overture?: {
+    readonly release: string;
+    readonly url: string;
+    readonly tiles: readonly OvertureTile[];
+  } | null;
 }
 
 export interface BattlefieldStore {

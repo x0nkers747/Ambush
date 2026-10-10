@@ -15,3 +15,14 @@ unchanged.
 
 Map data © OpenStreetMap contributors, available under the Open Database License (ODbL):
 https://www.openstreetmap.org/copyright
+
+## Overture Maps building tiles
+
+`quantico-va.overture-buildings.json` holds two neighbouring tiles of Overture Maps' `buildings`
+vector tiles (release 2026-09-23.1, zoom 14, columns 4674 and 4675, row 6288, near Quantico, VA), as
+read from the PMTiles archive and decompressed, base64-encoded. Six buildings cross the seam between
+them. Used by the Overture importer tests (docs/adr/0023).
+
+Building data from Overture Maps Foundation (overturemaps.org), available under the Open Database
+License (ODbL); it includes data © OpenStreetMap contributors (ODbL) and Global ML Building
+Footprints, licensed by Microsoft under the ODbL.

@@ -7,6 +7,15 @@ import {
 import { summarizeElevationSources, type SurfaceModel } from './elevation-sources';
 import { createFrame, geographicBounds, type BattlefieldFrame, type GeoBox } from './frame';
 import { featuresFromOsm, overpassQuery, type OsmImportReport, type OverpassResponse } from './osm';
+import {
+  buildingsFromOverture,
+  OVERTURE_BUILDINGS_ZOOM,
+  overtureAttribution,
+  overtureTilesFor,
+  type OvertureImportReport,
+  type OvertureTile,
+  type OvertureTileId,
+} from './overture';
 import { battlefieldGrid, resampleToGrid, tilesForGrid, type ElevationTile } from './terrarium';
 import { zoomForCellSize, type TileId } from './tiles';
 import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './utm';
@@ -22,7 +31,7 @@ import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './ut
 export const BATTLEFIELD_SCHEMA = 'ambush.battlefield';
 export const BATTLEFIELD_SCHEMA_VERSION = 1;
 /** The importer's own version: tag mapping, defaults and processing rules. */
-export const IMPORTER_VERSION = '1.0.0';
+export const IMPORTER_VERSION = '1.1.0';
 
 /** The only battlefield size offered for now; the format supports others. */
 export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;
@@ -89,6 +98,25 @@ export interface BattlefieldPackage {
     /** `false` when OSM could not be fetched and the battlefield has elevation only. */
     readonly available: boolean;
   };
+  /**
+   * Where the buildings came from (docs/adr/0023). Absent in packages made
+   * before importer 1.1, whose buildings are OpenStreetMap's.
+   */
+  readonly buildings?: {
+    readonly source: 'overture' | 'openstreetmap' | 'none';
+    /** The Overture release and tiles read, when the buildings are Overture's. */
+    readonly overture: {
+      readonly release: string;
+      readonly url: string;
+      readonly zoom: number;
+      readonly tiles: readonly (TileId & { readonly missing: boolean })[];
+      /** Buildings by the dataset their outline came from. */
+      readonly bySource: Readonly<Record<string, number>>;
+      readonly datasets: readonly string[];
+      readonly merged: number;
+      readonly heights: OvertureImportReport['heights'];
+    } | null;
+  };
   /** Credits the sources' licences require, to be shown with the map. */
   readonly attribution: readonly string[];
   readonly processing: {
@@ -125,12 +153,17 @@ export function battlefieldRequest(
   };
 }
 
-/** What to download for a request: the frame, the elevation tiles and the OSM query. */
+/** What to download for a request: the frame, the elevation tiles, the building tiles and the OSM queries. */
 export interface BattlefieldPlan {
   readonly frame: BattlefieldFrame;
   readonly zoom: number;
   readonly tiles: readonly TileId[];
+  /** The Overture building tiles covering the battlefield (docs/adr/0023). */
+  readonly buildingTiles: readonly OvertureTileId[];
+  /** The OSM query with buildings (when Overture's are not used). */
   readonly osmQuery: string;
+  /** The OSM query without buildings (when Overture's are used). */
+  readonly osmQueryWithoutBuildings: string;
 }
 
 export function planBattlefield(request: BattlefieldRequest): BattlefieldPlan {
@@ -140,7 +173,11 @@ export function planBattlefield(request: BattlefieldRequest): BattlefieldPlan {
     frame,
     zoom,
     tiles: tilesForGrid(frame, battlefieldGrid(frame, request.cellSizeM), zoom),
+    buildingTiles: overtureTilesFor(frame, OVERTURE_BUILDINGS_ZOOM),
     osmQuery: overpassQuery(geographicBounds(frame, OSM_QUERY_MARGIN_M)),
+    osmQueryWithoutBuildings: overpassQuery(geographicBounds(frame, OSM_QUERY_MARGIN_M), {
+      buildings: false,
+    }),
   };
 }
 
@@ -150,9 +187,21 @@ export interface BattlefieldInputs {
   /** Decoded tiles (elevations `null` when a tile could not be fetched) and their source headers. */
   readonly tiles: readonly (ElevationTile & { readonly sources: string })[];
   readonly elevationUrlTemplate: string;
-  /** `null` when OSM was unavailable: the battlefield then has terrain only. */
+  /** `null` when OSM was unavailable: the battlefield then has no OSM features. */
   readonly osm: OverpassResponse | null;
   readonly osmEndpoint: string;
+  /**
+   * Overture's building tiles (docs/adr/0023), or `null` to take the
+   * buildings from OSM. When given, the OSM response is read without
+   * buildings (it was fetched with `osmQueryWithoutBuildings`).
+   */
+  readonly overture?: {
+    readonly release: string;
+    readonly url: string;
+    readonly tiles: readonly OvertureTile[];
+  } | null;
+  /** Why Overture's buildings were not used (it could not be reached), for the warnings. */
+  readonly overtureProblem?: string;
   /** ISO 8601 time of generation (the builder is pure, so the caller supplies it). */
   readonly createdAt: string;
 }
@@ -176,8 +225,12 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
     );
   }
   const sources = summarizeElevationSources(inputs.tiles.map((t) => t.sources));
-  const osm = inputs.osm ? featuresFromOsm(inputs.osm, frame) : null;
-  const features: Required<EnvironmentFeatures> = osm?.features ?? {
+  const overture = inputs.overture ?? null;
+  const osm = inputs.osm
+    ? featuresFromOsm(inputs.osm, frame, { buildings: overture === null })
+    : null;
+  const ovt = overture ? buildingsFromOverture(overture.tiles, frame) : null;
+  const osmFeatures: Required<EnvironmentFeatures> = osm?.features ?? {
     roads: [],
     buildings: [],
     vegetation: [],
@@ -185,6 +238,10 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
     waterways: [],
     landUse: [],
   };
+  const features: Required<EnvironmentFeatures> = ovt
+    ? { ...osmFeatures, buildings: ovt.buildings }
+    : osmFeatures;
+  const buildingSource = ovt ? 'overture' : inputs.osm ? 'openstreetmap' : 'none';
   const terrain: TerrainDataset = {
     formatVersion: 3,
     georef: {
@@ -207,9 +264,19 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       `The generated terrain is invalid: ${error instanceof Error ? error.message : String(error)}.`,
     );
   }
-  const warnings = [...(osm?.report.warnings ?? [])];
-  if (!inputs.osm)
-    warnings.push('OpenStreetMap data could not be fetched: the battlefield has terrain only.');
+  const warnings = [...(osm?.report.warnings ?? []), ...(ovt?.report.warnings ?? [])];
+  if (inputs.overtureProblem !== undefined && !ovt) {
+    warnings.push(
+      `Buildings are from OpenStreetMap: Overture Maps could not be used (${inputs.overtureProblem}).`,
+    );
+  }
+  if (!inputs.osm) {
+    warnings.push(
+      ovt
+        ? 'OpenStreetMap data could not be fetched: the battlefield has terrain and buildings only (no roads, vegetation or water).'
+        : 'OpenStreetMap data could not be fetched: the battlefield has terrain only.',
+    );
+  }
   if (resampled.filled > 0) {
     warnings.push(
       `${String(resampled.filled)} elevation sample(s) had no source data and were filled from their neighbours.`,
@@ -270,27 +337,53 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
     },
     osm: {
       endpoint: inputs.osmEndpoint,
-      query: plan.osmQuery,
+      query: overture ? plan.osmQueryWithoutBuildings : plan.osmQuery,
       timestampOsmBase: osm?.report.timestampOsmBase ?? null,
       elementCount: osm?.report.elements ?? 0,
       available: inputs.osm !== null,
     },
+    buildings: {
+      source: buildingSource,
+      overture:
+        overture && ovt
+          ? {
+              release: overture.release,
+              url: overture.url,
+              zoom: overture.tiles[0]?.z ?? OVERTURE_BUILDINGS_ZOOM,
+              tiles: overture.tiles.map((t) => ({
+                z: t.z,
+                x: t.x,
+                y: t.y,
+                missing: t.data === null,
+              })),
+              bySource: ovt.report.bySource,
+              datasets: ovt.report.datasets,
+              merged: ovt.report.merged,
+              heights: ovt.report.heights,
+            }
+          : null,
+    },
     attribution: [
-      ...(inputs.osm ? [OSM_ATTRIBUTION] : []),
+      // OpenStreetMap's credit also covers Overture buildings drawn from OSM.
+      ...(inputs.osm || ovt?.report.datasets.includes('OpenStreetMap') ? [OSM_ATTRIBUTION] : []),
+      ...(ovt ? overtureAttribution(ovt.report.datasets) : []),
       TERRAIN_TILES_ATTRIBUTION,
       ...sources.attribution,
     ],
     processing: {
       importerVersion: IMPORTER_VERSION,
-      counts: osm?.report.counts ?? {
-        roads: 0,
-        buildings: 0,
-        vegetation: 0,
-        water: 0,
-        waterways: 0,
-        landUse: 0,
+      counts: {
+        ...(osm?.report.counts ?? {
+          roads: 0,
+          buildings: 0,
+          vegetation: 0,
+          water: 0,
+          waterways: 0,
+          landUse: 0,
+        }),
+        buildings: features.buildings.length,
       },
-      dropped: osm?.report.dropped ?? [],
+      dropped: [...(osm?.report.dropped ?? []), ...(ovt?.report.dropped ?? [])],
       warnings,
     },
   };

@@ -57,15 +57,20 @@ type Tags = Readonly<Record<string, string>>;
 /**
  * The Overpass QL query for a battlefield: every way or multipolygon the
  * importer uses, with full geometry, within the given boxes (two when the
- * battlefield crosses ±180°).
+ * battlefield crosses ±180°). Without buildings when they come from
+ * elsewhere (Overture Maps, docs/adr/0023).
  */
-export function overpassQuery(boxes: readonly GeoBox[], timeoutSeconds = 90): string {
+export function overpassQuery(
+  boxes: readonly GeoBox[],
+  { timeoutSeconds = 90, buildings = true }: { timeoutSeconds?: number; buildings?: boolean } = {},
+): string {
   const parts = boxes.map((b) => {
     const bbox = [b.south, b.west, b.north, b.east].map((v) => v.toFixed(6)).join(',');
     return [
       `way["highway"](${bbox});`,
-      `way["building"](${bbox});`,
-      `relation["building"]["type"="multipolygon"](${bbox});`,
+      ...(buildings
+        ? [`way["building"](${bbox});`, `relation["building"]["type"="multipolygon"](${bbox});`]
+        : []),
       `way["natural"~"^(wood|scrub|heath|wetland|water|grassland|tree_row)$"](${bbox});`,
       `relation["natural"~"^(wood|scrub|heath|wetland|water|grassland)$"]["type"="multipolygon"](${bbox});`,
       `way["landuse"](${bbox});`,
@@ -129,8 +134,8 @@ function roadClassOf(t: Tags): RoadClass | null {
 }
 
 /** Default storey height when only `building:levels` is known. */
-const STOREY_M = 3;
-const DEFAULT_BUILDING_M = 6;
+export const STOREY_M = 3;
+export const DEFAULT_BUILDING_M = 6;
 
 /** Vegetation kinds with defaults for values OSM rarely records. */
 const VEGETATION = {
@@ -273,10 +278,15 @@ interface Shape {
 
 // --- The importer ------------------------------------------------------------------
 
-/** Normalizes an Overpass response into terrain features for a battlefield. */
+/**
+ * Normalizes an Overpass response into terrain features for a battlefield.
+ * With `buildings: false` building elements are ignored (they come from
+ * elsewhere, docs/adr/0023), whatever the response holds.
+ */
 export function featuresFromOsm(
   response: OverpassResponse,
   frame: BattlefieldFrame,
+  { buildings: withBuildings = true }: { buildings?: boolean } = {},
 ): { features: Required<EnvironmentFeatures>; report: OsmImportReport } {
   const rect: Rect = {
     minX: -frame.widthM / 2,
@@ -329,7 +339,7 @@ export function featuresFromOsm(
     const veg = vegetationOf(tags);
     const wet = waterOf(tags);
     const land = landUseOf(tags);
-    const isBuilding = tags['building'] !== undefined && tags['building'] !== 'no';
+    const isBuilding = withBuildings && tags['building'] !== undefined && tags['building'] !== 'no';
     if (!isBuilding && !veg && !wet && !land) return false;
     const clipped = shapes.flatMap((s) => clipShape(s, ref));
     if (clipped.length === 0) return true; // outside the battlefield, or dropped above
@@ -500,7 +510,7 @@ export function featuresFromOsm(
           vegetationOf(tags) ||
           waterOf(tags) ||
           landUseOf(tags) ||
-          tags['building'] !== undefined
+          (withBuildings && tags['building'] !== undefined)
         ) {
           dropped.push({ ref, reason: 'area outline is not closed' });
         }

@@ -77,10 +77,11 @@ export function battlefieldExercise(
       <dt>Location</dt><dd>${escapeHtml(formatCoordinates(pkg.request.centre))}</dd>
       <dt>Size</dt><dd>${pkg.request.widthM.toLocaleString('en')} × ${pkg.request.heightM.toLocaleString('en')} m · UTM ${String(pkg.frame.zone)}${pkg.frame.hemisphere} (EPSG:${String(pkg.frame.epsg)})</dd>
       <dt>Elevation</dt><dd>${String(pkg.request.cellSizeM)} m grid from ${escapeHtml(datasets.join(', ') || 'unrecognised sources')} (${resolution}; ${escapeHtml(SURFACE_LABEL[e.surfaceModel] ?? e.surfaceModel)}). ${String(Math.round(e.minM))}–${String(Math.round(e.maxM))} m.</dd>
+      <dt>Buildings</dt><dd>${buildingsLine(pkg)}</dd>
       <dt>Map data</dt><dd>${
         pkg.osm.available
-          ? `OpenStreetMap as of ${escapeHtml(pkg.osm.timestampOsmBase ?? 'unknown')}: ${String(c.roads)} roads and paths, ${String(c.buildings)} buildings, ${String(c.vegetation)} vegetation, ${String(c.water)} water, ${String(c.waterways)} waterways, ${String(c.landUse)} land use`
-          : 'none (terrain only)'
+          ? `OpenStreetMap as of ${escapeHtml(pkg.osm.timestampOsmBase ?? 'unknown')}: ${String(c.roads)} roads and paths, ${String(c.vegetation)} vegetation, ${String(c.water)} water, ${String(c.waterways)} waterways, ${String(c.landUse)} land use`
+          : 'none (OpenStreetMap could not be fetched)'
       }</dd>
       <dt>Generated</dt><dd>${escapeHtml(new Date(pkg.createdAt).toLocaleString())} · importer ${escapeHtml(pkg.processing.importerVersion)}</dd>
     </dl>
@@ -102,8 +103,24 @@ export function battlefieldExercise(
   };
 }
 
+/** Where a battlefield's buildings came from (docs/adr/0023), with their count. */
+function buildingsLine(pkg: BattlefieldPackage): string {
+  const count = pkg.processing.counts.buildings;
+  const b = pkg.buildings;
+  if (b?.source === 'overture' && b.overture) {
+    const sources = Object.entries(b.overture.bySource)
+      .sort(([, x], [, y]) => y - x)
+      .map(([name, n]) => `${String(n)} ${escapeHtml(name)}`)
+      .join(', ');
+    return `${String(count)} from Overture Maps (release ${escapeHtml(b.overture.release)}; outlines from ${sources})`;
+  }
+  if (b?.source === 'none') return 'none';
+  return `${String(count)} from OpenStreetMap`;
+}
+
 const STEPS: readonly [GenerationStep, string][] = [
   ['elevation', 'Elevation tiles'],
+  ['buildings', 'Buildings (Overture Maps)'],
   ['osm', 'Map features (OpenStreetMap)'],
   ['processing', 'Building the battlefield'],
   ['saving', 'Saving'],
@@ -347,8 +364,8 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         show(
           'error',
           `<p>${escapeHtml(message)}</p>
-           <p class="muted">${osm ? 'The OpenStreetMap service may be busy. Try again in a minute, or continue with terrain only (no roads, buildings, vegetation or water).' : error instanceof ServiceError ? 'The service may be busy or unreachable. Check your connection and try again.' : ''}</p>
-           <div class="bf-row"><button data-action="retry">Try again</button>${osm ? '<button data-action="terrain-only">Continue with terrain only</button>' : ''}</div>`,
+           <p class="muted">${osm ? 'The OpenStreetMap service may be busy. Try again in a minute, or continue without OpenStreetMap: no roads, vegetation or water, and buildings only if Overture Maps can be reached.' : error instanceof ServiceError ? 'The service may be busy or unreachable. Check your connection and try again.' : ''}</p>
+           <div class="bf-row"><button data-action="retry">Try again</button>${osm ? '<button data-action="terrain-only">Continue without OpenStreetMap</button>' : ''}</div>`,
         );
       });
   };
@@ -393,7 +410,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
             <div class="grow"><b>${escapeHtml(b.name)}</b>
               <div class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${b.widthM.toLocaleString('en')} × ${b.heightM.toLocaleString('en')} m ·
               ${b.elevationResolutionM === null ? 'elevation resolution unknown' : `~${String(b.elevationResolutionM)} m elevation`} ·
-              ${b.osmAvailable ? `${String(c.buildings)} buildings, ${String(c.roads)} roads` : 'terrain only'} ·
+              ${b.osmAvailable ? `${String(c.buildings)} buildings, ${String(c.roads)} roads` : c.buildings > 0 ? `${String(c.buildings)} buildings, no OpenStreetMap features` : 'terrain only'} ·
               ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</div>
             </div>
             <button class="primary" data-open="${escapeHtml(b.id)}">Open</button>

@@ -261,6 +261,9 @@ describe('service clients', () => {
 });
 
 describe('generating a battlefield', () => {
+  // These tests script OpenStreetMap and the elevation tiles only; buildings from
+  // Overture Maps (docs/adr/0023) are tested in overture.test.ts.
+  const OSM_ONLY: ServiceConfig = { ...DEFAULT_SERVICES, buildingSource: 'openstreetmap' };
   const request = battlefieldRequest(
     { lat: 38.5223, lon: -77.2934 },
     { name: 'Quantico', widthM: 1000 },
@@ -285,7 +288,7 @@ describe('generating a battlefield', () => {
     ]);
     const progress: GenerationProgress[] = [];
     const pkg = await generateBattlefield(request, {
-      config: DEFAULT_SERVICES,
+      config: OSM_ONLY,
       store,
       fetch,
       decodePng: decode,
@@ -317,7 +320,7 @@ describe('generating a battlefield', () => {
       [/elevation-tiles-prod/, [tileResponse]],
       [/overpass/, [() => new Response('', { status: 504 })]],
     ]);
-    const options = { config: DEFAULT_SERVICES, store, fetch, decodePng: decode, sleep };
+    const options = { config: OSM_ONLY, store, fetch, decodePng: decode, sleep };
     await expect(generateBattlefield(request, options)).rejects.toBeInstanceOf(OsmUnavailableError);
     const pkg: BattlefieldPackage = await generateBattlefield(request, {
       ...options,
@@ -333,7 +336,7 @@ describe('generating a battlefield', () => {
     const fetch = fakeFetch([]);
     await expect(
       generateBattlefield(request, {
-        config: DEFAULT_SERVICES,
+        config: OSM_ONLY,
         store,
         fetch,
         decodePng: decode,
@@ -354,7 +357,7 @@ describe('generating a battlefield', () => {
     ]);
     await expect(
       generateBattlefield(request, {
-        config: DEFAULT_SERVICES,
+        config: OSM_ONLY,
         store,
         fetch,
         decodePng: decode,
@@ -371,7 +374,7 @@ describe('generating a battlefield', () => {
       [/overpass/, [() => json(quantico)]],
     ]);
     const pkg = await generateBattlefield(request, {
-      config: DEFAULT_SERVICES,
+      config: OSM_ONLY,
       store,
       fetch,
       decodePng: decode,

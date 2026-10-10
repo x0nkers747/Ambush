@@ -31,7 +31,8 @@ export interface ClientOptions {
   readonly onRetry?: RetryOptions['onRetry'];
 }
 
-const retry = (
+/** Retry options for a service call made with these client options. */
+export const retry = (
   service: string,
   o: ClientOptions,
   extra: Partial<RetryOptions> = {},
