@@ -405,7 +405,23 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     searchPlaces(query, o.config, { fetch: (u, i) => window.fetch(u, i) })
       .then((results: PlaceResult[]) => {
         if (results.length === 0) {
-          show('results', '<li class="muted">No places found.</li>');
+          // Nominatim knows only what OpenStreetMap maps: say why, and what to do instead.
+          show(
+            'results',
+            `<li class="no-results"><p><b>No places found for “${escapeHtml(query.trim())}”.</b></p>
+            <p class="muted">Search only finds places mapped in OpenStreetMap, and many street
+            addresses are missing, especially house numbers outside towns.</p>
+            <p class="muted">Try the road, town or postcode instead, or
+            <button class="link" data-action="enter-coordinates">enter coordinates</button>
+            from another map: paste “lat, lon” into Latitude. In Google Maps, right-click the spot
+            and click the coordinates to copy them.</p></li>`,
+          );
+          ui('results')
+            .querySelector('[data-action="enter-coordinates"]')
+            ?.addEventListener('click', () => {
+              input('bf-lat').focus();
+              input('bf-lat').select();
+            });
           return;
         }
         show(
