@@ -8,7 +8,12 @@ import {
 } from '#geo';
 import { QUANTICO_OSM as quantico } from '#geo/fixtures';
 import { DEFAULT_SERVICES, loadServiceConfig, type ServiceConfig } from './config';
-import { generateBattlefield, OsmUnavailableError, type GenerationProgress } from './generate';
+import {
+  generateBattlefield,
+  OsmUnavailableError,
+  RETRY_QUIET_MS,
+  type GenerationProgress,
+} from './generate';
 import {
   CancelledError,
   createRateLimiter,
@@ -208,8 +213,26 @@ describe('service clients', () => {
     const { sleep } = fakeSleep();
     const fetch = fakeFetch([[/./, [() => new Response('', { status: 504 })]]]);
     await expect(fetchOverpass('q', config, { fetch, sleep })).rejects.toThrow(
-      /OpenStreetMap \(Overpass API\) failed after 4 attempts/,
+      /OpenStreetMap \(Overpass API\) failed after 9 attempts/,
     );
+  });
+
+  it('keeps retrying Overpass gateway timeouts for about three minutes before giving up', async () => {
+    // As measured against the public server: a run of 504s, then the data.
+    const { sleep, waits } = fakeSleep();
+    const fetch = fakeFetch([
+      [
+        /./,
+        [
+          ...Array.from({ length: 8 }, () => () => new Response('', { status: 504 })),
+          () => json({ elements: [{ type: 'node', id: 1 }] }),
+        ],
+      ],
+    ]);
+    const result = await fetchOverpass('q', config, { fetch, sleep });
+    expect(result.response.elements).toHaveLength(1);
+    expect(waits).toEqual([2000, 5000, 10000, 15000, 15000, 15000, 15000, 15000]);
+    expect(waits.reduce((a, b) => a + b, 0)).toBe(92000);
   });
 
   it('fetches and decodes a tile with its sources; a missing tile has no elevations', async () => {
@@ -311,6 +334,48 @@ describe('generating a battlefield', () => {
     const sources = await store.getSources(pkg.id);
     expect(sources?.tiles).toHaveLength(tiles);
     expect(sources?.overpassText).toContain('"elements"');
+  });
+
+  it('says nothing about retries until a download has failed for a while', async () => {
+    // A clock that only the (fake) waits move on.
+    let nowMs = 0;
+    const waits: number[] = [];
+    const sleep: Sleep = (ms) => {
+      waits.push(ms);
+      nowMs += ms;
+      return Promise.resolve();
+    };
+    const run = async (failures: number) => {
+      const progress: GenerationProgress[] = [];
+      nowMs = 0;
+      await generateBattlefield(request, {
+        config: OSM_ONLY,
+        store: createMemoryStore(),
+        fetch: fakeFetch([
+          [/elevation-tiles-prod/, [tileResponse]],
+          [
+            /overpass/,
+            [
+              ...Array.from({ length: failures }, () => () => new Response('', { status: 504 })),
+              () => json(quantico),
+            ],
+          ],
+        ]),
+        decodePng: decode,
+        sleep,
+        clock: () => nowMs,
+        onProgress: (p) => progress.push(p),
+      });
+      return progress.filter((p) => p.message.startsWith('Retrying')).map((p) => p.message);
+    };
+    expect(RETRY_QUIET_MS).toBe(60000);
+    // The usual case: a few 504s, recovered within 17 s of waiting. Nothing is shown.
+    expect(await run(3)).toEqual([]);
+    // Still failing after a minute: the retries from then on are reported.
+    expect(await run(8)).toEqual([
+      'Retrying in 15 s: the service answered HTTP 504.',
+      'Retrying in 15 s: the service answered HTTP 504.',
+    ]);
   });
 
   it('fails with an OSM-specific error, and can continue with terrain only', async () => {

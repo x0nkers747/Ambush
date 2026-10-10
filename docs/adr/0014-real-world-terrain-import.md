@@ -49,11 +49,11 @@ and tile columns wrap.
 Each service is fetched directly from the browser; all of them answer with
 `Access-Control-Allow-Origin: *`. There is no backend.
 
-| Service                          | Used for                | Notes                                                                                                            |
-| -------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Overpass API (`overpass-api.de`) | OSM features, one query | Retries with backoff; 30 s after 429/406; error remarks inside a 200 answer are retried; endpoints tried in turn |
-| AWS Terrain Tiles, Terrarium PNG | Elevation               | About 4–9 tiles at zoom 14–15; 404/403 means a missing tile                                                      |
-| Nominatim                        | Optional place search   | Only on an explicit Search, at most one request per second, never search-as-you-type                             |
+| Service                          | Used for                | Notes                                                                                                                                                                                                                                               |
+| -------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overpass API (`overpass-api.de`) | OSM features, one query | Nine attempts over about 3 min (2, 5, 10, then 15 s apart), since 504s for the first minute are common; 30 s after 429/406; error remarks inside a 200 answer are retried; endpoints tried in turn. Retries are reported only after 60 s of failing |
+| AWS Terrain Tiles, Terrarium PNG | Elevation               | About 4–9 tiles at zoom 14–15; 404/403 means a missing tile                                                                                                                                                                                         |
+| Nominatim                        | Optional place search   | Only on an explicit Search, at most one request per second, never search-as-you-type                                                                                                                                                                |
 
 Endpoints are configuration (`acquire/config.ts`). They can be overridden per browser through
 `localStorage["ambush.services"]` (JSON with `overpassEndpoints`, `nominatimEndpoint`,

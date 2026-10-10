@@ -60,8 +60,20 @@ reason in amber below it.
 
 Terrain selection is one page. Stages 2–5 of a battlefield share another (`workspace.ts`) with one
 tactical map. The exercise therefore survives a step back to the scenario: it is not stored (ADR
-0015), so a page reload would lose it. Moving between the two pages reloads, as before.
-In-page stage changes update the address with `history.replaceState`, so a reload stays put:
+0015), so a page reload would lose it.
+
+Moving between the two pages happens in place, without a reload (this replaces ADR 0015's reload
+between pages). Only the header and the side panel change; the tactical map stays on screen as it
+is. Opening a battlefield hands the preview's map (`TacticalMap.attach`) and its canvas to the
+workspace, and reuses the battlefield the preview loaded, so it is not read again. Leaving hands
+the map back to the preview, with the scenario as edited. Without a reload to clear up, each page
+stops what it started when it is left: the workspace its frame loop and its keyboard and
+visibility listeners, terrain selection a generation in progress and late answers from search or
+storage. The demo, which terrain selection does not list, disposes its map on leaving.
+
+The move to the other page is a new history entry (`history.pushState`); stage changes within a
+page update the address with `history.replaceState`. Back and Forward reload at the address they
+reach, and a reload stays put:
 
 | Address        | Stage                                                      |
 | -------------- | ---------------------------------------------------------- |
@@ -156,10 +168,9 @@ under Help.
   previews the selected saved battlefield on the tactical map (`battlefield-preview.ts`), with its saved scenario (ORP, OPFOR and route). The preview pans and
   zooms but never edits (the `view` tool). It loads the whole battlefield, so it shows "Loading the
   preview…" until it is ready; a slower load is dropped when another selection follows, and the
-  map is disposed when the selection changes. Opening loads the battlefield again on its own page,
-  at the preview's view (centre and scale), and leaving it returns the view to the preview: the
-  view crosses the reload in session storage (`view-handoff.ts`), taken once and only for the same
-  battlefield.
+  map is disposed when the selection changes. Opening the battlefield hands this map to the
+  workspace and leaving hands it back (see Pages and addresses), so the view and the drawn terrain
+  never change between the two.
 - A reload in stages 3–5 restarts the exercise. Storing plans (`deploymentPlans` already serializes
   them) would remove that and is a candidate for later.
 - The After Action Review is a placeholder. Its section, stage and navigation exist, so replay and

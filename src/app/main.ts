@@ -14,17 +14,20 @@ import {
 } from '#exercise';
 import type { BattlefieldPackage } from '#geo';
 import { shareTerrain } from '#sim';
+import type { TacticalMap } from '#view2d';
+import type { PreviewData } from './battlefield-preview';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
-import { handOffView, takeView } from './view-handoff';
 import { demoInfoHtml, startWorkspace } from './workspace';
 
 // Composition root: the five-stage workflow (docs/adr/0025). Terrain
 // selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a battlefield
 // (scenario editing, BLUEFOR planning, OPFOR and combat, and the After Action
 // Review) share another (workspace.ts). Each page has its own address
-// (stages.ts); moving between pages saves what matters first and reloads, so
-// nothing from one page keeps running in the next.
+// (stages.ts). Moving between the two happens in place, without a reload:
+// the page being left stops what it started, and the tactical map of the
+// battlefield is handed over, so it is never rebuilt. The browser's Back and
+// Forward reload at the address they reach.
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Missing #app element');
@@ -48,6 +51,11 @@ async function openStore(): Promise<{ store: BattlefieldStore; persistent: boole
 /** Records an in-page stage change in the address without reloading, so a reload stays there. */
 function setAddress(stage: Stage): void {
   window.history.replaceState(null, '', stageHash(stage) || window.location.pathname);
+}
+
+/** Records a move to the other page as a new history entry (Back returns to it). */
+function pushAddress(stage: Stage): void {
+  window.history.pushState(null, '', stageHash(stage) || window.location.pathname);
 }
 
 /** Goes to a stage: a new address and a fresh page. */
@@ -94,6 +102,19 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Bat
   return { ...pkg, terrain: shareTerrain(pkg.terrain) };
 }
 
+/** What the terrain-selection preview shows of a battlefield and its scenario. */
+function previewData(pkg: BattlefieldPackage, definition: ScenarioDefinition): PreviewData {
+  const waypoints = Math.max(0, definition.opfor.route.length - 1);
+  return {
+    scenario: buildScenario(pkg.terrain, definition),
+    attribution: pkg.attribution,
+    caption:
+      definition.opfor.route.length === 0
+        ? 'Saved scenario: ORP only, no OPFOR yet'
+        : `Saved scenario: ORP, OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`,
+  };
+}
+
 function showFatal(root: HTMLElement, message: string): void {
   root.className = '';
   root.innerHTML = `<div class="fatal"><div class="sel-card"><h2>Something went wrong</h2>
@@ -107,32 +128,115 @@ function showFatal(root: HTMLElement, message: string): void {
 async function main(root: HTMLElement): Promise<void> {
   const { config, problems } = loadServiceConfig(localStorageOrNull());
   const { store, persistent } = await openStore();
+  // Back and Forward cross pages that were switched in place: load the one reached afresh.
+  window.addEventListener('popstate', () => {
+    window.location.reload();
+  });
+
+  /**
+   * The battlefield last loaded for the preview or left in the workspace, with
+   * its scenario. Opening it again reuses it, so the preview's map (built on
+   * its terrain) can be handed over as it is.
+   */
+  let loaded: { pkg: BattlefieldPackage; definition: ScenarioDefinition } | null = null;
+  /** Preview loads started; only the latest may set `loaded` (it is the one the preview shows). */
+  let previewLoads = 0;
+
+  const showSelection = (o: {
+    readonly selected?: string;
+    readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
+  }) => {
+    const page = startBattlefieldSelection(root, {
+      config,
+      configProblems: problems,
+      store,
+      persistent,
+      ...o,
+      loadPreview: async (id) => {
+        const mine = (previewLoads += 1);
+        const pkg = await openBattlefield(store, id);
+        const { definition } = await loadScenario(store, pkg);
+        if (mine === previewLoads) loaded = { pkg, definition };
+        return previewData(pkg, definition);
+      },
+      openBattlefield: (id, map) => {
+        void showBattlefield(id, 'edit', map, page);
+      },
+    });
+  };
+
+  /** Stages 2–5 of a saved battlefield, replacing `previous` (terrain selection) once it is ready. */
+  const showBattlefield = async (
+    id: string,
+    kind: 'edit' | 'play',
+    handed: TacticalMap | null,
+    previous: { dispose(): void } | null,
+  ): Promise<void> => {
+    let map = handed;
+    try {
+      let pkg: BattlefieldPackage;
+      let definition: ScenarioDefinition;
+      let notice: string | null = null;
+      if (loaded?.pkg.id === id) ({ pkg, definition } = loaded);
+      else {
+        pkg = await openBattlefield(store, id);
+        ({ definition, notice } = await loadScenario(store, pkg));
+        // A map of another load of this battlefield shows another terrain object.
+        map?.dispose();
+        map = null;
+      }
+      if (!definition.orp) {
+        previous?.dispose();
+        map?.dispose();
+        showFatal(
+          root,
+          'There is no open ground on this battlefield where the squad can assemble.',
+        );
+        return;
+      }
+      let latest = definition;
+      const save = (d: ScenarioDefinition) => {
+        latest = d;
+        loaded = { pkg, definition: d };
+        return store.putScenario(pkg.id, d.id, d);
+      };
+      await save(definition);
+      // Only a complete scenario is played; otherwise it opens for editing.
+      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
+      const initialStage = kind === 'play' && playable ? 'bluefor' : 'scenario';
+      if (handed || previous)
+        pushAddress({ kind: initialStage === 'bluefor' ? 'play' : 'edit', battlefieldId: id });
+      // Terrain selection stays on screen until now, so the handed-over map is never blank.
+      previous?.dispose();
+      startWorkspace(root, {
+        title: pkg.name,
+        terrain: pkg.terrain,
+        scenario: { kind: 'editable', definition, save },
+        attribution: pkg.attribution,
+        describePoint: describePointFor(pkg),
+        infoHtml: battlefieldInfoHtml(pkg),
+        initialStage,
+        notice,
+        map,
+        leave: (m) => {
+          pushAddress({ kind: 'select', selected: pkg.id });
+          showSelection({ adopt: { id: pkg.id, map: m, data: previewData(pkg, latest) } });
+        },
+        setAddress: (s) => {
+          setAddress({ kind: s === 'bluefor' ? 'play' : 'edit', battlefieldId: pkg.id });
+        },
+      });
+    } catch (error) {
+      previous?.dispose();
+      map?.dispose();
+      showFatal(root, error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const stage = parseStage(window.location.hash);
   switch (stage.kind) {
     case 'select':
-      startBattlefieldSelection(root, {
-        config,
-        configProblems: problems,
-        store,
-        persistent,
-        ...(stage.selected === undefined ? {} : { selected: stage.selected }),
-        loadPreview: async (id) => {
-          const pkg = await openBattlefield(store, id);
-          const { definition } = await loadScenario(store, pkg);
-          const waypoints = Math.max(0, definition.opfor.route.length - 1);
-          return {
-            scenario: buildScenario(pkg.terrain, definition),
-            attribution: pkg.attribution,
-            caption:
-              definition.opfor.route.length === 0
-                ? 'Saved scenario: ORP only, no OPFOR yet'
-                : `Saved scenario: ORP, OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`,
-          };
-        },
-        openBattlefield: (pkg) => {
-          go({ kind: 'edit', battlefieldId: pkg.id });
-        },
-      });
+      showSelection(stage.selected === undefined ? {} : { selected: stage.selected });
       return;
 
     case 'demo':
@@ -143,9 +247,12 @@ async function main(root: HTMLElement): Promise<void> {
         attribution: [],
         infoHtml: demoInfoHtml(DEMO_SCENARIO),
         initialStage: stage.play === true ? 'bluefor' : 'scenario',
-        // Terrain selection no longer lists the demo (it is reached only by its address).
-        leave: () => {
-          go({ kind: 'select' });
+        // Terrain selection does not list the demo (it is reached only by its
+        // address), so its map is not handed on.
+        leave: (map) => {
+          map.dispose();
+          pushAddress({ kind: 'select' });
+          showSelection({});
         },
         setAddress: (s) => {
           setAddress({ kind: 'demo', play: s === 'bluefor' });
@@ -154,40 +261,9 @@ async function main(root: HTMLElement): Promise<void> {
       return;
 
     case 'edit':
-    case 'play': {
-      const pkg = await openBattlefield(store, stage.battlefieldId);
-      const { definition, notice } = await loadScenario(store, pkg);
-      if (!definition.orp) {
-        showFatal(
-          root,
-          'There is no open ground on this battlefield where the squad can assemble.',
-        );
-        return;
-      }
-      const save = (d: ScenarioDefinition) => store.putScenario(pkg.id, d.id, d);
-      await save(definition);
-      // Only a complete scenario is played; otherwise it opens for editing.
-      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
-      startWorkspace(root, {
-        title: pkg.name,
-        terrain: pkg.terrain,
-        scenario: { kind: 'editable', definition, save },
-        attribution: pkg.attribution,
-        describePoint: describePointFor(pkg),
-        infoHtml: battlefieldInfoHtml(pkg),
-        initialStage: stage.kind === 'play' && playable ? 'bluefor' : 'scenario',
-        notice,
-        initialView: takeView(pkg.id),
-        leave: (view) => {
-          handOffView(pkg.id, view);
-          go({ kind: 'select', selected: pkg.id });
-        },
-        setAddress: (s) => {
-          setAddress({ kind: s === 'bluefor' ? 'play' : 'edit', battlefieldId: pkg.id });
-        },
-      });
+    case 'play':
+      await showBattlefield(stage.battlefieldId, stage.kind, null, null);
       return;
-    }
   }
 }
 

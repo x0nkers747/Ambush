@@ -41,10 +41,11 @@ button.
 
 1. **Select Terrain.** Search for a place, enter a latitude and longitude in decimal degrees
    (e.g. `38.5223`, `-77.2934`; pasting "lat, lon" into the first field works), or use your
-   current position; then **Generate battlefield**. **Cancel** stops it; buildings come from
+   current position; then **Generate battlefield**. The new battlefield is then selected and
+   previewed on the map, so you can check it before **Open battlefield**. **Cancel** stops it; buildings come from
    Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
-   network needed; double-click to open it; **Delete…** asks to confirm): it is previewed on the
+   network needed; double-click to open it; the bin beside it deletes it, on a second click): it is previewed on the
    map, with its saved scenario, and opens with **Open battlefield**. The synthetic demo is not
    listed; it opens at the address `#demo`.
 2. **Edit Scenario.** On the tactical map, with the tools in the side panel:

@@ -903,14 +903,43 @@
         flex-direction: column;
         gap: 4px;
       }
+      .bf-saved-row {
+        display: flex;
+        align-items: stretch;
+        gap: 4px;
+      }
       .bf-item {
         display: flex;
         flex-direction: column;
+        flex: 1;
+        min-width: 0;
         gap: 2px;
-        width: 100%;
         text-align: left;
         background: transparent;
         border-color: var(--line);
+      }
+      /* A saved battlefield's bin: grey, red on hover, solid red when armed. */
+      .bf-delete {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        padding: 0;
+        color: var(--muted);
+        background: transparent;
+        border-color: var(--line);
+      }
+      .bf-delete:hover:not(:disabled) {
+        color: var(--red);
+        border-color: var(--red);
+        background: transparent;
+      }
+      .bf-delete[data-confirm='yes'],
+      .bf-delete[data-confirm='yes']:hover:not(:disabled) {
+        color: #fff;
+        background: var(--red-strong);
+        border-color: #ff8a80;
       }
       .bf-item span {
         font-size: 12px;

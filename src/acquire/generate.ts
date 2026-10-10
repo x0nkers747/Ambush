@@ -43,10 +43,23 @@ export interface GenerateOptions {
   readonly sleep?: Sleep;
   /** The time recorded in the package. */
   readonly now?: () => Date;
+  /** A clock in milliseconds, for how long a download has been retrying (default `Date.now`). */
+  readonly clock?: () => number;
   readonly onProgress?: (progress: GenerationProgress) => void;
   /** When OSM cannot be fetched, build a terrain-only battlefield instead of failing. */
   readonly allowMissingOsm?: boolean;
 }
+
+/**
+ * How long a download may keep failing and being retried before the trainee
+ * is told. The public Overpass server usually answers a battlefield's first
+ * request with HTTP 504 (its gateway gives up after 7 to 16 s while the query
+ * still runs) and a later retry with the data. Measured on 2026-10-10 with
+ * nine 5 km queries: eight failed at first; of the seven that recovered, five
+ * did within 21 s and the others within 57 s. A message for that only alarms;
+ * the progress line keeps saying what is being downloaded meanwhile.
+ */
+export const RETRY_QUIET_MS = 60_000;
 
 /** OSM failed; the player may choose to continue with terrain only. */
 export class OsmUnavailableError extends ServiceError {
@@ -68,14 +81,20 @@ export async function generateBattlefield(
     if (o.signal?.aborted) throw new CancelledError();
   };
   const plan = planBattlefield(request);
-  const client = (step: GenerationStep) => ({
-    fetch: o.fetch,
-    ...(o.sleep ? { sleep: o.sleep } : {}),
-    ...(o.signal ? { signal: o.signal } : {}),
-    onRetry: ({ waitMs, reason }: { waitMs: number; reason: string }) => {
-      report({ step, message: `Retrying in ${String(Math.round(waitMs / 1000))} s: ${reason}.` });
-    },
-  });
+  const clock = o.clock ?? (() => Date.now());
+  /** Client options for one download; its retries are reported once it has failed for a while. */
+  const client = (step: GenerationStep) => {
+    const started = clock();
+    return {
+      fetch: o.fetch,
+      ...(o.sleep ? { sleep: o.sleep } : {}),
+      ...(o.signal ? { signal: o.signal } : {}),
+      onRetry: ({ waitMs, reason }: { waitMs: number; reason: string }) => {
+        if (clock() - started < RETRY_QUIET_MS) return;
+        report({ step, message: `Retrying in ${String(Math.round(waitMs / 1000))} s: ${reason}.` });
+      },
+    };
+  };
 
   // 1. Elevation.
   let done = 0;

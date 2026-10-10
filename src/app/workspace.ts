@@ -19,7 +19,7 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, MAX_SEED, type TerrainDataset, type Vec2 } from '#sim';
-import { createTacticalMap, type MapEditor, type MapView } from '#view2d';
+import { createTacticalMap, type MapBinding, type MapEditor, type TacticalMap } from '#view2d';
 import { carryPlans, type CarryResult } from './carry-plans';
 import {
   clock,
@@ -52,7 +52,10 @@ import { nextBlocker, STAGE_NAMES, type WorkflowFacts, type WorkflowStage } from
 // tactical map and a contextual side panel. Scenario editing (stage 2) and
 // the exercise (stages 3–5) share the page and the map, so stepping back to
 // the scenario keeps the exercise; a scenario change or an explicit restart
-// builds a new exercise and carries the trainee's plans into it.
+// builds a new exercise and carries the trainee's plans into it. The map can
+// come from the terrain-selection preview and goes back to it on leaving, so
+// it is never rebuilt between the two; the page stops its own frame loop and
+// listeners when it is left.
 
 /** The stages on this page. */
 export type WorkspaceStage = Exclude<WorkflowStage, 'terrain'>;
@@ -78,10 +81,13 @@ export interface WorkspaceOptions {
   readonly initialStage: 'scenario' | 'bluefor';
   /** A message to show on arrival (e.g. a saved scenario that could not be read). */
   readonly notice?: string | null;
-  /** The map view to open at (e.g. the terrain-selection preview's); otherwise the whole map. */
-  readonly initialView?: MapView | null;
-  /** Back to terrain selection (stage 1), with the map view to show there. */
-  readonly leave: (view: MapView) => void;
+  /**
+   * The terrain-selection preview's map of this battlefield, to keep as it is
+   * (view and drawn terrain); otherwise a new map fitted to the terrain.
+   */
+  readonly map?: TacticalMap | null;
+  /** Back to terrain selection (stage 1), handing the map over. The page has stopped by then. */
+  readonly leave: (map: TacticalMap) => void;
   /** Records the stage in the page address, so a reload stays there. */
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
 }
@@ -308,10 +314,9 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       }
     : undefined;
 
-  const canvas = app.querySelector<HTMLCanvasElement>('#map');
-  if (!canvas) throw new Error('Missing map canvas');
-  const map = createTacticalMap({
-    canvas,
+  const placeholder = app.querySelector<HTMLCanvasElement>('#map');
+  if (!placeholder) throw new Error('Missing map canvas');
+  const binding: MapBinding = {
     exercise: scenarioStage && stage === 'scenario' ? scenarioStage.preview : ex(),
     getSession: () => session,
     setSession: (next) => {
@@ -319,8 +324,19 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     },
     notify,
     ...(editor ? { editor } : {}),
-  });
-  if (o.initialView) map.setView(o.initialView.centre, o.initialView.metersPerPixel);
+  };
+  const adopt = (handed: TacticalMap): TacticalMap => {
+    // The preview's canvas takes the placeholder's place: same size, so the
+    // drawn map stays on screen as it is.
+    const canvas = handed.canvas;
+    canvas.id = 'map';
+    canvas.className = '';
+    canvas.setAttribute('aria-label', 'Tactical map');
+    placeholder.replaceWith(canvas);
+    handed.attach(binding);
+    return handed;
+  };
+  const map = o.map ? adopt(o.map) : createTacticalMap({ canvas: placeholder, ...binding });
   toScreen = (p) => map.toScreen(p);
 
   const exerciseStage = createExerciseStage({
@@ -387,7 +403,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   const enter = (target: WorkflowStage) => {
     if (target === 'terrain') {
       const leave = () => {
-        o.leave(map.view);
+        stop();
+        o.leave(map);
       };
       if (!hasWork()) {
         leave();
@@ -565,7 +582,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     ui('attribution').title = o.attribution.join('\n');
   }
 
-  window.addEventListener('keydown', (event) => {
+  const onKeyDown = (event: KeyboardEvent) => {
     if (
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLTextAreaElement ||
@@ -635,7 +652,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         break;
       }
     }
-  });
+  };
+  window.addEventListener('keydown', onKeyDown);
 
   // --- Panels -------------------------------------------------------------
 
@@ -955,9 +973,11 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
 
   let lastFrameMs: number | null = null;
   // rAF stops in hidden tabs; discard the gap on return rather than catching up.
-  document.addEventListener('visibilitychange', () => {
+  const onVisibilityChange = () => {
     lastFrameMs = null;
-  });
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  let frameId = 0;
   const frame = (nowMs: number) => {
     if (exercise) {
       const events =
@@ -969,12 +989,18 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     lastFrameMs = nowMs;
     map.render();
     updatePanels();
-    requestAnimationFrame(frame);
+    frameId = requestAnimationFrame(frame);
+  };
+  /** Stops the page (frame loop and global listeners); the map is handed on, not disposed. */
+  const stop = () => {
+    cancelAnimationFrame(frameId);
+    window.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
   };
 
   enter(stage);
   if (o.notice) notify(o.notice);
-  requestAnimationFrame(frame);
+  frameId = requestAnimationFrame(frame);
 }
 
 /** The demo's description for Battlefield Information. */

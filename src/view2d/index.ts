@@ -26,6 +26,7 @@ export {
   createTacticalMap,
   VIEWSHED_CELL_M,
   VIEWSHED_PREVIEW_CELL_M,
+  type MapBinding,
   type MapEditor,
   type MapView,
   type PointerReadout,

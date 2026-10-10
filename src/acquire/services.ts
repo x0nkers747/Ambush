@@ -83,6 +83,17 @@ export async function fetchOverpass(
   throw last instanceof Error ? last : new ServiceError(OVERPASS, `${OVERPASS} failed.`);
 }
 
+/**
+ * Retries for an Overpass query: nine attempts over about three minutes. The
+ * public server often answers HTTP 504 for a while before a 5 km query
+ * succeeds: measured on 2026-10-10, two of nine queries succeeded only on the
+ * fourth attempt (48 and 56 s) and one was still failing after six (109 s).
+ */
+export const OVERPASS_RETRY = {
+  retries: 8,
+  backoffMs: [2000, 5000, 10000, 15000],
+} as const;
+
 /** Overpass answered, but reported an error (e.g. a timeout) instead of data. */
 class OverpassRemarkError extends ServiceError {}
 
@@ -98,7 +109,7 @@ async function queryOverpass(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: `data=${encodeURIComponent(query)}`,
     },
-    retry(OVERPASS, o),
+    retry(OVERPASS, o, OVERPASS_RETRY),
   );
   const text = await response.text();
   let data: unknown;

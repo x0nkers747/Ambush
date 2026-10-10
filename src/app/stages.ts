@@ -1,9 +1,10 @@
 // Page addresses of the five-stage workflow (docs/adr/0015, docs/adr/0025).
 // Each address is a URL hash and a page: terrain selection is one page, and
 // stages 2–5 of one battlefield share another, so the exercise (stages 3–5)
-// survives a step back to the scenario. Moving between pages reloads, so
-// nothing from one page keeps running in the next, and a reload stays on the
-// same stage (stages 4 and 5 reload as stage 3: the exercise is not stored).
+// survives a step back to the scenario. Moving between pages happens in place
+// (main.ts) as a new history entry; Back, Forward and a reload load the page
+// at the address reached, on the same stage (stages 4 and 5 reload as stage
+// 3: the exercise is not stored).
 //
 //   ''                 1. Terrain selection
 //   '#select/<id>'     1. Terrain selection with battlefield <id> selected

@@ -13,6 +13,7 @@ import {
   type ServiceConfig,
 } from '#acquire';
 import type { Vec2 } from '#sim';
+import type { TacticalMap } from '#view2d';
 import {
   battlefieldRequest,
   createFrame,
@@ -25,7 +26,6 @@ import {
   type LatLon,
 } from '#geo';
 import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
-import { handOffView, takeView } from './view-handoff';
 import { createToast, escapeHtml, headerHtml, wireHeader } from './shell';
 import type { WorkflowFacts } from './workflow';
 
@@ -34,7 +34,8 @@ import type { WorkflowFacts } from './workflow';
 // battlefield and open it. The layout is the other stages': the map area
 // previews the selected saved battlefield on the tactical map, and the
 // side panel on the right chooses, describes the choice and holds its one
-// primary action.
+// primary action. Opening a battlefield hands the preview's map to the
+// workspace in the same page (docs/adr/0025).
 
 export interface SelectionOptions {
   readonly config: ServiceConfig;
@@ -46,8 +47,18 @@ export interface SelectionOptions {
   readonly selected?: string;
   /** Loads a saved battlefield for the preview map. */
   readonly loadPreview: (id: string) => Promise<PreviewData>;
-  /** Opens a battlefield; throws when no scenario can be made on it. */
-  readonly openBattlefield: (pkg: BattlefieldPackage) => void;
+  /**
+   * Opens battlefield `id` (stage 2), on `map` when the preview showed it
+   * (otherwise `null`). Terrain selection is disposed by then.
+   */
+  readonly openBattlefield: (id: string, map: TacticalMap | null) => void;
+  /** A map handed back by battlefield `id`'s workspace: the preview keeps showing it. */
+  readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
+}
+
+export interface BattlefieldSelection {
+  /** Stops everything terrain selection started (generation, the preview map). */
+  dispose(): void;
 }
 
 const SURFACE_LABEL: Record<string, string> = {
@@ -122,6 +133,9 @@ const STEPS: readonly [GenerationStep, string][] = [
   ['saving', 'Saving'],
 ];
 
+/** A bin, drawn in `currentColor`. */
+const TRASH_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/></svg>`;
+
 /** What is selected: a saved battlefield, or a new location to generate. */
 type Selection =
   | { readonly kind: 'none' }
@@ -139,7 +153,10 @@ const summaryLine = (b: BattlefieldSummary): string => {
   }`;
 };
 
-export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions): void {
+export function startBattlefieldSelection(
+  app: HTMLElement,
+  o: SelectionOptions,
+): BattlefieldSelection {
   app.className = 'select';
   app.innerHTML = `
     ${headerHtml('')}
@@ -222,6 +239,12 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   let saved: readonly BattlefieldSummary[] = [];
   let generating: AbortController | null = null;
   let opening = false;
+  /** Set once the page has moved on: late answers (search, generation, storage) are ignored. */
+  let disposed = false;
+  /** Whether the page is still shown (read after an `await`, when `disposed` may have changed). */
+  const live = () => !disposed;
+  /** The battlefield whose map was handed back, until the saved list confirms the selection. */
+  let adopting = o.adopt?.id ?? null;
 
   const facts: WorkflowFacts = {
     battlefieldSelected: () => selection.kind === 'saved',
@@ -260,8 +283,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
             <dt>Size</dt><dd>${summaryLine(b)}</dd>
             <dt>Elevation</dt><dd>${b.elevationResolutionM === null ? 'resolution unknown' : `~${String(b.elevationResolutionM)} m source data`}</dd>
             <dt>Generated</dt><dd>${escapeHtml(new Date(b.createdAt).toLocaleString())}</dd>
-          </dl>
-          <div class="bf-row"><button class="small" data-action="delete" data-id="${escapeHtml(b.id)}">Delete…</button></div>`;
+          </dl>`;
       }
       case 'location': {
         const { position, name } = selection;
@@ -312,11 +334,11 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   };
 
   const select = (next: Selection) => {
-    const before = selection.kind === 'saved' ? selection.summary.id : null;
     const id = next.kind === 'saved' ? next.summary.id : null;
+    adopting = null;
+    // A battlefield already shown (e.g. handed back by its workspace) is kept as it is.
     if (id === null) preview.hide();
-    // Coming back from the battlefield's own page: the view it was left at.
-    else if (id !== before) preview.show(() => o.loadPreview(id), takeView(id));
+    else preview.show(id, () => o.loadPreview(id));
     selection = next;
     show('preview', previewHtml());
     updatePrimary();
@@ -381,11 +403,13 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     ui('position-message').classList.remove('warn');
     navigator.geolocation.getCurrentPosition(
       (p) => {
+        if (disposed) return;
         input('bf-lat').value = p.coords.latitude.toFixed(6);
         input('bf-lon').value = p.coords.longitude.toFixed(6);
         setLocation({ lat: p.coords.latitude, lon: p.coords.longitude }, 'Current position');
       },
       (error) => {
+        if (disposed) return;
         positionMessage(
           `Your position is not available (${error.message || 'permission denied'}). Enter coordinates instead.`,
         );
@@ -404,6 +428,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     show('results', '<li class="muted">Searching…</li>');
     searchPlaces(query, o.config, { fetch: (u, i) => window.fetch(u, i) })
       .then((results: PlaceResult[]) => {
+        if (disposed) return;
         if (results.length === 0) {
           // Nominatim knows only what OpenStreetMap maps: say why, and what to do instead.
           show(
@@ -447,13 +472,14 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
           });
       })
       .catch((error: unknown) => {
+        if (disposed) return;
         show(
           'results',
           `<li class="warn">${escapeHtml(error instanceof ServiceError ? error.message : `${NOMINATIM} failed.`)} You can still enter coordinates.</li>`,
         );
       })
       .finally(() => {
-        button.disabled = false;
+        if (!disposed) button.disabled = false;
       });
   });
 
@@ -493,18 +519,28 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       signal: controller.signal,
       allowMissingOsm,
       onProgress: (p) => {
+        if (disposed) return;
         lastStep = p.step;
         renderSteps(p.step);
         show('message', escapeHtml(p.message));
       },
     })
-      .then((pkg) => {
-        generating = null;
+      .then(async (pkg) => {
+        if (disposed) return;
+        // Stay here: the new battlefield is selected and previewed, so the
+        // trainee can check the terrain before choosing Open battlefield.
+        // Generate stays blocked until it is selected.
         show('message', null);
-        open(pkg);
+        ui('progress').hidden = true;
+        ui('cancel').hidden = true;
+        notify(`${pkg.name} is ready. Check it on the map, then choose Open battlefield.`);
+        await refresh(pkg.id);
+        generating = null;
+        if (live()) updatePrimary();
       })
       .catch((error: unknown) => {
         generating = null;
+        if (disposed) return;
         ui('cancel').hidden = true;
         updatePrimary();
         show('message', null);
@@ -537,51 +573,45 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
 
   // --- Opening and deleting ------------------------------------------------
 
-  const open = (pkg: BattlefieldPackage) => {
-    try {
-      o.openBattlefield(pkg);
-    } catch (error) {
-      opening = false;
-      show('error', `<p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`);
-    }
-  };
-  /** Opens the selected saved battlefield (stage 2). */
+  /** Opens the selected saved battlefield (stage 2), on the preview's map. */
   const openSelection = () => {
     if (opening || selection.kind !== 'saved') return;
-    const id = selection.summary.id;
     opening = true;
-    // The battlefield opens where the preview was looking.
-    handOffView(id, preview.view());
-    o.store
-      .get(id)
-      .then(open)
-      .catch((error: unknown) => {
-        opening = false;
-        show(
-          'error',
-          `<p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p><p class="muted">You can delete it and generate it again.</p>`,
-        );
-      });
+    o.openBattlefield(selection.summary.id, preview.release());
   };
 
-  ui('preview').addEventListener('click', (event) => {
-    const target = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
-    const action = target?.dataset['action'];
-    if (action === 'delete' && target && selection.kind === 'saved') {
-      // Two clicks: the first asks for confirmation.
-      if (target.dataset['confirm'] !== 'yes') {
-        target.dataset['confirm'] = 'yes';
-        target.textContent = `Confirm: delete ${selection.summary.name} and its scenario`;
-        target.classList.add('danger');
-        return;
-      }
-      const id = selection.summary.id;
-      target.disabled = true;
-      void o.store.delete(id).then(() => {
-        select({ kind: 'none' });
-        refresh();
-      });
+  // Each saved battlefield's bin. Two clicks: the first arms it (red), the
+  // second deletes; an armed bin disarms itself after a few seconds.
+  let armed: { button: HTMLButtonElement; timer: ReturnType<typeof setTimeout> } | null = null;
+  const disarm = () => {
+    if (!armed) return;
+    clearTimeout(armed.timer);
+    delete armed.button.dataset['confirm'];
+    armed.button.title = armed.button.getAttribute('aria-label') ?? '';
+    armed = null;
+  };
+  ui('saved').addEventListener('click', (event) => {
+    const bin = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-delete]');
+    const summary = saved.find((b) => b.id === bin?.dataset['delete']);
+    if (!bin || !summary) return;
+    if (armed?.button !== bin) {
+      disarm();
+      bin.dataset['confirm'] = 'yes';
+      const ask = `Click the bin again to delete ${summary.name} and its scenario.`;
+      bin.title = ask;
+      notify(ask);
+      armed = { button: bin, timer: setTimeout(disarm, 4000) };
+      return;
     }
+    disarm();
+    bin.disabled = true;
+    const wasSelected = selection.kind === 'saved' && selection.summary.id === summary.id;
+    void o.store.delete(summary.id).then(() => {
+      if (disposed) return;
+      notify(`Deleted ${summary.name}.`);
+      if (wasSelected) select({ kind: 'none' });
+      void refresh(selection.kind === 'saved' ? selection.summary.id : undefined);
+    });
   });
 
   ui('primary').addEventListener('click', () => {
@@ -603,30 +633,33 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         .map(
           (
             b,
-          ) => `<li><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false">
+          ) => `<li class="bf-saved-row"><button class="bf-item" data-select="${escapeHtml(b.id)}" aria-pressed="false">
             <b>${escapeHtml(b.name)}</b>
             <span class="muted">${escapeHtml(formatCoordinates(b.centre, 4))} · ${escapeHtml(new Date(b.createdAt).toLocaleDateString())}</span>
-          </button></li>`,
+          </button><button class="bf-delete" data-delete="${escapeHtml(b.id)}" aria-label="Delete ${escapeHtml(b.name)}" title="Delete ${escapeHtml(b.name)}">${TRASH_ICON}</button></li>`,
         )
         .join(''),
     );
     markSelected();
   };
-  const refresh = (preselect?: string) => {
+  const refresh = (preselect?: string): Promise<void> =>
     o.store
       .list()
       .then((list) => {
+        if (disposed) return;
         renderSaved(list);
         const summary = list.find((b) => b.id === preselect);
         if (summary) select({ kind: 'saved', summary });
+        // A handed-back map whose battlefield is no longer saved.
+        else if (adopting !== null) select({ kind: 'none' });
       })
       .catch((error: unknown) => {
+        if (disposed) return;
         show(
           'saved',
           `<li class="warn">Saved battlefields could not be read: ${escapeHtml(error instanceof Error ? error.message : String(error))}</li>`,
         );
       });
-  };
   const choose = (id: string | undefined) => {
     const summary = saved.find((b) => b.id === id);
     if (summary) select({ kind: 'saved', summary });
@@ -642,6 +675,22 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     openSelection();
   });
 
-  select({ kind: 'none' });
-  refresh(o.selected);
+  if (o.adopt) {
+    // Back from the battlefield's workspace: its map stays as it was, and the
+    // battlefield is selected once the saved list is read.
+    preview.adopt(o.adopt.id, o.adopt.map, o.adopt.data);
+    show('preview', previewHtml());
+    updatePrimary();
+    ui('placeholder').hidden = true;
+    header.update('terrain', facts);
+  } else select({ kind: 'none' });
+  void refresh(o.adopt?.id ?? o.selected);
+
+  return {
+    dispose() {
+      disposed = true;
+      generating?.abort();
+      preview.hide();
+    },
+  };
 }

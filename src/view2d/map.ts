@@ -34,8 +34,11 @@ export const VIEWSHED_PREVIEW_CELL_M = 8;
 // The tactical map widget: owns the canvas, the camera and pointer handling,
 // and edits the exercise's draft plans and the session's selection.
 
-export interface TacticalMapOptions {
-  readonly canvas: HTMLCanvasElement;
+/**
+ * Who the map works for: the exercise it shows, the session it reads and
+ * edits, and optional editor hooks. Set at creation and replaced by `attach`.
+ */
+export interface MapBinding {
   readonly exercise: Exercise;
   readonly getSession: () => Session;
   readonly setSession: (session: Session) => void;
@@ -43,6 +46,10 @@ export interface TacticalMapOptions {
   readonly notify?: (message: string) => void;
   /** Editor hooks: clicks and drags go to the editor instead of the exercise. */
   readonly editor?: MapEditor;
+}
+
+export interface TacticalMapOptions extends MapBinding {
+  readonly canvas: HTMLCanvasElement;
 }
 
 /**
@@ -96,8 +103,10 @@ export interface TacticalMap {
   centreOn(point: Vec2): void;
   /** Centres the view on a map point at a scale in metres per pixel (within the zoom limits). */
   setView(point: Vec2, metersPerPixel: number): void;
-  /** The current view, e.g. to show the same on another page with `setView`. */
+  /** The current view (centre and scale). */
   readonly view: MapView;
+  /** The canvas the map draws on; it can be moved to another place in the page. */
+  readonly canvas: HTMLCanvasElement;
   /** Whether a map point is currently on screen. */
   isInView(point: Vec2): boolean;
   /** Canvas pixel position of a map point. */
@@ -107,23 +116,27 @@ export interface TacticalMap {
    * preview after an edit), keeping the view.
    */
   setExercise(next: Exercise): void;
+  /**
+   * Hands the map to a new owner (e.g. from the terrain-selection preview to
+   * the battlefield's workspace, docs/adr/0025), keeping the view and the
+   * drawn terrain. The exercise must be on the same terrain. A gesture in
+   * progress is dropped.
+   */
+  attach(binding: MapBinding): void;
   dispose(): void;
 }
 
-export function createTacticalMap({
-  canvas,
-  exercise,
-  getSession,
-  setSession,
-  notify,
-  editor: editorHooks,
-}: TacticalMapOptions): TacticalMap {
-  const activeEditor = () =>
-    editorHooks && (editorHooks.active?.() ?? true) ? editorHooks : undefined;
+export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): TacticalMap {
+  let binding: MapBinding = initial;
+  const getSession = () => binding.getSession();
+  const activeEditor = () => {
+    const editor = binding.editor;
+    return editor && (editor.active?.() ?? true) ? editor : undefined;
+  };
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D is not available');
-  let current = exercise;
-  const world = exercise.simulation.world;
+  let current = initial.exercise;
+  const world = current.simulation.world;
   const layer = createTerrainLayer(world.terrain);
 
   let viewport: Viewport = { width: 1, height: 1 };
@@ -232,7 +245,17 @@ export function createTacticalMap({
   const makeController = () =>
     createMapController(
       scene,
-      createMapActions(current, { get: getSession, set: setSession }, setCamera, notify),
+      createMapActions(
+        current,
+        {
+          get: getSession,
+          set: (session) => {
+            binding.setSession(session);
+          },
+        },
+        setCamera,
+        (message) => binding.notify?.(message),
+      ),
     );
   let controller = makeController();
 
@@ -405,6 +428,22 @@ export function createTacticalMap({
       current = next;
       controller = makeController();
     },
+    attach(next) {
+      if (next.exercise.simulation.world.terrain !== world.terrain)
+        throw new Error('The map shows one terrain: attach an exercise on the same terrain.');
+      controller.cancel();
+      editorDragging = false;
+      dragEditor = undefined;
+      pressedAt = null;
+      binding = next;
+      current = next.exercise;
+      controller = makeController();
+      // The new owner's selection decides what is visible.
+      if (visibility !== null) viewsheds.cancel();
+      visibility = null;
+      canvas.style.cursor = '';
+    },
+    canvas,
     isInView(point) {
       const p = worldToScreen(camera, viewport, point);
       return p.x >= 0 && p.y >= 0 && p.x <= viewport.width && p.y <= viewport.height;
