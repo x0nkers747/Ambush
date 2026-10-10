@@ -24,6 +24,7 @@ import {
   type BattlefieldPackage,
   type LatLon,
 } from '#geo';
+import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
 import { createToast, escapeHtml, headerHtml, wireHeader } from './shell';
 import { DEMO_ID } from './stages';
 import type { WorkflowFacts } from './workflow';
@@ -31,7 +32,8 @@ import type { WorkflowFacts } from './workflow';
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
 // enter a position and generate a new 5 km battlefield, or select the demo or
 // a saved battlefield and open it. The left panel chooses; the main area
-// describes the choice and holds its one primary action.
+// describes the choice, holds its one primary action, and previews the demo or
+// a saved battlefield on the tactical map.
 
 export interface SelectionOptions {
   readonly config: ServiceConfig;
@@ -42,6 +44,8 @@ export interface SelectionOptions {
   /** The demo or a saved battlefield's id to select on arrival (e.g. coming back from stage 2). */
   readonly selected?: string;
   readonly openDemo: () => void;
+  /** Loads the demo (`DEMO_ID`) or a saved battlefield for the preview map. */
+  readonly loadPreview: (id: string) => Promise<PreviewData>;
   /** Opens a battlefield; throws when no scenario can be made on it. */
   readonly openBattlefield: (pkg: BattlefieldPackage) => void;
 }
@@ -184,6 +188,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       </aside>
       <main class="sel-main">
         <div class="sel-card" data-ui="preview"></div>
+        <div class="sel-preview" data-ui="preview-panel" hidden></div>
         <div class="sel-card" data-ui="progress" hidden>
           <ol class="bf-steps" data-ui="steps"></ol>
           <div class="hint" data-ui="message" hidden></div>
@@ -210,6 +215,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     el.innerHTML = html ?? '';
   };
   const notify = createToast(ui('toast'));
+  const preview = createBattlefieldPreview(ui('preview-panel'));
 
   let selection: Selection = { kind: 'none' };
   let saved: readonly BattlefieldSummary[] = [];
@@ -293,6 +299,15 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   };
 
   const select = (next: Selection) => {
+    const before =
+      selection.kind === 'demo'
+        ? DEMO_ID
+        : selection.kind === 'saved'
+          ? selection.summary.id
+          : null;
+    const id = next.kind === 'demo' ? DEMO_ID : next.kind === 'saved' ? next.summary.id : null;
+    if (id === null) preview.hide();
+    else if (id !== before) preview.show(() => o.loadPreview(id));
     selection = next;
     show('preview', previewHtml());
     if (next.kind !== 'location') show('error', null);

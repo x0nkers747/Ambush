@@ -732,6 +732,57 @@
         width: auto;
         padding: 8px 18px;
       }
+      /* The battlefield preview below the details. */
+      .sel-preview {
+        position: relative;
+        flex: 1;
+        align-self: stretch;
+        min-height: 320px;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .preview-map {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+      .preview-canvas {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        user-select: none;
+      }
+      .preview-status {
+        position: absolute;
+        inset: 0 0 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        text-align: center;
+        color: var(--muted);
+        background: rgba(20, 23, 26, 0.6);
+      }
+      .preview-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 28px;
+        padding: 0 8px 0 12px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .sel-preview .attribution {
+        bottom: 34px;
+      }
       .fatal {
         padding: 40px 24px;
       }

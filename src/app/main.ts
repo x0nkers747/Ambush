@@ -5,6 +5,7 @@ import {
   type BattlefieldStore,
 } from '#acquire';
 import {
+  buildScenario,
   DEMO_SCENARIO,
   defaultScenarioDefinition,
   parseScenarioDefinition,
@@ -116,6 +117,21 @@ async function main(root: HTMLElement): Promise<void> {
         ...(stage.selected === undefined ? {} : { selected: stage.selected }),
         openDemo: () => {
           go({ kind: 'demo' });
+        },
+        loadPreview: async (id) => {
+          if (id === DEMO_ID)
+            return { scenario: DEMO_SCENARIO, attribution: [], caption: 'Demo scenario (fixed)' };
+          const pkg = await openBattlefield(store, id);
+          const { definition } = await loadScenario(store, pkg);
+          const waypoints = Math.max(0, definition.opfor.route.length - 1);
+          return {
+            scenario: buildScenario(pkg.terrain, definition),
+            attribution: pkg.attribution,
+            caption:
+              definition.opfor.route.length === 0
+                ? 'Saved scenario: ORP only, no OPFOR yet'
+                : `Saved scenario: ORP, OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`,
+          };
         },
         openBattlefield: (pkg) => {
           go({ kind: 'edit', battlefieldId: pkg.id });

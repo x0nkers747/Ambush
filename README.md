@@ -44,8 +44,8 @@ button.
    current position; then **Generate battlefield**. **Cancel** stops it; buildings come from
    Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
-   network needed; double-click to open it; **Delete…** asks to confirm) or the **demo**, and
-   open it.
+   network needed; double-click to open it; **Delete…** asks to confirm) or the **demo**: it is
+   previewed on the map, with its saved scenario, and opens with **Open battlefield**.
 2. **Edit Scenario.** On the tactical map, with the tools in the side panel:
    - **Place ORP**: click where the squad assembles (or drag the ORP).
    - **Place OPFOR**: click where the OPFOR patrol (three soldiers) starts (or drag it).

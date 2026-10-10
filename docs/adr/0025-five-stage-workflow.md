@@ -142,8 +142,11 @@ under Help.
 - `exercise-ui.ts` and `scenario-editor.ts` are replaced by `workspace.ts`, `exercise-stage.ts`,
   `scenario-stage.ts`, `roster.ts` and `shell.ts`. The exercise, scenario, terrain and simulation
   layers are unchanged. view2d gains only `MapEditor.active`, and the session gains the `view` tool.
-- Terrain selection has no map preview of a battlefield, because it would need the battlefield's
-  full terrain loaded and rendered. The main area describes the selection instead.
+- Terrain selection previews the selected demo or saved battlefield on the tactical map
+  (`battlefield-preview.ts`), with its saved scenario (ORP, OPFOR and route). The preview pans and
+  zooms but never edits (the `view` tool). It loads the whole battlefield, so it shows "Loading the
+  preview…" until it is ready; a slower load is dropped when another selection follows, and the
+  map is disposed when the selection changes. Opening loads the battlefield again on its own page.
 - A reload in stages 3–5 restarts the exercise. Storing plans (`deploymentPlans` already serializes
   them) would remove that and is a candidate for later.
 - The After Action Review is a placeholder. Its section, stage and navigation exist, so replay and
