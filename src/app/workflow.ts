@@ -23,6 +23,15 @@ export const STAGE_NAMES: Readonly<Record<WorkflowStage, string>> = {
   aar: 'After Action Review',
 };
 
+/** The short labels of the header's stage segments; `STAGE_NAMES` stays the full name. */
+export const STAGE_LABELS: Readonly<Record<WorkflowStage, string>> = {
+  terrain: 'Terrain',
+  scenario: 'Edit Scenario',
+  bluefor: 'BLUEFOR',
+  opfor: 'OPFOR',
+  aar: 'AAR',
+};
+
 /** 1 to 5. */
 export function stageNumber(stage: WorkflowStage): number {
   return WORKFLOW_STAGES.indexOf(stage) + 1;
@@ -41,7 +50,7 @@ export function nextStage(stage: WorkflowStage): WorkflowStage | null {
  * asked only for the stage being left.
  */
 export interface WorkflowFacts {
-  /** Stage 1: whether a battlefield (the demo or a saved one) is selected. */
+  /** Stage 1: whether a saved battlefield is selected. */
   readonly battlefieldSelected: () => boolean;
   /** Stage 2: why the scenario cannot be played (`scenarioProblems`); empty when it can. */
   readonly scenarioProblems: () => readonly string[];
@@ -59,7 +68,7 @@ export function nextBlocker(stage: WorkflowStage, facts: WorkflowFacts): string 
     case 'terrain':
       return facts.battlefieldSelected()
         ? null
-        : 'Select a battlefield first: the demo, a saved one, or generate a new one.';
+        : 'Select a battlefield first: a saved one, or generate a new one.';
     case 'scenario':
       return facts.scenarioProblems()[0] ?? null;
     case 'bluefor':
@@ -76,4 +85,23 @@ export function nextBlocker(stage: WorkflowStage, facts: WorkflowFacts): string 
 /** Why Previous is not available from `stage`, or `null` when it is. */
 export function previousBlocker(stage: WorkflowStage): string | null {
   return previousStage(stage) === null ? 'This is the first stage.' : null;
+}
+
+/**
+ * Why the header cannot go straight from `from` to `to`, or `null` when it
+ * can. Any earlier stage is open, as Previous is. The next stage has Next's
+ * gate. A later one is reached only through the next, since entering a stage
+ * does work (building the exercise) that skipping would miss.
+ */
+export function stageBlocker(
+  from: WorkflowStage,
+  to: WorkflowStage,
+  facts: WorkflowFacts,
+): string | null {
+  const next = nextStage(from);
+  if (stageNumber(to) <= stageNumber(from)) return null;
+  if (to === next) return nextBlocker(from, facts);
+  return next === null
+    ? null
+    : (nextBlocker(from, facts) ?? `Go through ${STAGE_NAMES[next]} first.`);
 }

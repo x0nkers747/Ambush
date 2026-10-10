@@ -69,6 +69,13 @@ export interface MapEditor {
   active?(): boolean;
 }
 
+/** What the map shows: the map point at the centre and the scale. */
+export interface MapView {
+  readonly centre: Vec2;
+  /** Map metres per CSS pixel. */
+  readonly metersPerPixel: number;
+}
+
 /** Map point under the pointer, for a coordinate readout. */
 export interface PointerReadout {
   readonly east: number;
@@ -89,6 +96,8 @@ export interface TacticalMap {
   centreOn(point: Vec2): void;
   /** Centres the view on a map point at a scale in metres per pixel (within the zoom limits). */
   setView(point: Vec2, metersPerPixel: number): void;
+  /** The current view, e.g. to show the same on another page with `setView`. */
+  readonly view: MapView;
   /** Whether a map point is currently on screen. */
   isInView(point: Vec2): boolean;
   /** Canvas pixel position of a map point. */
@@ -399,6 +408,12 @@ export function createTacticalMap({
     isInView(point) {
       const p = worldToScreen(camera, viewport, point);
       return p.x >= 0 && p.y >= 0 && p.x <= viewport.width && p.y <= viewport.height;
+    },
+    get view() {
+      return {
+        centre: { x: camera.centerX, y: camera.centerY },
+        metersPerPixel: camera.metersPerPixel,
+      };
     },
     get pointer() {
       return pointer;

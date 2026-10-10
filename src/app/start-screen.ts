@@ -25,14 +25,14 @@ import {
   type LatLon,
 } from '#geo';
 import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
+import { handOffView, takeView } from './view-handoff';
 import { createToast, escapeHtml, headerHtml, wireHeader } from './shell';
-import { DEMO_ID } from './stages';
 import type { WorkflowFacts } from './workflow';
 
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
-// enter a position and generate a new 5 km battlefield, or select the demo or
-// a saved battlefield and open it. The layout is the other stages': the map
-// area previews the demo or a saved battlefield on the tactical map, and the
+// enter a position and generate a new 5 km battlefield, or select a saved
+// battlefield and open it. The layout is the other stages': the map area
+// previews the selected saved battlefield on the tactical map, and the
 // side panel on the right chooses, describes the choice and holds its one
 // primary action.
 
@@ -42,10 +42,9 @@ export interface SelectionOptions {
   readonly store: BattlefieldStore;
   /** Whether saved battlefields survive a reload (IndexedDB available). */
   readonly persistent: boolean;
-  /** The demo or a saved battlefield's id to select on arrival (e.g. coming back from stage 2). */
+  /** A saved battlefield's id to select on arrival (e.g. coming back from stage 2). */
   readonly selected?: string;
-  readonly openDemo: () => void;
-  /** Loads the demo (`DEMO_ID`) or a saved battlefield for the preview map. */
+  /** Loads a saved battlefield for the preview map. */
   readonly loadPreview: (id: string) => Promise<PreviewData>;
   /** Opens a battlefield; throws when no scenario can be made on it. */
   readonly openBattlefield: (pkg: BattlefieldPackage) => void;
@@ -123,10 +122,9 @@ const STEPS: readonly [GenerationStep, string][] = [
   ['saving', 'Saving'],
 ];
 
-/** What is selected: the demo, a saved battlefield, or a new location to generate. */
+/** What is selected: a saved battlefield, or a new location to generate. */
 type Selection =
   | { readonly kind: 'none' }
-  | { readonly kind: 'demo' }
   | { readonly kind: 'saved'; readonly summary: BattlefieldSummary }
   | { readonly kind: 'location'; readonly position: LatLon; readonly name: string | null };
 
@@ -153,6 +151,10 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       </div>
     </main>
     <aside class="side" aria-label="Choose a battlefield">
+      <div class="primary-action">
+        <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
+        <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
+      </div>
       <section class="sec">
         <h2>Find a place</h2>
         <form class="bf-row" data-ui="search-form">
@@ -181,12 +183,6 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         }
       </section>
       <section class="sec">
-        <h2>Demo</h2>
-        <ul class="bf-saved"><li><button class="bf-item" data-select="${DEMO_ID}" aria-pressed="false">
-          <b>Demo battlefield</b><span class="muted">800 × 600 m of synthetic terrain</span>
-        </button></li></ul>
-      </section>
-      <section class="sec">
         <h2>Selected</h2>
         <div class="sel-details" data-ui="preview"></div>
         <div data-ui="progress" hidden>
@@ -196,10 +192,6 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         </div>
         <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </section>
-      <div class="primary-action">
-        <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
-        <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
-      </div>
       <footer class="sel-credits muted">
         Map data © OpenStreetMap contributors (ODbL). Buildings: Overture Maps Foundation (ODbL).
         Elevation: AWS Terrain Tiles (USGS, SRTM, Copernicus EU-DEM and national sources; credits
@@ -232,7 +224,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   let opening = false;
 
   const facts: WorkflowFacts = {
-    battlefieldSelected: () => selection.kind === 'demo' || selection.kind === 'saved',
+    battlefieldSelected: () => selection.kind === 'saved',
     scenarioProblems: () => [],
     startOpforProblems: () => [],
     opforStarted: () => false,
@@ -259,11 +251,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       case 'none':
         return `<p class="muted">Nothing selected. Find a place or enter a position to generate a new
           ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m battlefield
-          anywhere from 80° S to 84° N, or select a saved battlefield or the demo.</p>`;
-      case 'demo':
-        return `<p class="sel-name">Demo battlefield</p>
-          <p>800 × 600 m of synthetic terrain: a valley road through a hamlet, woods, a ridge, and
-          an OPFOR patrol to ambush. Its scenario is fixed.</p>`;
+          anywhere from 80° S to 84° N, or select a saved battlefield.</p>`;
       case 'saved': {
         const b = selection.summary;
         return `<p class="sel-name">${escapeHtml(b.name)}</p>
@@ -298,20 +286,15 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       ? generating
         ? 'Generating the battlefield…'
         : 'A new battlefield can be previewed once it is generated.'
-      : 'Select a saved battlefield or the demo to preview it here.';
+      : 'Select a saved battlefield to preview it here.';
 
   /** The one primary action: open the selection, or generate a new location. */
   const updatePrimary = () => {
     const button = ui('primary');
-    const label =
-      selection.kind === 'demo'
-        ? 'Open demo battlefield →'
-        : selection.kind === 'location'
-          ? 'Generate battlefield'
-          : 'Open battlefield →';
+    const label = selection.kind === 'location' ? 'Generate battlefield' : 'Open battlefield →';
     const reason =
       selection.kind === 'none'
-        ? 'Select a battlefield first: the demo, a saved one, or generate a new one.'
+        ? 'Select a battlefield first: a saved one, or generate a new one.'
         : selection.kind === 'location' && generating
           ? 'Generating…'
           : null;
@@ -323,26 +306,17 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   };
 
   const markSelected = () => {
-    const id =
-      selection.kind === 'demo'
-        ? DEMO_ID
-        : selection.kind === 'saved'
-          ? selection.summary.id
-          : null;
+    const id = selection.kind === 'saved' ? selection.summary.id : null;
     for (const b of app.querySelectorAll<HTMLElement>('[data-select]'))
       b.setAttribute('aria-pressed', String(b.dataset['select'] === id));
   };
 
   const select = (next: Selection) => {
-    const before =
-      selection.kind === 'demo'
-        ? DEMO_ID
-        : selection.kind === 'saved'
-          ? selection.summary.id
-          : null;
-    const id = next.kind === 'demo' ? DEMO_ID : next.kind === 'saved' ? next.summary.id : null;
+    const before = selection.kind === 'saved' ? selection.summary.id : null;
+    const id = next.kind === 'saved' ? next.summary.id : null;
     if (id === null) preview.hide();
-    else if (id !== before) preview.show(() => o.loadPreview(id));
+    // Coming back from the battlefield's own page: the view it was left at.
+    else if (id !== before) preview.show(() => o.loadPreview(id), takeView(id));
     selection = next;
     show('preview', previewHtml());
     updatePrimary();
@@ -555,17 +529,13 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       show('error', `<p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`);
     }
   };
-  /** Opens the demo or the selected saved battlefield (stage 2). */
+  /** Opens the selected saved battlefield (stage 2). */
   const openSelection = () => {
-    if (opening) return;
-    if (selection.kind === 'demo') {
-      opening = true;
-      o.openDemo();
-      return;
-    }
-    if (selection.kind !== 'saved') return;
+    if (opening || selection.kind !== 'saved') return;
     const id = selection.summary.id;
     opening = true;
+    // The battlefield opens where the preview was looking.
+    handOffView(id, preview.view());
     o.store
       .get(id)
       .then(open)
@@ -642,11 +612,8 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       });
   };
   const choose = (id: string | undefined) => {
-    if (id === DEMO_ID) select({ kind: 'demo' });
-    else {
-      const summary = saved.find((b) => b.id === id);
-      if (summary) select({ kind: 'saved', summary });
-    }
+    const summary = saved.find((b) => b.id === id);
+    if (summary) select({ kind: 'saved', summary });
   };
   app.querySelector('.side')?.addEventListener('click', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>('[data-select]');
@@ -659,6 +626,6 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     openSelection();
   });
 
-  select(o.selected === DEMO_ID ? { kind: 'demo' } : { kind: 'none' });
+  select({ kind: 'none' });
   refresh(o.selected);
 }

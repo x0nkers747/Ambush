@@ -1,7 +1,7 @@
 import { createExercise, type AmbushScenario } from '#exercise';
 import { createSession, setTool, type Session } from '#session';
 import { DEFAULT_TICK_RATE_HZ } from '#sim';
-import { createTacticalMap, type TacticalMap } from '#view2d';
+import { createTacticalMap, type MapView, type TacticalMap } from '#view2d';
 
 // The terrain-selection preview (docs/adr/0025): the selected battlefield on
 // the tactical map, with its scenario as saved (ORP, OPFOR and route). It is
@@ -18,9 +18,14 @@ export interface PreviewData {
 }
 
 export interface BattlefieldPreview {
-  /** Loads and shows a battlefield; a newer `show` or `hide` wins over a slower load. */
-  show(load: () => Promise<PreviewData>): void;
+  /**
+   * Loads and shows a battlefield, at `view` when given (otherwise the whole
+   * map); a newer `show` or `hide` wins over a slower load.
+   */
+  show(load: () => Promise<PreviewData>, view?: MapView | null): void;
   hide(): void;
+  /** What the preview map shows, or `null` while there is no map. */
+  view(): MapView | null;
 }
 
 export function createBattlefieldPreview(container: HTMLElement): BattlefieldPreview {
@@ -69,7 +74,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   });
 
   return {
-    show(load) {
+    show(load, view = null) {
       const mine = (generation += 1);
       container.hidden = false;
       status('Loading the preview…');
@@ -93,6 +98,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
               session = next;
             },
           });
+          if (view) map.setView(view.centre, view.metersPerPixel);
           const credits = el('preview-attribution');
           credits.hidden = data.attribution.length === 0;
           credits.textContent = data.attribution
@@ -117,6 +123,9 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       generation += 1;
       stopMap();
       container.hidden = true;
+    },
+    view() {
+      return map?.view ?? null;
     },
   };
 }

@@ -25,10 +25,16 @@ what was missing before moving on.
 | 4   | OPFOR & Combat      | Start OPFOR, Trigger Ambush, the engagement               |
 | 5   | After Action Review | Placeholder: "Coming soon", plus the recorded result      |
 
-Every stage has the same compact header (`shell.ts`): the stage name, "n / 5", and Previous and
-Next arrows. There are no per-stage buttons. A blocked arrow uses `aria-disabled` rather than
-`disabled`. It stays focusable, its reason is in its tooltip and an `aria-describedby` text, and
-pressing it shows the reason.
+Every stage has the same header (`shell.ts`), drawn after
+`assets/reference/tactical-workflow-navigation-bar.png`: Previous and Next arrows either side of
+five stage segments, each an icon and a short label (TERRAIN, EDIT SCENARIO, BLUEFOR, OPFOR, AAR;
+`STAGE_LABELS`). The current segment is outlined in blue. Its icon is blue, or red
+for OPFOR; the other icons are grey. There are no per-stage buttons. A segment opens any earlier stage, as Previous does, and the
+next stage under Next's gate. A later stage is reached only through the next one
+(`stageBlocker`), because entering a stage does work, such as building the exercise, that skipping
+would miss. A blocked arrow or segment uses `aria-disabled` rather than `disabled`. It stays
+focusable, its reason is in its tooltip and an `aria-describedby` text, and pressing it shows the
+reason. Below 760 px only the current segment keeps its label.
 
 ### Workflow stage and exercise phase are separate
 
@@ -41,7 +47,7 @@ simulation, with one exception: leaving for stage 2 pauses it, so nothing runs u
 What blocks Next is read from the existing rules, never copied: `nextBlocker(stage, facts)` takes
 lazy facts:
 
-- 1 → 2: the demo or a saved battlefield is selected. A new location must be generated first.
+- 1 → 2: a saved battlefield is selected. A new location must be generated first.
 - 2 → 3: `scenarioProblems` is empty. These are the prerequisites of ADR 0015, unchanged.
 - 3 → 4: `startOpforProblems` is empty (BLUEFOR executed and in position, changes executed, a
   valid kill zone), or OPFOR has already started. Advancing does not start OPFOR.
@@ -60,10 +66,10 @@ In-page stage changes update the address with `history.replaceState`, so a reloa
 | Address        | Stage                                                      |
 | -------------- | ---------------------------------------------------------- |
 | (none)         | 1                                                          |
-| `#select/<id>` | 1, with that battlefield (or `demo`) selected              |
+| `#select/<id>` | 1, with that battlefield selected                          |
 | `#edit/<id>`   | 2                                                          |
 | `#play/<id>`   | 3; stages 4 and 5 reload as 3, since the exercise restarts |
-| `#demo`        | 2 for the demo                                             |
+| `#demo`        | 2 for the demo (terrain selection does not list it)        |
 | `#demo/play`   | 3 for the demo                                             |
 
 ### Keeping work, invalidating stale results
@@ -92,10 +98,11 @@ and for Reset scenario. Routine navigation is never confirmed.
 
 The side panel is a fixed sequence of sections, shown or hidden by stage:
 
-1. Stage tools
-2. Simulation (stages 3–5)
-3. Stage status
-4. Primary action (sticky at the bottom on short screens)
+1. Primary action (always first, and kept at the top while the panel scrolls, so the way on to
+   the next stage is always in the same place)
+2. Stage tools
+3. Simulation (stages 3–5)
+4. Stage status
 5. Squad roster
 6. Event log (stages 3–5, collapsed)
 7. Help (collapsed)
@@ -143,12 +150,16 @@ under Help.
   `scenario-stage.ts`, `roster.ts` and `shell.ts`. The exercise, scenario, terrain and simulation
   layers are unchanged. view2d gains only `MapEditor.active`, and the session gains the `view` tool.
 - Terrain selection has the same layout as the other stages: the map area on the left, and on the
-  right the side panel (find a place, position, saved battlefields, the demo, the selection's
-  details and generation progress, and the one primary action: Open or Generate). The map area
-  previews the selected demo or saved battlefield on the tactical map (`battlefield-preview.ts`), with its saved scenario (ORP, OPFOR and route). The preview pans and
+  right the side panel (first the one primary action, Open or Generate, as in every stage; then
+  find a place, position, saved battlefields, and the selection's details and generation
+  progress). The map area
+  previews the selected saved battlefield on the tactical map (`battlefield-preview.ts`), with its saved scenario (ORP, OPFOR and route). The preview pans and
   zooms but never edits (the `view` tool). It loads the whole battlefield, so it shows "Loading the
   preview…" until it is ready; a slower load is dropped when another selection follows, and the
-  map is disposed when the selection changes. Opening loads the battlefield again on its own page.
+  map is disposed when the selection changes. Opening loads the battlefield again on its own page,
+  at the preview's view (centre and scale), and leaving it returns the view to the preview: the
+  view crosses the reload in session storage (`view-handoff.ts`), taken once and only for the same
+  battlefield.
 - A reload in stages 3–5 restarts the exercise. Storing plans (`deploymentPlans` already serializes
   them) would remove that and is a candidate for later.
 - The After Action Review is a placeholder. Its section, stage and navigation exist, so replay and

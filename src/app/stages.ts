@@ -6,14 +6,12 @@
 // same stage (stages 4 and 5 reload as stage 3: the exercise is not stored).
 //
 //   ''                 1. Terrain selection
-//   '#select/<id>'     1. Terrain selection with battlefield <id> (or `demo`) selected
+//   '#select/<id>'     1. Terrain selection with battlefield <id> selected
 //   '#edit/<id>'       2. Scenario editing for battlefield <id>
 //   '#play/<id>'       3. BLUEFOR planning and execution on its scenario
-//   '#demo'            2. The demo's scenario (fixed, shown read-only)
+//   '#demo'            2. The demo's scenario (fixed, shown read-only); terrain
+//                         selection does not list the demo, so only this address opens it
 //   '#demo/play'       3. BLUEFOR planning on the demo
-
-/** What terrain selection can have selected: the demo or a saved battlefield. */
-export const DEMO_ID = 'demo';
 
 export type Stage =
   | { readonly kind: 'select'; readonly selected?: string }

@@ -3,33 +3,51 @@ import {
   nextStage,
   previousBlocker,
   previousStage,
+  STAGE_LABELS,
   STAGE_NAMES,
+  stageBlocker,
   stageNumber,
   WORKFLOW_STAGES,
   type WorkflowFacts,
   type WorkflowStage,
 } from './workflow';
 
-// The application shell shared by every stage (docs/adr/0025): the compact
-// workflow header with Previous and Next, short messages over the map, and a
-// narrowly scoped confirmation for actions that discard work.
+// The application shell shared by every stage (docs/adr/0025): the workflow
+// header with Previous, the five stage segments and Next, short messages over
+// the map, and a narrowly scoped confirmation for actions that discard work.
 
 export const escapeHtml = (text: string): string =>
   text.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`);
 
+/** Each stage's segment icon (24 × 24, drawn in `currentColor`). */
+const STAGE_ICONS: Readonly<Record<WorkflowStage, string>> = {
+  terrain: `<path d="M2 20 9.5 6 17 20Z M13.2 12.2 16 8.5 22 20H17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>`,
+  scenario: `<path d="M3 6 9 4l6 2 6-2v14l-6 2-6-2-6 2Z M9 4v14 M15 6v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`,
+  bluefor: `<g fill="currentColor"><circle cx="12" cy="7" r="3"/><circle cx="5.5" cy="9" r="2.2"/><circle cx="18.5" cy="9" r="2.2"/><path d="M7 19a5 5 0 0 1 10 0Z M1.5 19a4 4 0 0 1 6.3-3.3A6.5 6.5 0 0 0 6 19Z M22.5 19a4 4 0 0 0-6.3-3.3A6.5 6.5 0 0 1 18 19Z"/></g>`,
+  opfor: `<path d="M12 3.5 20.5 12 12 20.5 3.5 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>`,
+  aar: `<path d="M4 3v17h17" fill="none" stroke="currentColor" stroke-width="1.6"/><g fill="currentColor"><rect x="7" y="13" width="2.4" height="6"/><rect x="11" y="9" width="2.4" height="10"/><rect x="15" y="5" width="2.4" height="14"/><rect x="19" y="10" width="1.6" height="9"/></g>`,
+};
+
 /** The header's markup; `context` is a short label such as the battlefield's name. */
 export function headerHtml(context = ''): string {
+  const steps = WORKFLOW_STAGES.map(
+    (stage) => `<li class="wf-step" data-step="${stage}">
+        <button class="wf-step-btn" data-ui="wf-step-${stage}" aria-describedby="wf-step-${stage}-reason">
+          <svg class="wf-icon" viewBox="0 0 24 24" aria-hidden="true">${STAGE_ICONS[stage]}</svg>
+          <span class="wf-label">${escapeHtml(STAGE_LABELS[stage])}</span>
+        </button>
+        <span class="sr-only" id="wf-step-${stage}-reason" data-ui="wf-step-${stage}-reason"></span>
+      </li>`,
+  ).join('');
   return `<header class="wf-header">
     <span class="wf-brand">AMBUSH!</span>
     <nav class="wf-nav" aria-label="Workflow">
       <button class="wf-arrow" data-ui="wf-prev" aria-describedby="wf-prev-reason">‹</button>
-      <div class="wf-stage" aria-live="polite">
-        <span class="wf-name" data-ui="wf-name"></span>
-        <span class="wf-count" data-ui="wf-count"></span>
-      </div>
+      <ol class="wf-steps">${steps}</ol>
       <button class="wf-arrow" data-ui="wf-next" aria-describedby="wf-next-reason">›</button>
       <span class="sr-only" id="wf-prev-reason" data-ui="wf-prev-reason"></span>
       <span class="sr-only" id="wf-next-reason" data-ui="wf-next-reason"></span>
+      <span class="sr-only" aria-live="polite" data-ui="wf-announce"></span>
     </nav>
     <span class="wf-context" data-ui="wf-context" title="${escapeHtml(context)}">${escapeHtml(context)}</span>
   </header>`;
@@ -41,9 +59,10 @@ export interface WorkflowHeader {
 }
 
 /**
- * Wires the header's arrows. A blocked arrow stays focusable
- * (`aria-disabled`), so its reason is available as a tooltip and to screen
- * readers; pressing it shows the reason instead of moving.
+ * Wires the header's arrows and stage segments. A blocked control stays
+ * focusable (`aria-disabled`), so its reason is available as a tooltip and to
+ * screen readers; pressing it shows the reason instead of moving. `update`
+ * runs every frame, so it touches the DOM only when something changed.
  */
 export function wireHeader(
   root: HTMLElement,
@@ -58,10 +77,8 @@ export function wireHeader(
     return e;
   };
   let current: WorkflowStage = WORKFLOW_STAGES[0] ?? 'terrain';
-  let reasons: { prev: string | null; next: string | null } = { prev: null, next: null };
-  const arrow = (which: 'prev' | 'next') => {
-    const reason = reasons[which];
-    const target = which === 'prev' ? previousStage(current) : nextStage(current);
+  let facts: WorkflowFacts | null = null;
+  const goTo = (target: WorkflowStage | null, reason: string | null) => {
     if (reason !== null || target === null) {
       o.blocked(reason ?? '');
       return;
@@ -69,34 +86,63 @@ export function wireHeader(
     o.go(target);
   };
   el('wf-prev').addEventListener('click', () => {
-    arrow('prev');
+    goTo(previousStage(current), previousBlocker(current));
   });
   el('wf-next').addEventListener('click', () => {
-    arrow('next');
+    goTo(nextStage(current), facts ? nextBlocker(current, facts) : null);
   });
-  const show = (which: 'prev' | 'next', target: WorkflowStage | null, reason: string | null) => {
-    const button = el(`wf-${which}`);
-    const verb = which === 'prev' ? 'Previous' : 'Next';
-    const label = target ? `${verb}: ${STAGE_NAMES[target]}` : verb;
-    const text = reason === null ? label : `${label}. ${reason}`;
-    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
-    if (button.title !== text) button.title = text;
-    const disabled = String(reason !== null);
-    if (button.getAttribute('aria-disabled') !== disabled)
-      button.setAttribute('aria-disabled', disabled);
-    const reasonEl = el(`wf-${which}-reason`);
-    if (reasonEl.textContent !== (reason ?? '')) reasonEl.textContent = reason ?? '';
+  for (const stage of WORKFLOW_STAGES) {
+    el(`wf-step-${stage}`).addEventListener('click', () => {
+      if (stage === current || !facts) return;
+      goTo(stage, stageBlocker(current, stage, facts));
+    });
+  }
+  const set = (e: HTMLElement, attribute: string, value: string | null) => {
+    if (e.getAttribute(attribute) === value) return;
+    if (value === null) e.removeAttribute(attribute);
+    else e.setAttribute(attribute, value);
   };
+  const setText = (e: HTMLElement, text: string) => {
+    if (e.textContent !== text) e.textContent = text;
+  };
+  const show = (name: string, label: string, reason: string | null) => {
+    const button = el(name);
+    set(button, 'aria-label', label);
+    set(button, 'title', reason === null ? label : `${label}. ${reason}`);
+    set(button, 'aria-disabled', String(reason !== null));
+    setText(el(`${name}-reason`), reason ?? '');
+  };
+  const total = String(WORKFLOW_STAGES.length);
   return {
-    update(stage, facts) {
+    update(stage, f) {
       current = stage;
-      reasons = { prev: previousBlocker(stage), next: nextBlocker(stage, facts) };
-      const name = STAGE_NAMES[stage];
-      if (el('wf-name').textContent !== name) el('wf-name').textContent = name;
-      const count = `${String(stageNumber(stage))} / ${String(WORKFLOW_STAGES.length)}`;
-      if (el('wf-count').textContent !== count) el('wf-count').textContent = count;
-      show('prev', previousStage(stage), reasons.prev);
-      show('next', nextStage(stage), reasons.next);
+      facts = f;
+      const next = nextBlocker(stage, f);
+      const prevTarget = previousStage(stage);
+      const nextTarget = nextStage(stage);
+      show(
+        'wf-prev',
+        prevTarget ? `Previous: ${STAGE_NAMES[prevTarget]}` : 'Previous',
+        previousBlocker(stage),
+      );
+      show('wf-next', nextTarget ? `Next: ${STAGE_NAMES[nextTarget]}` : 'Next', next);
+      for (const s of WORKFLOW_STAGES) {
+        const name = `wf-step-${s}`;
+        const position = `stage ${String(stageNumber(s))} of ${total}`;
+        if (s === stage) {
+          show(name, `${STAGE_NAMES[s]}, ${position}, current`, null);
+          set(el(name), 'aria-current', 'step');
+        } else {
+          // The next stage's reason is Next's, already computed.
+          const reason = s === nextTarget ? next : stageBlocker(stage, s, f);
+          show(name, `${STAGE_NAMES[s]}, ${position}`, reason);
+          set(el(name), 'aria-current', null);
+        }
+      }
+      setText(
+        el('wf-announce'),
+        `${STAGE_NAMES[stage]}, stage ${String(stageNumber(stage))} of ${total}`,
+      );
     },
   };
 }

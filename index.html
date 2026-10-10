@@ -28,7 +28,7 @@
         --red-strong: #b3261e;
         --focus: #f2c230;
         --side-w: 330px;
-        --header-h: 40px;
+        --header-h: 66px;
       }
       * {
         box-sizing: border-box;
@@ -157,12 +157,14 @@
         opacity: 1;
       }
 
-      /* Workflow header. */
+      /* Workflow header: Previous, the five stage segments, Next
+         (assets/reference/tactical-workflow-navigation-bar.png). */
       .wf-header {
         grid-column: 1 / -1;
         display: grid;
         grid-template-columns: 1fr auto 1fr;
         align-items: center;
+        gap: 12px;
         height: var(--header-h);
         padding: 0 12px;
         background: var(--panel);
@@ -175,35 +177,123 @@
       }
       .wf-nav {
         display: flex;
-        align-items: center;
-        gap: 10px;
+        align-items: stretch;
+        height: 56px;
+        padding: 3px;
+        background: var(--bg);
+        border: 1px solid #343b42;
+        border-radius: 8px;
       }
       .wf-arrow {
-        width: 30px;
-        height: 28px;
+        align-self: center;
+        width: 36px;
+        height: 36px;
+        margin: 0 8px;
         padding: 0;
-        font-size: 20px;
+        font-size: 22px;
         line-height: 1;
-        background: transparent;
-        border-color: transparent;
+        background: var(--panel-2);
+        border-color: #3a424a;
+        border-radius: 5px;
       }
       .wf-arrow:hover:not([aria-disabled='true']) {
-        border-color: var(--line);
+        background: #343b42;
       }
-      .wf-stage {
+      .wf-steps {
         display: flex;
-        align-items: baseline;
-        gap: 10px;
-        min-width: 230px;
+        margin: 0;
+        padding: 0 0 0 1px;
+        list-style: none;
+        border-left: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+      }
+      .wf-step {
+        position: relative;
+        display: flex;
+      }
+      /* Separators between segments, but not beside the current one. */
+      .wf-step + .wf-step::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        border-left: 1px solid var(--line);
+      }
+      .wf-step:has([aria-current='step'])::before,
+      .wf-step:has([aria-current='step']) + .wf-step::before {
+        display: none;
+      }
+      .wf-step-btn {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
-      }
-      .wf-name {
-        font-size: 15px;
-        font-weight: 700;
-      }
-      .wf-count {
+        gap: 3px;
+        min-width: 116px;
+        padding: 0 12px;
         color: var(--muted);
-        font-variant-numeric: tabular-nums;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 5px;
+      }
+      /* Blocked segments keep their colour: the reason is in the tooltip. */
+      .wf-step-btn[aria-disabled='true'] {
+        opacity: 1;
+      }
+      .wf-step-btn:hover:not([aria-disabled='true']):not([aria-current='step']) {
+        color: var(--text);
+        background: var(--panel-2);
+      }
+      .wf-icon {
+        width: 22px;
+        height: 22px;
+        flex: none;
+      }
+      .wf-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        line-height: 1.1;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .wf-step-btn[aria-current='step'] {
+        color: #fff;
+        cursor: default;
+        background: linear-gradient(rgb(79 143 224 / 0.16), rgb(79 143 224 / 0.06));
+        border-color: var(--blue);
+        box-shadow:
+          0 0 10px rgb(79 143 224 / 0.25),
+          inset 0 0 12px rgb(79 143 224 / 0.12);
+      }
+      .wf-step-btn[aria-current='step'] .wf-icon {
+        color: var(--blue);
+      }
+      /* OPFOR's icon is red when current, grey like the others when not. */
+      .wf-step[data-step='opfor'] .wf-step-btn[aria-current='step'] .wf-icon {
+        color: var(--red);
+      }
+      /* The current segment's corner marks. */
+      .wf-step-btn[aria-current='step']::before,
+      .wf-step-btn[aria-current='step']::after {
+        content: '';
+        position: absolute;
+        top: 3px;
+        width: 7px;
+        height: 7px;
+        border-top: 1px solid var(--blue);
+      }
+      .wf-step-btn[aria-current='step']::before {
+        left: 3px;
+        border-left: 1px solid var(--blue);
+        border-top-left-radius: 5px;
+      }
+      .wf-step-btn[aria-current='step']::after {
+        right: 3px;
+        border-right: 1px solid var(--blue);
+        border-top-right-radius: 5px;
       }
       .wf-context {
         justify-self: end;
@@ -396,13 +486,14 @@
         display: none;
       }
       /* The stage's primary action stays in reach on short screens. */
+      /* The way on to the next stage: first in the side panel, and kept in
+         view at its top while the rest scrolls. */
       .primary-action {
         position: sticky;
-        bottom: 0;
+        top: 0;
         z-index: 1;
         padding: 12px 14px;
         background: var(--panel);
-        border-top: 1px solid var(--line);
         border-bottom: 1px solid var(--line);
       }
       .primary-action .reason {
@@ -844,9 +935,6 @@
         :root {
           --side-w: 300px;
         }
-        .wf-stage {
-          min-width: 0;
-        }
         .wf-context {
           display: none;
         }
@@ -856,8 +944,33 @@
         .wf-nav {
           justify-self: center;
         }
+        .wf-step-btn {
+          min-width: 92px;
+          padding: 0 8px;
+        }
+      }
+      @media (max-width: 900px) {
+        .wf-brand {
+          display: none;
+        }
+        .wf-header {
+          grid-template-columns: 1fr;
+        }
       }
       @media (max-width: 760px) {
+        /* Only the current segment keeps its label. */
+        .wf-step-btn {
+          min-width: 50px;
+        }
+        .wf-step-btn[aria-current='step'] {
+          min-width: 104px;
+        }
+        .wf-step-btn:not([aria-current='step']) .wf-label {
+          display: none;
+        }
+        .wf-arrow {
+          margin: 0 4px;
+        }
         #app.workspace,
         #app.select {
           grid-template-columns: 1fr;

@@ -19,7 +19,7 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, MAX_SEED, type TerrainDataset, type Vec2 } from '#sim';
-import { createTacticalMap, type MapEditor } from '#view2d';
+import { createTacticalMap, type MapEditor, type MapView } from '#view2d';
 import { carryPlans, type CarryResult } from './carry-plans';
 import {
   clock,
@@ -78,8 +78,10 @@ export interface WorkspaceOptions {
   readonly initialStage: 'scenario' | 'bluefor';
   /** A message to show on arrival (e.g. a saved scenario that could not be read). */
   readonly notice?: string | null;
-  /** Back to terrain selection (stage 1). */
-  readonly leave: () => void;
+  /** The map view to open at (e.g. the terrain-selection preview's); otherwise the whole map. */
+  readonly initialView?: MapView | null;
+  /** Back to terrain selection (stage 1), with the map view to show there. */
+  readonly leave: (view: MapView) => void;
   /** Records the stage in the page address, so a reload stays there. */
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
 }
@@ -120,6 +122,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     </div>
   </main>
   <aside class="side" aria-label="Stage tools and status">
+    <div class="primary-action" data-ui="primary-wrap">
+      <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
+      <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
+    </div>
     <section class="sec" data-sec="tools">
       <h2 data-ui="tools-title"></h2>
       <div data-stage="scenario">
@@ -187,10 +193,6 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       <h2 data-ui="status-title">Status</h2>
       <div data-ui="status"></div>
     </section>
-    <div class="primary-action" data-ui="primary-wrap">
-      <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
-      <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
-    </div>
     <section class="sec" data-sec="roster">
       <h2>Squad roster</h2>
       <div data-ui="roster" class="roster"></div>
@@ -318,6 +320,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     notify,
     ...(editor ? { editor } : {}),
   });
+  if (o.initialView) map.setView(o.initialView.centre, o.initialView.metersPerPixel);
   toScreen = (p) => map.toScreen(p);
 
   const exerciseStage = createExerciseStage({
@@ -383,14 +386,17 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
 
   const enter = (target: WorkflowStage) => {
     if (target === 'terrain') {
+      const leave = () => {
+        o.leave(map.view);
+      };
       if (!hasWork()) {
-        o.leave();
+        leave();
         return;
       }
       confirm({
         message: `Leave ${o.title}? The BLUEFOR plans and the exercise are discarded${editable ? '; the scenario is saved' : ''}.`,
         action: 'Leave battlefield',
-        onConfirm: o.leave,
+        onConfirm: leave,
       });
       return;
     }

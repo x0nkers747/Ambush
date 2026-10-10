@@ -4,7 +4,9 @@ import {
   nextStage,
   previousBlocker,
   previousStage,
+  STAGE_LABELS,
   STAGE_NAMES,
+  stageBlocker,
   stageNumber,
   WORKFLOW_STAGES,
   type WorkflowFacts,
@@ -98,5 +100,31 @@ describe('the workflow', () => {
     };
     nextBlocker('scenario', f);
     expect(asked).toEqual(['scenarioProblems']);
+  });
+
+  it('labels the header segments as the reference bar does', () => {
+    expect(WORKFLOW_STAGES.map((s) => STAGE_LABELS[s])).toEqual([
+      'Terrain',
+      'Edit Scenario',
+      'BLUEFOR',
+      'OPFOR',
+      'AAR',
+    ]);
+  });
+
+  it('lets a stage segment open any earlier stage, the next one through its gate, and no further', () => {
+    const open = facts({ engagementComplete: () => true });
+    for (const s of ['terrain', 'scenario', 'bluefor'] as const)
+      expect(stageBlocker('opfor', s, open)).toBeNull();
+    expect(stageBlocker('scenario', 'bluefor', open)).toBeNull();
+    expect(
+      stageBlocker('scenario', 'bluefor', facts({ scenarioProblems: () => ['Place the OPFOR.'] })),
+    ).toBe('Place the OPFOR.');
+    // Further on: Next's reason first, then the stage to go through.
+    expect(
+      stageBlocker('scenario', 'aar', facts({ scenarioProblems: () => ['Place the OPFOR.'] })),
+    ).toBe('Place the OPFOR.');
+    expect(stageBlocker('scenario', 'opfor', open)).toBe('Go through BLUEFOR Planning first.');
+    expect(stageBlocker('terrain', 'aar', open)).toBe('Go through Edit Scenario first.');
   });
 });

@@ -15,7 +15,8 @@ import {
 import type { BattlefieldPackage } from '#geo';
 import { shareTerrain } from '#sim';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
-import { DEMO_ID, parseStage, stageHash, type Stage } from './stages';
+import { parseStage, stageHash, type Stage } from './stages';
+import { handOffView, takeView } from './view-handoff';
 import { demoInfoHtml, startWorkspace } from './workspace';
 
 // Composition root: the five-stage workflow (docs/adr/0025). Terrain
@@ -115,12 +116,7 @@ async function main(root: HTMLElement): Promise<void> {
         store,
         persistent,
         ...(stage.selected === undefined ? {} : { selected: stage.selected }),
-        openDemo: () => {
-          go({ kind: 'demo' });
-        },
         loadPreview: async (id) => {
-          if (id === DEMO_ID)
-            return { scenario: DEMO_SCENARIO, attribution: [], caption: 'Demo scenario (fixed)' };
           const pkg = await openBattlefield(store, id);
           const { definition } = await loadScenario(store, pkg);
           const waypoints = Math.max(0, definition.opfor.route.length - 1);
@@ -147,8 +143,9 @@ async function main(root: HTMLElement): Promise<void> {
         attribution: [],
         infoHtml: demoInfoHtml(DEMO_SCENARIO),
         initialStage: stage.play === true ? 'bluefor' : 'scenario',
+        // Terrain selection no longer lists the demo (it is reached only by its address).
         leave: () => {
-          go({ kind: 'select', selected: DEMO_ID });
+          go({ kind: 'select' });
         },
         setAddress: (s) => {
           setAddress({ kind: 'demo', play: s === 'bluefor' });
@@ -180,7 +177,9 @@ async function main(root: HTMLElement): Promise<void> {
         infoHtml: battlefieldInfoHtml(pkg),
         initialStage: stage.kind === 'play' && playable ? 'bluefor' : 'scenario',
         notice,
-        leave: () => {
+        initialView: takeView(pkg.id),
+        leave: (view) => {
+          handOffView(pkg.id, view);
           go({ kind: 'select', selected: pkg.id });
         },
         setAddress: (s) => {
