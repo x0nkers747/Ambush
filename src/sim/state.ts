@@ -148,15 +148,16 @@ export type EngagementEndReason =
  * - `engaging`: BLUEFOR, firing at valid targets as its cadence allows;
  * - `awaitingReaction`: OPFOR before its reaction delay has passed; keeps
  *   doing what it did (e.g. walking its route) and does not fire;
- * - `prone`: OPFOR that dropped prone; stays in place and returns fire;
- * - `fleeing`: OPFOR moving away from the threat; does not fire;
- * - `escaped`: OPFOR that got away; out of the engagement, not a target;
+ * - `prone`: OPFOR that dropped prone under fire; stays in place and returns fire;
+ * - `fleeing`: OPFOR running away from the threat; does not fire;
+ * - `escaped`: OPFOR that got far enough from where it started running;
+ *   out of the engagement, not a target;
  * - `incapacitated`: out of the engagement, not a target.
  */
 export type CombatBehavior =
   'engaging' | 'awaitingReaction' | 'prone' | 'fleeing' | 'escaped' | 'incapacitated';
 
-/** An OPFOR soldier's initial reaction to the ambush, drawn when the engagement starts. */
+/** An OPFOR soldier's reaction to the ambush (docs/adr/0028). */
 export type OpforReaction = 'prone' | 'flee';
 
 /** Per-soldier combat counts. */
@@ -177,8 +178,18 @@ export interface Combatant {
   /** The weapon fired (the soldier's primary weapon), or `null` when unarmed or unknown. */
   readonly weaponProfileRef: string | null;
   behavior: CombatBehavior;
-  /** OPFOR: the reaction drawn at the start; `null` for BLUEFOR. */
-  readonly reaction: OpforReaction | null;
+  /**
+   * OPFOR: the reaction it had, once it has reacted: `flee` when it was not
+   * under fire, `reactionIfUnderFire` when it was. `null` before it reacts,
+   * and for BLUEFOR.
+   */
+  reaction: OpforReaction | null;
+  /** OPFOR: the reaction drawn at the start, taken if it is under fire when it reacts. */
+  readonly reactionIfUnderFire: OpforReaction | null;
+  /** Whether any shot has been fired at this soldier. */
+  underFire: boolean;
+  /** OPFOR: where it started running, once fleeing; escape is measured from there. */
+  fleeFrom: Vec2 | null;
   /** OPFOR: when the reaction happens (simulation seconds); `null` for BLUEFOR. */
   readonly reactAtSeconds: number | null;
   /** Whether a flee found no route and the soldier dropped prone instead. */

@@ -81,18 +81,21 @@ fire only, never to the shooter's accuracy.
 
 | Field                                 | Meaning                                                                                      | Unit | Valid         | Default   |
 | ------------------------------------- | -------------------------------------------------------------------------------------------- | ---- | ------------- | --------- |
-| `reactionProbabilities.prone`         | Chance a soldier drops prone and returns fire                                                | 0–1  | sums to 1     | 0.6       |
-| `reactionProbabilities.flee`          | Chance a soldier flees                                                                       | 0–1  | with `prone`  | 0.4       |
+| `reactionProbabilities.prone`         | Under fire: chance a soldier drops prone and returns fire                                    | 0–1  | sums to 1     | 0.6       |
+| `reactionProbabilities.flee`          | Under fire: chance a soldier flees (a soldier not under fire always flees)                   | 0–1  | with `prone`  | 0.4       |
 | `reactionDelay.minSeconds/maxSeconds` | Each soldier's delay from the start of the engagement to its reaction, uniform in [min, max) | s    | 0 ≤ min ≤ max | 0.5 – 2.0 |
 | `returnFireDelaySeconds`              | From dropping prone to the first return shot                                                 | s    | ≥ 0           | 1.0       |
 | `fleeSpeedMps`                        | Running speed while fleeing                                                                  | m/s  | > 0, ≤ 15     | 4.5       |
 | `fleeDistanceM`                       | How far from the threat a fleeing soldier heads                                              | m    | > 0           | 600       |
-| `escapeDistanceM`                     | Minimum distance from every active enemy to count as escaped (see below)                     | m    | > 0           | 300       |
+| `escapeDistanceM`                     | Distance from where a fleeing soldier started running to count as escaped (see below)        | m    | > 0           | 50        |
+
+**Reaction.** When its reaction comes due, a soldier that has not been shot at flees. One that has
+(any shot fired at it, hit or miss) takes the reaction drawn for it when the engagement started,
+using `reactionProbabilities` (ADR 0028).
 
 **Escape.** At the end of each tick, a fleeing soldier escapes when it is at least
-`escapeDistanceM` from every active enemy and no active, armed enemy could engage it, because it is
-beyond that enemy's weapon's maximum range or out of its line of sight. Reaching the flee
-destination is also an escape.
+`escapeDistanceM` (straight line) from where it started running. Reaching the flee destination is
+also an escape.
 
 ## Engagement (`engagement`)
 

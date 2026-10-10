@@ -184,7 +184,7 @@ describe('which weapon each soldier fires', () => {
     const en1 = result?.soldiers.find((s) => s.soldierId === 'EN-1');
     expect(en1?.weaponProfileRef).toBeNull();
     expect(en1?.stats.shotsFired).toBe(0);
-    expect(en1?.reaction).not.toBeNull();
+    expect(en1?.reaction !== null || en1.outcome === 'incapacitated').toBe(true);
   });
 
   it('is none for an OPFOR soldier without a loadout', () => {
@@ -196,6 +196,54 @@ describe('which weapon each soldier fires', () => {
 });
 
 describe('an engagement in the exercise', () => {
+  it('lets the patrol run away and escape when no Marine can fire (docs/adr/0028)', () => {
+    // Every weapon reaches only 1 m: as if the Marines were hidden where they cannot shoot.
+    const combat = {
+      ...DEFAULT_COMBAT_CONFIG,
+      weapons: DEFAULT_COMBAT_CONFIG.weapons.map((w) => ({
+        ...w,
+        hitProbabilityByRange: [{ rangeM: 0, probability: 0.5 }],
+        maxEngagementRangeM: 1,
+      })),
+    };
+    const exercise = createExercise({
+      config: { tickRateHz: 30, seed: 3 },
+      scenario: DEMO_SCENARIO,
+      combat,
+    });
+    for (const v of DEMO_KILL_ZONE) exercise.addKillZoneVertex(v);
+    exercise.execute();
+    exercise.advance(1 / 30);
+    if (!exercise.startOpfor().ok) throw new Error('START OPFOR refused');
+    for (let i = 0; i < 30 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1)
+      exercise.advance(1 / 30);
+    if (!exercise.triggerAmbush().ok) throw new Error('TRIGGER AMBUSH refused');
+    const at = new Map(
+      exercise.simulation.state.soldiers
+        .filter((s) => s.side === 'OPFOR')
+        .map((s) => [s.id, { ...s.position }]),
+    );
+    const events = playOut(exercise, 1);
+    const result = exercise.engagementResult;
+    expect(result?.endReason).toBe('opforEscaped');
+    expect(result?.sides.OPFOR.escaped).toBe(3);
+    expect(result?.sides.BLUEFOR.shotsFired).toBe(0);
+    expect(events.filter((e) => e.type === 'opforReacted').map((e) => e.reaction)).toEqual([
+      'flee',
+      'flee',
+      'flee',
+    ]);
+    for (const s of exercise.simulation.state.soldiers.filter((x) => x.side === 'OPFOR')) {
+      const from = at.get(s.id);
+      if (!from) throw new Error('fixture');
+      // At least the escape distance from where it was, give or take the distance walked
+      // before reacting.
+      expect(Math.hypot(s.position.x - from.x, s.position.y - from.y)).toBeGreaterThan(45);
+    }
+    // Well before the time limit: 50 m at 4.5 m/s, after a reaction of at most 2 s.
+    expect(result?.durationSeconds).toBeLessThan(15);
+  });
+
   it('begins at the trigger and runs to a result that matches its combat log', () => {
     const exercise = sprungDemo(5);
     expect(exercise.phase).toBe('opforApproach');

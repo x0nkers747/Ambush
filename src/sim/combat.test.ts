@@ -137,7 +137,8 @@ describe('beginning an engagement', () => {
     expect(b1?.behavior).toBe('engaging');
     expect(b2?.nextShotSeconds).toBeNull();
     expect(o1?.behavior).toBe('awaitingReaction');
-    expect(['prone', 'flee']).toContain(o1?.reaction);
+    expect(o1?.reaction).toBeNull(); // not until it reacts
+    expect(['prone', 'flee']).toContain(o1?.reactionIfUnderFire);
     expect(o1?.reactAtSeconds).toBeGreaterThanOrEqual(1);
     expect(o1?.reactAtSeconds).toBeLessThan(2.5);
   });
@@ -158,10 +159,10 @@ describe('OPFOR reactions', () => {
     sim.step();
     return (sim.state.engagement?.combatants ?? [])
       .filter((c) => c.side === 'OPFOR')
-      .map((c) => c.reaction);
+      .map((c) => c.reactionIfUnderFire);
   };
 
-  it('are drawn independently per soldier, about 60 % prone and 40 % flee', () => {
+  it('under fire: are drawn independently per soldier, about 60 % prone and 40 % flee', () => {
     const reactions = reactionsOf(7);
     const prone = reactions.filter((r) => r === 'prone').length / reactions.length;
     expect(prone).toBeGreaterThan(0.52);
@@ -272,7 +273,7 @@ describe('OPFOR reactions', () => {
     ]);
   });
 
-  it('flee: runs straight away from the threat at the flee speed, and escapes out of reach', () => {
+  it('flee: runs straight away from the threat at the flee speed, and escapes 50 m on', () => {
     const sim = simOf(
       combatScenario({
         // The Marine's weapon reaches only 100 m: it can never engage the fleeing soldier.
@@ -294,15 +295,17 @@ describe('OPFOR reactions', () => {
     expect(soldierOf(sim, 'O1').position.y).toBeCloseTo(100 + 4.5 * 10, 6);
     const events = runToEnd(sim);
     const escaped = ofType(events, 'soldierEscaped');
-    // 300 m from the Marine after 200 m / 4.5 m/s = 44.4 s: the end of the tick ending 45.1 s.
+    // 50 m from where it started running after 50 m / 4.5 m/s = 11.1 s from 0.6 s: the
+    // end of the tick ending 11.8 s.
     expect(escaped).toEqual([
       {
         type: 'soldierEscaped',
-        tick: 450,
-        atSeconds: expect.closeTo(45.1, 9) as number,
+        tick: 117,
+        atSeconds: expect.closeTo(11.8, 9) as number,
         soldierId: 'O1',
       },
     ]);
+    expect(soldierOf(sim, 'O1').position.y).toBeCloseTo(100 + 4.5 * 11.2, 6);
     expect(combatantOf(sim, 'O1').behavior).toBe('escaped');
     expect(soldierOf(sim, 'O1').orders).toBeNull();
     expect(sim.state.engagement?.end?.reason).toBe('opforEscaped');
@@ -330,41 +333,79 @@ describe('OPFOR reactions', () => {
     expect(combatantOf(sim, 'O1').behavior).toBe('escaped');
   });
 
-  it('flee: does not escape while an armed enemy can still engage; reaching the destination is an escape', () => {
+  it('flee: escapes 50 m from where it started, though still in range and in sight', () => {
     const sim = simOf(
       combatScenario({
         blufor: [B('B1', 0, 0, 'blank')], // never hits, reaches 1 km
         opfor: [O('O1', 0, 100, null)],
-        config: testCombatConfig({ opfor: fleeOnly(), engagement: { maxDurationSeconds: 200 } }),
-      }),
-    );
-    begin(sim);
-    const events = runToEnd(sim);
-    const escaped = ofType(events, 'soldierEscaped');
-    expect(escaped).toHaveLength(1);
-    // 600 m at 4.5 m/s from 0.6 s: 133.9 s, at the destination (0, 700).
-    expect(escaped[0]?.atSeconds).toBeCloseTo(134, 6);
-    expect(soldierOf(sim, 'O1').position.y).toBeCloseTo(700, 6);
-    expect(ofType(events, 'shotFired').length).toBeGreaterThan(100);
-  });
-
-  it('flee: escapes once far enough and out of sight, though still within range', () => {
-    // A tall block 240–260 m north hides the soldier once it has run round and behind it.
-    const sim = simOf(
-      combatScenario({
-        blufor: [B('B1', 0, 0, 'blank')],
-        opfor: [O('O1', 0, 100, null)],
-        config: testCombatConfig({ opfor: fleeOnly(), engagement: { maxDurationSeconds: 200 } }),
-        features: withBuildings(building('tower', rectangle(0, 250, 60, 20), 30)),
+        config: testCombatConfig({ opfor: fleeOnly() }),
       }),
     );
     begin(sim);
     const escaped = ofType(runToEnd(sim), 'soldierEscaped');
     expect(escaped).toHaveLength(1);
-    expect(escaped[0]?.atSeconds).toBeLessThan(100);
+    expect(escaped[0]?.atSeconds).toBeCloseTo(11.8, 6);
     const { x, y } = soldierOf(sim, 'O1').position;
-    expect(Math.hypot(x, y)).toBeGreaterThanOrEqual(300);
-    expect(y).toBeLessThan(700);
+    expect(Math.hypot(x, y - 100)).toBeGreaterThanOrEqual(50);
+    expect(Math.hypot(x, y - 100)).toBeLessThan(51);
+  });
+
+  it('flee: reaching a destination nearer than the escape distance is an escape', () => {
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('B1', 0, 0, 'blank')],
+        opfor: [O('O1', 0, 100, null)],
+        config: testCombatConfig({ opfor: { ...fleeOnly(), fleeDistanceM: 30 } }),
+      }),
+    );
+    begin(sim);
+    expect(ofType(runToEnd(sim), 'soldierEscaped')).toHaveLength(1);
+    expect(soldierOf(sim, 'O1').position.y).toBeCloseTo(130, 6);
+  });
+
+  it('not under fire: flees whatever was drawn, so an unopposed patrol gets away', () => {
+    // BLUEFOR cannot reach them: nobody is shot at, and everyone runs, though all drew prone.
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('B1', 0, 0, 'short-blank'), B('B2', 20, 0, null)],
+        opfor: [O('O1', 0, 150, 'blank'), O('O2', 30, 160, 'blank'), O('O3', -30, 170, null)],
+        config: testCombatConfig({ opfor: proneOnly() }),
+      }),
+    );
+    begin(sim);
+    const events = runToEnd(sim);
+    expect(ofType(events, 'shotFired').filter((s) => s.shooterSide === 'BLUEFOR')).toEqual([]);
+    expect(ofType(events, 'opforReacted').map((e) => e.reaction)).toEqual(['flee', 'flee', 'flee']);
+    expect(ofType(events, 'soldierEscaped')).toHaveLength(3);
+    expect(sim.state.engagement?.end?.reason).toBe('opforEscaped');
+    for (const id of ['O1', 'O2', 'O3']) {
+      expect(combatantOf(sim, id)).toMatchObject({ reaction: 'flee', underFire: false });
+      expect(soldierOf(sim, id).posture).toBe('standing');
+      // Further from the Marines than where they were.
+      expect(soldierOf(sim, id).position.y).toBeGreaterThan(190);
+    }
+  });
+
+  it('under fire: a shot at the soldier, hit or miss, means it takes the reaction drawn', () => {
+    const sim = simOf(
+      combatScenario({
+        blufor: [B('B1', 0, 0, 'blank')], // fires at 0 s and never hits
+        opfor: [O('Shot', 0, 100, null), O('Spared', 300, 100, null)],
+        config: testCombatConfig({
+          opfor: proneOnly({ minSeconds: 1, maxSeconds: 1 }),
+          engagement: { bluforFirstShotDelay: { minSeconds: 0, maxSeconds: 0 } },
+        }),
+      }),
+    );
+    begin(sim);
+    const reacted = ofType(runTo(sim, 1.1), 'opforReacted');
+    expect(reacted.map((e) => [e.soldierId, e.reaction])).toEqual([
+      ['Shot', 'prone'],
+      ['Spared', 'flee'],
+    ]);
+    expect(combatantOf(sim, 'Shot')).toMatchObject({ underFire: true, behavior: 'prone' });
+    expect(combatantOf(sim, 'Spared')).toMatchObject({ underFire: false, behavior: 'fleeing' });
+    expect(soldierOf(sim, 'Shot').posture).toBe('prone');
   });
 
   it('flee: with no walkable way out, drops prone where it is instead', () => {
@@ -498,11 +539,11 @@ describe('two-sided combat', () => {
       ['O1', 'incapacitated'],
       ['O2', 'incapacitated'],
     ]);
-    // O2 was walking when hit at 2.5 s; it no longer moves.
+    // O2 was moving when hit at 2.5 s (it ran, not under fire); it no longer moves.
     const fallen = { ...soldierOf(sim, 'O2').position };
     for (let i = 0; i < 50; i += 1) sim.step();
     expect(soldierOf(sim, 'O2').position).toEqual(fallen);
-    expect(fallen.y).toBeLessThan(900);
+    expect(fallen).not.toEqual({ x: 300, y: 900 });
   });
 
   it('chooses the nearest valid target, by soldier order on a tie, never an incapacitated one', () => {
@@ -676,10 +717,14 @@ describe('engagement termination', () => {
   it('ends at the configured time limit, however long firing pauses', () => {
     const sim = simOf(
       combatScenario({
-        // Out of range all along: nobody fires at all, yet the engagement goes on.
+        // Out of range all along: nobody fires at all, yet the engagement goes on (the
+        // OPFOR soldier reacts only after the limit, so it never runs off).
         blufor: [B('B1', 0, 0, 'short-blank')],
         opfor: [O('O1', 0, 150, null)],
-        config: testCombatConfig({ opfor: proneOnly(), engagement: { maxDurationSeconds: 20 } }),
+        config: testCombatConfig({
+          opfor: proneOnly({ minSeconds: 30, maxSeconds: 30 }),
+          engagement: { maxDurationSeconds: 20 },
+        }),
       }),
     );
     begin(sim);
@@ -738,7 +783,8 @@ describe('engagement termination', () => {
     expect(ofType(events, 'soldierIncapacitated').map((e) => e.soldierId)).toEqual(['Near']);
     expect(ofType(events, 'soldierEscaped').map((e) => e.soldierId)).toEqual(['Away']);
     expect(sim.state.engagement?.end?.reason).toBe('opforEscaped');
-    expect(sim.state.engagement?.end?.atSeconds).toBeLessThan(2);
+    // Away ran from 0.6 s and was 50 m on after 11.1 s.
+    expect(sim.state.engagement?.end?.atSeconds).toBeCloseTo(11.8, 6);
   });
 });
 
@@ -775,6 +821,10 @@ describe('timing and determinism', () => {
         }),
       );
       begin(sim);
+      sim.step();
+      // As if shot at already, so that it drops prone and returns fire rather than running.
+      const o1 = (sim.state as SimState).engagement?.combatants.find((c) => c.soldierId === 'O1');
+      if (o1) o1.underFire = true;
       return ofType(runToEnd(sim), 'shotFired').map((s) => [s.atSeconds, s.shooterId]);
     };
     expect(duel(false)).toEqual([[1, 'B1']]);

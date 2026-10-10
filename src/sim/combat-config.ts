@@ -61,8 +61,9 @@ export const TARGET_SELECTION_POLICIES: readonly TargetSelectionPolicy[] = ['nea
 
 export interface OpforBehaviorConfig {
   /**
-   * Probabilities of each OPFOR soldier's initial reaction, drawn
-   * independently per soldier. Must sum to 1.
+   * Probabilities of each OPFOR soldier's reaction when it is under fire (a
+   * shot has been fired at it) as it reacts, drawn independently per soldier.
+   * Must sum to 1. A soldier not under fire flees (docs/adr/0028).
    */
   readonly reactionProbabilities: { readonly prone: number; readonly flee: number };
   /** Time from the start of the engagement until a soldier reacts. */
@@ -75,8 +76,7 @@ export interface OpforBehaviorConfig {
   readonly fleeDistanceM: number;
   /**
    * A fleeing soldier escapes once at least this far (horizontally) from
-   * every active enemy and no active, armed enemy could engage it (within
-   * range, with a clear line of sight); or on reaching its flee destination.
+   * where it started running, or on reaching its flee destination.
    */
   readonly escapeDistanceM: number;
 }

@@ -210,3 +210,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 25. [The five-stage workflow](docs/adr/0025-five-stage-workflow.md)
 26. [After Action Review replay](docs/adr/0026-aar-replay.md)
 27. [After Action Review scoring and recommendations](docs/adr/0027-aar-scoring.md)
+28. [OPFOR reactions under fire, and escape by distance run](docs/adr/0028-opfor-reactions-and-escape.md)

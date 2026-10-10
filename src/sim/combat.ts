@@ -91,6 +91,8 @@ export function beginEngagement(
       side: soldier.side,
       weaponProfileRef: weapon,
       fleeBlocked: false,
+      underFire: false,
+      fleeFrom: null,
       outAtSeconds: null,
       stats: { shotsFired: 0, hits: 0, incapacitations: 0, timesHit: 0 },
     };
@@ -99,6 +101,7 @@ export function beginEngagement(
         ...base,
         behavior: 'incapacitated',
         reaction: null,
+        reactionIfUnderFire: null,
         reactAtSeconds: null,
         nextShotSeconds: null,
       };
@@ -108,6 +111,7 @@ export function beginEngagement(
         ...base,
         behavior: 'engaging',
         reaction: null,
+        reactionIfUnderFire: null,
         reactAtSeconds: null,
         nextShotSeconds:
           weapon === null
@@ -115,12 +119,15 @@ export function beginEngagement(
             : startSeconds + uniform(state.rng, config.engagement.bluforFirstShotDelay),
       };
     }
-    const reaction: OpforReaction =
+    // Drawn now, so the draws do not depend on what happens first; taken only
+    // if the soldier is under fire when it reacts (docs/adr/0028).
+    const reactionIfUnderFire: OpforReaction =
       nextFloat(state.rng) < config.opfor.reactionProbabilities.prone ? 'prone' : 'flee';
     return {
       ...base,
       behavior: 'awaitingReaction',
-      reaction,
+      reaction: null,
+      reactionIfUnderFire,
       reactAtSeconds: startSeconds + uniform(state.rng, config.opfor.reactionDelay),
       nextShotSeconds: null,
     };
@@ -222,13 +229,19 @@ function combatantAt(engagement: EngagementState, index: number): Combatant {
   return combatant;
 }
 
-/** An OPFOR soldier's reaction comes due: drop prone, or flee (prone when no route away exists). */
+/**
+ * An OPFOR soldier's reaction comes due (docs/adr/0028). Not under fire, it
+ * runs away from BLUEFOR; under fire (any shot fired at it so far), it takes
+ * the reaction drawn at the start: drop prone and return fire, or run. With no
+ * route away, it drops prone.
+ */
 function react(context: Context, index: number, atSeconds: number): void {
   const { state, world, combat, engagement, tick, events } = context;
   const soldier = soldierAt(state, index);
   const combatant = combatantAt(engagement, index);
   const config = combat.config;
   const threat = threatPoint(state, soldier.side);
+  combatant.reaction = combatant.underFire ? (combatant.reactionIfUnderFire ?? 'flee') : 'flee';
 
   if (combatant.reaction === 'flee') {
     const route = fleeRoute(world, soldier, threat, config);
@@ -245,6 +258,7 @@ function react(context: Context, index: number, atSeconds: number): void {
         speed: config.opfor.fleeSpeedMps,
       };
       combatant.behavior = 'fleeing';
+      combatant.fleeFrom = { x: soldier.position.x, y: soldier.position.y };
       events.push({
         type: 'opforReacted',
         tick,
@@ -276,7 +290,7 @@ function react(context: Context, index: number, atSeconds: number): void {
     tick,
     atSeconds,
     soldierId: soldier.id,
-    reaction: combatant.reaction ?? 'prone',
+    reaction: combatant.reaction,
     fleeBlocked: combatant.fleeBlocked,
     destination: null,
     speed: null,
@@ -387,6 +401,7 @@ function fire(context: Context, index: number, atSeconds: number): void {
   const incapacitated = hit && nextFloat(state.rng) < weapon.incapacitationProbabilityOnHit;
 
   combatant.stats.shotsFired += 1;
+  victimCombatant.underFire = true;
   if (hit) {
     combatant.stats.hits += 1;
     victimCombatant.stats.timesHit += 1;
@@ -456,45 +471,26 @@ function selectTarget(
 }
 
 /**
- * Fleeing soldiers escape at the end of the tick once out of the fight: at
- * least `escapeDistanceM` from every active enemy, and no active, armed
- * enemy could engage them (within its weapon's maximum engagement range with
- * a clear line of sight). Reaching the flee destination is also an escape.
+ * Fleeing soldiers escape at the end of the tick once at least
+ * `escapeDistanceM` (horizontally) from where they started running, or on
+ * reaching their flee destination (docs/adr/0028).
  */
 function checkEscapes(context: Context, tickEnd: number): void {
-  const { state, world, combat, engagement, tick, events } = context;
+  const { state, combat, engagement, tick, events } = context;
   engagement.combatants.forEach((c, index) => {
     const soldier = state.soldiers[index];
     if (c.behavior !== 'fleeing' || soldier?.status !== 'active') return;
     const arrived = soldier.orders?.behavior !== 'moving';
-    if (!arrived && !outOfTheFight(state, world, combat, soldier)) return;
+    const from = c.fleeFrom;
+    const away =
+      from !== null &&
+      Math.hypot(soldier.position.x - from.x, soldier.position.y - from.y) >=
+        combat.config.opfor.escapeDistanceM;
+    if (!arrived && !away) return;
     soldier.orders = null;
     c.behavior = 'escaped';
     c.outAtSeconds = tickEnd;
     events.push({ type: 'soldierEscaped', tick, atSeconds: tickEnd, soldierId: soldier.id });
-  });
-}
-
-function outOfTheFight(
-  state: SimState,
-  world: SimWorld,
-  combat: CombatSetup,
-  soldier: Soldier,
-): boolean {
-  const enemies = state.soldiers.filter((s) => s.side !== soldier.side && s.status === 'active');
-  if (enemies.length === 0) return false;
-  const range = (s: Soldier) =>
-    Math.hypot(s.position.x - soldier.position.x, s.position.y - soldier.position.y);
-  // Distances first: line of sight is only traced once the soldier is far enough from everyone.
-  if (enemies.some((s) => range(s) < combat.config.opfor.escapeDistanceM)) return false;
-  return !enemies.some((s) => {
-    const ref = combat.weapons[s.id] ?? null;
-    const weapon = ref === null ? undefined : weaponCombatProfile(combat.config, ref);
-    return (
-      weapon !== undefined &&
-      range(s) <= weapon.maxEngagementRangeM &&
-      lineOfSight(world.terrain, s.position, soldier.position).clear
-    );
   });
 }
 
@@ -532,7 +528,11 @@ function endReason(
     const soldier = state.soldiers[i];
     return soldier !== undefined && isCombatCapable(c, soldier);
   });
-  if (!capable) return 'noCombatCapable';
+  // Soldiers still running away are still leaving the fight: wait for them to escape.
+  const fleeing = engagement.combatants.some(
+    (c, i) => c.behavior === 'fleeing' && state.soldiers[i]?.status === 'active',
+  );
+  if (!capable && !fleeing) return 'noCombatCapable';
   if (tickEnd >= engagement.endsBySeconds - TIME_EPSILON_SECONDS) return 'timeLimit';
   return null;
 }

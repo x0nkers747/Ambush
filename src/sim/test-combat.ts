@@ -59,7 +59,7 @@ export const TEST_COMBAT_CONFIG: CombatConfig = {
     returnFireDelaySeconds: 1,
     fleeSpeedMps: 4.5,
     fleeDistanceM: 600,
-    escapeDistanceM: 300,
+    escapeDistanceM: 50,
   },
   engagement: {
     maxDurationSeconds: 60,

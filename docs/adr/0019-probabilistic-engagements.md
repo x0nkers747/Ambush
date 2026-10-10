@@ -113,6 +113,9 @@ unit, valid range and default. The numbers are placeholders for gameplay, not em
 
 ### OPFOR reactions
 
+> Amended by ADR 0028: a soldier not under fire when it reacts always flees, and a fleeing soldier
+> escapes 50 m from where it started running. The rules below are the original ones.
+
 When the engagement starts, each OPFOR soldier, in soldier order, independently draws:
 
 - its reaction: prone with probability 0.6, flee with 0.4;
