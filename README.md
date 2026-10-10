@@ -67,6 +67,9 @@ button.
    ambush, on the same map. Play, pause, step, jump to either end, drag the timeline to any moment
    (forward or back), and change the speed (0.25× to 4×). Select a Marine to see what they were
    doing at that moment, and tick **Follow the selected Marine** to keep the map on them.
+   The **Score** panel grades the engagement out of 100 (fire participation, BLUEFOR survival,
+   OPFOR containment, fire efficiency) with recommendations
+   ([ADR 0027](docs/adr/0027-aar-scoring.md)).
    **Try again** takes you back to BLUEFOR planning with your plan as it was executed,
    ready to change and run again.
 
@@ -205,3 +208,5 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 23. [Buildings from Overture Maps](docs/adr/0023-overture-buildings.md)
 24. [Spot heights on the tactical map](docs/adr/0024-spot-heights.md)
 25. [The five-stage workflow](docs/adr/0025-five-stage-workflow.md)
+26. [After Action Review replay](docs/adr/0026-aar-replay.md)
+27. [After Action Review scoring and recommendations](docs/adr/0027-aar-scoring.md)

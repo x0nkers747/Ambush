@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-10
-- Fills in stage 5 of ADR 0025 (until now a placeholder). Scoring and analysis are not part of it.
+- Fills in stage 5 of ADR 0025 (until now a placeholder). Scoring and recommendations are ADR 0027.
 
 ## Context
 

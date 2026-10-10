@@ -2,12 +2,16 @@ import {
   buildPreviewScenario,
   buildScenario,
   createExercise,
+  displayPoints,
   frameAt,
+  gradeOf,
   frameSeconds,
   NO_KILL_ZONE,
   OPFOR_FORCES,
+  scoreEngagement,
   TRAINEE_SIDE,
   type AmbushScenario,
+  type EngagementScore,
   type Exercise,
   type ScenarioDefinition,
 } from '#exercise';
@@ -22,7 +26,13 @@ import {
   type MapTool,
   type Session,
 } from '#session';
-import { DEFAULT_TICK_RATE_HZ, MAX_SEED, type TerrainDataset, type Vec2 } from '#sim';
+import {
+  DEFAULT_TICK_RATE_HZ,
+  MAX_SEED,
+  type SoldierId,
+  type TerrainDataset,
+  type Vec2,
+} from '#sim';
 import {
   createTacticalMap,
   formatBearing,
@@ -231,6 +241,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         <label class="replay-follow"><input type="checkbox" data-ui="replay-follow"> Follow the selected Marine</label>
         <div class="replay-unit" data-ui="replay-unit"></div>
       </div>
+    </section>
+    <section class="sec" data-sec="score" data-stage="aar">
+      <h2>Score</h2>
+      <div class="scorecard" data-ui="score"></div>
     </section>
     <section class="sec" data-sec="status">
       <h2 data-ui="status-title">Status</h2>
@@ -1012,6 +1026,78 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         <dt>Shots</dt><dd>${stats ? `${String(stats.shotsFired)} fired, ${String(stats.hits)} hit` : 'none yet'}</dd>
       </dl>`;
   };
+  // --- The After Action Review's score (docs/adr/0027) ---------------------
+  // From the completed engagement of the live exercise, never the replay
+  // view: scrubbing or the playback speed cannot change it.
+  let scored: { exercise: Exercise; score: EngagementScore } | null = null;
+  const currentScore = (): EngagementScore | null => {
+    const e = exercise;
+    if (e?.phase !== 'engagementComplete') return null;
+    if (scored?.exercise !== e)
+      scored = { exercise: e, score: scoreEngagement(e.engagementResult) };
+    return scored.score;
+  };
+  const SEVERITY_MARK: Readonly<Record<string, string>> = {
+    high: '⚠',
+    medium: '⚠',
+    low: '•',
+    info: '✓',
+  };
+  const scoreHtml = (): string => {
+    const score = currentScore();
+    if (!score) return '<p class="muted">The score appears once the engagement has ended.</p>';
+    const e = exercise;
+    const name = (id: SoldierId) => {
+      const member = e?.rosterMember(id);
+      return member ? `${member.slot.label} (${id})` : id;
+    };
+    const head =
+      score.complete && score.total !== null
+        ? `<div class="score-head"><span class="score-total">${displayPoints(score.total)}</span>
+            <span class="muted">/ ${String(score.maxTotal)}</span>
+            <span class="score-grade" data-grade="${gradeOf(score.total)}">${gradeOf(score.total)}</span></div>`
+        : `<p class="warn">Incomplete assessment: ${escapeHtml(
+            score.categories
+              .filter((c) => c.points === null)
+              .map((c) => c.label)
+              .join(', '),
+          )} could not be evaluated, so there is no total.</p>`;
+    const categories = score.categories
+      .map((c) => {
+        const share = c.points === null ? 0 : Math.max(0, Math.min(1, c.points / c.maxPoints));
+        return `<li class="score-cat">
+          <div class="score-cat-row"><span>${escapeHtml(c.label)}</span>
+            <span class="score-pts">${c.points === null ? 'unavailable' : `${displayPoints(c.points)} / ${String(c.maxPoints)}`}</span></div>
+          <div class="score-bar" aria-hidden="true"><i style="width:${(share * 100).toFixed(1)}%"></i></div>
+          ${
+            c.points === null
+              ? `<p class="hint">${escapeHtml(c.unavailableReason ?? '')}</p>`
+              : c.deductions.map((d) => `<p class="hint">${escapeHtml(d)}</p>`).join('')
+          }
+        </li>`;
+      })
+      .join('');
+    const recommendations =
+      score.recommendations.length === 0
+        ? '<p class="muted">No recommendations.</p>'
+        : score.recommendations
+            .map(
+              (r) => `<details class="rec" data-severity="${r.severity}">
+          <summary><span aria-hidden="true">${SEVERITY_MARK[r.severity] ?? '•'}</span> ${escapeHtml(r.title)}</summary>
+          <p>${escapeHtml(r.observation)}</p>
+          <p class="muted">${escapeHtml(r.recommendation)}</p>
+          <dl class="kv">${r.measurements
+            .map((m) => `<dt>${escapeHtml(m.label)}</dt><dd>${escapeHtml(String(m.value))}</dd>`)
+            .join('')}</dl>
+          ${r.unitIds.length > 0 ? `<p class="hint">Units: ${escapeHtml(r.unitIds.map(name).join(', '))}</p>` : ''}
+        </details>`,
+            )
+            .join('');
+    return `${head}<ul class="score-cats">${categories}</ul>
+      <h3>Recommendations</h3>${recommendations}
+      <p class="hint">Shots are firing opportunities (an aimed shot or a short burst), not rounds. An incapacitated Marine counts as killed.</p>`;
+  };
+
   const updateReplayControls = () => {
     const recording = reviewed();
     const view = replayView();
@@ -1191,6 +1277,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         break;
       case 'aar':
         updateReplayControls();
+        setHtml(ui('score'), scoreHtml());
         setHtml(ui('status'), aarStatusHtml());
         break;
     }

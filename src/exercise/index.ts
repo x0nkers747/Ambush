@@ -157,6 +157,22 @@ export {
 } from './runner';
 export { createStateRecorder, frameAt, frameSeconds, type ReplayRecording } from './replay';
 export {
+  displayPoints,
+  EXCELLENT_EFFICIENCY_POINTS,
+  gradeOf,
+  INCAPACITATED_COUNTS_AS,
+  INEFFICIENT_SHOTS_PER_KILL,
+  MAX_POINTS,
+  scoreEngagement,
+  type CategoryScore,
+  type EngagementScore,
+  type Recommendation,
+  type RecommendationId,
+  type RecommendationSeverity,
+  type ScoreCategoryId,
+  type ScoreMeasurement,
+} from './scoring';
+export {
   primaryWeapon,
   WEAPON_DISPLAY_PROFILES,
   type PrimaryWeapon,

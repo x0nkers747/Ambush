@@ -666,6 +666,103 @@
         font-weight: 600;
       }
 
+      /* The AAR scorecard (docs/adr/0027). */
+      .score-head {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .score-total {
+        font-size: 28px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .score-grade {
+        margin-left: auto;
+        min-width: 34px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        text-align: center;
+        font-size: 18px;
+        font-weight: 700;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+      }
+      .score-grade[data-grade='A'],
+      .score-grade[data-grade='B'] {
+        color: var(--green);
+      }
+      .score-grade[data-grade='C'],
+      .score-grade[data-grade='D'] {
+        color: var(--amber);
+      }
+      .score-grade[data-grade='F'] {
+        color: var(--red);
+      }
+      .score-cats {
+        list-style: none;
+        margin: 0 0 8px;
+        padding: 0;
+      }
+      .score-cat {
+        margin: 0 0 8px;
+      }
+      .score-cat-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .score-pts {
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+      }
+      .score-bar {
+        height: 5px;
+        margin: 3px 0 2px;
+        border-radius: 3px;
+        background: var(--panel-2);
+        overflow: hidden;
+      }
+      .score-bar i {
+        display: block;
+        height: 100%;
+        background: var(--blue);
+      }
+      .score-cat .hint {
+        margin: 2px 0 0;
+      }
+      .scorecard h3 {
+        margin: 10px 0 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      details.rec {
+        margin: 0 0 6px;
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel-2);
+      }
+      details.rec > summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      details.rec[data-severity='high'] > summary span {
+        color: var(--red);
+      }
+      details.rec[data-severity='medium'] > summary span {
+        color: var(--amber);
+      }
+      details.rec[data-severity='info'] > summary span {
+        color: var(--green);
+      }
+      details.rec p {
+        margin: 6px 0;
+      }
+
       /* OPFOR & combat. */
       .combat-actions button {
         width: 100%;
