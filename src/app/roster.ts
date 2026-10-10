@@ -80,7 +80,9 @@ export function rosterHtml(exercise: Exercise, session: Session, source: string)
 
 /**
  * Roster clicks: a fire team's name selects the team, a row selects the
- * Marine; either is brought into view when it is off screen.
+ * Marine, and the map stays where it is. A double click also centres the map
+ * on them. (The click count is used rather than `dblclick`: the roster is
+ * redrawn when the selection changes, between the two clicks.)
  */
 export function wireRoster(
   element: HTMLElement,
@@ -94,13 +96,14 @@ export function wireRoster(
   element.addEventListener('click', (event) => {
     const exercise = o.exercise();
     const target = event.target instanceof Element ? event.target : null;
+    const centre = event.detail >= 2;
     const heading = target?.closest('[data-fire-team]');
     const unitId = heading instanceof HTMLElement ? heading.dataset['fireTeam'] : undefined;
     if (unitId !== undefined) {
       o.setSession(selectFireTeam(o.session(), exercise, unitId));
       const team = exercise.fireTeams.find((t) => t.unitId === unitId);
       const points = team?.memberIds.flatMap((id) => exercise.observer(id)?.point ?? []) ?? [];
-      if (points.length > 0 && !points.some((p) => o.map.isInView(p))) {
+      if (centre && points.length > 0) {
         o.map.centreOn({
           x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
           y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
@@ -113,6 +116,6 @@ export function wireRoster(
     if (id === undefined) return;
     o.setSession(selectSoldier(o.session(), exercise, soldierId(id)));
     const soldier = exercise.simulation.state.soldiers.find((s) => s.id === id);
-    if (soldier && !o.map.isInView(soldier.position)) o.map.centreOn(soldier.position);
+    if (centre && soldier) o.map.centreOn(soldier.position);
   });
 }

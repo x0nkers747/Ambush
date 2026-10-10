@@ -194,11 +194,13 @@ The trainee's intent per Marine is a `SoldierDeploymentPlan`:
 - **Destination:**
   - clicking the map sets the selected Marine's destination;
   - clicking again, or dragging the marker, moves it;
-  - right-click on the marker, Backspace, or **Clear destination** removes it.
+  - right-click on the marker, Backspace or Delete removes it (the **Clear destination** button
+    was removed in ADR 0025's side panel; **Reset** returns to the last executed plan).
 - **Facing:**
   - dragging the arrow handle sets `facingDegrees`, a bearing in [0, 360);
   - it is kept when the destination moves or is cleared;
-  - **Default facing** returns it to `null`.
+  - **Reset** returns it to the last executed plan's facing (the **Default facing** button, which
+    returned it to `null`, was removed).
 - **Default facing:** applies only while `facingDegrees` is `null`:
   - with a destination, the direction of the last piece of the generated path
     (the Marine keeps facing the way it walked);

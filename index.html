@@ -378,11 +378,12 @@
         border: 2px solid #9fd17a;
         pointer-events: none;
       }
-      /* With the floating simulation panel shown, the banner is centred in the
-         map area to its left (panel 284 px + 58 px from the edge + 12 px gap). */
+      /* With the floating simulation panel shown, the banner is centred between
+         the north arrow (to 50 px, plus an 8 px gap) and the panel (284 px wide,
+         14 px from the edge, plus a 12 px gap). */
       .ws-canvas:has(.sim-float:not([hidden])) .banner {
-        left: calc((100% - 354px) / 2);
-        max-width: calc(100% - 370px);
+        left: calc(50% - 126px);
+        max-width: calc(100% - 384px);
       }
       .banner[data-kind='triggered'] {
         border-color: var(--red);
@@ -572,15 +573,15 @@
       }
 
       /* Simulation controls. */
-      /* The simulation controls float over the map, left of its north arrow
-         (drawn 14 px from the right edge, 36 px wide), so they are always to hand. */
+      /* The simulation controls float in the map's top-right corner, so they
+         are always to hand (the north arrow is in the top-left corner). */
       .sim-float {
         position: absolute;
         top: 10px;
-        right: 58px;
+        right: 14px;
         z-index: 2;
         width: 284px;
-        max-width: calc(100% - 74px);
+        max-width: calc(100% - 80px);
         padding: 10px 12px 4px;
         background: rgb(27 31 35 / 0.94);
         border: 1px solid var(--line);

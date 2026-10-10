@@ -112,22 +112,24 @@ The side panel is a fixed sequence of sections, shown or hidden by stage:
 
 1. Primary action (always first, and kept at the top while the panel scrolls, so the way on to
    the next stage is always in the same place)
-2. Stage tools (in stage 3 the squad roster comes right before the selected unit's details)
+2. Stage tools
 3. Stage status
-4. Squad roster (stages 2, 4 and 5)
+4. Squad roster. In stage 3 it comes before the status, right after the tools, with the selection
+   hint above the roster and the selected unit's details and visibility below it.
 5. Event log (stages 3–5, collapsed)
 6. Help (collapsed)
 7. Battlefield Information (collapsed)
 
-The simulation controls (clock, state, **Move**, Pause, Resume and the time
-acceleration, 16× by default) float over the map in stages 3–5, left of the north arrow, so they
-never need scrolling to. The map's banner is then centred in the space to their left.
+The simulation controls (clock, state, **Move**, Pause, Resume and the time acceleration, 16× by
+default) float in the map's top-right corner in stages 3–5, so they never need scrolling to; the
+north arrow is in the top-left corner of every map. The map's banner is then centred between the
+two.
 
 Stage tools and status by stage:
 
 - **Stage 2:** the three scenario tools, Clear route and Reset scenario. Status shows ORP, OPFOR
   and route, with one actionable message.
-- **Stage 3:** Edit positions, Kill zone and Visibility (Visibility appears only here), plus the
+- **Stage 3:** Waypoints, Kill zone and Visibility (Visibility appears only here), plus the
   selection panel. Status shows destinations, Marines in position, the plan's state and readiness.
 - **Stage 4:** Start OPFOR and Trigger Ambush, each with its reason, plus the kill-zone count and
   approach time. Status shows BLUEFOR, OPFOR, the ambush and combat, plus the engagement table when

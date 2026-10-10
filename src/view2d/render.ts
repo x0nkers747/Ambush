@@ -548,7 +548,7 @@ export function drawOverlays(
   scene: MapScene,
   layer: TerrainLayer,
 ): void {
-  const { width, height } = scene.viewport;
+  const { height } = scene.viewport;
   drawGrid(ctx, scene, layer.bounds);
   drawEngagementWedge(ctx, scene, layer);
   drawOrp(ctx, scene);
@@ -572,7 +572,7 @@ export function drawOverlays(
     drawFacingArrow(ctx, scene);
   }
   drawTrigger(ctx, scene);
-  drawNorthArrow(ctx, width);
+  drawNorthArrow(ctx);
   drawScaleBar(ctx, scene, height);
 }
 
@@ -1562,8 +1562,9 @@ function centroid(points: readonly Vec2[]): Vec2 {
   return { x: cx / (3 * area), y: cy / (3 * area) };
 }
 
-function drawNorthArrow(ctx: CanvasRenderingContext2D, width: number): void {
-  const x = width - 32;
+/** The north arrow, in the map's top-left corner (its box spans 14 to 50 px across, 10 to 62 down). */
+function drawNorthArrow(ctx: CanvasRenderingContext2D): void {
+  const x = 32;
   const y = 22;
   ctx.save();
   ctx.fillStyle = 'rgba(20, 24, 28, 0.78)';

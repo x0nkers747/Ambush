@@ -234,7 +234,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
        }</p>`
       : `<p class="muted">${editable && o.session().tool === 'deploy' ? 'Click the map to place the team in a line centred there, slot 1 on the left.' : 'No formation.'}</p>`;
     const buttons = editable
-      ? `<p class="buttons"><button data-action="clear-formation" ${formation ? '' : 'disabled'}>Delete formation</button></p>`
+      ? `<p class="buttons"><button data-action="clear-formation" title="Delete the formation" ${formation ? '' : 'disabled'}>Reset</button></p>`
       : lockedNote(editing);
     return `
     <div class="soldier-title">${escapeHtml(team.name)}</div>
@@ -250,8 +250,8 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     const session = o.session();
     if (session.selectedFireTeamId !== null) return teamHtml(session.selectedFireTeamId, editing);
     const id = session.selectedSoldierId;
-    if (id === null)
-      return '<p class="muted">Select a Marine or a fire team in the roster, or click a blue symbol on the map.</p>';
+    // Nothing selected: the hint above the roster says what to do (SELECT_HINT).
+    if (id === null) return '';
     const soldier = e.simulation.state.soldiers.find((s) => s.id === id);
     const plan = e.displayedPlan(id);
     const member = e.rosterMember(id);
@@ -275,11 +275,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
        ${problem ? `<p class="alert">The destination is ${escapeHtml(problem)}.</p>` : ''}`
       : `<p class="muted">None: stays where they are.${editable && session.tool === 'deploy' ? ' Click the map to set one.' : ''}</p>`;
     const buttons = editable
-      ? `<p class="buttons">
-        <button data-action="clear-destination" ${d ? '' : 'disabled'}>Clear destination</button>
-        <button data-action="default-facing" ${plan.facingDegrees === null ? 'disabled' : ''}>Default facing</button>
-        <button data-action="reset-plan" title="Back to the last executed plan">Reset</button>
-      </p>`
+      ? `<p class="buttons"><button data-action="reset-plan" title="Back to the last executed plan">Reset</button></p>`
       : lockedNote(editing);
     return `
     <div class="soldier-title">${escapeHtml(member.slot.label)} · ${escapeHtml(member.role.name)}</div>
@@ -519,17 +515,20 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
         }
         const id = session.selectedSoldierId;
         if (id === null || action === undefined || !e.canEditPlans) return;
-        if (action === 'clear-destination') e.clearDestination(id);
-        if (action === 'default-facing') e.clearFacing(id);
         if (action === 'reset-plan') e.resetPlan(id);
       });
     },
   };
 }
 
+/** Shown above the roster in BLUEFOR planning while nothing is selected. */
+export const SELECT_HINT =
+  'Select a Marine or a fire team in the roster, or click a blue symbol on the map.';
+
 export const PLANNING_HELP = `<h3>Positions</h3>
 <dl class="help">
   <dt>Roster / symbol</dt><dd>Select a Marine</dd>
+  <dt>Double-click in roster</dt><dd>Select and centre the map on the Marine or fire team</dd>
   <dt>Click map</dt><dd>Set the Marine's destination (click again to move it)</dd>
   <dt>Drag destination</dt><dd>Move it</dd>
   <dt>Drag yellow handle</dt><dd>Set the facing (kept when the destination moves)</dd>

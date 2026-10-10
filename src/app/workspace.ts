@@ -29,6 +29,7 @@ import {
   createExerciseStage,
   minutesSeconds,
   PLANNING_HELP,
+  SELECT_HINT,
   TIME_HELP,
 } from './exercise-stage';
 import { rosterHtml, rosterSource, wireRoster } from './roster';
@@ -106,7 +107,7 @@ function seedFromAddress(): number {
 }
 
 const PLANNING_TOOLS: readonly { tool: 'deploy' | 'killZone'; label: string; key: string }[] = [
-  { tool: 'deploy', label: 'Edit positions', key: 'P' },
+  { tool: 'deploy', label: 'Waypoints', key: 'P' },
   { tool: 'killZone', label: 'Kill zone', key: 'K' },
 ];
 
@@ -177,9 +178,6 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           <button class="tool" data-ui="visibility" aria-pressed="false" title="Show what the selected Marine or fire team can see (V)">Visibility</button>
         </div>
         <div data-ui="planning-lock"></div>
-        <div data-ui="roster-slot"></div>
-        <div class="selection" data-ui="selection"></div>
-        <div data-ui="visibility-panel"></div>
       </div>
       <div data-stage="opfor">
         <div class="combat-actions">
@@ -206,7 +204,12 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     </section>
     <section class="sec" data-sec="roster">
       <h2>Squad roster</h2>
+      <p class="muted" data-stage="bluefor">${SELECT_HINT}</p>
       <div data-ui="roster" class="roster"></div>
+      <div data-stage="bluefor">
+        <div class="selection" data-ui="selection"></div>
+        <div data-ui="visibility-panel"></div>
+      </div>
     </section>
     <details class="sec collapsible" data-sec="events">
       <summary>Event log</summary>
@@ -460,16 +463,16 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     placeRoster();
   };
   /**
-   * In BLUEFOR planning the roster sits right above the selection panel (the
-   * selected unit's details); in the other stages it has its own section. The
-   * element itself moves, so its clicks and selection stay as they are.
+   * The roster section comes right after the tools in BLUEFOR planning (with
+   * the selected unit's details under the roster), and after the status in the
+   * other stages. The section itself moves, so its clicks and selection stay.
    */
   const placeRoster = () => {
-    const roster = ui('roster');
     const section = app.querySelector<HTMLElement>('[data-sec="roster"]');
-    const here = stage === 'bluefor' ? ui('roster-slot') : section;
-    if (here && roster.parentElement !== here) here.append(roster);
-    if (section) section.hidden = stage === 'bluefor';
+    const after = app.querySelector<HTMLElement>(
+      stage === 'bluefor' ? '[data-sec="tools"]' : '[data-sec="status"]',
+    );
+    if (section && after && after.nextElementSibling !== section) after.after(section);
   };
 
   const facts: WorkflowFacts = {
@@ -752,21 +755,16 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         : `Executed (revision ${String(e.revisions.length)})${e.hasUncommittedChanges ? ' · <span class="warn">changes not executed</span>' : ''}`;
     const blockers = e.opforStart ? [] : e.startOpforProblems();
     // The missing kill zone is not repeated here: Continue's reason gives it when it is the one left.
-    const listed = blockers.filter((b) => b !== NO_KILL_ZONE);
+    // The first problem is Continue's reason at the top, and the missing kill zone is
+    // given there when it is the one left: the status lists only the others.
+    const listed = blockers.slice(1).filter((b) => b !== NO_KILL_ZONE);
     const readiness = e.opforStart
       ? message('ok', 'OPFOR has started: continue to OPFOR & Combat.')
       : blockers.length === 0
         ? message('ok', 'Ready for OPFOR.')
         : listed.length === 0
           ? ''
-          : `${message('warn', listed[0] ?? '')}${
-              listed.length > 1
-                ? `<ul class="blockers">${listed
-                    .slice(1)
-                    .map((b) => `<li>${escapeHtml(b)}</li>`)
-                    .join('')}</ul>`
-                : ''
-            }`;
+          : `<ul class="blockers">${listed.map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
     return `<dl class="kv">
       <dt>Destinations</dt><dd>${String(assigned)} of ${String(trainee.length)} Marines</dd>
       <dt>In position</dt><dd>${String(inPosition)} of ${String(assigned)}</dd>
@@ -993,7 +991,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       stage === 'scenario' && scenarioStage && scenarioLock() === null
         ? `Tool: ${SCENARIO_TOOL_LABELS[scenarioStage.tool]}`
         : stage === 'bluefor' && ex().opforStart === null
-          ? `Tool: ${session.tool === 'killZone' ? 'Kill zone' : 'Edit positions'}`
+          ? `Tool: ${session.tool === 'killZone' ? 'Kill zone' : 'Waypoints'}`
           : '',
     );
     const p = map.pointer;
