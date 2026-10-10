@@ -63,8 +63,12 @@ button.
 3. **BLUEFOR Planning**: plan positions, the kill zone and visibility, then **Move**, pause,
    re-plan and resume, all in this stage (see below). Continue once BLUEFOR is in position.
 4. **OPFOR & Combat**: **Start OPFOR**, then **Trigger Ambush** when you choose.
-5. **After Action Review**: not built yet. The stage says so, shows the engagement's recorded
-   results, and its replay controls are disabled.
+5. **After Action Review**: a replay of exactly what happened, from the moment you triggered the
+   ambush, on the same map. Play, pause, step, jump to either end, drag the timeline to any moment
+   (forward or back), and change the speed (0.25× to 4×). Select a Marine to see what they were
+   doing at that moment, and tick **Follow the selected Marine** to keep the map on them.
+   **Return to Planning** takes you back to BLUEFOR planning with your plan as it was executed,
+   ready to change and run again.
 
 Going back keeps your work. The exercise survives a step back to the scenario; if you then change
 the scenario, the exercise is rebuilt and your positions, formations and kill zone are carried

@@ -15,17 +15,20 @@ import {
   waypointId,
   type Azimuth,
   type CombatConfig,
+  type DeepReadonly,
   type EngagementSummary,
   type EngagementAreaId,
   type LosResult,
   type Side,
   type SimConfig,
   type SimEvent,
+  type SimState,
   type Simulation,
   type SoldierId,
   type Vec2,
   type Viewshed,
 } from '#sim';
+import { createStateRecorder, type ReplayRecording } from './replay';
 import {
   validateOpforRoutes,
   validateTraineeSetup,
@@ -400,6 +403,20 @@ export interface Exercise {
   readonly combatLog: readonly CombatEvent[];
   readonly timeline: readonly ExerciseEvent[];
   /**
+   * The After Action Review's recording (docs/adr/0026): the simulation state
+   * at every tick from TRIGGER AMBUSH on; `null` before the trigger. Complete
+   * once the engagement has ended.
+   */
+  readonly recording: ReplayRecording | null;
+  /**
+   * A read-only view of the exercise as it was at `frame` of the recording
+   * (clamped to it): the simulation state, combat log, timeline, phase and
+   * every query (statuses, routes, the engagement's result) as at that tick,
+   * the trainee's plans as they are. Nothing is simulated to make it; every
+   * change is refused with an `ExerciseError`. Throws without a recording.
+   */
+  replayAt(frame: number): Exercise;
+  /**
    * Simulation seconds skipped because a frame exceeded the runner's catch-up
    * budget (docs/adr/0003), e.g. after the browser stalled. Diagnostic only.
    */
@@ -481,6 +498,12 @@ export interface Exercise {
   fireTeamOf(soldierId: SoldierId): FireTeam | undefined;
   /** The group's formation while editable and at least one Marine still follows it. */
   formation(unitId: string): FireTeamFormation | undefined;
+  /**
+   * Every formation as planned, also once the plan has been executed, in the
+   * order they were last placed (so placing them again in this order gives
+   * each Marine the same formation), with the Marines still following each.
+   */
+  plannedFormations(): readonly FireTeamFormation[];
   /**
    * Places the whole group (squad or fire team) in a line centred on `centre`, facing `azimuth`
    * (default: the formation's facing if it has one, else the direction from
@@ -584,6 +607,13 @@ export function createExercise({
     combat: { config: combat, weapons: combatWeapons },
   });
   const terrain = sim.world.terrain;
+  /**
+   * The simulation state the exercise's queries read: the live state, or,
+   * inside a replay view (`replayAt`), the recorded frame's. Changes always
+   * act on the live simulation.
+   */
+  let frameState: DeepReadonly<SimState> | null = null;
+  const simState = () => frameState ?? sim.state;
   const combatConfigIdentity = deepFreeze({
     id: combat.id,
     version: combat.version,
@@ -655,7 +685,7 @@ export function createExercise({
     (phase === 'bluforOccupation' || phase === 'opforApproach' || phase === 'engagement');
 
   const engagementResult = (): EngagementResult | null => {
-    const engagement = sim.state.engagement;
+    const engagement = simState().engagement;
     if (!engagement) return null;
     return {
       ...summarizeEngagement(engagement),
@@ -667,7 +697,7 @@ export function createExercise({
   };
 
   const soldierState = (id: SoldierId) => {
-    const soldier = sim.state.soldiers.find((s) => s.id === id);
+    const soldier = simState().soldiers.find((s) => s.id === id);
     if (!soldier) throw new ExerciseError(`unknown soldier "${id}"`);
     return soldier;
   };
@@ -687,7 +717,7 @@ export function createExercise({
       throw new ExerciseError(`plans cannot be edited during ${phase}${paused ? ' (paused)' : ''}`);
   };
   /** Orders committed this tick have not reached the soldiers yet. */
-  const commitPending = () => revisions.at(-1)?.tick === sim.tick;
+  const commitPending = () => revisions.at(-1)?.tick === simState().tick;
 
   const movementComplete = (): boolean => {
     if (phase === 'bluforPlanning') return false;
@@ -711,9 +741,9 @@ export function createExercise({
   };
   /** Every OPFOR soldier's position now, and whether it counts as in the kill zone. */
   const opforNow = (zone: readonly Vec2[]): OpforPositionAtTrigger[] => {
-    const combatants = sim.state.engagement?.combatants;
-    return sim.state.soldiers
-      .filter((s) => s.side === ENEMY_SIDE)
+    const combatants = simState().engagement?.combatants;
+    return simState()
+      .soldiers.filter((s) => s.side === ENEMY_SIDE)
       .map((s) => {
         const behavior = combatants?.find((c) => c.soldierId === s.id)?.behavior;
         const point = { x: s.position.x, y: s.position.y };
@@ -768,6 +798,12 @@ export function createExercise({
     }
   };
 
+  /** The recording's frames, from the trigger on (docs/adr/0026); `null` before it. */
+  let frames: DeepReadonly<SimState>[] | null = null;
+  /** The simulation events of every tick from the trigger on (docs/adr/0026). */
+  let recordedEvents: SimEvent[] = [];
+  const record = createStateRecorder();
+
   const stepped: SimEvent[] = [];
   const stepper = {
     dtSeconds: 1 / config.tickRateHz,
@@ -777,6 +813,11 @@ export function createExercise({
       const events = sim.step();
       stepped.push(...events);
       afterTick(events);
+      // Every tick from the trigger to the end of the engagement, as it is now.
+      if (frames && trigger) {
+        frames.push(record(sim.state));
+        recordedEvents.push(...events);
+      }
     },
   };
   let runner: FixedStepRunner = createFixedStepRunner(stepper);
@@ -867,6 +908,22 @@ export function createExercise({
     }
     return formation;
   };
+  /**
+   * Every formation as planned, editable or not, in the order last placed,
+   * with the Marines whose displayed plan is still the generated one; those
+   * nobody follows are left out.
+   */
+  const plannedFormations = (): FireTeamFormation[] =>
+    [...formations.values()].flatMap((f) => {
+      const linked = f.slots
+        .filter((slot) => {
+          if (!f.linked.has(slot.soldierId)) return false;
+          const plan = displayed(slot.soldierId);
+          return !!plan && samePlan(plan, generatedPlan(slot.soldierId, slot.point, f.azimuth));
+        })
+        .map((slot) => slot.soldierId);
+      return linked.length === 0 ? [] : [{ ...formationView(f), linked }];
+    });
   const formationView = (f: Formation): FireTeamFormation =>
     deepFreeze({
       unitId: f.unitId,
@@ -941,6 +998,8 @@ export function createExercise({
       linked: new Set(follow),
       movedClear,
     };
+    // Re-inserted, so `formations` stays in the order of the latest placements.
+    formations.delete(team.unitId);
     formations.set(team.unitId, formation);
     return formationView(formation);
   };
@@ -1083,13 +1142,13 @@ export function createExercise({
           problems.push('Plan changes have not been executed: press Resume to execute them.');
         break;
     }
-    const opfor = sim.state.soldiers.filter((s) => s.side === ENEMY_SIDE);
+    const opfor = simState().soldiers.filter((s) => s.side === ENEMY_SIDE);
     problems.push(...killZoneProblems(killZone, opfor));
     if (scenario.opforRoutes.length === 0) problems.push('The scenario defines no OPFOR route.');
     return problems;
   };
 
-  return {
+  const api: Exercise = {
     get phase() {
       return phase;
     },
@@ -1125,7 +1184,7 @@ export function createExercise({
     },
     get approachSeconds() {
       if (!opforStart) return null;
-      return (trigger?.atSeconds ?? sim.timeSeconds) - opforStart.timeSeconds;
+      return (trigger?.atSeconds ?? simState().tick / config.tickRateHz) - opforStart.timeSeconds;
     },
     combatConfig: combat,
     combatWeapons,
@@ -1225,6 +1284,7 @@ export function createExercise({
       const formation = liveFormation(unitId);
       return formation && formationView(formation);
     },
+    plannedFormations,
     placeFormation(unitId, centre, azimuth) {
       const team = fireTeam(unitId);
       requireEditable();
@@ -1408,6 +1468,9 @@ export function createExercise({
         opforPositions,
       });
       timeline.push({ type: 'ambushTriggered', ...now(), trigger });
+      // The recording starts with the state at the trigger itself.
+      frames = [record(sim.state)];
+      recordedEvents = [];
       return { ok: true, trigger };
     },
 
@@ -1417,7 +1480,129 @@ export function createExercise({
       runner.advance(realDtSeconds);
       return stepped.splice(0);
     },
+
+    get recording() {
+      if (!frames || !trigger) return null;
+      const complete = phase === 'engagementComplete';
+      return {
+        tickRateHz: config.tickRateHz,
+        triggerTick: trigger.tick,
+        triggerSeconds: trigger.atSeconds,
+        frames,
+        events: recordedEvents,
+        complete,
+        durationSeconds: (frames.length - 1) / config.tickRateHz,
+      };
+    },
+    replayAt: (frame) => replayView(frame),
   };
+
+  // --- Replay views (docs/adr/0026) ----------------------------------------
+  /** Everything that would change the exercise: refused in a replay view. */
+  const CHANGES = new Set<string | symbol>([
+    'setDestination',
+    'clearDestination',
+    'setFacing',
+    'clearFacing',
+    'resetPlan',
+    'placeFormation',
+    'moveFormation',
+    'setFormationFacing',
+    'clearFormation',
+    'loadDeploymentPlans',
+    'addKillZoneVertex',
+    'moveKillZoneVertex',
+    'deleteKillZoneVertex',
+    'clearKillZone',
+    'execute',
+    'pause',
+    'resume',
+    'startOpfor',
+    'triggerAmbush',
+    'advance',
+  ]);
+  const refuseChange = () => {
+    throw new ExerciseError('The replay is a record of what happened: it cannot be changed.');
+  };
+  /** Events of `list` (in tick order) up to `tick`: before it, or up to and including it. */
+  const upTo = <T extends { readonly tick: number }>(
+    list: readonly T[],
+    tick: number,
+    inclusive: boolean,
+  ): readonly T[] => {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const t = list[mid]?.tick ?? 0;
+      if (inclusive ? t <= tick : t < tick) lo = mid + 1;
+      else hi = mid;
+    }
+    return list.slice(0, lo);
+  };
+  let lastView: { frame: number; length: number; view: Exercise } | null = null;
+  const replayView = (requested: number): Exercise => {
+    if (!frames || frames.length === 0)
+      throw new ExerciseError('There is no recording: the ambush has not been triggered.');
+    const index = Math.min(Math.max(Math.round(requested), 0), frames.length - 1);
+    if (lastView?.frame === index && lastView.length === frames.length) return lastView.view;
+    const state = frames[index];
+    if (!state) throw new ExerciseError('There is no such frame.');
+    const tick = state.tick;
+    const engagement = state.engagement;
+    // A tick's events come with the state after it; the timeline is stamped after each tick.
+    const overrides = new Map<string | symbol, unknown>([
+      [
+        'simulation',
+        Object.freeze({
+          config: sim.config,
+          world: sim.world,
+          tick,
+          timeSeconds: tick / config.tickRateHz,
+          state,
+        }),
+      ],
+      [
+        'phase',
+        engagement?.end ? 'engagementComplete' : engagement ? 'engagement' : 'opforApproach',
+      ],
+      ['paused', false],
+      ['canEditPlans', false],
+      ['hasUncommittedChanges', false],
+      ['triggerState', engagement ? 'triggered' : 'queued'],
+      ['combatLog', upTo(combatLog, tick, false)],
+      ['timeline', upTo(timeline, tick, true)],
+      ['droppedSeconds', 0],
+    ]);
+    /** Runs `read` with the queries reading this frame's state. */
+    const inFrame = <T>(read: () => T): T => {
+      const before = frameState;
+      frameState = state;
+      try {
+        return read();
+      } finally {
+        frameState = before;
+      }
+    };
+    const view = new Proxy(api, {
+      get(target, prop) {
+        if (overrides.has(prop)) return overrides.get(prop);
+        if (CHANGES.has(prop)) return refuseChange;
+        const value = inFrame((): unknown => Reflect.get(target, prop, target));
+        return typeof value === 'function'
+          ? (...args: unknown[]) =>
+              inFrame(() => (value as (...a: unknown[]) => unknown).apply(target, args))
+          : value;
+      },
+      set() {
+        return false;
+      },
+    });
+    lastView = { frame: index, length: frames.length, view };
+    return view;
+  };
+
+  return api;
 }
 
 /** A deep copy of plain JSON-like data. */

@@ -72,6 +72,11 @@ export interface ExerciseStage {
   /** Starts the log again (a new exercise). */
   resetLog(): void;
   eventsHtml(): string;
+  /**
+   * In the After Action Review: the event log as it read live at the replay's
+   * moment, from the trigger on (empty at T+0).
+   */
+  replayEventsHtml(): string;
   soldierName(id: string): string;
   bluforHtml(): string;
   opforHtml(): string;
@@ -114,8 +119,8 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     return e.paused || (e.phase === 'bluforReady' && e.hasUncommittedChanges);
   };
 
-  const describeEvent = (event: SimEvent): string | undefined => {
-    const e = ex();
+  /** One log line for a simulation event; `e` is the exercise as it was just after it. */
+  const describeEvent = (event: SimEvent, e: Exercise = ex()): string | undefined => {
     switch (event.type) {
       case 'waypointReached': {
         const waypoint = e.simulation.state.soldiers
@@ -487,6 +492,38 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
       eventLog.length = 0;
       problems = [];
     },
+    replayEventsHtml() {
+      const view = ex();
+      const recording = view.recording;
+      const now = view.simulation.tick;
+      const first = recording?.triggerTick ?? now;
+      if (!recording || now <= first) return '<li class="muted">Nothing yet.</li>';
+      // As the live log was written: the trigger, then each tick's events, each
+      // described with the state just after it, and the milestones stamped then.
+      const lines: string[] = [];
+      // From the trigger itself on: a milestone of the trigger tick may be from before it.
+      const triggered = view.timeline.findIndex((m) => m.type === 'ambushTriggered');
+      const milestones = triggered < 0 ? [] : view.timeline.slice(triggered);
+      for (const m of milestones) if (m.tick === first) lines.push(describeMilestone(m));
+      let next = 0;
+      for (let tick = first; tick < now; tick += 1) {
+        const after = view.replayAt(tick - first + 1);
+        while (next < recording.events.length && (recording.events[next]?.tick ?? now) <= tick) {
+          const event = recording.events[next];
+          next += 1;
+          const line = event?.tick === tick ? describeEvent(event, after) : undefined;
+          if (line) lines.push(line);
+        }
+        for (const m of milestones) if (m.tick === tick + 1) lines.push(describeMilestone(m));
+      }
+      return (
+        lines
+          .reverse()
+          .slice(0, 30)
+          .map((line) => `<li>${escapeHtml(line)}</li>`)
+          .join('') || '<li class="muted">Nothing yet.</li>'
+      );
+    },
     eventsHtml() {
       return (
         eventLog
@@ -520,6 +557,19 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     },
   };
 }
+
+export const REPLAY_HELP = `<h3>Replay (After Action Review)</h3>
+<dl class="help">
+  <dt>Play / Space</dt><dd>Play or pause, from the moment the ambush was triggered</dd>
+  <dt>Timeline</dt><dd>Drag to any moment, forward or back</dd>
+  <dt>1 s buttons / ← →</dt><dd>Step back or forward one second</dd>
+  <dt>⏮ ⏭ / Home End</dt><dd>Jump to the start or the end</dd>
+  <dt>Speed</dt><dd>0.25× to 4×; the outcome is the same at any speed</dd>
+  <dt>Blue symbol</dt><dd>Select a Marine to see what they were doing at that moment</dd>
+</dl>
+<p class="muted">The replay shows exactly what was recorded during the engagement; nothing is
+simulated again. Return to Planning goes back to BLUEFOR planning with your plan as it was
+executed, ready to change and run again.</p>`;
 
 /** Shown above the roster in BLUEFOR planning while nothing is selected. */
 export const SELECT_HINT =

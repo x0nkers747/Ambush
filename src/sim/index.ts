@@ -81,6 +81,7 @@ export {
   type WaterwayKind,
 } from './environment';
 export { fingerprintPlainData, fingerprintWorld, hashSimState } from './hash';
+export { clonePlainData } from './plain-data';
 export {
   buildingRoofElevations,
   lineOfSight,

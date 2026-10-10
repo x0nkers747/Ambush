@@ -155,6 +155,7 @@ export {
   type FixedStepRunnerOptions,
   type Steppable,
 } from './runner';
+export { createStateRecorder, frameAt, frameSeconds, type ReplayRecording } from './replay';
 export {
   primaryWeapon,
   WEAPON_DISPLAY_PROFILES,

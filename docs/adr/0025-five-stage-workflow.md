@@ -23,7 +23,7 @@ what was missing before moving on.
 | 2   | Edit Scenario       | ORP, OPFOR and OPFOR route (the demo's is read-only)      |
 | 3   | BLUEFOR Planning    | Positions, kill zone, visibility; Execute, pause, re-plan |
 | 4   | OPFOR & Combat      | Start OPFOR, Trigger Ambush, the engagement               |
-| 5   | After Action Review | Placeholder: "Coming soon", plus the recorded result      |
+| 5   | After Action Review | Replay of the engagement from the trigger (ADR 0026)      |
 
 Every stage has the same header (`shell.ts`), drawn after
 `assets/reference/tactical-workflow-navigation-bar.png`: Previous and Next arrows either side of
@@ -115,8 +115,9 @@ The side panel is a fixed sequence of sections, shown or hidden by stage:
    the next stage is always in the same place)
 2. Stage tools
 3. Stage status
-4. Squad roster. In stage 3 it comes before the status, right after the tools, with the selection
-   hint above the roster and the selected unit's details and visibility below it.
+4. Squad roster, in stage 3 only (changed 2026-10-10: the other stages do not need it for now). It
+   comes before the status, right after the tools, with the selection hint above the roster and
+   the selected unit's details and visibility below it.
 5. Event log (stages 3–5, collapsed)
 6. Help (collapsed)
 7. Battlefield Information (collapsed)
@@ -135,12 +136,12 @@ Stage tools and status by stage:
 - **Stage 4:** Start OPFOR and Trigger Ambush, each with its reason, plus the kill-zone count and
   approach time. Status shows BLUEFOR, OPFOR, the ambush and combat, plus the engagement table when
   there is one.
-- **Stage 5:** "Coming soon", with a description. The simulation controls are disabled, with a note
-  that replay is not available. Status shows the recorded engagement result only. Nothing is
-  invented.
+- **Stage 5:** the replay controls (ADR 0026) and the selected Marine's state at the replay's
+  moment; the floating simulation panel is hidden. Status shows the engagement result as at that
+  moment. The primary action is **Return to Planning**.
 
-The roster (`roster.ts`) is the same in stages 2–5, with the same selection, fire-team selection
-and map sync. Stage 1 has no squad yet, so no roster. Help text that used to be permanent is now
+The roster (`roster.ts`) is shown in stage 3, with its selection, fire-team and squad selection
+and map sync; elsewhere Marines are selected on the map. Stage 1 has no squad yet. Help text that used to be permanent is now
 under Help.
 
 ### Tools that do not belong to a stage are switched off
@@ -179,5 +180,5 @@ under Help.
   never change between the two.
 - A reload in stages 3–5 restarts the exercise. Storing plans (`deploymentPlans` already serializes
   them) would remove that and is a candidate for later.
-- The After Action Review is a placeholder. Its section, stage and navigation exist, so replay and
-  analysis can be added later without changing the workflow.
+- The After Action Review replays the engagement (ADR 0026); scoring and analysis can be added
+  later without changing the workflow.

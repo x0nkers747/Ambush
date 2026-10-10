@@ -31,16 +31,17 @@ export function carryPlans(from: Exercise, to: Exercise): CarryResult {
       problems.push(`Kill zone not kept: ${reason(error)}`);
     }
   }
-  // Formations first, the squad's before its fire teams' (as they are listed):
-  // placing one re-links its Marines, and Marines with their own orders are
-  // then given them below, as they had them.
-  for (const team of from.formationGroups) {
-    const formation = from.formation(team.unitId);
-    if (!formation) continue;
+  // Formations first, in the order they were last placed (also once the plan
+  // has been executed): placing one re-links its Marines, so each Marine
+  // follows the formation it followed before. Marines with their own orders
+  // are then given them below, as they had them.
+  for (const formation of from.plannedFormations()) {
+    const name =
+      from.formationGroups.find((g) => g.unitId === formation.unitId)?.name ?? formation.unitId;
     try {
-      to.placeFormation(team.unitId, formation.centre, formation.azimuth);
+      to.placeFormation(formation.unitId, formation.centre, formation.azimuth);
     } catch (error) {
-      problems.push(`${team.name} formation not kept: ${reason(error)}`);
+      problems.push(`${name} formation not kept: ${reason(error)}`);
     }
   }
   let kept = 0;

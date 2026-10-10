@@ -2,6 +2,8 @@ import {
   buildPreviewScenario,
   buildScenario,
   createExercise,
+  frameAt,
+  frameSeconds,
   NO_KILL_ZONE,
   OPFOR_FORCES,
   TRAINEE_SIDE,
@@ -21,7 +23,13 @@ import {
   type Session,
 } from '#session';
 import { DEFAULT_TICK_RATE_HZ, MAX_SEED, type TerrainDataset, type Vec2 } from '#sim';
-import { createTacticalMap, type MapBinding, type MapEditor, type TacticalMap } from '#view2d';
+import {
+  createTacticalMap,
+  formatBearing,
+  type MapBinding,
+  type MapEditor,
+  type TacticalMap,
+} from '#view2d';
 import { carryPlans, type CarryResult } from './carry-plans';
 import {
   clock,
@@ -29,6 +37,7 @@ import {
   createExerciseStage,
   minutesSeconds,
   PLANNING_HELP,
+  REPLAY_HELP,
   SELECT_HINT,
   TIME_HELP,
 } from './exercise-stage';
@@ -111,6 +120,14 @@ function seedFromAddress(): number {
   const seed = text === null ? NaN : Number(text);
   return Number.isInteger(seed) && seed >= 0 && seed <= MAX_SEED ? seed : 1;
 }
+
+/**
+ * TEMPORARY, for testing: Move puts BLUEFOR in position at once, by stepping
+ * the simulation until every Marine has arrived and turned (instead of
+ * playing the occupation out in real time). Set to `false` (or delete it and
+ * its use below) to restore the normal Move.
+ */
+const INSTANT_MOVE = true as boolean;
 
 const PLANNING_TOOLS: readonly { tool: 'deploy' | 'killZone'; label: string; key: string }[] = [
   { tool: 'deploy', label: 'Waypoints', key: 'P' },
@@ -197,11 +214,22 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           <dt>Approach time</dt><dd data-ui="approach-time" title="Simulation time since Start OPFOR (frozen when the ambush is triggered)"></dd>
         </dl>
       </div>
-      <div data-stage="aar">
-        <p class="coming-soon">Coming soon</p>
-        <p class="muted">The After Action Review will replay the exercise and walk through it: where
-        each Marine was, what they could see, when the ambush was sprung and how the engagement
-        unfolded. It is not available yet.</p>
+      <div data-stage="aar" class="replay">
+        <div class="replay-time">
+          <span class="clock" data-ui="replay-time">T+ 00:00.0</span>
+          <span class="muted">of <span data-ui="replay-duration">00:00.0</span></span>
+        </div>
+        <input type="range" class="replay-scrub" data-ui="replay-scrub" min="0" max="0" step="1" value="0" aria-label="Replay timeline: time since the ambush was triggered">
+        <div class="replay-buttons" role="group" aria-label="Replay">
+          <button data-replay="restart" title="Restart from the beginning (Home)" aria-label="Restart from the beginning">⏮</button>
+          <button data-replay="back" title="Step back 1 s (←)" aria-label="Step back one second">◀ 1 s</button>
+          <button class="action" data-replay="play" data-ui="replay-play" title="Play or pause (Space)">Play</button>
+          <button data-replay="forward" title="Step forward 1 s (→)" aria-label="Step forward one second">1 s ▶</button>
+          <button data-replay="end" title="Jump to the end (End)" aria-label="Jump to the end">⏭</button>
+        </div>
+        <div class="speed" role="group" aria-label="Playback speed" data-ui="replay-speeds"></div>
+        <label class="replay-follow"><input type="checkbox" data-ui="replay-follow"> Follow the selected Marine</label>
+        <div class="replay-unit" data-ui="replay-unit"></div>
       </div>
     </section>
     <section class="sec" data-sec="status">
@@ -306,8 +334,23 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     return exercise;
   };
   /** What the map shows: the scenario preview while editing a battlefield's scenario. */
+  // --- After Action Review replay (docs/adr/0026) ---------------------------
+  // The map, roster and panels show the exercise as it was at the replay's
+  // frame (`Exercise.replayAt`); playing only moves the replay clock.
+  const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4] as const;
+  const replay = { seconds: 0, playing: false, speed: 1 as number, follow: false };
+  /** The recording to review: the exercise's, once the engagement has ended. */
+  const reviewed = () => (exercise?.recording?.complete ? exercise.recording : null);
+  const replayFrame = () => {
+    const recording = reviewed();
+    return recording ? frameAt(recording, replay.seconds) : 0;
+  };
+  /** The exercise as at the replay's frame, in the After Action Review; otherwise `null`. */
+  const replayView = (): Exercise | null =>
+    stage === 'aar' && exercise && reviewed() ? exercise.replayAt(replayFrame()) : null;
+
   const shown = (): Exercise =>
-    stage === 'scenario' && scenarioStage ? scenarioStage.preview : ex();
+    stage === 'scenario' && scenarioStage ? scenarioStage.preview : (replayView() ?? ex());
 
   /** Whether the squad is not shown: while editing a scenario whose ORP is not placed yet. */
   const squadHidden = () =>
@@ -362,7 +405,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   toScreen = (p) => map.toScreen(p);
 
   const exerciseStage = createExerciseStage({
-    exercise: ex,
+    // In the After Action Review its panels show the replay's moment.
+    exercise: () => replayView() ?? ex(),
     session: () => session,
     map,
   });
@@ -450,6 +494,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       planningVisibility = session.showVisibility;
       if (session.tool === 'deploy' || session.tool === 'killZone') planningTool = session.tool;
     }
+    // The After Action Review opens at the trigger, paused.
+    replay.playing = false;
+    if (target === 'aar') replay.seconds = 0;
+    replayShownFrame = -1;
     if (target === 'scenario' && exercise && exerciseStage.isRunning()) {
       // Nothing runs unseen: the exercise waits, paused, for the trainee's return.
       exercise.pause();
@@ -485,6 +533,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       stage === 'bluefor' ? '[data-sec="tools"]' : '[data-sec="status"]',
     );
     if (section && after && after.nextElementSibling !== section) after.after(section);
+    // Only BLUEFOR planning needs the roster for now.
+    if (section) section.hidden = stage !== 'bluefor';
   };
 
   const facts: WorkflowFacts = {
@@ -544,7 +594,14 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
 
   // Simulation (stages 3–5).
   ui('execute').addEventListener('click', () => {
-    if (stage === 'bluefor') exerciseStage.execute();
+    if (stage !== 'bluefor') return;
+    exerciseStage.execute();
+    // TEMPORARY (INSTANT_MOVE): the occupation is stepped through within the click.
+    const e = exercise;
+    if (INSTANT_MOVE && e) {
+      for (let i = 0; i < 30 * 900 && e.phase === 'bluforOccupation' && !e.paused; i += 1)
+        exerciseStage.collect(e.advance(1 / 30));
+    }
   });
   ui('pause').addEventListener('click', () => {
     if (stage === 'bluefor' || stage === 'opfor') exerciseStage.pause();
@@ -563,12 +620,26 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     return { scale, b };
   });
 
-  // The stage's primary action: the same rule as the header's Next.
+  // The stage's primary action: the same rule as the header's Next; in the
+  // After Action Review, back to planning.
   const PRIMARY: Readonly<Record<WorkspaceStage, string>> = {
     scenario: 'Continue to BLUEFOR Planning →',
     bluefor: 'Continue to OPFOR & Combat →',
     opfor: 'View After Action Review →',
-    aar: '',
+    aar: '← Return to Planning',
+  };
+  /**
+   * Back to BLUEFOR planning from the After Action Review: a new exercise with
+   * the plan as it was executed (`carryPlans`: positions, formations, facings,
+   * the kill zone), nobody hurt, ready to change and run again. The recording
+   * stays as it was until the next run makes a new one.
+   */
+  const returnToPlanning = () => {
+    replay.playing = false;
+    rebuild('Back to planning.');
+    enter('bluefor');
+    if (!carryNotice)
+      notify('Back to BLUEFOR Planning with your plan as it was executed: change it, then Move.');
   };
   const NEXT: Readonly<Record<WorkspaceStage, WorkspaceStage | null>> = {
     scenario: 'bluefor',
@@ -577,6 +648,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     aar: null,
   };
   ui('primary').addEventListener('click', () => {
+    if (stage === 'aar') {
+      returnToPlanning();
+      return;
+    }
     const reason = nextBlocker(stage, facts);
     const target = NEXT[stage];
     if (reason !== null || !target) {
@@ -584,6 +659,76 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       return;
     }
     enter(target);
+  });
+
+  // The replay's controls (stage 5).
+  /** Shows the replay's frame on the map when it changed, following the selected Marine. */
+  let replayShownFrame = -1;
+  const syncReplay = () => {
+    const view = replayView();
+    if (!view) return;
+    const frame = replayFrame();
+    if (frame !== replayShownFrame) {
+      replayShownFrame = frame;
+      map.setExercise(view);
+    }
+    const id = session.selectedSoldierId;
+    const soldier = id === null ? null : view.simulation.state.soldiers.find((s) => s.id === id);
+    if (replay.follow && soldier) map.centreOn({ x: soldier.position.x, y: soldier.position.y });
+  };
+  const seekReplay = (seconds: number) => {
+    const recording = reviewed();
+    if (!recording) return;
+    replay.seconds = Math.min(Math.max(seconds, 0), recording.durationSeconds);
+    syncReplay();
+  };
+  const replayAction = (action: string | undefined) => {
+    const recording = reviewed();
+    if (!recording || stage !== 'aar') return;
+    switch (action) {
+      case 'play':
+        if (!replay.playing && replay.seconds >= recording.durationSeconds) replay.seconds = 0;
+        replay.playing = !replay.playing;
+        break;
+      case 'restart':
+        seekReplay(0);
+        break;
+      case 'end':
+        replay.playing = false;
+        seekReplay(recording.durationSeconds);
+        break;
+      case 'back':
+        seekReplay(frameSeconds(recording, replayFrame()) - 1);
+        break;
+      case 'forward':
+        seekReplay(frameSeconds(recording, replayFrame()) + 1);
+        break;
+    }
+  };
+  app.querySelector('.replay-buttons')?.addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-replay]');
+    replayAction(target?.dataset['replay']);
+  });
+  ui('replay-scrub').addEventListener('input', () => {
+    const recording = reviewed();
+    if (!recording) return;
+    // Dragging the timeline pauses, at the frame it points to.
+    replay.playing = false;
+    seekReplay(frameSeconds(recording, Number((ui('replay-scrub') as HTMLInputElement).value)));
+  });
+  const replaySpeedButtons = REPLAY_SPEEDS.map((speed) => {
+    const b = document.createElement('button');
+    b.textContent = `${String(speed)}×`;
+    b.setAttribute('aria-label', `${String(speed)} times speed`);
+    b.addEventListener('click', () => {
+      replay.speed = speed;
+    });
+    ui('replay-speeds').append(b);
+    return { speed, b };
+  });
+  ui('replay-follow').addEventListener('change', () => {
+    replay.follow = (ui('replay-follow') as HTMLInputElement).checked;
+    syncReplay();
   });
 
   // Status panels' own buttons.
@@ -637,6 +782,22 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     if (!ui('confirm').hidden && event.key === 'Escape') {
       ui('confirm').hidden = true;
       return;
+    }
+    if (stage === 'aar') {
+      const action = (
+        {
+          ' ': 'play',
+          ArrowLeft: 'back',
+          ArrowRight: 'forward',
+          Home: 'restart',
+          End: 'end',
+        } as Record<string, string | undefined>
+      )[event.key];
+      if (action) {
+        event.preventDefault();
+        replayAction(action);
+        return;
+      }
     }
     const running = stage === 'bluefor' || stage === 'opfor';
     const planning = stage === 'bluefor';
@@ -716,7 +877,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     scenario: SCENARIO_HELP,
     bluefor: PLANNING_HELP + TIME_HELP,
     opfor: COMBAT_HELP + TIME_HELP,
-    aar: TIME_HELP,
+    aar: REPLAY_HELP,
   };
 
   const message = (kind: 'ok' | 'warn' | 'alert', text: string) =>
@@ -808,6 +969,76 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     </dl>${problemsHtml()}${engagement ? `<h3>Engagement</h3>${engagement}` : ''}`;
   };
 
+  const BEHAVIOR_LABELS: Readonly<Record<string, string>> = {
+    engaging: 'Engaging',
+    awaitingReaction: 'Not yet reacting',
+    prone: 'Prone, returning fire',
+    fleeing: 'Fleeing',
+    escaped: 'Escaped',
+    incapacitated: 'Incapacitated',
+  };
+  /** The selected Marine as at the replay's frame. */
+  const replayUnitHtml = (view: Exercise): string => {
+    const id = session.selectedSoldierId;
+    if (id === null)
+      return `<p class="muted">${
+        session.selectedFireTeamId !== null
+          ? 'Select a single Marine to see what they were doing.'
+          : 'Select a Marine on the map to see what they were doing at this moment.'
+      }</p>`;
+    const state = view.simulation.state;
+    const soldier = state.soldiers.find((s) => s.id === id);
+    if (!soldier) return '';
+    const combatant = state.engagement?.combatants.find((c) => c.soldierId === id);
+    const member = view.rosterMember(id);
+    const activity =
+      soldier.status === 'incapacitated'
+        ? 'Incapacitated'
+        : combatant
+          ? (BEHAVIOR_LABELS[combatant.behavior] ?? combatant.behavior)
+          : soldier.orders && soldier.orders.behavior !== 'inPosition'
+            ? 'Moving'
+            : 'In position';
+    const stats = combatant?.stats;
+    return `<p class="sel-name">${escapeHtml(member?.slot.label ?? id)} <span class="muted">(${escapeHtml(id)})</span></p>
+      <dl class="kv">
+        <dt>Status</dt><dd>${soldier.status === 'incapacitated' ? '<span class="alert">Incapacitated</span>' : 'Active'}</dd>
+        <dt>Doing</dt><dd>${escapeHtml(activity)}</dd>
+        <dt>Posture</dt><dd>${escapeHtml(soldier.posture)}</dd>
+        <dt>Position</dt><dd>E ${soldier.position.x.toFixed(0)} · N ${soldier.position.y.toFixed(0)}</dd>
+        <dt>Facing</dt><dd>${formatBearing(soldier.azimuth)}</dd>
+        <dt>Shots</dt><dd>${stats ? `${String(stats.shotsFired)} fired, ${String(stats.hits)} hit` : 'none yet'}</dd>
+      </dl>`;
+  };
+  const updateReplayControls = () => {
+    const recording = reviewed();
+    const view = replayView();
+    if (!recording || !view) return;
+    const frame = replayFrame();
+    const last = recording.frames.length - 1;
+    setText(ui('replay-time'), `T+ ${clock(frameSeconds(recording, frame))}`);
+    setText(ui('replay-duration'), clock(recording.durationSeconds));
+    const scrub = ui('replay-scrub') as HTMLInputElement;
+    if (scrub.max !== String(last)) scrub.max = String(last);
+    if (scrub.value !== String(frame)) scrub.value = String(frame);
+    const play = button('replay-play');
+    setText(play, replay.playing ? 'Pause' : frame >= last ? 'Replay' : 'Play');
+    play.classList.toggle('ready', !replay.playing);
+    for (const { speed, b } of replaySpeedButtons) pressed(b, replay.speed === speed);
+    const at = (name: string) => app.querySelector<HTMLButtonElement>(`[data-replay="${name}"]`);
+    const back = at('back');
+    const restart = at('restart');
+    const forward = at('forward');
+    const end = at('end');
+    if (back) disable(back, frame === 0);
+    if (restart) disable(restart, frame === 0);
+    if (forward) disable(forward, frame >= last);
+    if (end) disable(end, frame >= last);
+    const follow = ui('replay-follow') as HTMLInputElement;
+    if (follow.checked !== replay.follow) follow.checked = replay.follow;
+    setHtml(ui('replay-unit'), replayUnitHtml(view));
+  };
+
   const aarStatusHtml = (): string =>
     exerciseStage.engagementHtml() || '<p class="muted">No engagement result is available.</p>';
 
@@ -835,12 +1066,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       pressed(b, live && session.timeScale === scale);
       disable(b, !live);
     }
-    setText(
-      ui('sim-note'),
-      stage === 'aar'
-        ? 'Replay is not available yet: these controls do nothing in the After Action Review.'
-        : '',
-    );
+    setText(ui('sim-note'), '');
   };
 
   const updateScenarioTools = () => {
@@ -943,7 +1169,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     setText(ui('status-title'), STATUS_TITLE[stage]);
     const hasExercise = stage !== 'scenario';
     const simSection = app.querySelector<HTMLElement>('[data-sec="sim"]');
-    if (simSection) simSection.hidden = !hasExercise;
+    if (simSection) simSection.hidden = !hasExercise || stage === 'aar';
     const events = app.querySelector<HTMLElement>('[data-sec="events"]');
     if (events) events.hidden = !hasExercise;
     setHtml(ui('help'), HELP[stage]);
@@ -962,19 +1188,23 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         setHtml(ui('status'), combatStatusHtml());
         break;
       case 'aar':
+        updateReplayControls();
         setHtml(ui('status'), aarStatusHtml());
         break;
     }
     if (hasExercise) {
       updateSimulation();
-      setHtml(ui('events'), exerciseStage.eventsHtml());
+      setHtml(
+        ui('events'),
+        stage === 'aar' ? exerciseStage.replayEventsHtml() : exerciseStage.eventsHtml(),
+      );
     }
 
     // The primary action.
     const primary = button('primary');
     const label = PRIMARY[stage];
     ui('primary-wrap').hidden = label === '';
-    const reason = label === '' ? null : nextBlocker(stage, facts);
+    const reason = label === '' || stage === 'aar' ? null : nextBlocker(stage, facts);
     setText(primary, label);
     const blocked = String(reason !== null);
     if (primary.getAttribute('aria-disabled') !== blocked)
@@ -1027,7 +1257,16 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   document.addEventListener('visibilitychange', onVisibilityChange);
   let frameId = 0;
   const frame = (nowMs: number) => {
-    if (exercise) {
+    const recording = reviewed();
+    if (stage === 'aar' && replay.playing && recording && lastFrameMs !== null) {
+      replay.seconds += ((nowMs - lastFrameMs) / 1000) * replay.speed;
+      if (replay.seconds >= recording.durationSeconds) {
+        replay.seconds = recording.durationSeconds;
+        replay.playing = false;
+      }
+    }
+    if (stage === 'aar') syncReplay();
+    if (exercise && stage !== 'aar') {
       const events =
         lastFrameMs === null
           ? []
