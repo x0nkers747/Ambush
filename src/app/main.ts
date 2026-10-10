@@ -94,7 +94,7 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Bat
 }
 
 function showFatal(root: HTMLElement, message: string): void {
-  root.className = 'select';
+  root.className = '';
   root.innerHTML = `<div class="fatal"><div class="sel-card"><h2>Something went wrong</h2>
     <p>${message.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`)}</p>
     <div class="bf-row"><button class="primary-btn" data-action="home">Back to terrain selection</button></div></div></div>`;

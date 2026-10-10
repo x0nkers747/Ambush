@@ -28,7 +28,8 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     <div class="preview-map" data-ui="preview-map"></div>
     <div class="attribution" data-ui="preview-attribution" hidden></div>
     <div class="preview-status" data-ui="preview-status" role="status"></div>
-    <div class="preview-bar"><span data-ui="preview-caption"></span><span class="spacer"></span>
+    <div class="mapbar"><span class="pointer" data-ui="preview-pointer"></span><span class="spacer"></span>
+      <span data-ui="preview-caption"></span>
       <button class="small" data-ui="preview-fit" title="Fit the whole map">Fit map</button></div>`;
   const el = (name: string) => {
     const e = container.querySelector<HTMLElement>(`[data-ui="${name}"]`);
@@ -50,6 +51,13 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   };
   const loop = () => {
     map?.render();
+    // The same pointer readout as the other stages' map bar.
+    const p = map?.pointer;
+    const text = p
+      ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m`
+      : '';
+    const readout = el('preview-pointer');
+    if (readout.textContent !== text) readout.textContent = text;
     frame = requestAnimationFrame(loop);
   };
   const status = (text: string | null) => {

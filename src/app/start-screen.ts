@@ -31,9 +31,10 @@ import type { WorkflowFacts } from './workflow';
 
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
 // enter a position and generate a new 5 km battlefield, or select the demo or
-// a saved battlefield and open it. The left panel chooses; the main area
-// describes the choice, holds its one primary action, and previews the demo or
-// a saved battlefield on the tactical map.
+// a saved battlefield and open it. The layout is the other stages': the map
+// area previews the demo or a saved battlefield on the tactical map, and the
+// side panel on the right chooses, describes the choice and holds its one
+// primary action.
 
 export interface SelectionOptions {
   readonly config: ServiceConfig;
@@ -144,60 +145,68 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   app.className = 'select';
   app.innerHTML = `
     ${headerHtml('')}
-    <div class="sel">
-      <aside class="sel-panel" aria-label="Choose a battlefield">
-        <section class="sec">
-          <h2>Find a place</h2>
-          <form class="bf-row" data-ui="search-form">
-            <label class="grow"><span class="sr-only">Place name</span><input id="bf-search" placeholder="e.g. Quantico, Virginia" autocomplete="off"></label>
-            <button type="submit" data-ui="search-button">Search</button>
-          </form>
-          <ul class="bf-results" data-ui="results" hidden></ul>
-        </section>
-        <section class="sec">
-          <h2>Position</h2>
-          <form class="bf-row" data-ui="coords-form">
-            <label>Latitude <input id="bf-lat" inputmode="decimal" placeholder="38.5223" autocomplete="off"></label>
-            <label>Longitude <input id="bf-lon" inputmode="decimal" placeholder="-77.2934" autocomplete="off"></label>
-            <button type="submit">Use position</button>
-          </form>
-          <p><button class="link" data-ui="here">Use my current position</button></p>
-          <p class="hint" data-ui="position-message" hidden></p>
-        </section>
-        <section class="sec">
-          <h2>Saved battlefields</h2>
-          <ul class="bf-saved" data-ui="saved"><li class="muted">Loading…</li></ul>
-          ${
-            o.persistent
-              ? '<p class="hint">Saved in this browser: they open without a network connection.</p>'
-              : '<p class="hint warn">This browser cannot store battlefields (storage is unavailable): generated battlefields are lost when the page is closed.</p>'
-          }
-        </section>
-        <section class="sec">
-          <h2>Demo</h2>
-          <ul class="bf-saved"><li><button class="bf-item" data-select="${DEMO_ID}" aria-pressed="false">
-            <b>Demo battlefield</b><span class="muted">800 × 600 m of synthetic terrain</span>
-          </button></li></ul>
-        </section>
-        <footer class="sel-credits muted">
-          Map data © OpenStreetMap contributors (ODbL). Buildings: Overture Maps Foundation (ODbL).
-          Elevation: AWS Terrain Tiles (USGS, SRTM, Copernicus EU-DEM and national sources; credits
-          are listed with each battlefield). Place search: Nominatim.
-          ${o.configProblems.length > 0 ? `<br><span class="warn">Service settings ignored: ${escapeHtml(o.configProblems.join('; '))}</span>` : ''}
-        </footer>
-      </aside>
-      <main class="sel-main">
-        <div class="sel-card" data-ui="preview"></div>
+    <main class="ws-map">
+      <div class="ws-canvas">
         <div class="sel-preview" data-ui="preview-panel" hidden></div>
-        <div class="sel-card" data-ui="progress" hidden>
+        <div class="sel-placeholder" data-ui="placeholder"></div>
+        <div class="toast" data-ui="toast" role="status" hidden></div>
+      </div>
+    </main>
+    <aside class="side" aria-label="Choose a battlefield">
+      <section class="sec">
+        <h2>Find a place</h2>
+        <form class="bf-row" data-ui="search-form">
+          <label class="grow"><span class="sr-only">Place name</span><input id="bf-search" placeholder="e.g. Quantico, Virginia" autocomplete="off"></label>
+          <button type="submit" data-ui="search-button">Search</button>
+        </form>
+        <ul class="bf-results" data-ui="results" hidden></ul>
+      </section>
+      <section class="sec">
+        <h2>Position</h2>
+        <form class="bf-row" data-ui="coords-form">
+          <label>Latitude <input id="bf-lat" inputmode="decimal" placeholder="38.5223" autocomplete="off"></label>
+          <label>Longitude <input id="bf-lon" inputmode="decimal" placeholder="-77.2934" autocomplete="off"></label>
+          <button type="submit">Use</button>
+        </form>
+        <p><button class="link" data-ui="here">Use my current position</button></p>
+        <p class="hint" data-ui="position-message" hidden></p>
+      </section>
+      <section class="sec">
+        <h2>Saved battlefields</h2>
+        <ul class="bf-saved" data-ui="saved"><li class="muted">Loading…</li></ul>
+        ${
+          o.persistent
+            ? '<p class="hint">Saved in this browser: they open without a network connection.</p>'
+            : '<p class="hint warn">This browser cannot store battlefields (storage is unavailable): generated battlefields are lost when the page is closed.</p>'
+        }
+      </section>
+      <section class="sec">
+        <h2>Demo</h2>
+        <ul class="bf-saved"><li><button class="bf-item" data-select="${DEMO_ID}" aria-pressed="false">
+          <b>Demo battlefield</b><span class="muted">800 × 600 m of synthetic terrain</span>
+        </button></li></ul>
+      </section>
+      <section class="sec">
+        <h2>Selected</h2>
+        <div class="sel-details" data-ui="preview"></div>
+        <div data-ui="progress" hidden>
           <ol class="bf-steps" data-ui="steps"></ol>
           <div class="hint" data-ui="message" hidden></div>
-          <div class="bf-row"><button data-ui="cancel">Cancel</button></div>
+          <div class="bf-row"><button class="small" data-ui="cancel">Cancel</button></div>
         </div>
-        <div class="sel-card bf-error" data-ui="error" role="alert" hidden></div>
-        <div class="toast" data-ui="toast" role="status" hidden></div>
-      </main>
-    </div>`;
+        <div class="bf-error" data-ui="error" role="alert" hidden></div>
+      </section>
+      <div class="primary-action">
+        <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
+        <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
+      </div>
+      <footer class="sel-credits muted">
+        Map data © OpenStreetMap contributors (ODbL). Buildings: Overture Maps Foundation (ODbL).
+        Elevation: AWS Terrain Tiles (USGS, SRTM, Copernicus EU-DEM and national sources; credits
+        are listed with each battlefield). Place search: Nominatim.
+        ${o.configProblems.length > 0 ? `<br><span class="warn">Service settings ignored: ${escapeHtml(o.configProblems.join('; '))}</span>` : ''}
+      </footer>
+    </aside>`;
 
   const ui = (name: string): HTMLElement => {
     const el = app.querySelector<HTMLElement>(`[data-ui="${name}"]`);
@@ -244,47 +253,73 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
 
   // --- The selection and its details -------------------------------------
 
+  /** The selection's details, in the side panel. */
   const previewHtml = (): string => {
     switch (selection.kind) {
       case 'none':
-        return `<h2>Choose a battlefield</h2>
-          <p class="muted">Search for a place or enter a position to generate a new
+        return `<p class="muted">Nothing selected. Find a place or enter a position to generate a new
           ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m battlefield
-          anywhere from 80° S to 84° N, from OpenStreetMap, Overture Maps buildings and freely
-          available elevation data. Or select a saved battlefield or the demo.</p>`;
+          anywhere from 80° S to 84° N, or select a saved battlefield or the demo.</p>`;
       case 'demo':
-        return `<h2>Demo battlefield</h2>
+        return `<p class="sel-name">Demo battlefield</p>
           <p>800 × 600 m of synthetic terrain: a valley road through a hamlet, woods, a ridge, and
-          an OPFOR patrol to ambush. Its scenario is fixed.</p>
-          <div class="bf-row"><button class="primary-btn" data-action="open">Open demo battlefield →</button></div>`;
+          an OPFOR patrol to ambush. Its scenario is fixed.</p>`;
       case 'saved': {
         const b = selection.summary;
-        return `<h2>${escapeHtml(b.name)}</h2>
+        return `<p class="sel-name">${escapeHtml(b.name)}</p>
           <dl class="kv">
             <dt>Location</dt><dd>${escapeHtml(formatCoordinates(b.centre, 4))}</dd>
             <dt>Size</dt><dd>${summaryLine(b)}</dd>
             <dt>Elevation</dt><dd>${b.elevationResolutionM === null ? 'resolution unknown' : `~${String(b.elevationResolutionM)} m source data`}</dd>
             <dt>Generated</dt><dd>${escapeHtml(new Date(b.createdAt).toLocaleString())}</dd>
           </dl>
-          <div class="bf-row"><button class="primary-btn" data-action="open">Open battlefield →</button>
-          <button class="small" data-action="delete" data-id="${escapeHtml(b.id)}">Delete…</button></div>`;
+          <div class="bf-row"><button class="small" data-action="delete" data-id="${escapeHtml(b.id)}">Delete…</button></div>`;
       }
       case 'location': {
         const { position, name } = selection;
         const frame = createFrame(position, DEFAULT_BATTLEFIELD_SIZE_M);
         const lat = position.lat.toFixed(5);
         const lon = position.lon.toFixed(5);
-        return `<h2>${escapeHtml(name ?? 'New battlefield')}</h2>
+        return `<p class="sel-name">${escapeHtml(name ?? 'New battlefield')}</p>
           <dl class="kv">
             <dt>Centre</dt><dd>${escapeHtml(formatCoordinates(position))}</dd>
             <dt>Size</dt><dd>${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m · UTM ${String(frame.zone)}${frame.hemisphere}</dd>
             <dt>Elevation</dt><dd>${String(DEFAULT_CELL_SIZE_M)} m grid</dd>
           </dl>
           <p class="muted">Your squad starts on open ground near the centre; there is no OPFOR yet.
-          <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">View on OpenStreetMap</a></p>
-          <div class="bf-row"><button class="primary-btn" data-action="generate" ${generating ? 'disabled' : ''}>Generate battlefield</button></div>`;
+          <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">View on OpenStreetMap</a></p>`;
       }
     }
+  };
+
+  /** What the map area says when there is nothing to preview. */
+  const placeholderText = (): string =>
+    selection.kind === 'location'
+      ? generating
+        ? 'Generating the battlefield…'
+        : 'A new battlefield can be previewed once it is generated.'
+      : 'Select a saved battlefield or the demo to preview it here.';
+
+  /** The one primary action: open the selection, or generate a new location. */
+  const updatePrimary = () => {
+    const button = ui('primary');
+    const label =
+      selection.kind === 'demo'
+        ? 'Open demo battlefield →'
+        : selection.kind === 'location'
+          ? 'Generate battlefield'
+          : 'Open battlefield →';
+    const reason =
+      selection.kind === 'none'
+        ? 'Select a battlefield first: the demo, a saved one, or generate a new one.'
+        : selection.kind === 'location' && generating
+          ? 'Generating…'
+          : null;
+    button.textContent = label;
+    button.setAttribute('aria-disabled', String(reason !== null));
+    ui('primary-reason').textContent = reason ?? '';
+    ui('primary-reason').hidden = reason === null;
+    ui('placeholder').textContent = placeholderText();
   };
 
   const markSelected = () => {
@@ -310,6 +345,8 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     else if (id !== before) preview.show(() => o.loadPreview(id));
     selection = next;
     show('preview', previewHtml());
+    updatePrimary();
+    ui('placeholder').hidden = id !== null;
     if (next.kind !== 'location') show('error', null);
     markSelected();
     header.update('terrain', facts);
@@ -448,7 +485,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
     if (selection.kind !== 'location' || generating) return;
     const controller = new AbortController();
     generating = controller;
-    show('preview', previewHtml());
+    updatePrimary();
     ui('progress').hidden = false;
     ui('cancel').hidden = false;
     show('error', null);
@@ -479,7 +516,7 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       .catch((error: unknown) => {
         generating = null;
         ui('cancel').hidden = true;
-        show('preview', previewHtml());
+        updatePrimary();
         show('message', null);
         if (isCancelled(error)) {
           ui('progress').hidden = true;
@@ -544,8 +581,6 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
   ui('preview').addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
     const action = target?.dataset['action'];
-    if (action === 'open') openSelection();
-    if (action === 'generate') generate(false);
     if (action === 'delete' && target && selection.kind === 'saved') {
       // Two clicks: the first asks for confirmation.
       if (target.dataset['confirm'] !== 'yes') {
@@ -561,6 +596,12 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
         refresh();
       });
     }
+  });
+
+  ui('primary').addEventListener('click', () => {
+    if (selection.kind === 'location') generate(false);
+    else if (selection.kind === 'none') notify(ui('primary-reason').textContent);
+    else openSelection();
   });
 
   // Saved battlefields: a click selects, a double click opens.
@@ -607,11 +648,11 @@ export function startBattlefieldSelection(app: HTMLElement, o: SelectionOptions)
       if (summary) select({ kind: 'saved', summary });
     }
   };
-  app.querySelector('.sel-panel')?.addEventListener('click', (event) => {
+  app.querySelector('.side')?.addEventListener('click', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>('[data-select]');
     if (item) choose(item.dataset['select']);
   });
-  app.querySelector('.sel-panel')?.addEventListener('dblclick', (event) => {
+  app.querySelector('.side')?.addEventListener('dblclick', (event) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>('[data-select]');
     if (!item) return;
     choose(item.dataset['select']);
