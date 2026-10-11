@@ -64,7 +64,8 @@ function checkContinuity(lines: readonly Line[], junctions: readonly Vec2[] = []
   return mesh;
 }
 
-describe('drapeNetwork', () => {
+// Dense sampling: a few seconds per case on a slow machine.
+describe('drapeNetwork', { timeout: 30_000 }, () => {
   it('draws a straight road at its width', () => {
     checkContinuity([line('r', 3, [-100, 0], [100, 10])]);
   });

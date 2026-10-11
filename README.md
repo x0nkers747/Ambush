@@ -19,10 +19,12 @@ springs the ambush with Trigger Ambush
 seconds ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)), on the demo or on any
 battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. A
 **3D view** ([ADR 0029](docs/adr/0029-3d-view-milestone-1.md),
-[ADR 0030](docs/adr/0030-3d-geographic-features.md)) shows the same battlefield and soldiers on
-the simulated terrain, with its roads, buildings and water, and the ground coloured by land
-cover: switch with **2D | 3D** under the map; drag to orbit, right-drag to pan, use the wheel to
-zoom and double-click to focus. Trees are not in 3D yet.
+[ADR 0030](docs/adr/0030-3d-geographic-features.md),
+[ADR 0031](docs/adr/0031-3d-procedural-vegetation.md)) shows the same battlefield and soldiers
+on the simulated terrain, with its roads, buildings, water, forests, tree lines and scrub, and
+the ground coloured by land cover: switch with **2D | 3D** under the map; drag to orbit,
+right-drag to pan, use the wheel to zoom and double-click to focus. Soldiers hidden by trees or
+buildings show through as dim silhouettes.
 
 ## Requirements
 
@@ -219,3 +221,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 28. [OPFOR reactions under fire, and escape by distance run](docs/adr/0028-opfor-reactions-and-escape.md)
 29. [The 3D battlefield view, milestone 1](docs/adr/0029-3d-view-milestone-1.md)
 30. [Geographic features in the 3D view](docs/adr/0030-3d-geographic-features.md)
+31. [Procedural vegetation in the 3D view](docs/adr/0031-3d-procedural-vegetation.md)

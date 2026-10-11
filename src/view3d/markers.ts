@@ -1,6 +1,7 @@
 import {
   ConeGeometry,
   CylinderGeometry,
+  GreaterDepth,
   Group,
   Mesh,
   MeshStandardMaterial,
@@ -14,6 +15,8 @@ import type { DestinationMarker, UnitMarker } from './unit-markers';
 // OPFOR, with a nose pointing the way the soldier faces. A marker's origin is
 // the soldier's feet, on the simulated ground. Far away it is drawn larger, so
 // it stays about `MARKER_PX` pixels tall on screen; close up it is life size.
+// Where trees, buildings or the ground hide a marker, a dim silhouette of it
+// shows through (docs/adr/0031), so soldiers in a wood are not lost from view.
 
 /** On-screen height of a marker seen from afar, in CSS pixels. */
 const MARKER_PX = 26;
@@ -39,6 +42,21 @@ const material = (color: number, opacity = 1) =>
     transparent: opacity < 1,
     opacity,
     depthWrite: opacity >= 1,
+  });
+
+/** The see-through silhouette: drawn only where something nearer hides the marker. */
+const ghost = (color: number) =>
+  new MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.6,
+    roughness: 1,
+    metalness: 0,
+    fog: false,
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+    depthFunc: GreaterDepth,
   });
 
 export interface MarkerLayer {
@@ -72,7 +90,13 @@ export function createMarkerLayer(): MarkerLayer {
     destinationFriendly: material(COLORS.friendly, 0.45),
     destinationSelected: material(COLORS.selected, 0.6),
   };
-  const soldiers = new Map<string, { root: Group; parts: Mesh[] }>();
+  const ghosts = {
+    friendly: ghost(COLORS.friendly),
+    enemy: ghost(COLORS.enemy),
+    down: ghost(COLORS.down),
+    selected: ghost(COLORS.selected),
+  };
+  const soldiers = new Map<string, { root: Group; parts: Mesh[]; hidden: Mesh[] }>();
   const pins = new Map<string, Mesh>();
 
   /** Scale so the marker is MARKER_PX tall on screen, but never smaller than life size. */
@@ -99,11 +123,14 @@ export function createMarkerLayer(): MarkerLayer {
         let entry = soldiers.get(u.id);
         if (!entry) {
           const parts = [new Mesh(body), new Mesh(head), new Mesh(nose)];
+          // Drawn after everything else, so whatever hides the marker is already there.
+          const hidden = [new Mesh(body), new Mesh(head)];
+          for (const h of hidden) h.renderOrder = 10;
           const root = new Group();
           root.name = `soldier ${u.id}`;
-          root.add(...parts);
+          root.add(...parts, ...hidden);
           group.add(root);
-          entry = { root, parts };
+          entry = { root, parts, hidden };
           soldiers.set(u.id, entry);
         }
         const down = u.status !== 'active';
@@ -115,6 +142,14 @@ export function createMarkerLayer(): MarkerLayer {
               ? materials.friendly
               : materials.enemy;
         for (const part of entry.parts) part.material = look;
+        const seeThrough = down
+          ? ghosts.down
+          : u.selected
+            ? ghosts.selected
+            : u.affiliation === 'friendly'
+              ? ghosts.friendly
+              : ghosts.enemy;
+        for (const h of entry.hidden) h.material = seeThrough;
         const lying = down || u.posture === 'prone';
         const [, , noseMesh] = entry.parts;
         if (noseMesh) noseMesh.visible = !lying;
@@ -171,7 +206,7 @@ export function createMarkerLayer(): MarkerLayer {
       return out;
     },
     dispose() {
-      for (const m of Object.values(materials)) m.dispose();
+      for (const m of [...Object.values(materials), ...Object.values(ghosts)]) m.dispose();
       for (const g of [body, head, nose, pin]) g.dispose();
       group.clear();
       soldiers.clear();

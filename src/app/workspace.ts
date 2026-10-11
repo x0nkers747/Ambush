@@ -1403,7 +1403,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     setText(
       ui('pointer'),
       viewMode === '3d'
-        ? 'Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus'
+        ? (view3d?.status() ?? 'Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus')
         : p
           ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m${
               o.describePoint ? `   ${o.describePoint({ x: p.east, y: p.north })}` : ''

@@ -8,3 +8,4 @@ export {
   type BattlefieldView3dOptions,
   type TerrainTints,
 } from './view';
+export type { QualityLevel } from './quality';

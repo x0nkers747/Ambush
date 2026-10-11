@@ -26,3 +26,25 @@ export function hashInts(a: number, b: number, seed = 0): number {
 export function unit(hash: number): number {
   return hash / 4294967296;
 }
+
+/**
+ * Smooth value noise in [−1, 1] at map point (x, y), varying over about
+ * `scale` metres: hashed lattice values, smoothly interpolated.
+ */
+export function valueNoise(x: number, y: number, scale: number, seed: number): number {
+  const gx = x / scale;
+  const gy = y / scale;
+  const ix = Math.floor(gx);
+  const iy = Math.floor(gy);
+  const fx = gx - ix;
+  const fy = gy - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const v00 = unit(hashInts(ix, iy, seed));
+  const v10 = unit(hashInts(ix + 1, iy, seed));
+  const v01 = unit(hashInts(ix, iy + 1, seed));
+  const v11 = unit(hashInts(ix + 1, iy + 1, seed));
+  const top = v00 + sx * (v10 - v00);
+  const bottom = v01 + sx * (v11 - v01);
+  return (top + sy * (bottom - top)) * 2 - 1;
+}

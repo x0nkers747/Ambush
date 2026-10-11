@@ -23,7 +23,7 @@ export const LAND_COVER_COLORS: Readonly<Record<LandCoverClass, number>> = {
   cemetery: 0x86996a,
   recreation: 0x8fa964,
   other: 0xa2a083,
-  woodland: 0x52693c,
+  woodland: 0x485e34,
   treeLine: 0x5a7041,
   scrub: 0x7b8752,
   wetland: 0x77805f,
