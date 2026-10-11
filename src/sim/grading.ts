@@ -22,12 +22,17 @@ import { heightAt, type TerrainDataset } from './terrain';
 /** Bump when the grading rules change: graded terrains of different versions differ. */
 export const GRADING_VERSION = 1;
 /**
- * Which model of the ground a terrain is: `graded-v<version>` for a graded
- * terrain, `source` for one that is not. Scenarios record it, so plans made
- * on an earlier model are noticed (docs/adr/0032).
+ * Which model of the ground a terrain is: the DEM cleaning version
+ * (docs/adr/0033) and the grading version it went through, e.g.
+ * `dem-clean-v1+graded-v1`; `source` for an untouched terrain. Scenarios
+ * record it, so plans made on an earlier model are noticed (docs/adr/0032).
  */
 export function terrainModelId(terrain: TerrainDataset): string {
-  return terrain.grading ? `graded-v${String(terrain.grading.version)}` : 'source';
+  const steps = [
+    ...(terrain.cleaning ? [terrain.cleaning.version] : []),
+    ...(terrain.grading ? [`graded-v${String(terrain.grading.version)}`] : []),
+  ];
+  return steps.length > 0 ? steps.join('+') : 'source';
 }
 
 /** Target spacing of the refined lattice, metres. */

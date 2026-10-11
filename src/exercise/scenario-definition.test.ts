@@ -5,6 +5,7 @@ import {
   hashSimState,
   rectangle,
   shareTerrain,
+  TERRAIN_MODEL,
   terrainModelId,
   type TerrainDataset,
   type Vec2,
@@ -305,11 +306,13 @@ describe('a new scenario without an ORP', () => {
   });
 });
 
-describe('the terrain model a scenario was planned on (docs/adr/0032)', () => {
+describe('the terrain model a scenario was planned on (docs/adr/0032, docs/adr/0033)', () => {
   it('is recorded, kept through edits and saving, and absent from older scenarios', () => {
     const d = defaultScenarioDefinition(DEMO_SCENARIO.terrain, 'demo');
     expect(d.terrainModel).toBe(terrainModelId(DEMO_SCENARIO.terrain));
-    expect(d.terrainModel).toMatch(/^graded-v\d+$/);
+    // The DEM cleaning and grading versions the ground went through.
+    expect(d.terrainModel).toBe(TERRAIN_MODEL);
+    expect(d.terrainModel).toMatch(/^dem-clean-v\d+\+graded-v\d+$/);
     expect(parseScenarioDefinition(JSON.parse(JSON.stringify(d)))).toEqual(d);
     const older: Record<string, unknown> = { ...d };
     delete older['terrainModel'];

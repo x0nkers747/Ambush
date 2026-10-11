@@ -27,7 +27,10 @@ right-drag to pan, use the wheel to zoom and double-click to focus. Soldiers hid
 buildings show through as dim silhouettes. Roads and buildings are graded into the ground
 (cuttings, embankments and level pads, on 2.5 m refinement tiles), and that one graded terrain is
 used by everything: the 2D map, the 3D view, movement, line of sight and replay
-([ADR 0032](docs/adr/0032-authoritative-graded-terrain.md)).
+([ADR 0032](docs/adr/0032-authoritative-graded-terrain.md)). Faulty elevation samples in the
+source data (voids, spikes, no-data values) are found and repaired before grading, real cliffs and
+ravines are left alone, and Battlefield Information reports what was found
+([ADR 0033](docs/adr/0033-dem-quality-validation.md)).
 
 ## Requirements
 
@@ -226,3 +229,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 30. [Geographic features in the 3D view](docs/adr/0030-3d-geographic-features.md)
 31. [Procedural vegetation in the 3D view](docs/adr/0031-3d-procedural-vegetation.md)
 32. [One authoritative, graded terrain](docs/adr/0032-authoritative-graded-terrain.md)
+33. [DEM quality validation and repair](docs/adr/0033-dem-quality-validation.md)

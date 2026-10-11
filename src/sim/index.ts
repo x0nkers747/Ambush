@@ -114,6 +114,19 @@ export {
   type ScenarioUnit,
 } from './scenario';
 export { createSimulation, type SimSnapshot, type Simulation } from './simulation';
+export { authoritativeGround, TERRAIN_MODEL } from './authoritative-terrain';
+export {
+  cleanElevations,
+  cleanTerrain,
+  DEM_CLEANING,
+  DEM_CLEANING_VERSION,
+  demQualitySummary,
+  DemQualityError,
+  type DemFinding,
+  type DemQualityReport,
+  type SourceCorrections,
+  type TerrainCleaning,
+} from './dem-quality';
 export {
   BUILDING_APRON_M,
   CUT_SLOPE,

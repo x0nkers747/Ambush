@@ -1,3 +1,4 @@
+import { cleanElevations, DEM_CLEANING } from '#sim';
 import { toGeo, type BattlefieldFrame } from './frame';
 import {
   mercatorPixel,
@@ -216,4 +217,170 @@ export function fillMissing(values: Float64Array, columns: number, rows: number)
     remaining -= updates.length;
   }
   return total - remaining;
+}
+
+/** The ground size of a tile's pixels, metres (Web Mercator, at the tile's middle). */
+function pixelSizeM(tile: TileId): number {
+  const n = 2 ** tile.z;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (tile.y + 0.5)) / n)));
+  return (40_075_016.686 * Math.cos(lat)) / (TILE_SIZE * n);
+}
+
+/** What checking the source tiles' pixels found (docs/adr/0033). */
+export interface TileCleaningResult {
+  /** The tiles with faulty pixels repaired (missing tiles stay missing). */
+  readonly tiles: ElevationTile[];
+  /** Isolated pits and spikes repaired, and invalid pixels (no-data, impossible values). */
+  readonly faultyPixels: number;
+  readonly invalidPixels: number;
+  /** Tile edge lines far off both their sides (a stitching fault), rebuilt. */
+  readonly brokenEdges: number;
+  /** Tile edges with a steady step across them (two sources that disagree), left as they are. */
+  readonly seamOffsets: number;
+  /** Regions too large to rebuild with confidence, and seam offsets. */
+  readonly unresolvedRegions: number;
+}
+
+/** One edge of a tile: its pixels in order, the step inwards, and the neighbour's edge across it. */
+interface TileEdge {
+  readonly pixel: (k: number) => number;
+  readonly inward: (i: number) => number;
+  readonly across: readonly number[] | null;
+  /** Seam offsets are counted on one side of each pair (west and north edges). */
+  readonly counted: boolean;
+}
+
+function tileEdges(
+  tile: TileId,
+  at: (t: TileId, dx: number, dy: number) => Float32Array | null,
+): TileEdge[] {
+  const S = TILE_SIZE;
+  const column = (data: Float32Array | null, x: number) =>
+    data ? Array.from({ length: S }, (_, k) => data[k * S + x] ?? Number.NaN) : null;
+  const row = (data: Float32Array | null, y: number) =>
+    data ? Array.from({ length: S }, (_, k) => data[y * S + k] ?? Number.NaN) : null;
+  return [
+    {
+      pixel: (k) => k * S,
+      inward: (i) => i + 1,
+      across: column(at(tile, -1, 0), S - 1),
+      counted: true,
+    },
+    {
+      pixel: (k) => k * S + S - 1,
+      inward: (i) => i - 1,
+      across: column(at(tile, 1, 0), 0),
+      counted: false,
+    },
+    { pixel: (k) => k, inward: (i) => i + S, across: row(at(tile, 0, -1), S - 1), counted: true },
+    {
+      pixel: (k) => (S - 1) * S + k,
+      inward: (i) => i - S,
+      across: row(at(tile, 0, 1), 0),
+      counted: false,
+    },
+  ];
+}
+
+/** A broken edge line: at least this share of its pixels far off both sides. */
+const BROKEN_EDGE_SHARE = 0.9;
+/** A seam offset: the step across an edge differs from the steps beside it by this much, metres … */
+const SEAM_OFFSET_M = 2;
+/** … the same way along at least this share of the edge. */
+const SEAM_OFFSET_SHARE = 0.8;
+
+/**
+ * Checks every tile's pixels before resampling (docs/adr/0033), where a
+ * faulty pixel is one or two pixels hundreds of metres off; resampling would
+ * smear it into several grid samples, some only partly wrong.
+ *
+ * - Tile edges are checked against the tiles beside them: an edge line far
+ *   off both its sides (a stitching fault) is marked invalid, then rebuilt;
+ *   a steady step across an edge (two sources that disagree) is reported and
+ *   left, since nothing says which side is right.
+ * - Each tile is then checked by the DEM cleaner on its own, at its real
+ *   pixel size, so the result does not depend on which other tiles were fetched.
+ */
+export function cleanElevationTiles(tiles: readonly ElevationTile[]): TileCleaningResult {
+  const byKey = new Map(tiles.map((t) => [tileKey(t), t.elevations]));
+  const at = (t: TileId, dx: number, dy: number) =>
+    byKey.get(tileKey({ z: t.z, x: wrapTileX(t.x + dx, t.z), y: t.y + dy })) ?? null;
+  const S = TILE_SIZE;
+  const minOff = DEM_CLEANING.minExcursionM;
+  let faultyPixels = 0;
+  let invalidPixels = 0;
+  let brokenEdges = 0;
+  let seamOffsets = 0;
+  let unresolvedRegions = 0;
+
+  const out = tiles.map((tile): ElevationTile => {
+    const e = tile.elevations;
+    if (!e) return tile;
+    const marked = new Set<number>();
+    for (const edge of tileEdges(tile, at)) {
+      let broken = 0;
+      let up = 0;
+      let down = 0;
+      for (let k = 0; k < S; k += 1) {
+        const i = edge.pixel(k);
+        const v = e[i] ?? Number.NaN;
+        const inner = e[edge.inward(i)] ?? Number.NaN;
+        // Across the edge, or carried on from two pixels in when there is no tile there.
+        const outer =
+          edge.across?.[k] ?? 2 * inner - (e[edge.inward(edge.inward(i))] ?? Number.NaN);
+        const a = v - inner;
+        const b = v - outer;
+        // Far off both sides, the same way, while the two sides agree.
+        if (
+          Math.sign(a) === Math.sign(b) &&
+          Math.min(Math.abs(a), Math.abs(b)) >= minOff &&
+          Math.min(Math.abs(a), Math.abs(b)) >=
+            DEM_CLEANING.isolationRatio * Math.abs(inner - outer)
+        ) {
+          broken += 1;
+        }
+        if (edge.across) {
+          // The step across the edge beyond the step just inside it.
+          // A few metres: two sources disagreeing. Far more is a fault, for the edge check.
+          const offset = (edge.across[k] ?? v) - v - a;
+          if (offset >= SEAM_OFFSET_M && offset < minOff) up += 1;
+          if (offset <= -SEAM_OFFSET_M && offset > -minOff) down += 1;
+        }
+      }
+      if (broken >= BROKEN_EDGE_SHARE * S) {
+        brokenEdges += 1;
+        for (let k = 0; k < S; k += 1) marked.add(edge.pixel(k));
+      } else if (edge.counted && Math.max(up, down) >= SEAM_OFFSET_SHARE * S) {
+        seamOffsets += 1;
+      }
+    }
+    let values: Float32Array = e;
+    if (marked.size > 0) {
+      values = Float32Array.from(e);
+      for (const i of marked) values[i] = Number.NaN;
+    }
+    const { elevations, report } = cleanElevations({
+      originX: 0,
+      originY: 0,
+      cellSize: pixelSizeM(tile),
+      columns: S,
+      rows: S,
+      elevations: values,
+    });
+    for (const f of report.findings) {
+      if (f.action === 'repaired' && f.kind !== 'invalid') faultyPixels += f.samples;
+    }
+    invalidPixels += report.invalidSamples - marked.size;
+    unresolvedRegions += report.unresolvedRegions;
+    if (report.repairedSamples === 0 && report.invalidSamples === 0) return tile;
+    return { ...tile, elevations: Float32Array.from(elevations) };
+  });
+  return {
+    tiles: out,
+    faultyPixels,
+    invalidPixels,
+    brokenEdges,
+    seamOffsets,
+    unresolvedRegions: unresolvedRegions + seamOffsets,
+  };
 }

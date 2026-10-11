@@ -12,7 +12,7 @@ import {
   type PlaceResult,
   type ServiceConfig,
 } from '#acquire';
-import type { Vec2 } from '#sim';
+import { demQualitySummary, type DemFinding, type DemQualityReport, type Vec2 } from '#sim';
 import type { TacticalMap } from '#view2d';
 import {
   battlefieldRequest,
@@ -74,8 +74,14 @@ export function describePointFor(pkg: BattlefieldPackage): (p: Vec2) => string {
   return (p) => formatCoordinates(toGeo(frame, p));
 }
 
-/** A battlefield's description (sources, accuracy, credits) for Battlefield Information. */
-export function battlefieldInfoHtml(pkg: BattlefieldPackage): string {
+/**
+ * A battlefield's description (sources, accuracy, credits) for Battlefield
+ * Information, with its DEM quality report when the terrain has been prepared.
+ */
+export function battlefieldInfoHtml(
+  pkg: BattlefieldPackage,
+  quality: DemQualityReport | null = null,
+): string {
   const e = pkg.elevation;
   const datasets = e.datasets.filter((d) => d.resolutionM < 200).map((d) => d.name);
   const resolution =
@@ -85,12 +91,23 @@ export function battlefieldInfoHtml(pkg: BattlefieldPackage): string {
         ? `about ${String(e.finestResolutionM)}–${String(e.coarsestResolutionM)} m source data`
         : `about ${String(e.finestResolutionM)} m source data`;
   const c = pkg.processing.counts;
+  // The range of the ground in use: once prepared, the cleaned and graded
+  // terrain (docs/adr/0033), not the raw import's, which keeps any faults.
+  let [lowM, highM] = [e.minM, e.maxM];
+  if (quality) {
+    [lowM, highM] = [Infinity, -Infinity];
+    for (const v of pkg.terrain.heightfield.elevations) {
+      lowM = Math.min(lowM, v);
+      highM = Math.max(highM, v);
+    }
+  }
   return `
     <dl class="kv">
       <dt>Location</dt><dd>${escapeHtml(formatCoordinates(pkg.request.centre))}</dd>
       <dt>Size</dt><dd>${pkg.request.widthM.toLocaleString('en')} × ${pkg.request.heightM.toLocaleString('en')} m</dd>
       <dt>Coordinates</dt><dd>UTM ${String(pkg.frame.zone)}${pkg.frame.hemisphere} (EPSG:${String(pkg.frame.epsg)})</dd>
-      <dt>Elevation</dt><dd>${String(pkg.request.cellSizeM)} m grid from ${escapeHtml(datasets.join(', ') || 'unrecognised sources')} (${resolution}; ${escapeHtml(SURFACE_LABEL[e.surfaceModel] ?? e.surfaceModel)}). ${String(Math.round(e.minM))}–${String(Math.round(e.maxM))} m.</dd>
+      <dt>Elevation</dt><dd>${String(pkg.request.cellSizeM)} m grid from ${escapeHtml(datasets.join(', ') || 'unrecognised sources')} (${resolution}; ${escapeHtml(SURFACE_LABEL[e.surfaceModel] ?? e.surfaceModel)}). ${String(Math.round(lowM))}–${String(Math.round(highM))} m.</dd>
+      ${quality ? `<dt>Terrain check</dt><dd>${terrainCheckHtml(quality)}</dd>` : ''}
       <dt>Buildings</dt><dd>${buildingsLine(pkg)}</dd>
       <dt>Map data</dt><dd>${
         pkg.osm.available
@@ -108,6 +125,38 @@ export function battlefieldInfoHtml(pkg: BattlefieldPackage): string {
     <details class="sub"><summary>Sources and credits</summary><ul class="credits">${pkg.attribution
       .map((a) => `<li>${escapeHtml(a)}</li>`)
       .join('')}</ul></details>`;
+}
+
+/** The DEM quality check (docs/adr/0033): one line, with the details folded away. */
+function terrainCheckHtml(q: DemQualityReport): string {
+  const line = demQualitySummary(q) ?? 'Terrain validation complete. No elevation errors found.';
+  const shown = q.findings.slice(0, 12);
+  const place = (f: DemFinding) => `${String(Math.round(f.x))}, ${String(Math.round(f.y))}`;
+  const value = (v: number | null) => (v === null ? 'no data' : `${v.toFixed(1)} m`);
+  const describe = (f: DemFinding) => {
+    const what =
+      f.kind === 'source'
+        ? 'faulty source pixel'
+        : f.kind === 'invalid'
+          ? `${String(f.samples)} invalid sample(s)`
+          : `${f.samples === 1 ? 'isolated' : `${String(f.samples)}-sample`} ${f.kind}`;
+    const outcome =
+      f.action === 'repaired'
+        ? `${value(f.original)} → ${value(f.cleaned)}`
+        : f.action === 'unresolved'
+          ? `${value(f.original)}, not repaired`
+          : `${value(f.original)}, kept`;
+    return `<li>${escapeHtml(`${what} at ${place(f)}: ${outcome}`)}</li>`;
+  };
+  return `${escapeHtml(line)} <span class="muted">(${escapeHtml(q.version)}, ${q.samples.toLocaleString('en')} samples)</span>${
+    shown.length > 0
+      ? `<details class="sub"><summary>Details</summary><ul class="credits">${shown.map(describe).join('')}${
+          q.findings.length > shown.length
+            ? `<li>${escapeHtml(`and ${String(q.findings.length - shown.length)} more`)}</li>`
+            : ''
+        }</ul></details>`
+      : ''
+  }`;
 }
 
 /** Where a battlefield's buildings came from (docs/adr/0023), with their count. */

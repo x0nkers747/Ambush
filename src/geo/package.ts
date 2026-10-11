@@ -1,7 +1,9 @@
 import {
+  DEM_CLEANING_VERSION,
   fingerprintPlainData,
   validateTerrain,
   type EnvironmentFeatures,
+  type SourceCorrections,
   type TerrainDataset,
 } from '#sim';
 import { summarizeElevationSources, type SurfaceModel } from './elevation-sources';
@@ -16,7 +18,13 @@ import {
   type OvertureTile,
   type OvertureTileId,
 } from './overture';
-import { battlefieldGrid, resampleToGrid, tilesForGrid, type ElevationTile } from './terrarium';
+import {
+  battlefieldGrid,
+  cleanElevationTiles,
+  resampleToGrid,
+  tilesForGrid,
+  type ElevationTile,
+} from './terrarium';
 import { zoomForCellSize, type TileId } from './tiles';
 import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './utm';
 
@@ -31,7 +39,7 @@ import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './ut
 export const BATTLEFIELD_SCHEMA = 'ambush.battlefield';
 export const BATTLEFIELD_SCHEMA_VERSION = 1;
 /** The importer's own version: tag mapping, defaults and processing rules. */
-export const IMPORTER_VERSION = '1.1.0';
+export const IMPORTER_VERSION = '1.2.0';
 
 /** The only battlefield size offered for now; the format supports others. */
 export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;
@@ -87,6 +95,12 @@ export interface BattlefieldPackage {
     readonly surfaceModel: SurfaceModel;
     /** Grid samples with no source pixels, filled from their neighbours. */
     readonly filledSamples: number;
+    /**
+     * The check of the source pixels (docs/adr/0033): grid samples a faulty
+     * pixel reached, with their corrected values. The raw grid in `terrain`
+     * is left as resampled. Absent in packages made before importer 1.2.
+     */
+    readonly cleaning?: SourceCorrections;
     readonly minM: number;
     readonly maxM: number;
   };
@@ -224,6 +238,16 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       `Elevation data unavailable: ${error instanceof Error ? error.message : String(error)}.`,
     );
   }
+  // The source pixels checked before resampling (docs/adr/0033): where a faulty
+  // pixel reached the grid, the corrected value is kept beside the raw one.
+  const checked = cleanElevationTiles(inputs.tiles);
+  const corrections: [number, number][] = [];
+  if (checked.faultyPixels + checked.invalidPixels + checked.brokenEdges > 0) {
+    const clean = resampleToGrid(frame, grid, zoom, checked.tiles).elevations;
+    clean.forEach((v, i) => {
+      if (Math.abs(v - (resampled.elevations[i] ?? v)) >= 0.01) corrections.push([i, v]);
+    });
+  }
   const sources = summarizeElevationSources(inputs.tiles.map((t) => t.sources));
   const overture = inputs.overture ?? null;
   const osm = inputs.osm
@@ -282,6 +306,16 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       `${String(resampled.filled)} elevation sample(s) had no source data and were filled from their neighbours.`,
     );
   }
+  if (checked.unresolvedRegions - checked.seamOffsets > 0) {
+    warnings.push(
+      `The elevation source has ${String(checked.unresolvedRegions - checked.seamOffsets)} region(s) of faulty data too large to rebuild with confidence.`,
+    );
+  }
+  if (checked.seamOffsets > 0) {
+    warnings.push(
+      `The elevation source steps by a few metres along ${String(checked.seamOffsets)} tile edge(s) (sources that disagree); the steps are left as they are.`,
+    );
+  }
   if (sources.surfaceModel === 'DSM' || sources.surfaceModel === 'mixed') {
     warnings.push(
       'The elevation source is (at least partly) a surface model: tree canopy and buildings may raise the ground, so woods and built-up areas can be counted twice in line of sight.',
@@ -331,6 +365,15 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       coarsestResolutionM: sources.coarsestResolutionM,
       surfaceModel: sources.surfaceModel,
       filledSamples: resampled.filled,
+      cleaning: {
+        version: DEM_CLEANING_VERSION,
+        faultyPixels: checked.faultyPixels,
+        invalidPixels: checked.invalidPixels,
+        brokenEdges: checked.brokenEdges,
+        seamOffsets: checked.seamOffsets,
+        unresolvedRegions: checked.unresolvedRegions,
+        samples: corrections,
+      },
       // A loop, not Math.min(...elevations): spreading 251 001 samples (5 km) overflows the stack.
       minM: elevations.reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY),
       maxM: elevations.reduce((a, b) => Math.max(a, b), Number.NEGATIVE_INFINITY),
@@ -432,6 +475,25 @@ export function parseBattlefieldPackage(data: unknown): BattlefieldPackage {
     fail(`its terrain is invalid (${error instanceof Error ? error.message : String(error)})`);
   }
   if (!Array.isArray(d['attribution'])) fail('"attribution" is missing');
+  const cleaning = (d['elevation'] as { cleaning?: unknown } | undefined)?.cleaning;
+  if (cleaning !== undefined) {
+    const c = cleaning as Partial<SourceCorrections>;
+    const count = terrain.heightfield.elevations.length;
+    if (
+      typeof c.version !== 'string' ||
+      !Array.isArray(c.samples) ||
+      !c.samples.every(
+        (e) =>
+          Array.isArray(e) &&
+          Number.isInteger(e[0]) &&
+          (e[0] ?? -1) >= 0 &&
+          (e[0] ?? count) < count &&
+          Number.isFinite(e[1]),
+      )
+    ) {
+      fail('its elevation corrections are invalid');
+    }
+  }
   const pkg = data as BattlefieldPackage;
   if (fingerprintPlainData({ request: pkg.request, terrain: pkg.terrain }) !== pkg.id) {
     fail('its content does not match its id (the data was changed or damaged)');

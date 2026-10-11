@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { DEMO_SCENARIO } from '#exercise';
-import { createSyntheticTerrain, gradeTerrain, heightAt, rectangle, refinementIndex } from '#sim';
+import {
+  createSyntheticTerrain,
+  gradeTerrain,
+  heightAt,
+  rectangle,
+  refinementIndex,
+  TERRAIN_MODEL,
+  terrainModelId,
+} from '#sim';
 import { elevationAt } from '#view2d';
 import { terrainGround } from '#view3d';
+import { authoritativeTerrain } from './terrain-grading';
 
 // One authoritative terrain for every system (docs/adr/0032): the 2D map's
 // elevation readout and the 3D view's ground query give the same value as
@@ -54,4 +63,26 @@ describe('2D and 3D elevation queries', () => {
       }
     });
   }
+});
+
+describe('the terrain a battlefield opens with (docs/adr/0033)', () => {
+  const raw = createSyntheticTerrain(
+    { originX: 0, originY: 0, cellSize: 10, columns: 31, rows: 31 },
+    (x, y) => 20 + 0.02 * x + (x === 150 && y === 150 ? -782 : 0),
+    { roads: [], buildings: [], vegetation: [] },
+  );
+
+  it('is the raw DEM cleaned, then graded: never a surface prepared by other rules', async () => {
+    const prepared = await authoritativeTerrain('test-battlefield', raw, null);
+    expect(terrainModelId(prepared.terrain)).toBe(TERRAIN_MODEL);
+    expect(prepared.quality.repairedSamples).toBe(1);
+    expect(heightAt(prepared.terrain, 150, 150)).toBeCloseTo(23, 0);
+    // The stored raw terrain is unchanged.
+    expect(heightAt(raw, 150, 150)).toBeLessThan(-700);
+    // The same battlefield and rules: the same preparation, not another.
+    expect(await authoritativeTerrain('test-battlefield', raw, null)).toBe(prepared);
+    // 2D and 3D read the repaired ground too.
+    expect(elevationAt(prepared.terrain, 150, 150)).toBe(heightAt(prepared.terrain, 150, 150));
+    expect(terrainGround(prepared.terrain)(150, -150)).toBe(heightAt(prepared.terrain, 150, 150));
+  });
 });

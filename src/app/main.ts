@@ -14,7 +14,7 @@ import {
   type ScenarioDefinition,
 } from '#exercise';
 import type { BattlefieldPackage } from '#geo';
-import { shareTerrain, terrainModelId } from '#sim';
+import { demQualitySummary, shareTerrain, terrainModelId, type DemQualityReport } from '#sim';
 import type { TacticalMap } from '#view2d';
 import type { PreviewData } from './battlefield-preview';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
@@ -90,7 +90,7 @@ async function loadScenario(
         const problems = scenarioProblems(pkg.terrain, definition);
         return {
           definition: { ...definition, terrainModel: model },
-          notice: `This scenario was planned on an earlier model of the ground. The terrain now has its roads and building foundations graded into it (cuttings, embankments and level pads), which can change slopes, cover and sight lines. ${
+          notice: `This scenario was planned on an earlier model of the ground. The terrain is now checked for elevation errors, which are repaired, and has its roads and building foundations graded into it (cuttings, embankments and level pads); slopes, cover and sight lines can differ. ${
             problems.length > 0
               ? 'Some of its positions are no longer valid: check the ORP and the OPFOR route.'
               : 'Check the ORP and the OPFOR route.'
@@ -113,16 +113,30 @@ async function loadScenario(
 }
 
 /**
- * A saved battlefield with its authoritative terrain: the stored source
- * terrain graded (roads and building foundations built in, docs/adr/0032),
+ * A saved battlefield with its authoritative terrain: the stored raw terrain
+ * with its DEM cleaned (docs/adr/0033), then graded (roads and building
+ * foundations built in, docs/adr/0032),
  * then shared (`shareTerrain`): everything on the page (scenario edits,
  * previews, the exercise, the 2D and 3D views) then uses one frozen terrain,
  * so its navigation grid and other per-terrain data are built once. The
  * stored package keeps the source terrain.
  */
-async function openBattlefield(store: BattlefieldStore, id: string): Promise<BattlefieldPackage> {
+async function openBattlefield(store: BattlefieldStore, id: string): Promise<OpenedBattlefield> {
   const pkg = await store.get(id);
-  return { ...pkg, terrain: shareTerrain(await authoritativeTerrain(pkg.id, pkg.terrain)) };
+  const { terrain, quality } = await authoritativeTerrain(
+    pkg.id,
+    pkg.terrain,
+    pkg.elevation.cleaning ?? null,
+  );
+  return { ...pkg, terrain: shareTerrain(terrain), quality };
+}
+
+/** An opened battlefield: its package with the authoritative terrain, and that terrain's DEM quality report. */
+type OpenedBattlefield = BattlefieldPackage & { readonly quality: DemQualityReport };
+
+/** A warning when the DEM check left regions it could not repair (docs/adr/0033); null otherwise. */
+function unresolvedNotice(quality: DemQualityReport): string | null {
+  return quality.unresolvedRegions > 0 ? demQualitySummary(quality) : null;
 }
 
 /** What the terrain-selection preview shows of a battlefield and its scenario. */
@@ -168,7 +182,7 @@ async function main(root: HTMLElement): Promise<void> {
    * its scenario. Opening it again reuses it, so the preview's map (built on
    * its terrain) can be handed over as it is.
    */
-  let loaded: { pkg: BattlefieldPackage; definition: ScenarioDefinition } | null = null;
+  let loaded: { pkg: OpenedBattlefield; definition: ScenarioDefinition } | null = null;
   /** Preview loads started; only the latest may set `loaded` (it is the one the preview shows). */
   let previewLoads = 0;
 
@@ -204,7 +218,7 @@ async function main(root: HTMLElement): Promise<void> {
   ): Promise<void> => {
     let map = handed;
     try {
-      let pkg: BattlefieldPackage;
+      let pkg: OpenedBattlefield;
       let definition: ScenarioDefinition;
       let notice: string | null = null;
       if (loaded?.pkg.id === id) ({ pkg, definition } = loaded);
@@ -235,9 +249,9 @@ async function main(root: HTMLElement): Promise<void> {
         scenario: { kind: 'editable', definition, save },
         attribution: pkg.attribution,
         describePoint: describePointFor(pkg),
-        infoHtml: battlefieldInfoHtml(pkg),
+        infoHtml: battlefieldInfoHtml(pkg, pkg.quality),
         initialStage,
-        notice,
+        notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
         map,
         leave: (m) => {
           pushAddress({ kind: 'select', selected: pkg.id });

@@ -1,6 +1,6 @@
 import {
   createSyntheticTerrain,
-  gradeTerrain,
+  authoritativeGround,
   rectangle,
   type Building,
   type Road,
@@ -211,9 +211,9 @@ const patrolRoute = (soldierId: string): OpforRoute => ({
   shownToTrainee: true,
 });
 
-// The authoritative ground: the demo's elevation with its road and building
-// foundations graded into it (docs/adr/0032).
-const terrain = gradeTerrain(
+// The authoritative ground: the demo's elevation, checked (docs/adr/0033),
+// with its road and building foundations graded into it (docs/adr/0032).
+const { terrain } = authoritativeGround(
   createSyntheticTerrain(
     { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
     demoElevation,

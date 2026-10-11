@@ -1,4 +1,5 @@
 import { validateFeatures, type EnvironmentFeatures } from './environment';
+import type { TerrainCleaning } from './dem-quality';
 import { refinementIndex, sampleSurface } from './terrain-surface';
 
 // Runtime terrain format (docs/adr/0006, docs/adr/0008, docs/adr/0011).
@@ -97,6 +98,8 @@ export interface TerrainDataset {
   readonly metadata?: TerrainMetadata;
   /** Finer samples in some cells; part of the surface (docs/adr/0032). */
   readonly refinement?: TerrainRefinement;
+  /** Present on a cleaned terrain: the DEM after quality repair (docs/adr/0033). */
+  readonly cleaning?: TerrainCleaning;
   /** Present on a graded terrain: the authoritative ground every system uses. */
   readonly grading?: TerrainGrading;
 }
