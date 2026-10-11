@@ -5,9 +5,11 @@ import {
   hashSimState,
   rectangle,
   shareTerrain,
+  terrainModelId,
   type TerrainDataset,
   type Vec2,
 } from '#sim';
+import { DEMO_SCENARIO } from './demo-scenario';
 import { createExercise } from './exercise';
 import { orpContains } from './orp';
 import {
@@ -300,5 +302,17 @@ describe('a new scenario without an ORP', () => {
     const after = buildPreviewScenario(T, placed);
     expect(after.squadPlaced).toBe(true);
     expect(after.scenario).toEqual(buildScenario(T, placed));
+  });
+});
+
+describe('the terrain model a scenario was planned on (docs/adr/0032)', () => {
+  it('is recorded, kept through edits and saving, and absent from older scenarios', () => {
+    const d = defaultScenarioDefinition(DEMO_SCENARIO.terrain, 'demo');
+    expect(d.terrainModel).toBe(terrainModelId(DEMO_SCENARIO.terrain));
+    expect(d.terrainModel).toMatch(/^graded-v\d+$/);
+    expect(parseScenarioDefinition(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    const older: Record<string, unknown> = { ...d };
+    delete older['terrainModel'];
+    expect(parseScenarioDefinition(older).terrainModel).toBeUndefined();
   });
 });

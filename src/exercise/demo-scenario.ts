@@ -1,5 +1,6 @@
 import {
   createSyntheticTerrain,
+  gradeTerrain,
   rectangle,
   type Building,
   type Road,
@@ -210,10 +211,14 @@ const patrolRoute = (soldierId: string): OpforRoute => ({
   shownToTrainee: true,
 });
 
-const terrain = createSyntheticTerrain(
-  { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
-  demoElevation,
-  { roads, buildings, vegetation },
+// The authoritative ground: the demo's elevation with its road and building
+// foundations graded into it (docs/adr/0032).
+const terrain = gradeTerrain(
+  createSyntheticTerrain(
+    { originX: -400, originY: -300, cellSize: 5, columns: 161, rows: 121 },
+    demoElevation,
+    { roads, buildings, vegetation },
+  ),
 );
 const squad = deployInOrp(USMC_RIFLE_SQUAD_TEMPLATE, squadInstance(), DEMO_ORP, terrain);
 

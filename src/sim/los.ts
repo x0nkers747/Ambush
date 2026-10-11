@@ -2,6 +2,7 @@ import { boundsOf, type Box } from './environment';
 import type { Vec2, Vec3 } from './geometry';
 import { pointInPolygon, segmentIntersectionParams } from './polygon';
 import { heightAt, isOnTerrain, type TerrainDataset } from './terrain';
+import { isRefinedAt, refinementIndex } from './terrain-surface';
 
 // Line of sight (docs/adr/0011): a pure, deterministic query over terrain,
 // buildings and vegetation, used by the planning tools now and by combat later.
@@ -154,6 +155,31 @@ export function traceSightLine(terrain: TerrainDataset, a: Vec3, b: Vec3): Sight
   crossings(gx0, gx1);
   crossings(gy0, gy1);
   crossings(gx0 - gy0, gx1 - gy1); // the SW–NE diagonals (docs/adr/0008)
+  // In refined cells the fine grid's lines and diagonals too (docs/adr/0032):
+  // every fine line that is not a coarse one, where it crosses a refined cell.
+  const refinement = refinementIndex(terrain);
+  if (refinement) {
+    const k = refinement.factor;
+    const fineCrossings = (v0: number, v1: number) => {
+      if (v0 === v1) return;
+      const lo = Math.min(v0, v1);
+      const hi = Math.max(v0, v1);
+      for (let m = Math.ceil(lo); m <= Math.floor(hi); m += 1) {
+        if (m % k === 0) continue;
+        const t = (m - v0) / (v1 - v0);
+        if (
+          t > 0 &&
+          t < 1 &&
+          isRefinedAt(terrain.heightfield, refinement, a.x + t * dx, a.y + t * dy)
+        ) {
+          push(t);
+        }
+      }
+    };
+    fineCrossings(gx0 * k, gx1 * k);
+    fineCrossings(gy0 * k, gy1 * k);
+    fineCrossings((gx0 - gy0) * k, (gx1 - gy1) * k);
+  }
   for (const { polygon } of buildings) addEdgeCrossings(a, b, polygon, push);
   for (const { polygon, holes } of vegetation) {
     addEdgeCrossings(a, b, polygon, push);

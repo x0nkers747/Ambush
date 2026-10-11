@@ -21,7 +21,15 @@ export function canonicalEncode(value: unknown): string {
 function cloneAt(value: unknown, path: string): unknown {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number') return checkNumber(value, path);
-  if (Array.isArray(value)) return value.map((item, i) => cloneAt(item, `${path}[${String(i)}]`));
+  if (Array.isArray(value)) {
+    // Elements' paths are built only when needed (for an error): terrain
+    // arrays hold millions of numbers.
+    return value.map((item: unknown, i) =>
+      typeof item === 'number' && Number.isFinite(item)
+        ? item
+        : cloneAt(item, `${path}[${String(i)}]`),
+    );
+  }
   const record = checkPlainObject(value, path);
   const copy: Record<string, unknown> = {};
   for (const key of Object.keys(record)) copy[key] = cloneAt(record[key], `${path}.${key}`);
@@ -36,7 +44,15 @@ function encodeAt(value: unknown, path: string): string {
     return Object.is(value, -0) ? '-0' : String(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((item, i) => encodeAt(item, `${path}[${String(i)}]`)).join(',')}]`;
+    return `[${value
+      .map((item: unknown, i) =>
+        typeof item === 'number' && Number.isFinite(item)
+          ? Object.is(item, -0)
+            ? '-0'
+            : String(item)
+          : encodeAt(item, `${path}[${String(i)}]`),
+      )
+      .join(',')}]`;
   }
   const record = checkPlainObject(value, path);
   const fields = Object.keys(record)

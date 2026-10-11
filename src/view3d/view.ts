@@ -20,8 +20,8 @@ import {
 import { Sky } from 'three/addons/objects/Sky.js';
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
-import { heightAt, isOnTerrain, type TerrainDataset } from '#sim';
-import type { BattlefieldExtent, GroundAt } from './camera-math';
+import type { TerrainDataset } from '#sim';
+import { terrainGround, type BattlefieldExtent, type GroundAt } from './camera-math';
 import { createGeoFeatures, type GeoFeatureLayer } from './geo-features';
 import {
   createGenerator,
@@ -238,8 +238,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     apron.name = 'surroundings';
     apron.position.set((b.minX + b.maxX) / 2, apronZ - 0.05, -(b.minY + b.maxY) / 2);
     scene.add(walls, apron);
-    const groundAt: GroundAt = (x, z) =>
-      isOnTerrain(terrain, x, -z) ? heightAt(terrain, x, -z) : null;
+    const groundAt: GroundAt = terrainGround(terrain);
     // Subtle haze: the far side of a battlefield seen from the default view is just touched.
     scene.fog = new Fog(HAZE, 1.4 * span, 6 * span);
     // The sun lights the whole battlefield from far away.

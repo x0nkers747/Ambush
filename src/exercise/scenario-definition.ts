@@ -3,6 +3,7 @@ import {
   isOnTerrain,
   planPath,
   pointProblem,
+  terrainModelId,
   type ScenarioSoldier,
   type TerrainDataset,
   type Vec2,
@@ -60,6 +61,11 @@ export interface ScenarioDefinition {
     /** The route, starting where the OPFOR starts. Empty: no OPFOR placed yet. */
     readonly route: readonly MapPoint[];
   };
+  /**
+   * The model of the ground it was planned on (`terrainModelId`, docs/adr/0032).
+   * Absent in scenarios saved before terrain grading.
+   */
+  readonly terrainModel?: string;
 }
 
 export class ScenarioDefinitionError extends Error {
@@ -102,6 +108,7 @@ export function defaultScenarioDefinition(
     name,
     orp,
     opfor: { force: 'patrol-3', route: [] },
+    terrainModel: terrainModelId(terrain),
   };
 }
 
@@ -410,5 +417,6 @@ export function parseScenarioDefinition(data: unknown): ScenarioDefinition {
     name: d['name'] as string,
     orp,
     opfor: { force: opfor.force as OpforForce, route },
+    ...(typeof d['terrainModel'] === 'string' ? { terrainModel: d['terrainModel'] } : {}),
   };
 }

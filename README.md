@@ -24,7 +24,10 @@ battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario e
 on the simulated terrain, with its roads, buildings, water, forests, tree lines and scrub, and
 the ground coloured by land cover: switch with **2D | 3D** under the map; drag to orbit,
 right-drag to pan, use the wheel to zoom and double-click to focus. Soldiers hidden by trees or
-buildings show through as dim silhouettes.
+buildings show through as dim silhouettes. Roads and buildings are graded into the ground
+(cuttings, embankments and level pads, on 2.5 m refinement tiles), and that one graded terrain is
+used by everything: the 2D map, the 3D view, movement, line of sight and replay
+([ADR 0032](docs/adr/0032-authoritative-graded-terrain.md)).
 
 ## Requirements
 
@@ -222,3 +225,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 29. [The 3D battlefield view, milestone 1](docs/adr/0029-3d-view-milestone-1.md)
 30. [Geographic features in the 3D view](docs/adr/0030-3d-geographic-features.md)
 31. [Procedural vegetation in the 3D view](docs/adr/0031-3d-procedural-vegetation.md)
+32. [One authoritative, graded terrain](docs/adr/0032-authoritative-graded-terrain.md)

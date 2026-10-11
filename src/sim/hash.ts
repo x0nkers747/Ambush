@@ -57,13 +57,27 @@ export function fnv1a64(bytes: Iterable<number>): string {
 
 /** `fnv1a64` over the UTF-16LE bytes of `text`, without materializing them. */
 function fnv1a64Utf16le(text: string): string {
-  const h = new Fnv1a64();
+  // `Fnv1a64.byte`, inlined on local limbs: world fingerprints hash tens of
+  // megabytes of terrain.
+  let h0 = 0x2325;
+  let h1 = 0x8422;
+  let h2 = 0x9ce4;
+  let h3 = 0xcbf2;
   for (let i = 0; i < text.length; i += 1) {
     const unit = text.charCodeAt(i);
-    h.byte(unit & 0xff);
-    h.byte(unit >>> 8);
+    for (let half = 0; half < 2; half += 1) {
+      const a0 = h0 ^ (half === 0 ? unit & 0xff : unit >>> 8);
+      const t0 = a0 * 0x1b3;
+      const t1 = h1 * 0x1b3 + (t0 >>> 16);
+      const t2 = h2 * 0x1b3 + ((a0 << 8) & 0xffffff) + (t1 >>> 16);
+      const t3 = h3 * 0x1b3 + ((h1 << 8) & 0xffffff) + (t2 >>> 16);
+      h0 = t0 & 0xffff;
+      h1 = t1 & 0xffff;
+      h2 = t2 & 0xffff;
+      h3 = t3 & 0xffff;
+    }
   }
-  return h.hex();
+  return [h3, h2, h1, h0].map((v) => v.toString(16).padStart(4, '0')).join('');
 }
 
 /**

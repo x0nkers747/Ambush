@@ -1,4 +1,5 @@
 import { validateFeatures, type EnvironmentFeatures } from './environment';
+import { refinementIndex, sampleSurface } from './terrain-surface';
 
 // Runtime terrain format (docs/adr/0006, docs/adr/0008, docs/adr/0011).
 // Immutable reference data: it is not part of SimState, is never mutated, and
@@ -51,6 +52,37 @@ export interface TerrainMetadata {
   readonly surfaceModel: 'DTM' | 'DSM' | 'mixed' | 'unknown';
 }
 
+/**
+ * Local refinement of the heightfield (docs/adr/0032): some cells of the
+ * regular grid are replaced by a finer regular grid of their own, where the
+ * ground has detail the grid cannot hold (graded roads and building
+ * foundations). A refined cell (c, r) is `factor` × `factor` fine cells, each
+ * split along its south-west to north-east diagonal like the coarse cells.
+ * Its samples on the cell's edges equal the neighbouring surface: the
+ * coarse corners are the heightfield's own samples, and along an edge shared
+ * with an unrefined cell the samples lie on that cell's straight edge, so the
+ * surface is continuous everywhere.
+ */
+export interface TerrainRefinement {
+  /** Fine cells per coarse cell side (≥ 2). */
+  readonly factor: number;
+  /** Refined coarse cells, ascending, as `r * (columns − 1) + c`. */
+  readonly cells: readonly number[];
+  /**
+   * `(factor + 1)²` samples per refined cell, in `cells` order, each row-major
+   * from the cell's south-west corner.
+   */
+  readonly samples: readonly number[];
+}
+
+/** How a graded terrain was made from its source (docs/adr/0032). */
+export interface TerrainGrading {
+  /** `GRADING_VERSION` of the rules that made it. */
+  readonly version: number;
+  /** Spacing of the refined samples, in metres. */
+  readonly fineSpacingM: number;
+}
+
 /** Elevation plus the environment features standing on it. */
 export interface TerrainDataset {
   /**
@@ -63,6 +95,10 @@ export interface TerrainDataset {
   readonly heightfield: Heightfield;
   readonly features: EnvironmentFeatures;
   readonly metadata?: TerrainMetadata;
+  /** Finer samples in some cells; part of the surface (docs/adr/0032). */
+  readonly refinement?: TerrainRefinement;
+  /** Present on a graded terrain: the authoritative ground every system uses. */
+  readonly grading?: TerrainGrading;
 }
 
 /** Throws a RangeError describing the first invalid field. */
@@ -96,6 +132,7 @@ export function validateTerrain(terrain: TerrainDataset): void {
     );
   }
   if (!elevations.every(Number.isFinite)) throw new RangeError('terrain elevations must be finite');
+  if (terrain.refinement) validateRefinement(terrain);
   validateFeatures(terrain.features, ({ x, y }) => isOnTerrain(terrain, x, y));
 }
 
@@ -112,32 +149,21 @@ export function isOnTerrain(terrain: TerrainDataset, x: number, y: number): bool
 
 /**
  * Terrain elevation at (x, y), interpolated linearly on the terrain triangles
- * (see `terrainTriangleIndices`). Throws a RangeError off the terrain; it never
- * extrapolates.
+ * (see `terrainTriangleIndices`), or on a refined cell's fine triangles where
+ * the terrain is refined (docs/adr/0032). The one elevation query every
+ * system uses. Throws a RangeError off the terrain; it never extrapolates.
  */
 export function heightAt(terrain: TerrainDataset, x: number, y: number): number {
   if (!isOnTerrain(terrain, x, y)) {
     throw new RangeError(`(${String(x)}, ${String(y)}) is outside the terrain`);
   }
-  const { originX, originY, cellSize, columns, rows, elevations } = terrain.heightfield;
-  const gx = (x - originX) / cellSize;
-  const gy = (y - originY) / cellSize;
-  // The last row/column of samples belongs to the cell below/left of it.
-  const c = Math.min(Math.floor(gx), columns - 2);
-  const r = Math.min(Math.floor(gy), rows - 2);
-  const u = gx - c;
-  const v = gy - r;
-
-  const at = (col: number, row: number): number => elevations[row * columns + col] ?? Number.NaN;
-  const sw = at(c, r);
-  const se = at(c + 1, r);
-  const nw = at(c, r + 1);
-  const ne = at(c + 1, r + 1);
-
-  // Each cell is split along its SW–NE diagonal.
-  return u >= v
-    ? sw + u * (se - sw) + v * (ne - se) // south-east triangle: SW, SE, NE
-    : sw + v * (nw - sw) + u * (ne - nw); // north-west triangle: SW, NE, NW
+  return sampleSurface(
+    terrain.heightfield,
+    terrain.heightfield.elevations,
+    refinementIndex(terrain),
+    x,
+    y,
+  );
 }
 
 /**
@@ -161,4 +187,82 @@ export function terrainTriangleIndices(terrain: TerrainDataset): number[] {
     }
   }
   return indices;
+}
+
+/** Checks a terrain's refinement (docs/adr/0032); throws a RangeError. */
+function validateRefinement(terrain: TerrainDataset): void {
+  const { columns, rows, elevations } = terrain.heightfield;
+  const ref = terrain.refinement;
+  if (!ref) return;
+  const { factor, cells, samples } = ref;
+  if (!Number.isInteger(factor) || factor < 2) {
+    throw new RangeError(`terrain refinement factor must be an integer ≥ 2, got ${String(factor)}`);
+  }
+  const n1 = factor + 1;
+  if (samples.length !== cells.length * n1 * n1) {
+    throw new RangeError('terrain refinement has the wrong number of samples');
+  }
+  if (!samples.every(Number.isFinite))
+    throw new RangeError('terrain refinement samples must be finite');
+  const cellCount = (columns - 1) * (rows - 1);
+  cells.forEach((cell, k) => {
+    if (!Number.isInteger(cell) || cell < 0 || cell >= cellCount) {
+      throw new RangeError(`terrain refinement cell ${String(cell)} is off the grid`);
+    }
+    if (k > 0 && !(cell > (cells[k - 1] ?? -1))) {
+      throw new RangeError('terrain refinement cells must be ascending and distinct');
+    }
+    // The fine corners are the coarse samples: the surface stays continuous.
+    const c = cell % (columns - 1);
+    const r = Math.floor(cell / (columns - 1));
+    const o = k * n1 * n1;
+    const corners: [number, number][] = [
+      [o, r * columns + c],
+      [o + factor, r * columns + c + 1],
+      [o + factor * n1, (r + 1) * columns + c],
+      [o + factor * n1 + factor, (r + 1) * columns + c + 1],
+    ];
+    for (const [fine, coarse] of corners) {
+      if (Math.abs((samples[fine] ?? NaN) - (elevations[coarse] ?? NaN)) > 1e-6) {
+        throw new RangeError(`terrain refinement cell ${String(cell)} does not meet its corners`);
+      }
+    }
+    // Along an edge shared with an unrefined cell the samples lie on that
+    // cell's straight edge.
+    const refined = (cc: number, rr: number) =>
+      cc < 0 || rr < 0 || cc >= columns - 1 || rr >= rows - 1
+        ? true
+        : binarySearch(cells, rr * (columns - 1) + cc);
+    const edges: [boolean, (m: number) => number, number, number][] = [
+      [refined(c, r - 1), (m) => o + m, o, o + factor],
+      [refined(c, r + 1), (m) => o + factor * n1 + m, o + factor * n1, o + factor * n1 + factor],
+      [refined(c - 1, r), (m) => o + m * n1, o, o + factor * n1],
+      [refined(c + 1, r), (m) => o + m * n1 + factor, o + factor, o + factor * n1 + factor],
+    ];
+    for (const [shared, at, from, to] of edges) {
+      if (shared) continue;
+      for (let m = 1; m < factor; m += 1) {
+        const expected =
+          (samples[from] ?? NaN) + (m / factor) * ((samples[to] ?? NaN) - (samples[from] ?? NaN));
+        if (Math.abs((samples[at(m)] ?? NaN) - expected) > 1e-6) {
+          throw new RangeError(
+            `terrain refinement cell ${String(cell)} does not meet its unrefined neighbour`,
+          );
+        }
+      }
+    }
+  });
+}
+
+function binarySearch(sorted: readonly number[], value: number): boolean {
+  let lo = 0;
+  let hi = sorted.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const v = sorted[mid] ?? 0;
+    if (v === value) return true;
+    if (v < value) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return false;
 }

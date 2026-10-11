@@ -29,7 +29,16 @@ export function isSharedTerrain(terrain: TerrainDataset): boolean {
 
 export function deepFreeze<T>(value: T): T {
   if (typeof value === 'object' && value !== null) {
-    for (const child of Object.values(value)) deepFreeze(child);
+    // Numbers need no freezing; skipping them keeps large arrays cheap.
+    if (Array.isArray(value)) {
+      for (const child of value as unknown[]) {
+        if (typeof child === 'object' && child !== null) deepFreeze(child);
+      }
+    } else {
+      for (const child of Object.values(value)) {
+        if (typeof child === 'object' && child !== null) deepFreeze(child);
+      }
+    }
     Object.freeze(value);
   }
   return value;

@@ -9,3 +9,4 @@ export {
   type TerrainTints,
 } from './view';
 export type { QualityLevel } from './quality';
+export { terrainGround, type GroundAt } from './camera-math';

@@ -21,7 +21,7 @@ export {
   type SoldierIconSpec,
 } from './soldier-icons';
 export { describeSymbol, displaySymbolCode, symbolSvg } from './symbology';
-export { elevationTints, typicalElevationRange } from './terrain-layer';
+export { elevationAt, elevationTints, typicalElevationRange } from './terrain-layer';
 export { createViewshedService, type ViewshedService } from './viewshed-service';
 export {
   createTacticalMap,

@@ -247,6 +247,31 @@ function terrainBreaks(terrain: TerrainDataset, a: Vec2, b: Vec2): number[] {
   crossings(gx0, gx1);
   crossings(gy0, gy1);
   crossings(gx0 - gy0, gx1 - gy1); // the SW–NE diagonals (docs/adr/0008)
+  // Refined cells (docs/adr/0032): their fine lines and diagonals too.
+  const refinement = terrain.refinement;
+  if (refinement) {
+    const k = refinement.factor;
+    const refined = new Set(refinement.cells);
+    const { columns, rows } = terrain.heightfield;
+    const inRefinedCell = (t: number) => {
+      const x = a.x + t * (b.x - a.x);
+      const y = a.y + t * (b.y - a.y);
+      const c = Math.min(Math.floor((x - originX) / cellSize), columns - 2);
+      const r = Math.min(Math.floor((y - originY) / cellSize), rows - 2);
+      return refined.has(r * (columns - 1) + c);
+    };
+    const fine = (v0: number, v1: number) => {
+      if (v0 === v1) return;
+      for (let m = Math.ceil(Math.min(v0, v1)); m <= Math.floor(Math.max(v0, v1)); m += 1) {
+        if (m % k === 0) continue;
+        const t = (m - v0) / (v1 - v0);
+        if (t > 0 && t < 1 && inRefinedCell(t)) out.push(t);
+      }
+    };
+    fine(gx0 * k, gx1 * k);
+    fine(gy0 * k, gy1 * k);
+    fine((gx0 - gy0) * k, (gx1 - gy1) * k);
+  }
   return out;
 }
 

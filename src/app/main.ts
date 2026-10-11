@@ -1,3 +1,4 @@
+import { authoritativeTerrain } from './terrain-grading';
 import {
   createMemoryStore,
   loadServiceConfig,
@@ -13,7 +14,7 @@ import {
   type ScenarioDefinition,
 } from '#exercise';
 import type { BattlefieldPackage } from '#geo';
-import { shareTerrain } from '#sim';
+import { shareTerrain, terrainModelId } from '#sim';
 import type { TacticalMap } from '#view2d';
 import type { PreviewData } from './battlefield-preview';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
@@ -81,7 +82,22 @@ async function loadScenario(
   for (const data of saved) {
     try {
       const definition = parseScenarioDefinition(data);
-      if (definition.battlefieldId === pkg.id) return { definition, notice: null };
+      if (definition.battlefieldId !== pkg.id) continue;
+      // Planned on another model of the ground (docs/adr/0032): kept, checked
+      // against this one, and the trainee told; never changed silently.
+      const model = terrainModelId(pkg.terrain);
+      if (definition.terrainModel !== model) {
+        const problems = scenarioProblems(pkg.terrain, definition);
+        return {
+          definition: { ...definition, terrainModel: model },
+          notice: `This scenario was planned on an earlier model of the ground. The terrain now has its roads and building foundations graded into it (cuttings, embankments and level pads), which can change slopes, cover and sight lines. ${
+            problems.length > 0
+              ? 'Some of its positions are no longer valid: check the ORP and the OPFOR route.'
+              : 'Check the ORP and the OPFOR route.'
+          }`,
+        };
+      }
+      return { definition, notice: null };
     } catch (error) {
       return {
         definition: defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false }),
@@ -97,13 +113,16 @@ async function loadScenario(
 }
 
 /**
- * A saved battlefield, with its terrain shared (`shareTerrain`): everything
- * on the page (scenario edits, previews, the exercise) then uses one frozen
- * terrain, so its navigation grid and other per-terrain data are built once.
+ * A saved battlefield with its authoritative terrain: the stored source
+ * terrain graded (roads and building foundations built in, docs/adr/0032),
+ * then shared (`shareTerrain`): everything on the page (scenario edits,
+ * previews, the exercise, the 2D and 3D views) then uses one frozen terrain,
+ * so its navigation grid and other per-terrain data are built once. The
+ * stored package keeps the source terrain.
  */
 async function openBattlefield(store: BattlefieldStore, id: string): Promise<BattlefieldPackage> {
   const pkg = await store.get(id);
-  return { ...pkg, terrain: shareTerrain(pkg.terrain) };
+  return { ...pkg, terrain: shareTerrain(await authoritativeTerrain(pkg.id, pkg.terrain)) };
 }
 
 /** What the terrain-selection preview shows of a battlefield and its scenario. */

@@ -1,6 +1,7 @@
 import type { Vec2, Vec3 } from './geometry';
 import { queryFeatures, type PreparedBuilding, type PreparedVegetation } from './los';
 import type { TerrainDataset } from './terrain';
+import { isRefinedAt, refinementIndex, sampleSurface } from './terrain-surface';
 
 // A fast sight-line tracer for viewsheds (docs/adr/0020). It decides exactly
 // what `traceSightLine` decides (obstructed or not) for every sight line: every
@@ -29,6 +30,9 @@ const INDEX_MARGIN_M = 1;
 /** Widening of feature boxes, in metres, and of their parameter ranges along a line. */
 const BOX_EPSILON_M = 1e-6;
 const T_EPSILON = 1e-9;
+/** `nextCut` sources besides the terrain sequences. */
+const END = -1;
+const PENDING = -2;
 /** Polygons with more vertices than this get a band index and a raster for point-in-polygon tests. */
 const BANDED_MIN_VERTICES = 12;
 /** Raster cell size, and how far every edge must stay from a cell for the raster to answer, in metres. */
@@ -303,6 +307,15 @@ interface Feature {
 function createTracer(terrain: TerrainDataset): SightLineTracer {
   const { originX, originY, cellSize, columns, rows } = terrain.heightfield;
   const elevations = Float64Array.from(terrain.heightfield.elevations);
+  // Refined cells (docs/adr/0032): their fine lines are cuts too, and the
+  // ground there is the fine surface.
+  const refinementSource = refinementIndex(terrain);
+  const refinement = refinementSource
+    ? { ...refinementSource, samples: Float64Array.from(refinementSource.samples) }
+    : null;
+  const fineFactor = refinement?.factor ?? 1;
+  /** Terrain cut sequences: coarse x, y, diagonal, then the fine ones where refined. */
+  const sequenceCount = refinement ? 6 : 3;
   const maxX = originX + (columns - 1) * cellSize;
   const maxY = originY + (rows - 1) * cellSize;
   const { buildings, vegetation } = queryFeatures(terrain);
@@ -408,12 +421,12 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   let head = 0;
   let tail = 0;
   // Terrain cut sequences: v0, v1, next k, last k, step, current t.
-  const v0s = new Float64Array(3);
-  const v1s = new Float64Array(3);
-  const kNext = new Float64Array(3);
-  const kLast = new Float64Array(3);
-  const kStep = new Float64Array(3);
-  const seqT = new Float64Array(3);
+  const v0s = new Float64Array(6);
+  const v1s = new Float64Array(6);
+  const kNext = new Float64Array(6);
+  const kLast = new Float64Array(6);
+  const kStep = new Float64Array(6);
+  const seqT = new Float64Array(6);
   // Bucket walk.
   let bc = 0;
   let br = 0;
@@ -435,23 +448,12 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   const inBuildings: PreparedBuilding[] = [];
   const inVegetation: PreparedVegetation[] = [];
 
-  // Exactly `heightAt`, on the copied elevations.
+  // Exactly `heightAt` (the same function), on the copied samples.
   const ground = (x: number, y: number): number => {
     if (!(x >= originX && x <= maxX && y >= originY && y <= maxY)) {
       throw new RangeError(`(${String(x)}, ${String(y)}) is outside the terrain`);
     }
-    const gx = (x - originX) / cellSize;
-    const gy = (y - originY) / cellSize;
-    const c = Math.min(Math.floor(gx), columns - 2);
-    const r = Math.min(Math.floor(gy), rows - 2);
-    const u = gx - c;
-    const v = gy - r;
-    const i = r * columns + c;
-    const sw = elevations[i] ?? Number.NaN;
-    const se = elevations[i + 1] ?? Number.NaN;
-    const nw = elevations[i + columns] ?? Number.NaN;
-    const ne = elevations[i + columns + 1] ?? Number.NaN;
-    return u >= v ? sw + u * (se - sw) + v * (ne - se) : sw + v * (nw - sw) + u * (ne - nw);
+    return sampleSurface(terrain.heightfield, elevations, refinement, x, y);
   };
 
   const pushPending = (t: number) => {
@@ -598,8 +600,18 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
         return;
       }
       kNext[s] = k + step;
+      // Fine sequences: not the coarse lines, and only inside refined cells
+      // (the reference's test, on the same point).
+      if (s >= 3 && k % fineFactor === 0) continue;
       const t = (k - v0) / (v1 - v0);
       if (t > tMin && t < 1) {
+        if (
+          s >= 3 &&
+          refinement &&
+          !isRefinedAt(terrain.heightfield, refinement, ax + t * dx, ay + t * dy)
+        ) {
+          continue;
+        }
         seqT[s] = t;
         return;
       }
@@ -610,8 +622,9 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   const nextCut = (): number => {
     for (;;) {
       let t = endTaken ? Infinity : 1;
-      let source = 3; // 0–2 terrain sequences, 3 the end, 4 pending feature cuts
-      for (let s = 0; s < 3; s += 1) {
+      // 0–5 terrain sequences, END the end, PENDING the pending feature cuts.
+      let source = END;
+      for (let s = 0; s < sequenceCount; s += 1) {
         const v = seqT[s] ?? Infinity;
         if (v < t) {
           t = v;
@@ -622,7 +635,7 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
         const p = pending[head] ?? Infinity;
         if (p <= t) {
           t = p;
-          source = 4;
+          source = PENDING;
         }
       }
       // Feature cuts at or before t may still be unknown: load buckets first.
@@ -630,8 +643,8 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
         loadBucket();
         continue;
       }
-      if (source === 4) head += 1;
-      else if (source === 3) endTaken = true;
+      if (source === PENDING) head += 1;
+      else if (source === END) endTaken = true;
       else advance(source);
       return t;
     }
@@ -756,7 +769,13 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     v1s[1] = gy1;
     v0s[2] = gx0 - gy0;
     v1s[2] = gx1 - gy1;
-    for (let s = 0; s < 3; s += 1) {
+    v0s[3] = gx0 * fineFactor;
+    v1s[3] = gx1 * fineFactor;
+    v0s[4] = gy0 * fineFactor;
+    v1s[4] = gy1 * fineFactor;
+    v0s[5] = (gx0 - gy0) * fineFactor;
+    v1s[5] = (gx1 - gy1) * fineFactor;
+    for (let s = 0; s < sequenceCount; s += 1) {
       const v0 = v0s[s] ?? 0;
       const v1 = v1s[s] ?? 0;
       seqT[s] = Infinity;

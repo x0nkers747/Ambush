@@ -114,6 +114,28 @@ export {
   type ScenarioUnit,
 } from './scenario';
 export { createSimulation, type SimSnapshot, type Simulation } from './simulation';
+export {
+  BUILDING_APRON_M,
+  CUT_SLOPE,
+  FILL_SLOPE,
+  FINE_SPACING_M,
+  GRADING_VERSION,
+  gradeTerrain,
+  gradeWithSummary,
+  MAX_CENTRE_DEPTH_M,
+  MIN_CHANGE_M,
+  ROAD_GRADING,
+  terrainModelId,
+  type GradingSummary,
+} from './grading';
+export {
+  isRefinedAt,
+  refinementIndex,
+  surfaceMesh,
+  surfaceSampler,
+  type RefinementIndex,
+  type SurfaceMesh,
+} from './terrain-surface';
 export { isSharedTerrain, shareTerrain } from './shared-terrain';
 export {
   isOnPolygonBoundary,
@@ -169,6 +191,8 @@ export {
   type GeoReference,
   type Heightfield,
   type TerrainDataset,
+  type TerrainGrading,
+  type TerrainRefinement,
   type TerrainMetadata,
 } from './terrain';
 export type { CombatSetup, MovementParams, SimWorld } from './world';

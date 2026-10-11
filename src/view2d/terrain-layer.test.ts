@@ -3,8 +3,10 @@ import { DEMO_SCENARIO } from '#exercise';
 import {
   createSyntheticTerrain,
   flatElevation,
+  gradeTerrain,
   heightAt,
   isOnTerrain,
+  rectangle,
   ridgeElevation,
   slopeElevation,
   terrainTriangleIndices,
@@ -13,6 +15,7 @@ import {
 import {
   contourIntervals,
   contourLines,
+  elevationAt,
   elevationRange,
   placeSpotHeights,
   spotHeightLabel,
@@ -296,5 +299,56 @@ describe('placeSpotHeights', () => {
   it('labels heights in whole metres', () => {
     expect(spotHeightLabel(spot(0, 5, 64.6))).toBe('65');
     expect(spotHeightLabel(spot(0, 5, -3.2))).toBe('-3');
+  });
+});
+
+describe('the 2D map on graded terrain (docs/adr/0032)', () => {
+  // A road cut through a ridge and a building pad on a slope.
+  const source = createSyntheticTerrain(
+    { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
+    (x, y) => 100 + 0.04 * x + 6 * Math.exp(-(((y - 60) / 8) ** 2)),
+    {
+      roads: [
+        {
+          id: 'cut',
+          roadClass: 'paved',
+          widthMeters: 6,
+          centerline: [
+            { x: -100, y: -180 },
+            { x: -100, y: 180 },
+          ],
+        },
+      ],
+      buildings: [{ id: 'pad', footprint: rectangle(100, -50, 18, 12, 15), heightMeters: 6 }],
+      vegetation: [],
+    },
+  );
+  const graded = gradeTerrain(source);
+
+  it('traces contours on the graded ground, cuttings and pads included', () => {
+    const levels = contourLines(graded, 1);
+    let points = 0;
+    let changed = 0;
+    for (const { level, segments } of levels) {
+      for (let i = 0; i < segments.length; i += 2) {
+        const x = segments[i] ?? 0;
+        const y = segments[i + 1] ?? 0;
+        points += 1;
+        // On the graded surface, to the centimetre…
+        expect(Math.abs(heightAt(graded, x, y) - level)).toBeLessThan(0.01);
+        // …and where grading changed the ground, not on the source's contour.
+        if (Math.abs(heightAt(source, x, y) - level) > 0.5) changed += 1;
+      }
+    }
+    expect(points).toBeGreaterThan(1000);
+    expect(changed).toBeGreaterThan(20);
+    // The cutting's floor is lower than any source ground there: it is in the range.
+    expect(elevationRange(graded).min).toBeLessThanOrEqual(elevationRange(source).min + 1e-9);
+  });
+
+  it("reads the pointer's elevation from the graded ground", () => {
+    expect(elevationAt(graded, -100, 60)).toBe(heightAt(graded, -100, 60));
+    expect(elevationAt(graded, -100, 60)).not.toBe(heightAt(source, -100, 60));
+    expect(elevationAt(graded, 500, 0)).toBeNull();
   });
 });

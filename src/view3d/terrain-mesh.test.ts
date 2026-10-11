@@ -29,19 +29,49 @@ function roughTerrain(): TerrainDataset {
   );
 }
 
+/** Triangles of a mesh bucketed by 5 m squares (battlefield axes), built once per mesh. */
+const buckets = new WeakMap<TerrainMeshData, Map<string, number[]>>();
+function triangleBuckets(mesh: TerrainMeshData): Map<string, number[]> {
+  let map = buckets.get(mesh);
+  if (map) return map;
+  map = new Map();
+  const p = mesh.positions;
+  for (let t = 0; t < mesh.triangleCount; t += 1) {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let k = 0; k < 3; k += 1) {
+      const i = mesh.indices[t * 3 + k] ?? 0;
+      xs.push(p[i * 3] ?? 0);
+      ys.push(-(p[i * 3 + 2] ?? 0));
+    }
+    for (let bx = Math.floor(Math.min(...xs) / 5); bx <= Math.floor(Math.max(...xs) / 5); bx += 1) {
+      for (
+        let by = Math.floor(Math.min(...ys) / 5);
+        by <= Math.floor(Math.max(...ys) / 5);
+        by += 1
+      ) {
+        const key = `${String(bx)},${String(by)}`;
+        const list = map.get(key) ?? [];
+        list.push(t);
+        map.set(key, list);
+      }
+    }
+  }
+  buckets.set(mesh, map);
+  return map;
+}
+
 /**
  * The mesh's own height at (x, y): find the triangle of the index buffer that
  * contains the point and interpolate linearly from its float32 vertices, as
  * the GPU does. Independent of `heightAt`'s code.
  */
-function meshHeight(mesh: TerrainMeshData, terrain: TerrainDataset, x: number, y: number): number {
-  const { originX, originY, cellSize, columns, rows } = terrain.heightfield;
-  const c = Math.min(Math.floor((x - originX) / cellSize), columns - 2);
-  const r = Math.min(Math.floor((y - originY) / cellSize), rows - 2);
-  const cell = r * (columns - 1) + c;
+function meshHeight(mesh: TerrainMeshData, _terrain: TerrainDataset, x: number, y: number): number {
   const p = mesh.positions;
   let best: { h: number; inside: number } | null = null;
-  for (const t of [cell * 2, cell * 2 + 1]) {
+  const candidates =
+    triangleBuckets(mesh).get(`${String(Math.floor(x / 5))},${String(Math.floor(y / 5))}`) ?? [];
+  for (const t of candidates) {
     const v = [0, 1, 2].map((k) => mesh.indices[t * 3 + k] ?? 0);
     // Three.js (X, Y, Z) back to battlefield (x, y, z).
     const pts = v.map((i) =>
@@ -286,8 +316,9 @@ describe('the surroundings', () => {
     for (let i = 0; i < mesh.vertexCount; i += 1)
       vertices.add([0, 1, 2].map((k) => mesh.positions[i * 3 + k]).join(','));
     const count = skirt.positions.length / 3;
-    // Two vertices per boundary sample, on four sides (corners on two).
-    expect(count).toBe(2 * (2 * 11 + 2 * 7));
+    // A wall quad (top and foot at each end) per edge segment of the outline.
+    const segments = 2 * 10 + 2 * 6;
+    expect(count).toBe(4 * segments);
     for (let i = 0; i < count; i += 2) {
       const top = [0, 1, 2].map((k) => skirt.positions[i * 3 + k]).join(',');
       expect(vertices.has(top)).toBe(true);

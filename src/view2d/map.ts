@@ -1,6 +1,6 @@
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
-import { heightAt, isOnTerrain, type Vec2 } from '#sim';
+import type { Vec2 } from '#sim';
 import {
   fitBounds,
   type Bounds,
@@ -23,6 +23,7 @@ import {
   drawVisibility,
   hasVisibilityOverlay,
 } from './render';
+import { elevationAt } from './terrain-layer';
 import { buildScene, type MapScene, type VisibilityView } from './scene';
 import { createTeamVisibility } from './group-viewshed';
 import { createViewshedService } from './viewshed-service';
@@ -279,9 +280,8 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
       return;
     }
     const { x, y } = screenToWorld(camera, viewport, screen);
-    pointer = isOnTerrain(world.terrain, x, y)
-      ? { east: x, north: y, elevation: heightAt(world.terrain, x, y) }
-      : null;
+    const elevation = elevationAt(world.terrain, x, y);
+    pointer = elevation === null ? null : { east: x, north: y, elevation };
   };
 
   const toWorld = (screen: Vec2) => screenToWorld(camera, viewport, screen);

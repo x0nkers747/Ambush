@@ -1,3 +1,4 @@
+import { heightAt, isOnTerrain, type TerrainDataset } from '#sim';
 import type { ThreePoint } from './axes';
 
 // The tactical camera's geometry (docs/adr/0029), in Three.js axes (x east,
@@ -6,6 +7,15 @@ import type { ThreePoint } from './axes';
 
 /** Ground elevation at a Three.js (x, z), or `null` off the battlefield. */
 export type GroundAt = (x: number, z: number) => number | null;
+
+/**
+ * The 3D view's ground query (Three.js axes): the terrain's `heightAt`, the
+ * same ground the simulation and the 2D map use (docs/adr/0032), or null off
+ * the battlefield.
+ */
+export function terrainGround(terrain: TerrainDataset): GroundAt {
+  return (x, z) => (isOnTerrain(terrain, x, -z) ? heightAt(terrain, x, -z) : null);
+}
 
 export interface BattlefieldExtent {
   readonly minX: number;

@@ -1,4 +1,4 @@
-import { terrainTriangleIndices, type TerrainDataset } from '#sim';
+import { heightAt, isOnTerrain, surfaceMesh, type TerrainDataset } from '#sim';
 
 // Terrain imagery for the tactical map, computed once per terrain. Pure
 // functions over the heightfield; the renderer turns them into canvas objects.
@@ -123,19 +123,22 @@ export interface ContourLevel {
 }
 
 /**
- * Contour lines every `interval` metres, traced on the terrain triangles
- * (`terrainTriangleIndices`) so they match the simulated surface exactly.
+ * Contour lines every `interval` metres, traced on the terrain surface's own
+ * triangles (`surfaceMesh`: the heightfield's cells and, where the terrain is
+ * refined, the fine cells, docs/adr/0032), so they match the simulated
+ * surface exactly, graded roads and building pads included.
  *
  * One pass over the triangles: each is visited only for the levels between
  * its lowest and highest corner (the only ones that can cross it), and each
  * level's segments come out in triangle order, as a pass per level gave them.
  */
 export function contourLines(terrain: TerrainDataset, interval: number): ContourLevel[] {
-  const { originX, originY, cellSize, columns, elevations } = terrain.heightfield;
-  const triangles = terrainTriangleIndices(terrain);
-  const x = (i: number) => originX + (i % columns) * cellSize;
-  const y = (i: number) => originY + Math.floor(i / columns) * cellSize;
-  const z = (i: number) => elevations[i] ?? 0;
+  const surface = surfaceMesh(terrain);
+  const triangles = surface.indices;
+  const p = surface.positions;
+  const x = (i: number) => p[i * 3] ?? 0;
+  const y = (i: number) => p[i * 3 + 1] ?? 0;
+  const z = (i: number) => p[i * 3 + 2] ?? 0;
 
   const { min, max } = elevationRange(terrain);
   const first = Math.ceil(min / interval);
@@ -182,6 +185,11 @@ export function elevationRange(terrain: TerrainDataset): { min: number; max: num
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (const e of terrain.heightfield.elevations) {
+    min = Math.min(min, e);
+    max = Math.max(max, e);
+  }
+  // Refined samples too (docs/adr/0032): a cutting can be the lowest ground.
+  for (const e of terrain.refinement?.samples ?? []) {
     min = Math.min(min, e);
     max = Math.max(max, e);
   }
@@ -378,4 +386,13 @@ export function placeSpotHeights(
     placed.push(box);
   }
   return placed.map((p) => p.s);
+}
+
+/**
+ * The 2D map's elevation at a map point (the pointer readout): the terrain's
+ * `heightAt`, the same ground the simulation and the 3D view use
+ * (docs/adr/0032), or null off the battlefield.
+ */
+export function elevationAt(terrain: TerrainDataset, x: number, y: number): number | null {
+  return isOnTerrain(terrain, x, y) ? heightAt(terrain, x, y) : null;
 }
