@@ -317,7 +317,8 @@ describe('plantModels', () => {
 
   it('builds every plant at its exact height and crown radius, at every level', () => {
     expect(models.map((m) => m.spec)).toEqual(PLANTS);
-    for (const m of models) {
+    // (Props, docs/adr/0036, are checked below: their far levels drop details.)
+    for (const m of models.filter((x) => x.spec.kind !== 'prop')) {
       expect(m.lods).toHaveLength(LOD_LEVELS);
       for (const lod of m.lods) {
         let top = -Infinity;
@@ -338,6 +339,32 @@ describe('plantModels', () => {
       expect(near.triangleCount).toBeGreaterThan(medium.triangleCount);
       expect(medium.triangleCount).toBeGreaterThan(far.triangleCount);
       expect(near.triangleCount).toBeLessThan(500);
+    }
+  });
+
+  it('builds every prop at its height and reach, simpler with distance', () => {
+    const props = models.filter((x) => x.spec.kind === 'prop');
+    expect(props.length).toBe(PLANTS_BY_KIND.prop.length);
+    for (const m of props) {
+      expect(m.lods).toHaveLength(LOD_LEVELS);
+      const [near, medium, far] = m.lods;
+      let top = -Infinity;
+      let wide = 0;
+      let bottom = Infinity;
+      for (let i = 0; i < near.positions.length; i += 3) {
+        top = Math.max(top, near.positions[i + 1] ?? 0);
+        bottom = Math.min(bottom, near.positions[i + 1] ?? 0);
+        wide = Math.max(wide, Math.hypot(near.positions[i] ?? 0, near.positions[i + 2] ?? 0));
+      }
+      expect(top).toBeCloseTo(m.spec.height, 4);
+      expect(wide).toBeCloseTo(m.spec.crown, 4);
+      // Posts and footings reach below the ground, for slopes.
+      expect(bottom).toBeLessThan(-0.15);
+      for (const lod of m.lods) expect(lod.colors?.length).toBe(lod.positions.length);
+      expect(near.triangleCount).toBeGreaterThanOrEqual(medium.triangleCount);
+      expect(medium.triangleCount).toBeGreaterThanOrEqual(far.triangleCount);
+      expect(near.triangleCount).toBeGreaterThan(far.triangleCount);
+      expect(near.triangleCount).toBeLessThan(600);
     }
   });
 

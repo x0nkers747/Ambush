@@ -1,5 +1,5 @@
 import type { TerrainDataset } from '#sim';
-import { buildFeatureGeometry, featureBuffers, type FeatureGeometry } from './geo-features';
+import { buildFeatures, featureBuffers, type FeatureGeometry } from './geo-features';
 import {
   placeVegetation,
   type PlacementStats,
@@ -31,11 +31,12 @@ export function generateBattlefield(
 ): GeneratedBattlefield {
   progress('features');
   let t = performance.now();
-  const features = buildFeatureGeometry(terrain);
+  const { geometry: features, decorInstances } = buildFeatures(terrain);
   const featureMs = performance.now() - t;
   progress('vegetation');
   t = performance.now();
-  const vegetation = placeVegetation(terrain);
+  // The roadside trees and props (docs/adr/0036) are drawn with the vegetation.
+  const vegetation = placeVegetation(terrain, { extra: decorInstances });
   return { features, vegetation, ms: { features: featureMs, vegetation: performance.now() - t } };
 }
 

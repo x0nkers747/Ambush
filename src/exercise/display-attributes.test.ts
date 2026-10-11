@@ -13,16 +13,32 @@ import {
 } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
 
-// Building and road attributes kept for display (docs/adr/0035) must never
-// reach the simulation: the same battlefield with and without them grades
-// identically, has the same roofs for line of sight, gives the same sight
-// lines, and runs to the same state, events and hash.
+// Building and road attributes kept for display (docs/adr/0035), and mapped
+// roadside details (docs/adr/0036), must never reach the simulation: the same
+// battlefield with and without them grades identically, has the same roofs
+// for line of sight, gives the same sight lines, and runs to the same state,
+// events and hash.
 
 /** The demo battlefield with every display attribute set, some contradicting the simulated values. */
 function decorated(terrain: TerrainDataset): TerrainDataset {
   return {
     ...terrain,
     metadata: { ...terrain.metadata, architecture: 'central-european' },
+    // Roadside details (docs/adr/0036), some placed across roads and buildings.
+    decor: {
+      points: terrain.features.buildings.slice(0, 5).flatMap((b, i) => {
+        const p = b.footprint[0] ?? { x: 0, y: 0 };
+        return [
+          { id: `lamp${String(i)}`, kind: 'streetLamp' as const, position: p },
+          { id: `tree${String(i)}`, kind: 'tree' as const, position: { x: p.x + 3, y: p.y + 3 } },
+        ];
+      }),
+      lines: terrain.features.roads.slice(0, 3).map((r, i) => ({
+        id: `fence${String(i)}`,
+        kind: 'fence' as const,
+        points: r.centerline,
+      })),
+    },
     features: {
       ...terrain.features,
       buildings: terrain.features.buildings.map((b, i) => ({

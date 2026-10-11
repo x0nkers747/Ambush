@@ -115,7 +115,8 @@ export function selectVegetation(
         const band = lodBand(d, s, scale);
         if (band < 0) continue;
         let widen = 1;
-        if (band === LOD_LEVELS - 1) {
+        // Thinned props keep their size: a wider lamp post would look wrong.
+        if (band === LOD_LEVELS - 1 && PLANTS[p]?.kind !== 'prop') {
           const keep = keepFraction(d, s, scale);
           if (rank >= keep) continue;
           widen = Math.min(MAX_WIDEN, 1 / Math.sqrt(keep));

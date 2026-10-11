@@ -1,4 +1,4 @@
-import { validateFeatures, type EnvironmentFeatures } from './environment';
+import { validateFeatures, type DecorFeatures, type EnvironmentFeatures } from './environment';
 import type { TerrainCleaning } from './dem-quality';
 import { refinementIndex, sampleSurface } from './terrain-surface';
 
@@ -102,6 +102,8 @@ export interface TerrainDataset {
   readonly heightfield: Heightfield;
   readonly features: EnvironmentFeatures;
   readonly metadata?: TerrainMetadata;
+  /** Mapped roadside details, display only (docs/adr/0036); absent on older terrain. */
+  readonly decor?: DecorFeatures;
   /** Finer samples in some cells; part of the surface (docs/adr/0032). */
   readonly refinement?: TerrainRefinement;
   /** Present on a cleaned terrain: the DEM after quality repair (docs/adr/0033). */
@@ -143,6 +145,11 @@ export function validateTerrain(terrain: TerrainDataset): void {
   if (!elevations.every(Number.isFinite)) throw new RangeError('terrain elevations must be finite');
   if (terrain.refinement) validateRefinement(terrain);
   validateFeatures(terrain.features, ({ x, y }) => isOnTerrain(terrain, x, y));
+  // Stored data: checked whatever its static type says.
+  const decor: { readonly points?: unknown; readonly lines?: unknown } | undefined = terrain.decor;
+  if (decor !== undefined && (!Array.isArray(decor.points) || !Array.isArray(decor.lines))) {
+    throw new RangeError('terrain decor needs point and line lists');
+  }
 }
 
 /** Whether (x, y) lies on the terrain, boundaries included. */

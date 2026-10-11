@@ -183,6 +183,53 @@ export interface LandUseArea {
   readonly source?: FeatureSource;
 }
 
+/**
+ * Mapped roadside and settlement details (docs/adr/0036): street lamps,
+ * single trees, power poles and lines, fences and walls, signs and street
+ * furniture. Display only: the simulation never reads them (they are not
+ * obstacles, cover or concealment), and a terrain without them is complete.
+ */
+export interface DecorFeatures {
+  readonly points: readonly DecorPoint[];
+  readonly lines: readonly DecorLine[];
+}
+
+export type DecorPointKind =
+  | 'streetLamp'
+  | 'tree'
+  | 'powerPole'
+  | 'powerTower'
+  | 'trafficSign'
+  | 'bollard'
+  | 'bench'
+  | 'wasteBasket'
+  | 'postBox';
+
+export interface DecorPoint {
+  readonly id: string;
+  readonly kind: DecorPointKind;
+  readonly position: Vec2;
+  /** Trees: OSM `leaf_type`. */
+  readonly leafType?: 'broadleaved' | 'needleleaved';
+  /** Tagged height, metres (trees, poles). */
+  readonly heightMeters?: number;
+  /** Signs: the sign's class, from `traffic_sign` or `highway=stop|give_way` (e.g. "stop"). */
+  readonly sign?: string;
+}
+
+export type DecorLineKind = 'powerLine' | 'minorLine' | 'fence' | 'wall' | 'guardRail';
+
+export interface DecorLine {
+  readonly id: string;
+  readonly kind: DecorLineKind;
+  /** At least two points. */
+  readonly points: readonly Vec2[];
+  /** Fences and walls: `fence_type` or `material` (e.g. "chain_link", "wood", "stone"). */
+  readonly material?: string;
+  /** Tagged height, metres. */
+  readonly heightMeters?: number;
+}
+
 export interface EnvironmentFeatures {
   readonly roads: readonly Road[];
   readonly buildings: readonly Building[];

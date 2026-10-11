@@ -20,7 +20,7 @@ describe('OSM import of recorded real-world data', () => {
     ['Quantico, Virginia', quantico as OverpassResponse, QUANTICO],
     ['Grafenwöhr, Germany', grafenwoehr as OverpassResponse, GRAFENWOEHR],
   ])('produces valid features for %s, all inside the battlefield', (_name, data, frame) => {
-    const { features, report } = featuresFromOsm(data, frame);
+    const { features, decor, report } = featuresFromOsm(data, frame);
     expect(() => {
       validateFeatures(features, onMap);
     }).not.toThrow();
@@ -31,7 +31,7 @@ describe('OSM import of recorded real-world data', () => {
     // Every element of the real data was usable.
     expect(report.dropped).toEqual([]);
     // Deterministic: the same input gives the same output.
-    expect(featuresFromOsm(data, frame)).toEqual({ features, report });
+    expect(featuresFromOsm(data, frame)).toEqual({ features, decor, report });
   });
 
   it('finds the Potomac, woods and a stream at Quantico', () => {

@@ -1,4 +1,5 @@
 import {
+  type DecorFeatures,
   isSimplePolygon,
   pointInPolygon,
   polygonArea,
@@ -18,6 +19,7 @@ import {
 import { buildingAppearance, osmBuildingAttributes } from './building-tags';
 import { clipPolygon, clipPolyline, dedupe, type Rect } from './clip';
 import { joinCoastlines, seaFromCoastlines } from './coastline';
+import { decorFromOsm, decorStatements } from './decor';
 import { toLocal, type BattlefieldFrame, type GeoBox } from './frame';
 import type { LatLon } from './utm';
 
@@ -36,7 +38,13 @@ export interface OverpassResponse {
 }
 
 export type OsmElement =
-  | { readonly type: 'node'; readonly id: number; readonly tags?: Tags }
+  | {
+      readonly type: 'node';
+      readonly id: number;
+      readonly lat?: number;
+      readonly lon?: number;
+      readonly tags?: Tags;
+    }
   | {
       readonly type: 'way';
       readonly id: number;
@@ -61,11 +69,16 @@ type Tags = Readonly<Record<string, string>>;
  * The Overpass QL query for a battlefield: every way or multipolygon the
  * importer uses, with full geometry, within the given boxes (two when the
  * battlefield crosses ±180°). Without buildings when they come from
- * elsewhere (Overture Maps, docs/adr/0023).
+ * elsewhere (Overture Maps, docs/adr/0023). With the roadside details
+ * (lamps, trees, power, fences, signs: docs/adr/0036) unless `decor` is false.
  */
 export function overpassQuery(
   boxes: readonly GeoBox[],
-  { timeoutSeconds = 90, buildings = true }: { timeoutSeconds?: number; buildings?: boolean } = {},
+  {
+    timeoutSeconds = 90,
+    buildings = true,
+    decor = true,
+  }: { timeoutSeconds?: number; buildings?: boolean; decor?: boolean } = {},
 ): string {
   const parts = boxes.map((b) => {
     const bbox = [b.south, b.west, b.north, b.east].map((v) => v.toFixed(6)).join(',');
@@ -84,6 +97,7 @@ export function overpassQuery(
       `way["barrier"="hedge"](${bbox});`,
       // The sea is not mapped as areas, only its shore (coastline.ts).
       `way["natural"="coastline"](${bbox});`,
+      ...(decor ? decorStatements(bbox) : []),
     ].join('\n  ');
   });
   return `[out:json][timeout:${String(timeoutSeconds)}];\n(\n  ${parts.join('\n  ')}\n);\nout geom;`;
@@ -101,6 +115,8 @@ export interface OsmImportReport {
   /** Notes about approximations, e.g. holes ignored at the battlefield edge. */
   readonly warnings: readonly string[];
   readonly timestampOsmBase: string | null;
+  /** Roadside details found (docs/adr/0036), by kind. */
+  readonly decor: Readonly<Record<string, number>>;
 }
 
 // --- Tag mapping (data, versioned with the importer) -------------------------
@@ -301,7 +317,11 @@ export function featuresFromOsm(
   response: OverpassResponse,
   frame: BattlefieldFrame,
   { buildings: withBuildings = true }: { buildings?: boolean } = {},
-): { features: Required<EnvironmentFeatures>; report: OsmImportReport } {
+): {
+  features: Required<EnvironmentFeatures>;
+  decor: DecorFeatures;
+  report: OsmImportReport;
+} {
   const rect: Rect = {
     minX: -frame.widthM / 2,
     minY: -frame.heightM / 2,
@@ -610,8 +630,18 @@ export function featuresFromOsm(
   if (courtyards > 0) {
     warnings.push(`${String(courtyards)} building courtyard(s) are drawn as part of the building`);
   }
+  // Roadside details (display only).
+  const details = decorFromOsm(elements, frame, rect);
+  if (details.dropped > 0) {
+    warnings.push(`${String(details.dropped)} roadside detail(s) had no usable position`);
+  }
+  const decorCounts: Record<string, number> = {};
+  for (const f of [...details.decor.points, ...details.decor.lines]) {
+    decorCounts[f.kind] = (decorCounts[f.kind] ?? 0) + 1;
+  }
   return {
     features: { roads, buildings, vegetation, water, waterways, landUse },
+    decor: details.decor,
     report: {
       elements: response.elements.length,
       counts: {
@@ -625,6 +655,7 @@ export function featuresFromOsm(
       dropped,
       warnings,
       timestampOsmBase: response.osm3s?.timestamp_osm_base ?? null,
+      decor: decorCounts,
     },
   };
 }

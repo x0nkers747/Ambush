@@ -81,6 +81,11 @@ export {
   type WaterArea,
   type Waterway,
   type WaterwayKind,
+  type DecorFeatures,
+  type DecorLine,
+  type DecorLineKind,
+  type DecorPoint,
+  type DecorPointKind,
 } from './environment';
 export { fingerprintPlainData, fingerprintWorld, hashSimState } from './hash';
 export { clonePlainData } from './plain-data';

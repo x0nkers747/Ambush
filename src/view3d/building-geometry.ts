@@ -133,6 +133,8 @@ export interface BuildingGeometry {
   readonly buried: number;
   readonly entrances: readonly BuildingEntrance[];
   readonly stats: BuildingStats;
+  /** Each building's shape and style (for the roadside details, docs/adr/0036). */
+  readonly designs: ReadonlyMap<string, BuildingDesign>;
 }
 
 const linear = (srgb: number, shade = 1): Rgb => [
@@ -238,6 +240,7 @@ export function buildingGeometry(terrain: TerrainDataset): BuildingGeometry {
     count,
     buried,
     entrances,
+    designs,
     stats: {
       roofs: roofCounts,
       shapes: shapeCounts,

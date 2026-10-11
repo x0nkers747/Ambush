@@ -35,7 +35,11 @@ hip, shed and flat roofs on rectangles and L/T plans, textured walls and roofs a
 windows, and doors facing the nearest road, styled for the battlefield's region (North American
 or central European) from the source's building tags where it has them. They are display only:
 the simulated building heights, line of sight, grading and movement are unchanged
-([ADR 0035](docs/adr/0035-procedural-buildings.md)).
+([ADR 0035](docs/adr/0035-procedural-buildings.md)). Around them the 3D view draws paths and
+driveways to front doors, street lamps in built-up streets, utility poles and wires, fences, walls
+and front-garden hedges, roadside and garden trees, and a few signs and mailboxes: mapped
+OpenStreetMap details where they exist, inferred from context elsewhere, all decorative and never
+part of the simulation ([ADR 0036](docs/adr/0036-procedural-environmental-detail.md)).
 
 ## Requirements
 

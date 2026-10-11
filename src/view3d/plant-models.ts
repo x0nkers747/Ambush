@@ -1,4 +1,5 @@
 import type { MeshData } from './drape';
+import { meshExtent, propLods, type PropName } from './prop-models';
 import { hashInts, unit } from './hash';
 import { srgbToLinear } from './terrain-mesh';
 
@@ -16,7 +17,15 @@ import { srgbToLinear } from './terrain-mesh';
 // Every model is scaled to exactly its reference height and crown radius, at
 // every level of detail, so switching level never changes a tree's size.
 
-export type PlantKind = 'broadleaf' | 'conifer' | 'pine' | 'smallTree' | 'deadTree' | 'shrub';
+export type PlantKind =
+  | 'broadleaf'
+  | 'conifer'
+  | 'pine'
+  | 'smallTree'
+  | 'deadTree'
+  | 'shrub'
+  /** Roadside and settlement details (docs/adr/0036): lamps, poles, fences, signs. */
+  | 'prop';
 
 export interface PlantSpec {
   readonly name: string;
@@ -27,6 +36,8 @@ export interface PlantSpec {
   readonly crown: number;
   /** Distances at which this plant changes level are scaled by this (small plants switch sooner). */
   readonly lodScale: number;
+  /** For props: which model (prop-models.ts). */
+  readonly prop?: PropName;
 }
 
 /** The library, in a fixed order: placement refers to plants by index. */
@@ -40,6 +51,36 @@ export const PLANTS: readonly PlantSpec[] = [
   { name: 'snag', kind: 'deadTree', height: 12, crown: 2.6, lodScale: 0.75 },
   { name: 'bush', kind: 'shrub', height: 2, crown: 1.4, lodScale: 0.5 },
   { name: 'thicket', kind: 'shrub', height: 2.4, crown: 1.9, lodScale: 0.5 },
+  // Props (docs/adr/0036): height and reach are measured from each model's near level.
+  ...(
+    [
+      ['lampResidential', 0.45],
+      ['lampVillage', 0.35],
+      ['lampModern', 0.5],
+      ['lampIndustrial', 0.5],
+      ['poleTimber', 0.6],
+      ['poleConcrete', 0.6],
+      ['pylon', 1.2],
+      ['fenceWood', 0.25],
+      ['fenceChain', 0.25],
+      ['fenceMetal', 0.25],
+      ['wallStone', 0.3],
+      ['wallConcrete', 0.3],
+      ['hedge', 0.3],
+      ['guardRail', 0.25],
+      ['signStop', 0.2],
+      ['signGiveWay', 0.2],
+      ['signGeneric', 0.2],
+      ['mailbox', 0.15],
+      ['bench', 0.15],
+      ['bin', 0.15],
+      ['bollard', 0.15],
+      ['postBox', 0.15],
+    ] as const
+  ).map(([prop, lodScale]): PlantSpec => {
+    const { height, radius } = meshExtent(propLods(prop)[0]);
+    return { name: prop, kind: 'prop', height, crown: radius, lodScale, prop };
+  }),
 ];
 
 /** Indices into `PLANTS` by kind. */
@@ -50,7 +91,15 @@ export const PLANTS_BY_KIND: Readonly<Record<PlantKind, readonly number[]>> = {
   smallTree: [5],
   deadTree: [6],
   shrub: [7, 8],
+  prop: PLANTS.flatMap((p, i) => (p.kind === 'prop' ? [i] : [])),
 };
+
+/** The index of a prop in `PLANTS`. */
+export function propIndex(name: PropName): number {
+  const i = PLANTS.findIndex((p) => p.prop === name);
+  if (i < 0) throw new RangeError(`no prop ${name}`);
+  return i;
+}
 
 export const LOD_LEVELS = 3;
 
@@ -503,6 +552,9 @@ export function plantModels(): PlantModel[] {
         break;
       case 'shrub':
         lods = shrub(spec, seed, color);
+        break;
+      case 'prop':
+        lods = propLods(spec.prop ?? 'bollard');
         break;
     }
     const [near, medium, far] = lods as [MeshData, MeshData, MeshData];

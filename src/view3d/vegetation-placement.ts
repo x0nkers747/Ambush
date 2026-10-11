@@ -60,6 +60,8 @@ export interface VegetationInstances {
 export interface PlacementStats {
   readonly trees: number;
   readonly shrubs: number;
+  /** Roadside and settlement details drawn as instances (docs/adr/0036). */
+  readonly props: number;
   readonly byPlant: readonly number[];
   readonly excluded: Readonly<Record<ExclusionReason, number>>;
   /** Whether `maxInstances` thinned the result. */
@@ -70,10 +72,32 @@ export interface PlacementStats {
 export interface PlacementOptions {
   /** At most this many plants; beyond it the lowest-ranked are dropped. */
   readonly maxInstances?: number;
+  /**
+   * Plants and props placed elsewhere (the roadside details, docs/adr/0036),
+   * drawn with the rest: each at its foot on the ground, as given.
+   */
+  readonly extra?: readonly PlacedInstance[];
+}
+
+/** An instance placed by another generator. */
+export interface PlacedInstance {
+  /** Index into `PLANTS`. */
+  readonly plant: number;
+  readonly x: number;
+  readonly y: number;
+  /** Rotation about the vertical: the model's +x turns to this map direction, radians. */
+  readonly yaw: number;
+  /** Horizontal and vertical scale relative to the model. */
+  readonly scaleW: number;
+  readonly scaleH: number;
+  /** Colour multiplier, linear RGB. */
+  readonly tint: readonly [number, number, number];
+  /** For ranking (distant thinning). */
+  readonly seed: number;
 }
 
 /** Bump when placement changes, e.g. to key a cache. */
-export const PLACEMENT_VERSION = 1;
+export const PLACEMENT_VERSION = 2;
 export const TILE_M = 100;
 export const DEFAULT_MAX_INSTANCES = 500_000;
 
@@ -158,7 +182,7 @@ const byId = (a: VegetationArea, b: VegetationArea) => (a.id < b.id ? -1 : a.id 
 
 export function placeVegetation(
   terrain: TerrainDataset,
-  { maxInstances = DEFAULT_MAX_INSTANCES }: PlacementOptions = {},
+  { maxInstances = DEFAULT_MAX_INSTANCES, extra = [] }: PlacementOptions = {},
 ): { instances: VegetationInstances; stats: PlacementStats } {
   const started = performance.now();
   const { originX, originY, cellSize, columns, rows } = terrain.heightfield;
@@ -413,6 +437,21 @@ export function placeVegetation(
     }
   }
 
+  // Instances placed elsewhere keep their own orientation, size and colour.
+  const fixed = new Map<number, PlacedInstance>();
+  for (const e of extra) {
+    const spec = PLANTS[e.plant];
+    if (!spec) continue;
+    fixed.set(px.length, e);
+    px.push(e.x);
+    py.push(e.y);
+    pr.push(0);
+    plantOf.push(e.plant);
+    heights.push(spec.height * e.scaleH);
+    crowns.push(spec.crown * e.scaleW);
+    seeds.push(e.seed);
+  }
+
   // --- Instances, ordered by plant, tile and rank --------------------------------
   let order = px.map((_, i) => i);
   const rankOf = seeds.map((s) => unit(hashInts(s, 0, 0x77)));
@@ -457,17 +496,18 @@ export function placeVegetation(
     position[k * 3] = x;
     position[k * 3 + 1] = y;
     position[k * 3 + 2] = z;
-    yaw[k] = unit(hashInts(s, 1, 0x78)) * Math.PI * 2;
-    scale[k * 2] = (crowns[i] ?? 1) / (spec?.crown ?? 1);
-    scale[k * 2 + 1] = (heights[i] ?? 1) / (spec?.height ?? 1);
+    const placed = fixed.get(i);
+    yaw[k] = placed ? placed.yaw : unit(hashInts(s, 1, 0x78)) * Math.PI * 2;
+    scale[k * 2] = placed ? placed.scaleW : (crowns[i] ?? 1) / (spec?.crown ?? 1);
+    scale[k * 2 + 1] = placed ? placed.scaleH : (heights[i] ?? 1) / (spec?.height ?? 1);
     // Colour: a little lighter or darker per plant and per stand, a little
     // warmer or cooler.
     const bright =
       (0.88 + 0.22 * unit(hashInts(s, 2, 0x78))) * (1 + 0.07 * valueNoise(x, y, 45, 0x79));
     const warm = (unit(hashInts(s, 3, 0x78)) - 0.5) * 0.12;
-    tint[k * 3] = bright * (1 + warm);
-    tint[k * 3 + 1] = bright;
-    tint[k * 3 + 2] = bright * (1 - warm);
+    tint[k * 3] = placed ? placed.tint[0] : bright * (1 + warm);
+    tint[k * 3 + 1] = placed ? placed.tint[1] : bright;
+    tint[k * 3 + 2] = placed ? placed.tint[2] : bright * (1 - warm);
     rank[k] = key[k]?.rank ?? 0;
     zMin[tile] = Math.min(zMin[tile] ?? z, z - 1);
     zMax[tile] = Math.max(zMax[tile] ?? z, z + (heights[i] ?? 0));
@@ -477,6 +517,7 @@ export function placeVegetation(
   for (let r = 1; r < starts.length; r += 1) starts[r] = (starts[r] ?? 0) + (starts[r - 1] ?? 0);
 
   const shrubCount = PLANTS_BY_KIND.shrub.reduce((s, p) => s + (byPlant[p] ?? 0), 0);
+  const propCount = PLANTS_BY_KIND.prop.reduce((s, p) => s + (byPlant[p] ?? 0), 0);
   return {
     instances: {
       count,
@@ -498,8 +539,9 @@ export function placeVegetation(
       },
     },
     stats: {
-      trees: count - shrubCount,
+      trees: count - shrubCount - propCount,
       shrubs: shrubCount,
+      props: propCount,
       byPlant,
       excluded,
       capped,

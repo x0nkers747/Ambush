@@ -39,7 +39,7 @@ import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './ut
 export const BATTLEFIELD_SCHEMA = 'ambush.battlefield';
 export const BATTLEFIELD_SCHEMA_VERSION = 1;
 /** The importer's own version: tag mapping, defaults and processing rules. */
-export const IMPORTER_VERSION = '1.3.0';
+export const IMPORTER_VERSION = '1.4.0';
 
 /** The only battlefield size offered for now; the format supports others. */
 export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;
@@ -136,6 +136,8 @@ export interface BattlefieldPackage {
   readonly processing: {
     readonly importerVersion: string;
     readonly counts: OsmImportReport['counts'];
+    /** Roadside details by kind (docs/adr/0036); absent before importer 1.4. */
+    readonly decor?: OsmImportReport['decor'];
     readonly dropped: OsmImportReport['dropped'];
     readonly warnings: readonly string[];
   };
@@ -280,6 +282,8 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
       elevationResolutionM: sources.finestResolutionM,
       surfaceModel: sources.surfaceModel,
     },
+    // Display only (docs/adr/0036).
+    ...(osm && osm.decor.points.length + osm.decor.lines.length > 0 ? { decor: osm.decor } : {}),
   };
   try {
     validateTerrain(terrain);
@@ -426,6 +430,7 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
         }),
         buildings: features.buildings.length,
       },
+      decor: osm?.report.decor ?? {},
       dropped: [...(osm?.report.dropped ?? []), ...(ovt?.report.dropped ?? [])],
       warnings,
     },

@@ -2,6 +2,8 @@ import {
   BufferAttribute,
   BufferGeometry,
   Group,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshStandardMaterial,
   NotEqualStencilFunc,
@@ -10,9 +12,13 @@ import {
 import type { TerrainDataset } from '#sim';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
+import { PATH_COLOR, pathGeometry, wirePositions } from './decor-geometry';
+import type { PathStyle } from './decor-paths';
+import { DECOR_VERSION, planDecor, type DecorStats } from './decor-plan';
 import { createDraper, type MeshData } from './drape';
 import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-geometry';
 import type { SurfaceMeshData } from './surface-mesh';
+import type { PlacedInstance } from './vegetation-placement';
 import { waterGeometry } from './water-geometry';
 
 // The battlefield's geographic features (docs/adr/0030): roads, water and
@@ -24,7 +30,9 @@ import { waterGeometry } from './water-geometry';
 // features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 2;
+export const GEOMETRY_VERSION = 3;
+/** The roadside details' own version (docs/adr/0036). */
+export { DECOR_VERSION };
 
 export interface GeoFeatureStats {
   readonly roadTriangles: number;
@@ -37,8 +45,15 @@ export interface GeoFeatureStats {
   readonly buildingDetail: BuildingStats;
   /** Buildings whose uphill corners stand higher than their roof (steep ground). */
   readonly buriedBuildings: number;
+  /** Roadside and settlement details (docs/adr/0036). */
+  readonly decor: DecorStats & { readonly pathTriangles: number; readonly wireSegments: number };
   /** Generation times in milliseconds. */
-  readonly ms: { readonly roads: number; readonly water: number; readonly buildings: number };
+  readonly ms: {
+    readonly roads: number;
+    readonly water: number;
+    readonly buildings: number;
+    readonly decor: number;
+  };
 }
 
 /** The generated feature geometry: plain typed arrays, transferable between threads. */
@@ -49,7 +64,17 @@ export interface FeatureGeometry {
   readonly openings: SurfaceMeshData;
   /** Building entrances (doors and garage doors): display metadata. */
   readonly entrances: readonly BuildingEntrance[];
+  /** Inferred paths and driveways, by style (docs/adr/0036). */
+  readonly paths: readonly (readonly [PathStyle, MeshData])[];
+  /** Overhead wires: line segments in Three.js axes. */
+  readonly wires: Float32Array;
   readonly stats: GeoFeatureStats;
+}
+
+/** Feature geometry, with the roadside details that the vegetation layer draws. */
+export interface BuiltFeatures {
+  readonly geometry: FeatureGeometry;
+  readonly decorInstances: readonly PlacedInstance[];
 }
 
 export interface GeoFeatureLayer {
@@ -62,6 +87,11 @@ export interface GeoFeatureLayer {
 
 /** Runs the feature generators. Pure: no scene, no DOM. */
 export function buildFeatureGeometry(terrain: TerrainDataset): FeatureGeometry {
+  return buildFeatures(terrain).geometry;
+}
+
+/** Runs the feature generators, keeping the roadside instances apart for the vegetation. */
+export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   const draper = createDraper(terrain);
   const clock = () => performance.now();
   let t = clock();
@@ -77,12 +107,19 @@ export function buildFeatureGeometry(terrain: TerrainDataset): FeatureGeometry {
     const data = roads.get(layer);
     return data ? [[layer, data] as const] : [];
   });
-  return {
+  t = clock();
+  const decor = planDecor(terrain, buildings.designs, buildings.entrances);
+  const paths = pathGeometry(decor.paths, draper);
+  const wires = wirePositions(decor.wires);
+  const decorMs = clock() - t;
+  const geometry: FeatureGeometry = {
     roads: roadList,
     water: water.mesh,
     buildings: buildings.surfaces,
     openings: buildings.openings,
     entrances: buildings.entrances,
+    paths,
+    wires,
     stats: {
       roadTriangles: roadList.reduce((s, [, d]) => s + d.triangleCount, 0),
       waterTriangles: water.mesh.triangleCount,
@@ -91,22 +128,36 @@ export function buildFeatureGeometry(terrain: TerrainDataset): FeatureGeometry {
       buildings: buildings.count,
       buildingDetail: buildings.stats,
       buriedBuildings: buildings.buried,
-      ms: { roads: roadMs, water: waterMs, buildings: buildingMs },
+      decor: {
+        ...decor.stats,
+        pathTriangles: paths.reduce((sum, [, d]) => sum + d.triangleCount, 0),
+        wireSegments: wires.length / 6,
+      },
+      ms: { roads: roadMs, water: waterMs, buildings: buildingMs, decor: decorMs },
     },
   };
+  return { geometry, decorInstances: decor.instances };
 }
 
 /** The typed arrays of a feature geometry, for transferring them to another thread. */
 export function featureBuffers(f: FeatureGeometry): ArrayBuffer[] {
-  return [...f.roads.map(([, d]) => d), f.water, f.buildings, f.openings].flatMap((d) =>
-    [
-      d.positions,
-      d.normals,
-      d.colors,
-      'uvs' in d ? (d as SurfaceMeshData).uvs : null,
-      'layers' in d ? (d as SurfaceMeshData).layers : null,
-    ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
-  );
+  return [
+    ...f.roads.map(([, d]) => d),
+    ...f.paths.map(([, d]) => d),
+    f.water,
+    f.buildings,
+    f.openings,
+  ]
+    .flatMap((d) =>
+      [
+        d.positions,
+        d.normals,
+        d.colors,
+        'uvs' in d ? (d as SurfaceMeshData).uvs : null,
+        'layers' in d ? (d as SurfaceMeshData).layers : null,
+      ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
+    )
+    .concat(f.wires.length > 0 ? [f.wires.buffer as ArrayBuffer] : []);
 }
 
 function geometryOf(data: MeshData): BufferGeometry {
@@ -153,6 +204,37 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
       }),
     );
     if (mesh) mesh.receiveShadow = true;
+  }
+
+  // Inferred paths and driveways (docs/adr/0036), under every road layer.
+  features.paths.forEach(([style, data], rank) => {
+    const mesh = add(
+      `paths: ${style}`,
+      data,
+      new MeshStandardMaterial({
+        color: PATH_COLOR[style],
+        roughness: 1,
+        metalness: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1 - 0.1 * rank,
+      }),
+    );
+    if (mesh) mesh.receiveShadow = true;
+  });
+
+  // Overhead wires: thin dark lines, one draw call.
+  let wireMesh: LineSegments<BufferGeometry, LineBasicMaterial> | null = null;
+  if (features.wires.length > 0) {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(features.wires, 3));
+    g.computeBoundingSphere();
+    wireMesh = new LineSegments(
+      g,
+      new LineBasicMaterial({ color: 0x3c3f3d, transparent: true, opacity: 0.75 }),
+    );
+    wireMesh.name = 'overhead wires';
+    group.add(wireMesh);
   }
 
   // Slightly transparent. The stencil lets each pixel take water once, so
@@ -212,6 +294,8 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
         m.material.dispose();
       }
       materials.dispose();
+      wireMesh?.geometry.dispose();
+      wireMesh?.material.dispose();
       group.clear();
     },
   };
