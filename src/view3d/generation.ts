@@ -1,5 +1,6 @@
 import type { TerrainDataset } from '#sim';
 import { buildFeatures, featureBuffers, type FeatureGeometry } from './geo-features';
+import { bakeGroundMap, type GroundMap } from './ground-map';
 import {
   placeVegetation,
   type PlacementStats,
@@ -14,6 +15,10 @@ import {
 // worker is terminated), and replies from a cancelled job are ignored, so a
 // stale result can never reach a newer battlefield. Where workers are not
 // available (tests), the same work runs on this thread, asynchronously.
+//
+// The ground map for the terrain material (docs/adr/0038) is baked by a
+// second worker at the same time, so it neither waits for nor delays the
+// features and vegetation.
 
 export type GenerationStage = 'features' | 'vegetation';
 
@@ -60,14 +65,28 @@ export function battlefieldBuffers(g: GeneratedBattlefield): ArrayBuffer[] {
 }
 
 export interface GenerationRequest {
-  readonly type: 'generate';
+  readonly type: 'generate' | 'ground';
   readonly jobId: number;
   readonly terrain: TerrainDataset;
+}
+
+/** The ground map and how long it took, ms. */
+export interface BakedGround {
+  readonly map: GroundMap;
+  readonly ms: number;
+}
+
+/** The ground map of a terrain. Pure. */
+export function bakeGround(terrain: TerrainDataset): BakedGround {
+  const t = performance.now();
+  const map = bakeGroundMap(terrain);
+  return { map, ms: performance.now() - t };
 }
 
 export type GenerationReply =
   | { readonly type: 'progress'; readonly jobId: number; readonly stage: GenerationStage }
   | { readonly type: 'done'; readonly jobId: number; readonly result: GeneratedBattlefield }
+  | { readonly type: 'ground'; readonly jobId: number; readonly result: BakedGround }
   | { readonly type: 'error'; readonly jobId: number; readonly message: string };
 
 /** What the generator needs of a worker: a Web Worker running generation.worker.ts. */
@@ -79,9 +98,9 @@ export interface GenerationWorker {
 }
 
 /** A job: its result, or a rejection when it fails or is cancelled. */
-export interface GenerationJob {
+export interface GenerationJob<T = GeneratedBattlefield> {
   readonly id: number;
-  readonly result: Promise<GeneratedBattlefield>;
+  readonly result: Promise<T>;
   /** Stops the job; its promise rejects with a `GenerationCancelled`. */
   cancel(): void;
 }
@@ -96,6 +115,8 @@ export class GenerationCancelled extends Error {
 export interface Generator {
   /** Starts generating for a terrain, cancelling any job still running. */
   start(terrain: TerrainDataset, progress?: (stage: GenerationStage) => void): GenerationJob;
+  /** Starts baking a terrain's ground map, cancelling any bake still running. */
+  ground(terrain: TerrainDataset): GenerationJob<BakedGround>;
   dispose(): void;
 }
 
@@ -108,92 +129,116 @@ export function createGenerator({
   createWorker = defaultWorker,
 }: GeneratorOptions = {}): Generator {
   let nextId = 1;
-  let current: GenerationJob | null = null;
+  const current: {
+    generate: GenerationJob<unknown> | null;
+    ground: GenerationJob<unknown> | null;
+  } = { generate: null, ground: null };
+
+  /** Runs one job of a kind in a fresh worker (or on this thread), cancelling the kind's previous job. */
+  const run = <T>(
+    type: GenerationRequest['type'],
+    terrain: TerrainDataset,
+    inThread: () => T,
+    progress: (stage: GenerationStage) => void,
+  ): GenerationJob<T> => {
+    current[type]?.cancel();
+    const id = nextId;
+    nextId += 1;
+    let settled = false;
+    let resolveJob: (g: T) => void = () => undefined;
+    let rejectJob: (error: Error) => void = () => undefined;
+    const result = new Promise<T>((resolve, reject) => {
+      resolveJob = resolve;
+      rejectJob = reject;
+    });
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (current[type] === job) current[type] = null;
+      fn();
+    };
+    let stopWork: () => void = () => undefined;
+    const worker = createWorker();
+    if (worker) {
+      stopWork = () => {
+        worker.onmessage = null;
+        worker.onerror = null;
+        worker.terminate();
+      };
+      worker.onmessage = ({ data }) => {
+        // A reply for another job, or after this one ended, is stale: ignore it.
+        if (data.jobId !== id || settled) return;
+        if (data.type === 'progress') {
+          progress(data.stage);
+          return;
+        }
+        stopWork();
+        if (data.type === 'error') {
+          settle(() => {
+            rejectJob(new Error(data.message));
+          });
+        } else {
+          settle(() => {
+            resolveJob(data.result as T);
+          });
+        }
+      };
+      worker.onerror = (event) => {
+        stopWork();
+        const message = (event as { message?: unknown } | null)?.message;
+        settle(() => {
+          rejectJob(new Error(`generation worker failed: ${String(message ?? event)}`));
+        });
+      };
+      worker.postMessage({ type, jobId: id, terrain });
+    } else {
+      // On this thread, after the caller has had a chance to cancel.
+      const timer = setTimeout(() => {
+        try {
+          const g = inThread();
+          settle(() => {
+            resolveJob(g);
+          });
+        } catch (error) {
+          settle(() => {
+            rejectJob(error instanceof Error ? error : new Error(String(error)));
+          });
+        }
+      }, 0);
+      stopWork = () => {
+        clearTimeout(timer);
+      };
+    }
+    const job: GenerationJob<T> = {
+      id,
+      result,
+      cancel() {
+        if (settled) return;
+        stopWork();
+        settle(() => {
+          rejectJob(new GenerationCancelled());
+        });
+      },
+    };
+    current[type] = job;
+    return job;
+  };
+
   return {
     start(terrain, progress = () => undefined) {
-      current?.cancel();
-      const id = nextId;
-      nextId += 1;
-      let settled = false;
-      let resolveJob: (g: GeneratedBattlefield) => void = () => undefined;
-      let rejectJob: (error: Error) => void = () => undefined;
-      const result = new Promise<GeneratedBattlefield>((resolve, reject) => {
-        resolveJob = resolve;
-        rejectJob = reject;
-      });
-      const settle = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        if (current === job) current = null;
-        fn();
-      };
-      let stopWork: () => void = () => undefined;
-      const worker = createWorker();
-      if (worker) {
-        stopWork = () => {
-          worker.onmessage = null;
-          worker.onerror = null;
-          worker.terminate();
-        };
-        worker.onmessage = ({ data }) => {
-          // A reply for another job, or after this one ended, is stale: ignore it.
-          if (data.jobId !== id || settled) return;
-          if (data.type === 'progress') {
-            progress(data.stage);
-            return;
-          }
-          stopWork();
-          if (data.type === 'done')
-            settle(() => {
-              resolveJob(data.result);
-            });
-          else
-            settle(() => {
-              rejectJob(new Error(data.message));
-            });
-        };
-        worker.onerror = (event) => {
-          stopWork();
-          const message = (event as { message?: unknown } | null)?.message;
-          settle(() => {
-            rejectJob(new Error(`generation worker failed: ${String(message ?? event)}`));
-          });
-        };
-        worker.postMessage({ type: 'generate', jobId: id, terrain });
-      } else {
-        // On this thread, after the caller has had a chance to cancel.
-        const timer = setTimeout(() => {
-          try {
-            const g = generateBattlefield(terrain, progress);
-            settle(() => {
-              resolveJob(g);
-            });
-          } catch (error) {
-            settle(() => {
-              rejectJob(error instanceof Error ? error : new Error(String(error)));
-            });
-          }
-        }, 0);
-        stopWork = () => {
-          clearTimeout(timer);
-        };
-      }
-      const job: GenerationJob = {
-        id,
-        result,
-        cancel() {
-          if (settled) return;
-          stopWork();
-          settle(() => {
-            rejectJob(new GenerationCancelled());
-          });
-        },
-      };
-      current = job;
-      return job;
+      return run('generate', terrain, () => generateBattlefield(terrain, progress), progress);
+    },
+    ground(terrain) {
+      return run(
+        'ground',
+        terrain,
+        () => bakeGround(terrain),
+        () => undefined,
+      );
     },
     dispose() {
-      current?.cancel();
+      current.generate?.cancel();
+      current.ground?.cancel();
     },
   };
 }

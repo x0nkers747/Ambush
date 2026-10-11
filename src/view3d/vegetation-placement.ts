@@ -24,6 +24,23 @@ import { polygonIndex, polylineSegments, segmentGrid } from './spatial-index';
 // battlefield always grows the same plants, in whatever order its features
 // were loaded.
 
+/**
+ * The share of conifers among a wood's trees at map point (x, y): stands of
+ * conifers and of broadleaf trees, from slow noise. The ground under them
+ * (needles or leaf litter, docs/adr/0038) follows the same noise.
+ */
+export function coniferShareAt(x: number, y: number): number {
+  return coniferShare(valueNoise(x, y, CONIFER_NOISE.scale, CONIFER_NOISE.seed));
+}
+
+/** The noise behind `coniferShareAt`, for callers that sample it in bulk. */
+export const CONIFER_NOISE = { scale: 140, seed: 0x6c } as const;
+
+/** `coniferShareAt` from its noise value. */
+export function coniferShare(noise: number): number {
+  return Math.min(0.95, Math.max(0.05, 0.4 + 0.75 * noise));
+}
+
 export interface TileIndex {
   readonly originX: number;
   readonly originY: number;
@@ -332,7 +349,7 @@ export function placeVegetation(
         return tree(pick('smallTree', 0), canopy, 0.4 + 0.25 * v, h, sparse);
       }
       // Stands: conifers where the slow noise says so, else broadleaf.
-      const coniferShare = Math.min(0.95, Math.max(0.05, 0.4 + 0.75 * valueNoise(x, y, 140, 0x6c)));
+      const coniferShare = coniferShareAt(x, y);
       const edgeShare = atEdge ? 0.92 : 1;
       if (u < coniferShare) {
         const pine = valueNoise(x, y, 220, 0x6d) > 0.1;

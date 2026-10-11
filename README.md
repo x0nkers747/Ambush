@@ -43,7 +43,13 @@ part of the simulation ([ADR 0036](docs/adr/0036-procedural-environmental-detail
 painted markings where real roads would (centrelines, lane separators, edge lines, mapped crossings
 and stop lines), in the region's conventions: yellow centrelines in North America, white in
 Germany, and none on residential streets, service roads or tracks
-([ADR 0037](docs/adr/0037-road-markings.md)).
+([ADR 0037](docs/adr/0037-road-markings.md)). The ground is textured from its land cover:
+grass and rough grass, leaf or needle litter under woods (following the trees above), field soil
+with furrows, bare earth and gravel in yards and on worn road shoulders, damp earth in wetlands,
+and bare earth or rock on steep slopes and graded cuttings. The textures (CC0) are mapped in world
+space at real scale, without visible tiling, and natural edges are soft while field and settlement
+edges stay sharp. It is display only: no vertex moves, and the simulation never reads it
+([ADR 0038](docs/adr/0038-terrain-materials.md)).
 
 ## Requirements
 
@@ -247,3 +253,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 35. [Procedural buildings and richer OSM building data](docs/adr/0035-procedural-buildings.md)
 36. [Procedural environmental detail](docs/adr/0036-procedural-environmental-detail.md)
 37. [Road markings, and no overhead wires](docs/adr/0037-road-markings.md)
+38. [Terrain materials and surface realism](docs/adr/0038-terrain-materials.md)

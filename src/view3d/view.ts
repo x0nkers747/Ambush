@@ -29,6 +29,8 @@ import {
   type GenerationJob,
   type GenerationStage,
 } from './generation';
+import { GROUND_MATERIAL_VERSION } from './ground-map';
+import { createGroundMaterial, type GroundMaterial } from './ground-material';
 import { landCoverTints } from './landcover';
 import { createMarkerLayer } from './markers';
 import { plantModels, type PlantModel } from './plant-models';
@@ -38,8 +40,8 @@ import { apronElevation, skirtMesh, terrainMesh, type TerrainMeshData } from './
 import { destinationMarkers, unitMarkers } from './unit-markers';
 import { createVegetationLayer, type VegetationLayer } from './vegetation-layer';
 
-// The 3D battlefield view (docs/adr/0029, 0030, 0031): the simulated terrain
-// coloured by land cover, the roads, water, buildings and vegetation on it,
+// The 3D battlefield view (docs/adr/0029, 0030, 0031, 0038): the simulated
+// terrain with ground materials from its land cover, the roads, water, buildings and vegetation on it,
 // daylight, shadows, sky and fog, the tactical camera, and the soldiers. The
 // terrain is drawn at once; roads, water, buildings and vegetation are
 // generated in a worker and appear when ready. Like the 2D
@@ -82,6 +84,15 @@ interface TerrainEntry {
   readonly terrain: TerrainDataset;
   readonly data: TerrainMeshData;
   readonly mesh: Mesh<BufferGeometry, MeshStandardMaterial>;
+  /** The terrain's material: vertex colours until its ground map is baked (docs/adr/0038). */
+  readonly ground: GroundMaterial;
+  readonly groundJob: GenerationJob<unknown>;
+  readonly groundBake: {
+    /** Worker time to bake the map, and from starting the bake to using it, ms. */
+    bakeMs: number | null;
+    waitMs: number | null;
+    error: string | null;
+  };
   /** Roads, water and buildings, and vegetation, once generated. */
   features: GeoFeatureLayer | null;
   vegetation: VegetationLayer | null;
@@ -203,13 +214,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     if (data.colors) geometry.setAttribute('color', new BufferAttribute(data.colors, 3));
     geometry.setIndex(new BufferAttribute(data.indices, 1));
     geometry.computeBoundingSphere();
-    const material = new MeshStandardMaterial({
-      color: data.colors ? 0xffffff : 0x9aa77e,
-      vertexColors: data.colors !== null,
-      roughness: 0.95,
-      metalness: 0,
-    });
-    const mesh = new Mesh(geometry, material);
+    const ground = createGroundMaterial({ simple: quality.level === 'low' });
+    const mesh = new Mesh(geometry, ground.material);
     mesh.name = 'terrain';
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -259,6 +265,23 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       revealFrameMs: [],
       error: null,
     };
+    // The ground map, in its own worker: the terrain's textures appear when it arrives.
+    const groundBake: TerrainEntry['groundBake'] = { bakeMs: null, waitMs: null, error: null };
+    const groundStarted = performance.now();
+    const groundJob = generator.ground(terrain);
+    groundJob.result.then(
+      (baked) => {
+        if (disposed || current?.groundJob !== groundJob) return;
+        groundBake.bakeMs = baked.ms;
+        groundBake.waitMs = performance.now() - groundStarted;
+        ground.setMap(baked.map);
+      },
+      (error: unknown) => {
+        if (error instanceof GenerationCancelled) return;
+        // The vertex colours stay: the terrain still shows its land cover.
+        groundBake.error = error instanceof Error ? error.message : String(error);
+      },
+    );
     const jobStarted = performance.now();
     const job = generator.start(terrain, (stage) => {
       generation.stage = stage;
@@ -324,6 +347,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       terrain,
       data,
       mesh,
+      ground,
+      groundJob,
+      groundBake,
       features: null,
       vegetation: null,
       job,
@@ -344,6 +370,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       m.geometry.dispose();
       m.material.dispose();
     }
+    entry.ground.dispose();
+    entry.groundJob.cancel();
     entry.job.cancel();
     if (revealEntry === entry) {
       // Layers still waiting to be shown are not in the scene: free them here.
@@ -417,6 +445,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       if (obj instanceof Mesh) (obj.material as MeshStandardMaterial).needsUpdate = true;
     });
     current?.vegetation?.setSettings(quality.vegetation, vegetationShadows(quality));
+    current?.ground.setSimple(quality.level === 'low');
   };
   if (quality.shadows) sun.shadow.mapSize.set(quality.shadows.mapSize, quality.shadows.mapSize);
 
@@ -518,6 +547,16 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         textures: renderer.info.memory.textures,
         terrainVertices: current?.data.vertexCount ?? 0,
         terrainBuilds,
+        ground: current
+          ? {
+              version: GROUND_MATERIAL_VERSION,
+              map: current.ground.hasMap(),
+              textures: current.ground.texturesReady(),
+              simple: quality.level === 'low',
+              ...current.groundBake,
+              textureBytes: current.ground.textureBytes(),
+            }
+          : null,
         features: current?.features?.stats ?? null,
         vegetation: current?.vegetation?.stats() ?? null,
         generation: current?.generation ?? null,

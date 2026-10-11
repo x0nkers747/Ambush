@@ -50,35 +50,46 @@ export interface LandCover {
   readonly classified: number;
 }
 
-interface Area {
+/** A grid of points in battlefield metres, row by row from the south-west corner. */
+export interface RasterGrid {
+  readonly originX: number;
+  readonly originY: number;
+  /** Spacing of the points along x and y, metres. */
+  readonly stepX: number;
+  readonly stepY: number;
+  readonly columns: number;
+  readonly rows: number;
+}
+
+/** One land-cover area as painted. */
+export interface LandCoverArea {
   readonly cls: LandCoverClass;
+  /** The source feature's id. */
+  readonly id: string;
+  /** The outer ring, then the holes. */
   readonly rings: readonly (readonly Vec2[])[];
   readonly area: number;
-  readonly id: string;
 }
 
 /**
- * The land-cover class index of every point of a grid `subdivision` times
- * finer than the heightfield (0: none, else 1 + the index in `classes`), row by
- * row from the south-west corner; with `subdivision` 1, of every sample. Areas are painted largest first, so a smaller area lying in a
- * larger one (a meadow in a village) shows; vegetation is painted over land
- * use, and water over both. The order does not depend on the order the
- * features were loaded in.
+ * The land cover at every point of a grid: for each point, the class index
+ * (0: none, else 1 + the index in `classes`) and the area that set it (−1:
+ * none, else the index in `areas`). Areas are painted largest first, so a
+ * smaller area lying in a larger one (a meadow in a village) shows;
+ * vegetation is painted over land use, and water over both. The order does
+ * not depend on the order the features were loaded in.
  */
-export function classifyLandCover(
+export function rasterizeLandCover(
   terrain: TerrainDataset,
-  subdivision = 1,
+  grid: RasterGrid,
 ): {
   classes: LandCoverClass[];
   index: Uint8Array;
-  columns: number;
-  rows: number;
+  areas: LandCoverArea[];
+  area: Int32Array;
 } {
   const { features } = terrain;
-  const { originX, originY } = terrain.heightfield;
-  const cellSize = terrain.heightfield.cellSize / subdivision;
-  const columns = (terrain.heightfield.columns - 1) * subdivision + 1;
-  const rows = (terrain.heightfield.rows - 1) * subdivision + 1;
+  const { originX, originY, stepX, stepY, columns, rows } = grid;
   const classes: LandCoverClass[] = [];
   const classIndex = (cls: LandCoverClass) => {
     let i = classes.indexOf(cls);
@@ -86,7 +97,8 @@ export function classifyLandCover(
     return i + 1;
   };
   const index = new Uint8Array(columns * rows);
-  const byArea = (areas: Area[]) =>
+  const areaOf = new Int32Array(columns * rows).fill(-1);
+  const byArea = (areas: LandCoverArea[]) =>
     areas.sort((a, b) => b.area - a.area || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const area = (ring: readonly Vec2[]) => {
     let s = 0;
@@ -96,7 +108,7 @@ export function classifyLandCover(
     });
     return Math.abs(s) / 2;
   };
-  const layers: Area[][] = [
+  const layers: LandCoverArea[][] = [
     byArea(
       (features.landUse ?? []).map((l) => ({
         cls: l.kind,
@@ -122,20 +134,22 @@ export function classifyLandCover(
       })),
     ),
   ];
+  const areas: LandCoverArea[] = [];
   for (const layer of layers) {
     for (const a of layer) {
       const value = classIndex(a.cls);
+      const which = areas.push(a) - 1;
       let minY = Infinity;
       let maxY = -Infinity;
       for (const p of a.rings[0] ?? []) {
         minY = Math.min(minY, p.y);
         maxY = Math.max(maxY, p.y);
       }
-      const r0 = Math.max(0, Math.ceil((minY - originY) / cellSize));
-      const r1 = Math.min(rows - 1, Math.floor((maxY - originY) / cellSize));
-      // Scanlines through the sample rows, even–odd over all the rings (holes too).
+      const r0 = Math.max(0, Math.ceil((minY - originY) / stepY));
+      const r1 = Math.min(rows - 1, Math.floor((maxY - originY) / stepY));
+      // Scanlines through the rows of points, even–odd over all the rings (holes too).
       for (let r = r0; r <= r1; r += 1) {
-        const y = originY + r * cellSize;
+        const y = originY + r * stepY;
         const xs: number[] = [];
         for (const ring of a.rings) {
           ring.forEach((p, i) => {
@@ -145,13 +159,46 @@ export function classifyLandCover(
         }
         xs.sort((u, v) => u - v);
         for (let k = 0; k + 1 < xs.length; k += 2) {
-          const c0 = Math.max(0, Math.ceil(((xs[k] ?? 0) - originX) / cellSize));
-          const c1 = Math.min(columns - 1, Math.floor(((xs[k + 1] ?? 0) - originX) / cellSize));
-          for (let c = c0; c <= c1; c += 1) index[r * columns + c] = value;
+          const c0 = Math.max(0, Math.ceil(((xs[k] ?? 0) - originX) / stepX));
+          const c1 = Math.min(columns - 1, Math.floor(((xs[k + 1] ?? 0) - originX) / stepX));
+          for (let c = c0; c <= c1; c += 1) {
+            index[r * columns + c] = value;
+            areaOf[r * columns + c] = which;
+          }
         }
       }
     }
   }
+  return { classes, index, areas, area: areaOf };
+}
+
+/**
+ * The land-cover class index of every point of a grid `subdivision` times
+ * finer than the heightfield (0: none, else 1 + the index in `classes`), row
+ * by row from the south-west corner; with `subdivision` 1, of every sample.
+ * See `rasterizeLandCover`.
+ */
+export function classifyLandCover(
+  terrain: TerrainDataset,
+  subdivision = 1,
+): {
+  classes: LandCoverClass[];
+  index: Uint8Array;
+  columns: number;
+  rows: number;
+} {
+  const { originX, originY } = terrain.heightfield;
+  const step = terrain.heightfield.cellSize / subdivision;
+  const columns = (terrain.heightfield.columns - 1) * subdivision + 1;
+  const rows = (terrain.heightfield.rows - 1) * subdivision + 1;
+  const { classes, index } = rasterizeLandCover(terrain, {
+    originX,
+    originY,
+    stepX: step,
+    stepY: step,
+    columns,
+    rows,
+  });
   return { classes, index, columns, rows };
 }
 
