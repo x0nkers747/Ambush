@@ -12,6 +12,7 @@ import {
   InstancedMesh,
   Mesh,
   MeshStandardMaterial,
+  PerspectiveCamera,
   Scene,
   SRGBColorSpace,
   Vector3,
@@ -30,7 +31,18 @@ import {
   type GenerationStage,
 } from './generation';
 import { GROUND_MATERIAL_VERSION } from './ground-map';
-import { createGroundMaterial, type GroundMaterial, type GroundPath } from './ground-material';
+import {
+  createGroundMaterial,
+  type GroundMaterial,
+  type GroundOverlay,
+  type GroundPath,
+} from './ground-material';
+import {
+  groundProjection,
+  type GroundProjection,
+  type MapPoint,
+  type ScreenPoint,
+} from './ground-projection';
 import { landCoverTints } from './landcover';
 import { createMarkerLayer } from './markers';
 import { plantModels, type PlantModel } from './plant-models';
@@ -72,11 +84,43 @@ export interface BattlefieldView3dOptions {
   readonly quality?: QualityLevel | 'auto';
 }
 
+/**
+ * Pointer input the view hands over (docs/adr/0039), in CSS pixels of its
+ * canvas. A left press the handler claims becomes its drag, and the camera
+ * does not move; any other press is the camera's (orbit, pan), and if the
+ * pointer comes up without having moved, it is a click.
+ */
+export interface PointerHandler {
+  /** A press: `true` claims it (a handle drag). */
+  press(screen: ScreenPoint, button: number): boolean;
+  drag(screen: ScreenPoint): void;
+  release(screen: ScreenPoint): void;
+  click(screen: ScreenPoint, button: number): void;
+  /** The cursor for a hover. */
+  hover(screen: ScreenPoint): string;
+}
+
 export interface BattlefieldView3d {
   /** The canvas the view draws into; the caller places it. */
   readonly canvas: HTMLCanvasElement;
+  /** A transparent canvas for 2D overlays over the view, the same size; the caller places it above `canvas`. */
+  readonly overlay: HTMLCanvasElement;
   /** Draws a frame from the current exercise. Call once per animation frame while shown. */
   render(): void;
+  /** The ground as a map projection, as the camera stands now (`GroundProjection`). */
+  projection(): GroundProjection;
+  /** Who gets clicks and drags on the view; `null`: the camera alone. */
+  setPointerHandler(handler: PointerHandler | null): void;
+  /** Draws the 2D overlay after each frame (on `overlay`, cleared first, in CSS pixels). */
+  setOverlayPainter(paint: ((ctx: CanvasRenderingContext2D) => void) | null): void;
+  /** Paints a visibility overlay on the ground, or none (`GroundOverlay`). */
+  setGroundOverlay(overlay: GroundOverlay | null): void;
+  /** The map point the camera looks at, and how far it is from it (metres), or null before the first frame. */
+  focus(): { readonly point: MapPoint; readonly distance: number } | null;
+  /** Looks at a map point (keeping the angle), from `distance` metres if given. */
+  focusOn(point: MapPoint, distance?: number): void;
+  /** The map point and ground elevation under the pointer, or null. */
+  readonly pointer: { readonly x: number; readonly y: number; readonly z: number } | null;
   /** Back to the default overhead view. */
   resetView(): void;
   /** What the view is still preparing, for the user (e.g. "Growing vegetation…"), or null. */
@@ -144,6 +188,15 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   const canvas = document.createElement('canvas');
   canvas.className = 'view3d';
   canvas.setAttribute('aria-label', '3D battlefield view');
+  // Tactical overlays (routes, arrows, labels, shots) are drawn on a 2D canvas above.
+  const overlay = document.createElement('canvas');
+  overlay.className = 'view3d-overlay';
+  overlay.setAttribute('aria-hidden', 'true');
+  const overlayContext = overlay.getContext('2d');
+  let paintOverlay: ((ctx: CanvasRenderingContext2D) => void) | null = null;
+  let groundOverlay: GroundOverlay | null = null;
+  let pointerHandler: PointerHandler | null = null;
+  let pointerGround: { x: number; y: number; z: number } | null = null;
   // WebGLRenderer is WebGL 2 only in current Three.js.
   const renderer = new WebGLRenderer({
     canvas,
@@ -411,6 +464,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     width = w;
     height = h;
     renderer.setSize(w, h, false);
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    overlay.width = Math.round(w * ratio);
+    overlay.height = Math.round(h * ratio);
     current?.camera.resize(w, h);
   };
   const observer = new ResizeObserver(resize);
@@ -464,8 +520,114 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   let revealEntry: TerrainEntry | null = null;
   let pendingLayers: { dispose(): void }[] = [];
   let disposed = false;
+  // --- Pointer input for gameplay (docs/adr/0039) ---------------------------
+  // Listened to in the capture phase, before the camera's own listeners: a
+  // left press the handler claims (a handle) is stopped there, so the camera
+  // does not orbit while a destination or arrow is dragged.
+  /** The ground as a map projection, as the camera stands now. */
+  const fallbackCamera = new PerspectiveCamera();
+  const projectionNow = (): GroundProjection =>
+    current
+      ? groundProjection(current.camera.camera, current.groundAt, { width, height }, current.apronZ)
+      : groundProjection(fallbackCamera, () => null, { width, height }, 0);
+  const local = (event: MouseEvent): ScreenPoint => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+  /** The press in progress: where it began, its button, whether it moved and whether it was claimed. */
+  let gesture: {
+    start: ScreenPoint;
+    button: number;
+    moved: boolean;
+    claimed: boolean;
+    pointerId: number;
+  } | null = null;
+  /** Movement in CSS pixels that turns a press into a drag (as on the 2D map). */
+  const DRAG_PX = 4;
+  const onPointerDown = (event: PointerEvent) => {
+    const p = local(event);
+    const claimed = pointerHandler?.press(p, event.button) ?? false;
+    gesture = { start: p, button: event.button, moved: false, claimed, pointerId: event.pointerId };
+    if (claimed) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+    }
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    const p = local(event);
+    const hit = projectionNow().toWorld(p);
+    const z = hit && current ? current.groundAt(hit.x, -hit.y) : null;
+    pointerGround = hit && z !== null ? { x: hit.x, y: hit.y, z } : null;
+    if (gesture) {
+      if (Math.hypot(p.x - gesture.start.x, p.y - gesture.start.y) >= DRAG_PX) gesture.moved = true;
+      if (gesture.claimed) {
+        event.stopImmediatePropagation();
+        pointerHandler?.drag(p);
+      }
+      return;
+    }
+    if (pointerHandler) canvas.style.cursor = pointerHandler.hover(p);
+  };
+  const onPointerUp = (event: PointerEvent) => {
+    const g = gesture;
+    if (g?.pointerId !== event.pointerId) return;
+    gesture = null;
+    const p = local(event);
+    if (g.claimed) {
+      event.stopImmediatePropagation();
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      pointerHandler?.release(p);
+    } else if (!g.moved) {
+      // A click where the button went down, ignoring jitter (as on the 2D map).
+      pointerHandler?.click(g.start, g.button);
+    }
+    if (pointerHandler) canvas.style.cursor = pointerHandler.hover(p);
+  };
+  const onPointerCancel = () => {
+    gesture = null;
+  };
+  const onPointerLeave = () => {
+    pointerGround = null;
+  };
+  canvas.addEventListener('pointerdown', onPointerDown, { capture: true });
+  canvas.addEventListener('pointermove', onPointerMove, { capture: true });
+  canvas.addEventListener('pointerup', onPointerUp, { capture: true });
+  canvas.addEventListener('pointercancel', onPointerCancel, { capture: true });
+  canvas.addEventListener('pointerleave', onPointerLeave);
+
   const view: BattlefieldView3d = {
     canvas,
+    overlay,
+    projection: projectionNow,
+    setPointerHandler(handler) {
+      pointerHandler = handler;
+      gesture = null;
+      if (!handler) canvas.style.cursor = '';
+    },
+    setOverlayPainter(paint) {
+      paintOverlay = paint;
+    },
+    setGroundOverlay(next) {
+      groundOverlay = next;
+    },
+    focus() {
+      if (!current) return null;
+      const { target, position } = current.camera.pose();
+      return { point: { x: target.x, y: -target.z }, distance: position.distanceTo(target) };
+    },
+    focusOn(point, distance) {
+      if (!current) return;
+      const { target, position } = current.camera.pose();
+      const offset = position.clone().sub(target);
+      if (distance !== undefined && offset.length() > 0) offset.setLength(distance);
+      const z = current.groundAt(point.x, -point.y) ?? current.apronZ;
+      const nextTarget = new Vector3(point.x, z, -point.y);
+      current.camera.setPose(nextTarget, nextTarget.clone().add(offset));
+    },
+    get pointer() {
+      return pointerGround;
+    },
     render() {
       if (disposed) return;
       resize();
@@ -487,7 +649,17 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         height,
       );
       const drawing = performance.now();
+      entry.ground.setOverlay(groundOverlay);
       renderer.render(scene, entry.camera.camera);
+      if (overlayContext) {
+        const ratio = overlay.width / Math.max(width, 1);
+        overlayContext.setTransform(1, 0, 0, 1, 0, 0);
+        overlayContext.clearRect(0, 0, overlay.width, overlay.height);
+        if (paintOverlay) {
+          overlayContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+          paintOverlay(overlayContext);
+        }
+      }
       if (revealing) entry.generation.revealFrameMs.push(performance.now() - drawing);
     },
     resetView() {
@@ -509,6 +681,12 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       if (disposed) return;
       disposed = true;
       observer.disconnect();
+      canvas.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      canvas.removeEventListener('pointermove', onPointerMove, { capture: true });
+      canvas.removeEventListener('pointerup', onPointerUp, { capture: true });
+      canvas.removeEventListener('pointercancel', onPointerCancel, { capture: true });
+      canvas.removeEventListener('pointerleave', onPointerLeave);
+      overlay.remove();
       if (current) dropTerrain(current);
       current = null;
 
@@ -537,6 +715,11 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         new Vector3(x - back * Math.sin(a), z + distance * Math.sin(p), -(y - back * Math.cos(a))),
       );
     },
+  });
+  // For automated browser checks: where a map point (on the ground, raised
+  // `lift` metres) is on the canvas, in CSS pixels, as clicks see it.
+  Object.defineProperty(canvas, 'ambushProject', {
+    value: (x: number, y: number, lift = 0) => projectionNow().toScreen({ x, y }, lift),
   });
   // For automated browser checks: switch the quality level.
   Object.defineProperty(canvas, 'ambushSetQuality', {

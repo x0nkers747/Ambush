@@ -11,7 +11,14 @@ export {
   type Camera,
   type Viewport,
 } from './camera';
-export { SOLDIER_ICON_PX, type VisibilityView } from './scene';
+export {
+  cameraProjection,
+  SOLDIER_ICON_PX,
+  SOLDIER_LIFT_M,
+  type MapProjection,
+  type VisibilityView,
+} from './scene';
+export { SHOT_LIFT_M, viewshedPixels } from './render';
 export {
   AFFILIATION_COLORS,
   drawSoldierIcon,
@@ -29,6 +36,7 @@ export {
   VIEWSHED_PREVIEW_CELL_M,
   type MapBinding,
   type MapEditor,
+  type MapSurface,
   type MapView,
   type PointerReadout,
   type TacticalMap,

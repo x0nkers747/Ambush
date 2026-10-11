@@ -1,6 +1,6 @@
 import type { Azimuth, SoldierId, Vec2 } from '#sim';
 import { facingToward } from './bearing';
-import { panBy, screenToWorld, zoomAt, type Camera } from './camera';
+import { panBy, zoomAt, type Camera } from './camera';
 import {
   formationGeometry,
   isOnDestination,
@@ -97,6 +97,12 @@ export interface MapController {
   readonly cursor: MapCursor;
   /** Whether a destination or formation is being dragged (e.g. to show a quicker preview meanwhile). */
   readonly draggingDestination: boolean;
+  /**
+   * Whether the pointer is holding a handle (destination, facing arrow,
+   * formation, kill-zone corner): a view whose camera also takes drags (3D)
+   * leaves this gesture to the controller.
+   */
+  readonly holdingHandle: boolean;
   /** Ends the current gesture without acting on it (e.g. a click another handler took). */
   cancel(): void;
 }
@@ -105,7 +111,8 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
   let mode: Mode = { kind: 'idle' };
   let cursor: MapCursor = 'default';
 
-  const toWorld = (s: MapScene, p: Vec2) => screenToWorld(s.camera, s.viewport, p);
+  /** The map point under a screen point (`null`: none, e.g. the sky in 3D). */
+  const toWorld = (s: MapScene, p: Vec2) => s.projection.toWorld(p);
 
   const hoverCursor = (s: MapScene, p: Vec2): MapCursor => {
     if (s.tool === 'killZone') {
@@ -123,7 +130,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     if (s.tool === 'killZone') {
       // Soldiers are not selected with the kill-zone tool, so corners can go anywhere.
       const point = toWorld(s, p);
-      if (!s.killZoneEditable || !s.isOnMap(point)) return;
+      if (!s.killZoneEditable || !point || !s.isOnMap(point)) return;
       const index = killZoneInsertionIndexAt(s, p);
       if (index === undefined) actions.addKillZoneVertex(point);
       else actions.addKillZoneVertex(point, index);
@@ -138,7 +145,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     // A click on an OPFOR symbol selects nothing and sets no destination.
     if (soldierAt(s, p)) return;
     const point = toWorld(s, p);
-    if (!s.isOnMap(point)) return;
+    if (!point || !s.isOnMap(point)) return;
     if (s.selectedTeam?.editable) actions.placeFormation(point);
     else if (s.editable) actions.setDestination(point);
   };
@@ -149,6 +156,15 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     },
     get draggingDestination() {
       return mode.kind === 'destination' || mode.kind === 'formationCentre';
+    },
+    get holdingHandle() {
+      return (
+        mode.kind === 'destination' ||
+        mode.kind === 'facing' ||
+        mode.kind === 'formationCentre' ||
+        mode.kind === 'formationFacing' ||
+        mode.kind === 'killZoneVertex'
+      );
     },
 
     cancel() {
@@ -204,7 +220,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
         case 'destination': {
           // Positions the exercise refuses (in a building, unreachable) are skipped.
           const point = toWorld(s, p);
-          if (s.editable && s.isOnMap(point)) actions.setDestination(point);
+          if (s.editable && point && s.isOnMap(point)) actions.setDestination(point);
           return;
         }
         case 'facing': {
@@ -214,27 +230,31 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
           const anchor = destination
             ? { x: destination.east, y: destination.north }
             : soldier.position;
-          const azimuth = facingToward(anchor, toWorld(s, p));
+          const toward = toWorld(s, p);
+          const azimuth = toward ? facingToward(anchor, toward) : undefined;
           if (azimuth !== undefined) actions.setFacing(azimuth);
           return;
         }
         case 'formationCentre': {
           // Positions where the line would not fit are skipped.
           const point = toWorld(s, p);
-          if (s.selectedTeam?.editable && s.isOnMap(point)) actions.moveFormation(point);
+          if (s.selectedTeam?.editable && point && s.isOnMap(point)) actions.moveFormation(point);
           return;
         }
         case 'formationFacing': {
           const formation = s.selectedTeam?.formation;
           if (!s.selectedTeam?.editable || !formation || !formationGeometry(s)) return;
-          const azimuth = facingToward(formation.centre, toWorld(s, p));
+          const toward = toWorld(s, p);
+          const azimuth = toward ? facingToward(formation.centre, toward) : undefined;
           if (azimuth !== undefined) actions.setFormationFacing(azimuth);
           return;
         }
         case 'killZoneVertex': {
           // Positions the zone would refuse (crossing itself, off the map) are skipped.
           const point = toWorld(s, p);
-          if (s.killZoneEditable && s.isOnMap(point)) actions.moveKillZoneVertex(mode.index, point);
+          if (s.killZoneEditable && point && s.isOnMap(point)) {
+            actions.moveKillZoneVertex(mode.index, point);
+          }
           return;
         }
       }

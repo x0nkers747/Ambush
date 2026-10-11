@@ -24,7 +24,7 @@ import {
   hasVisibilityOverlay,
 } from './render';
 import { elevationAt } from './terrain-layer';
-import { buildScene, type MapScene, type VisibilityView } from './scene';
+import { buildScene, type MapProjection, type MapScene, type VisibilityView } from './scene';
 import { createTeamVisibility } from './group-viewshed';
 import { createViewshedService } from './viewshed-service';
 
@@ -93,9 +93,40 @@ export interface PointerReadout {
   readonly elevation: number;
 }
 
+/**
+ * The tactical map's gameplay on another view's surface (docs/adr/0039): the
+ * 3D battlefield hands over its ground projection and its pointer input, and
+ * gets the same selection, plan and kill-zone edits, scenario editing and
+ * tactical overlays as the 2D map, through the same controller and commands.
+ * Points are CSS pixels of that view's canvas.
+ */
+export interface MapSurface {
+  /** The scene as that view shows it. */
+  scene(): MapScene;
+  /** A press: `true` when the surface takes the drag (a plan handle or the scenario editor's). */
+  press(screen: Vec2, button: number): boolean;
+  /** The pointer moved during a drag the surface took. */
+  drag(screen: Vec2): void;
+  /** The drag the surface took ended. */
+  release(screen: Vec2): void;
+  /** A click (pressed and released without a drag), for any button. */
+  click(screen: Vec2, button: number): void;
+  /** The cursor suiting what is under a screen point. */
+  hover(screen: Vec2): string;
+  /** Draws the tactical overlays and the scenario editor's, over that view. */
+  draw(ctx: CanvasRenderingContext2D): void;
+}
+
 export interface TacticalMap {
   /** Draws the current state. Call once per animation frame. */
   render(): void;
+  /**
+   * Keeps the visibility overlay's viewsheds current without drawing (while
+   * another view is shown): call once per animation frame instead of `render`.
+   */
+  update(): void;
+  /** The map's gameplay on another view (`MapSurface`), through that view's projection. */
+  surface(projection: () => MapProjection, viewport: () => Viewport): MapSurface;
   /** Fits the whole terrain into view. */
   fitView(): void;
   /** Map point under the pointer, or `null` when the pointer is off the terrain. */
@@ -205,7 +236,7 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
     const observers = team?.memberIds.flatMap((id) => current.observer(id) ?? []) ?? [];
     const first = observers[0];
     if (!first) return null;
-    const cellSize = controller.draggingDestination ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
+    const cellSize = dragging() ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
     // Never another team's (or a single Marine's) result while this team's is computed.
     const previous = visibility?.team === unitId ? visibility.viewshed : null;
     const { viewshed, pending, failed, preview } = teamVisibility(
@@ -241,7 +272,7 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
       visibility = null;
       return;
     }
-    const cellSize = controller.draggingDestination ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
+    const cellSize = dragging() ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
     const { viewshed, pending, failed, preview } = viewsheds.request(observer.point, cellSize);
     visibility = {
       observer: observer.point,
@@ -253,21 +284,23 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
     };
   };
 
-  const makeController = () =>
-    createMapController(
-      scene,
-      createMapActions(
-        current,
-        {
-          get: getSession,
-          set: (session) => {
-            binding.setSession(session);
-          },
+  /** Controllers of other views' surfaces: their drags also preview viewsheds coarsely. */
+  const surfaceControllers = new Set<{ readonly draggingDestination: boolean }>();
+  const dragging = () =>
+    controller.draggingDestination || [...surfaceControllers].some((c) => c.draggingDestination);
+  const makeActions = () =>
+    createMapActions(
+      current,
+      {
+        get: getSession,
+        set: (session) => {
+          binding.setSession(session);
         },
-        setCamera,
-        (message) => binding.notify?.(message),
-      ),
+      },
+      setCamera,
+      (message) => binding.notify?.(message),
     );
+  const makeController = () => createMapController(scene, makeActions());
   let controller = makeController();
 
   const local = (event: MouseEvent): Vec2 => {
@@ -412,8 +445,104 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
   observer.observe(canvas);
   resize();
 
+  const surface = (
+    projection: () => MapProjection,
+    surfaceViewport: () => Viewport,
+  ): MapSurface => {
+    const surfaceScene = (): MapScene =>
+      buildScene(
+        current,
+        getSession(),
+        camera,
+        surfaceViewport(),
+        visibility,
+        binding.hideTrainee?.() ?? false,
+        projection(),
+      );
+    // Its own gesture state, the same commands; rebuilt when the map's exercise changes.
+    let made: { exercise: Exercise; controller: ReturnType<typeof createMapController> } | null =
+      null;
+    const own = () => {
+      if (made?.exercise !== current) {
+        if (made) surfaceControllers.delete(made.controller);
+        made = { exercise: current, controller: createMapController(surfaceScene, makeActions()) };
+        surfaceControllers.add(made.controller);
+      }
+      return made.controller;
+    };
+    const toWorld = (p: Vec2) => projection().toWorld(p);
+    let editorDrag: MapEditor | undefined;
+    return {
+      scene: surfaceScene,
+      press(p, button) {
+        // Only the left button drags handles; the others belong to the view's camera.
+        if (button !== 0) return false;
+        const editor = activeEditor();
+        const point = toWorld(p);
+        if (editor && point && editor.press?.(point, p, button)) {
+          editorDrag = editor;
+          return true;
+        }
+        const c = own();
+        c.pointerDown({ ...p, button });
+        if (c.holdingHandle) return true;
+        c.cancel();
+        return false;
+      },
+      drag(p) {
+        if (editorDrag) {
+          const point = toWorld(p);
+          if (point) editorDrag.drag?.(point);
+          return;
+        }
+        own().pointerMove({ ...p, button: 0 });
+      },
+      release(p) {
+        if (editorDrag) {
+          const point = toWorld(p);
+          if (point) editorDrag.drop?.(point);
+          editorDrag = undefined;
+          return;
+        }
+        own().pointerUp({ ...p, button: 0 });
+      },
+      click(p, button) {
+        const editor = activeEditor();
+        if (editor) {
+          const point = toWorld(p);
+          if (!point) return;
+          // A right click is the editor's right press (e.g. deleting a route waypoint).
+          if (button === 0) editor.click(point, p);
+          else if (button === 2) editor.press?.(point, p, button);
+          return;
+        }
+        // The map's own click: select, set a destination, place a formation,
+        // add a kill-zone corner; a right click deletes the handle under it.
+        const c = own();
+        c.pointerDown({ ...p, button });
+        c.pointerUp({ ...p, button });
+      },
+      hover(p) {
+        const point = toWorld(p);
+        const custom = point ? activeEditor()?.cursor?.(point, p) : null;
+        if (custom) return custom;
+        const c = own();
+        c.pointerMove({ ...p, button: 0 });
+        return c.cursor;
+      },
+      draw(ctx) {
+        const s = surfaceScene();
+        drawOverlays(ctx, s, layer);
+        const editor = activeEditor();
+        if (editor?.draw) editor.draw(ctx, (p) => s.projection.toScreen(p));
+      },
+    };
+  };
+
   return {
     render: draw,
+    update: updateVisibility,
+    surface,
     fitView() {
       setCamera(fitCamera());
     },

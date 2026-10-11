@@ -92,7 +92,8 @@ export function wireRoster(
     readonly exercise: () => Exercise;
     readonly session: () => Session;
     readonly setSession: (session: Session) => void;
-    readonly map: TacticalMap;
+    /** Where a double click centres the view (the 2D map, or the 3D view when shown). */
+    readonly map: Pick<TacticalMap, 'centreOn'>;
   },
 ): void {
   element.addEventListener('click', (event) => {

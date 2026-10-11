@@ -49,7 +49,13 @@ with furrows, bare earth and gravel in yards and on worn road shoulders, damp ea
 and bare earth or rock on steep slopes and graded cuttings. The textures (CC0) are mapped in world
 space at real scale, without visible tiling, and natural edges are soft while field and settlement
 edges stay sharp. It is display only: no vertex moves, and the simulation never reads it
-([ADR 0038](docs/adr/0038-terrain-materials.md)).
+([ADR 0038](docs/adr/0038-terrain-materials.md)). The whole exercise can be played in either view, or switching
+between them at any moment: in 3D, click a Marine to select him, click the ground to send him
+there, drag his destination or facing arrow, place fire teams, draw the kill zone and edit the
+scenario, with the same purple viewsheds painted on the terrain, the same routes, wedges and labels
+on the ground, the shots during the ambush and the full After Action Review replay. Both views run
+the same commands on the same exercise; the 3D view only projects them onto the ground
+([ADR 0039](docs/adr/0039-2d-3d-functional-parity.md)).
 
 ## Requirements
 
@@ -254,3 +260,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 36. [Procedural environmental detail](docs/adr/0036-procedural-environmental-detail.md)
 37. [Road markings, and no overhead wires](docs/adr/0037-road-markings.md)
 38. [Terrain materials and surface realism](docs/adr/0038-terrain-materials.md)
+39. [Complete 2D/3D functional parity](docs/adr/0039-2d-3d-functional-parity.md)

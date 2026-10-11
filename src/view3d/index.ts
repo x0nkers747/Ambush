@@ -6,7 +6,10 @@ export {
   createBattlefieldView3d,
   type BattlefieldView3d,
   type BattlefieldView3dOptions,
+  type PointerHandler,
   type TerrainTints,
 } from './view';
+export type { GroundOverlay } from './ground-material';
+export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projection';
 export type { QualityLevel } from './quality';
 export { terrainGround, type GroundAt } from './camera-math';

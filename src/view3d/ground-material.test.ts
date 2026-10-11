@@ -209,3 +209,60 @@ describe('groundNoisePixels', () => {
     expect(Math.max(...values) - Math.min(...values)).toBeGreaterThan(100);
   });
 });
+
+describe('the visibility overlay on the ground (docs/adr/0039)', () => {
+  /** A 5 × 3 grid of 4 m cells, a distinct pixel per cell, row 0 the northernmost (as the 2D map's). */
+  const grid = { originX: -10, originY: 20, cellSize: 4, columns: 5, rows: 3 };
+  const pixels = new Uint8ClampedArray(grid.columns * grid.rows * 4);
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let c = 0; c < grid.columns; c += 1) {
+      pixels.set([row * 40, c * 40, 200, 255], (row * grid.columns + c) * 4);
+    }
+  }
+
+  it('each cell of the 2D map’s viewshed lands on the ground where the 2D map draws it', () => {
+    const ground = createGroundMaterial();
+    ground.setOverlay({ pixels, grid });
+    const { uniforms } = compiled(ground.material);
+    expect(uniforms['groundOverlayOn']?.value).toBe(1);
+    const [sx, sy, ox, oy] = uniforms['groundOverlayXform']?.value as number[];
+    const texture = uniforms['groundOverlay']?.value as Texture;
+    const data = (texture.image as { data: Uint8Array }).data;
+    for (let r = 0; r < grid.rows; r += 1) {
+      for (let c = 0; c < grid.columns; c += 1) {
+        // The centre of viewshed cell (c, r), r counted from the south as the viewshed grid is.
+        const x = grid.originX + (c + 0.5) * grid.cellSize;
+        const y = grid.originY + (r + 0.5) * grid.cellSize;
+        const u = x * (sx ?? 0) + (ox ?? 0);
+        const v = y * (sy ?? 0) + (oy ?? 0);
+        const tc = Math.floor(u * grid.columns);
+        const tr = Math.floor(v * grid.rows);
+        // The texel there is the pixel the 2D map draws for that cell (image row 0 = north).
+        const imageRow = grid.rows - 1 - r;
+        expect([tc, tr]).toEqual([c, imageRow]);
+        const i = (tr * grid.columns + tc) * 4;
+        expect([...data.slice(i, i + 2)]).toEqual([imageRow * 40, c * 40]);
+      }
+    }
+    ground.dispose();
+  });
+
+  it('is premultiplied (no dark fringe), replaced only for a new viewshed, and cleared', () => {
+    const ground = createGroundMaterial();
+    const half = new Uint8ClampedArray([200, 100, 50, 128]);
+    const one = { originX: 0, originY: 0, cellSize: 4, columns: 1, rows: 1 };
+    ground.setOverlay({ pixels: half, grid: one });
+    const { uniforms } = compiled(ground.material);
+    const first = uniforms['groundOverlay']?.value as Texture;
+    expect([...(first.image as { data: Uint8Array }).data]).toEqual([100, 50, 25, 128]);
+    // The same viewshed again: the same texture.
+    ground.setOverlay({ pixels: half, grid: one });
+    expect(uniforms['groundOverlay']?.value).toBe(first);
+    let freed = false;
+    first.addEventListener('dispose', () => (freed = true));
+    ground.setOverlay(null);
+    expect(uniforms['groundOverlayOn']?.value).toBe(0);
+    expect(freed).toBe(true);
+    ground.dispose();
+  });
+});

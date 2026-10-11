@@ -611,7 +611,10 @@ placed in or against a building.</p>
 <p class="muted">Green is the ground a standing Marine at the destination (or where they stand, if
 they have none) can see a standing person on. Terrain, buildings and vegetation block the view.
 Select a fire team to see what any of its Marines can see; drag a destination to compare
-positions.</p>`;
+positions.</p>
+<h3>3D view</h3>
+<p class="muted">Every click and drag above works on the 3D ground too, with the same results.
+Drag empty ground to orbit, right-drag to pan, use the wheel to zoom and double-click to focus.</p>`;
 
 export const TIME_HELP = `<h3>Map and time</h3>
 <dl class="help">

@@ -14,7 +14,7 @@ import {
 } from '#sim';
 import { formatBearing } from './bearing';
 import { roadStrokes } from './roads';
-import { wedgeOnScreen } from './engagement';
+import { pointAlong, wedgeEdges, wedgeOnScreen } from './engagement';
 import {
   screenToWorld,
   terrainBounds,
@@ -551,7 +551,8 @@ export function drawOverlays(
   layer: TerrainLayer,
 ): void {
   const { height } = scene.viewport;
-  drawGrid(ctx, scene, layer.bounds);
+  const plan = !scene.projection.perspective;
+  if (plan) drawGrid(ctx, scene, layer.bounds);
   drawEngagementWedge(ctx, scene, layer);
   drawOrp(ctx, scene);
   drawKillZone(ctx, scene);
@@ -574,8 +575,10 @@ export function drawOverlays(
     drawFacingArrow(ctx, scene);
   }
   drawTrigger(ctx, scene);
-  drawNorthArrow(ctx);
-  drawScaleBar(ctx, scene, height);
+  if (plan) {
+    drawNorthArrow(ctx);
+    drawScaleBar(ctx, scene, height);
+  }
 }
 
 /** Sets the context to draw in map coordinates (metres), keeping the device pixel ratio. */
@@ -835,6 +838,10 @@ function drawEngagementWedge(
   scene: MapScene,
   layer: TerrainLayer,
 ): void {
+  if (scene.projection.perspective) {
+    drawEngagementWedgeOnGround(ctx, scene);
+    return;
+  }
   const wedges = scene.engagements
     .map((wedge) => ({ wedge, ...wedgeOnScreen(wedge, scene.camera, scene.viewport) }))
     .filter(({ radius }) => radius > 0);
@@ -894,6 +901,94 @@ function drawEngagementWedge(
   ctx.restore();
 }
 
+/** Points along an arc of a wedge in map metres, `steps` + 1 of them, from bearing `from` to `to`. */
+function arcPoints(origin: Vec2, radius: number, from: number, to: number, steps: number): Vec2[] {
+  return Array.from({ length: steps + 1 }, (_, k) => {
+    const a = from + ((to - from) * k) / steps;
+    return { x: origin.x + radius * Math.sin(a), y: origin.y + radius * Math.cos(a) };
+  });
+}
+
+/**
+ * The engagement wedges in perspective (docs/adr/0039): the same bands,
+ * edges, arc and label as on the 2D map, laid on the ground in map metres
+ * and projected, so they follow the terrain and shrink with distance.
+ */
+function drawEngagementWedgeOnGround(ctx: CanvasRenderingContext2D, scene: MapScene): void {
+  const wedges = scene.engagements.filter((w) => w.rangeM > 0);
+  if (wedges.length === 0) return;
+  const { projection } = scene;
+  const bands = WEDGE_BAND_ALPHAS.length;
+  const STEPS = 24;
+  ctx.save();
+  WEDGE_BAND_ALPHAS.forEach((alpha, i) => {
+    ctx.beginPath();
+    for (const wedge of wedges) {
+      const [left, right] = wedgeEdges(wedge);
+      const inner = (wedge.rangeM * i) / bands;
+      const outer = (wedge.rangeM * (i + 1)) / bands;
+      const ring = [
+        ...arcPoints(wedge.origin, outer, left, right, STEPS),
+        ...(inner > 0 ? arcPoints(wedge.origin, inner, right, left, STEPS) : [wedge.origin]),
+      ].map((p) => projection.toScreen(p));
+      tracePolygon(ctx, ring);
+    }
+    ctx.fillStyle = `rgba(47, 111, 196, ${String(alpha)})`;
+    ctx.fill('nonzero');
+  });
+  const labels: { x: number; y: number; text: string }[] = [];
+  for (const wedge of wedges) {
+    const [left, right] = wedgeEdges(wedge);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(29, 64, 120, 0.35)';
+    polyline(
+      ctx,
+      projection.line([
+        pointAlong(wedge.origin, left, wedge.rangeM),
+        wedge.origin,
+        pointAlong(wedge.origin, right, wedge.rangeM),
+      ]),
+    );
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(29, 64, 120, 0.6)';
+    polyline(
+      ctx,
+      arcPoints(wedge.origin, wedge.rangeM, left, right, STEPS).map((p) => projection.toScreen(p)),
+    );
+    const at = projection.along(
+      pointAlong(wedge.origin, (left + right) / 2, wedge.rangeM),
+      (left + right) / 2,
+      12,
+    );
+    const text = `${wedge.weaponName} · ${String(wedge.rangeM)} m`;
+    if (!labels.some((l) => l.text === text && Math.hypot(l.x - at.x, l.y - at.y) < 60)) {
+      labels.push({ x: at.x, y: at.y, text });
+    }
+  }
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const { x, y, text } of labels) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.labelHalo;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = COLORS.orpEdge;
+    ctx.fillText(text, x, y);
+  }
+  ctx.restore();
+}
+
+/** Adds a closed polygon to the current path, starting afresh after any point that cannot be drawn. */
+function tracePolygon(ctx: CanvasRenderingContext2D, points: readonly Vec2[]): void {
+  const drawable = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (drawable.length < 3) return;
+  drawable.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+}
+
 /** A planned route as walked: start, then each leg's generated turns and its waypoint. */
 function walkedPoints(route: PlannedRoute): Vec2[] {
   return [route.start, ...route.legs.flatMap((leg) => [...(leg.turns ?? []), leg.to])];
@@ -903,15 +998,12 @@ function walkedPoints(route: PlannedRoute): Vec2[] {
 function drawOrp(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const orp = scene.orp;
   if (!orp) return;
-  const points = orp.outline.map((p) => worldToScreen(scene.camera, scene.viewport, p));
-  if (points.length < 3) return;
+  const first = orp.outline[0];
+  if (orp.outline.length < 3 || !first) return;
+  const points = scene.projection.line([...orp.outline, first]);
   ctx.save();
   ctx.beginPath();
-  points.forEach((p, i) => {
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  });
-  ctx.closePath();
+  tracePolygon(ctx, points);
   ctx.fillStyle = COLORS.orpFill;
   ctx.fill();
   ctx.setLineDash([6, 3]);
@@ -921,7 +1013,7 @@ function drawOrp(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.setLineDash([]);
   // The name sits just outside the northern edge, clear of the soldiers inside.
   const top = points.reduce((a, b) => (b.y < a.y ? b : a));
-  const centre = worldToScreen(scene.camera, scene.viewport, orp.centre);
+  const centre = scene.projection.toScreen(orp.centre);
   ctx.font = 'bold 11px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
@@ -1049,7 +1141,9 @@ function drawSoldiers(ctx: CanvasRenderingContext2D, scene: MapScene): void {
     const behavior = scene.combat?.behaviors.get(id);
     // An incapacitated soldier stays on the map, faded and crossed out.
     if (behavior === 'incapacitated') ctx.globalAlpha = 0.45;
-    if (full) {
+    if (scene.projection.perspective) {
+      // The 3D view draws the soldier himself; the overlay adds the ring, label and status.
+    } else if (full) {
       // Soldiers outside the trainee's organization (OPFOR) have no role: the plain circle.
       const role = scene.markings.get(id)?.icon ?? null;
       drawSoldierIcon(ctx, { role, affiliation, facing: soldier.azimuth }, at, SOLDIER_ICON_PX);
@@ -1167,8 +1261,9 @@ function drawShots(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.save();
   ctx.lineCap = 'round';
   for (const shot of shots) {
-    const from = worldToScreen(scene.camera, scene.viewport, shot.from);
-    const to = worldToScreen(scene.camera, scene.viewport, shot.to);
+    // From the shooter's weapon to the target's body where the view shows height.
+    const from = scene.projection.toScreen(shot.from, SHOT_LIFT_M);
+    const to = scene.projection.toScreen(shot.to, SHOT_LIFT_M);
     ctx.globalAlpha = Math.max(0.15, 1 - shot.ageSeconds / SHOT_DISPLAY_SECONDS);
     ctx.strokeStyle = shot.side === 'BLUEFOR' ? COLORS.bluforShot : COLORS.opforShot;
     ctx.lineWidth = shot.hit ? 2 : 1.25;
@@ -1185,6 +1280,13 @@ function drawShots(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   }
   ctx.restore();
 }
+
+/**
+ * Height above the ground, in metres, at which a shot line starts and ends
+ * where the view shows height: about a kneeling or standing soldier's weapon
+ * and body. The simulation records shooter and target, not a trajectory.
+ */
+export const SHOT_LIFT_M = 1.2;
 
 /** Badge colours, darker than the icons so white "+n" text reads on them. */
 const BADGE_COLORS: Readonly<Record<Affiliation, string>> = {
@@ -1298,18 +1400,24 @@ function drawFacingArrow(
 function drawKillZone(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   const zone = scene.killZone;
   if (!zone || zone.vertices.length === 0) return;
-  const points = zone.vertices.map((v) => worldToScreen(scene.camera, scene.viewport, v));
+  const points = zone.vertices.map((v) => scene.projection.toScreen(v));
   const closed = points.length >= 3;
+  const first = zone.vertices[0];
+  // The outline as drawn: on the ground between corners, in perspective.
+  const outline = scene.projection.line(
+    closed && first ? [...zone.vertices, first] : zone.vertices,
+  );
   ctx.save();
   ctx.beginPath();
-  points.forEach((p, i) => {
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  });
   if (closed) {
-    ctx.closePath();
+    tracePolygon(ctx, outline);
     ctx.fillStyle = COLORS.killZoneFill;
     ctx.fill();
+  } else {
+    outline.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
   }
   ctx.strokeStyle = COLORS.killZoneEdge;
   ctx.lineWidth = 2;
@@ -1328,7 +1436,9 @@ function drawKillZone(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   }
 
   if (closed) {
-    const c = centroid(points);
+    const c = scene.projection.perspective
+      ? scene.projection.toScreen(centroid(zone.vertices))
+      : centroid(points);
     ctx.font = 'bold 12px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1343,8 +1453,8 @@ function drawKillZone(ctx: CanvasRenderingContext2D, scene: MapScene): void {
 
 /** Scenario information: the expected enemy route, distinct from trainee plans. */
 function drawOpforRoute(ctx: CanvasRenderingContext2D, scene: MapScene, path: PlannedRoute): void {
-  const points = walkedPoints(path).map((p) => worldToScreen(scene.camera, scene.viewport, p));
-  const waypoints = path.legs.map((leg) => worldToScreen(scene.camera, scene.viewport, leg.to));
+  const points = scene.projection.line(walkedPoints(path));
+  const waypoints = path.legs.map((leg) => scene.projection.toScreen(leg.to));
   ctx.save();
   ctx.strokeStyle = COLORS.opforRoute;
   ctx.fillStyle = COLORS.opforRoute;
@@ -1378,7 +1488,7 @@ function drawObserver(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   if (!visibility) return;
   ctx.save();
   for (const observer of visibility.observers ?? [visibility.observer]) {
-    const p = worldToScreen(scene.camera, scene.viewport, observer);
+    const p = scene.projection.toScreen(observer);
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(p.x, p.y, 10, 0, 2 * Math.PI);
@@ -1547,7 +1657,7 @@ function drawTrigger(ctx: CanvasRenderingContext2D, scene: MapScene): void {
   ctx.strokeStyle = COLORS.trigger;
   ctx.lineWidth = 3;
   for (const opfor of scene.trigger.opforPositions) {
-    const p = worldToScreen(scene.camera, scene.viewport, opfor.point);
+    const p = scene.projection.toScreen(opfor.point);
     ctx.setLineDash(opfor.inKillZone ? [] : [4, 4]);
     for (const r of opfor.inKillZone ? [10, 18] : [14]) {
       ctx.beginPath();
@@ -1630,9 +1740,16 @@ function drawScaleBar(ctx: CanvasRenderingContext2D, scene: MapScene, height: nu
 
 function polyline(ctx: CanvasRenderingContext2D, points: readonly Vec2[]): void {
   ctx.beginPath();
-  points.forEach((p, i) => {
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  });
+  // A point that cannot be drawn (behind a perspective camera) breaks the line.
+  let pen = false;
+  for (const p of points) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+      pen = false;
+      continue;
+    }
+    if (pen) ctx.lineTo(p.x, p.y);
+    else ctx.moveTo(p.x, p.y);
+    pen = true;
+  }
   ctx.stroke();
 }

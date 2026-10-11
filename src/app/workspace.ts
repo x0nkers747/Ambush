@@ -32,17 +32,19 @@ import {
   type SoldierId,
   type TerrainDataset,
   type Vec2,
+  type Viewshed,
 } from '#sim';
 import {
   createTacticalMap,
   elevationTints,
   formatBearing,
   typicalElevationRange,
+  viewshedPixels,
   type MapBinding,
   type MapEditor,
   type TacticalMap,
 } from '#view2d';
-import type { BattlefieldView3d } from '#view3d';
+import type { BattlefieldView3d, GroundOverlay } from '#view3d';
 import { carryPlans, type CarryResult } from './carry-plans';
 import {
   clock,
@@ -422,7 +424,9 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     return handed;
   };
   const map = o.map ? adopt(o.map) : createTacticalMap({ canvas: placeholder, ...binding });
-  toScreen = (p) => map.toScreen(p);
+  // The scenario editor's handles are hit-tested on the view that is shown.
+  toScreen = (p) =>
+    viewMode === '3d' && view3d ? view3d.projection().toScreen(p) : map.toScreen(p);
 
   const exerciseStage = createExerciseStage({
     // In the After Action Review its panels show the replay's moment.
@@ -705,7 +709,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     }
     const id = session.selectedSoldierId;
     const soldier = id === null ? null : view.simulation.state.soldiers.find((s) => s.id === id);
-    if (replay.follow && soldier) map.centreOn({ x: soldier.position.x, y: soldier.position.y });
+    if (replay.follow && soldier) centreOn({ x: soldier.position.x, y: soldier.position.y });
   };
   const seekReplay = (seconds: number) => {
     const recording = reviewed();
@@ -786,7 +790,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     setSession: (next) => {
       session = next;
     },
-    map,
+    map: { centreOn },
   });
   // --- 2D / 3D view (docs/adr/0029) ----------------------------------------
   // The 3D view is loaded the first time it is opened and then kept, with its
@@ -797,16 +801,88 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   let view3d: BattlefieldView3d | null = null;
   let loading3d = false;
   let stopped = false;
+  /**
+   * Centres the view that is shown on a map point (a roster double click, the
+   * replay following a Marine); the other view follows on the next switch.
+   */
+  function centreOn(point: Vec2): void {
+    if (viewMode === '3d' && view3d) view3d.focusOn(point);
+    else map.centreOn(point);
+  }
+  /** The 3D camera's distance that shows about as much ground as the 2D map's scale, and back. */
+  const FOV_HALF_TAN = Math.tan((22.5 * Math.PI) / 180);
+  const distanceFor = (metersPerPixel: number, heightPx: number) =>
+    (metersPerPixel * heightPx) / (2 * FOV_HALF_TAN);
+  const scaleFor = (distance: number, heightPx: number) =>
+    (2 * FOV_HALF_TAN * distance) / Math.max(heightPx, 1);
+  /** Keeps the place in view when switching: the other view looks where this one did. */
+  const carryFocus = (to: '2d' | '3d') => {
+    if (!view3d) return;
+    const height = map.canvas.getBoundingClientRect().height;
+    if (to === '3d') {
+      const { centre, metersPerPixel } = map.view;
+      view3d.focusOn(centre, distanceFor(metersPerPixel, height));
+    } else {
+      const focus = view3d.focus();
+      if (focus) map.setView(focus.point, scaleFor(focus.distance, height));
+    }
+  };
+  /** The visibility overlay's pixels, made once per viewshed for the 3D ground. */
+  const groundOverlays = new WeakMap<Viewshed, GroundOverlay>();
+  const groundOverlayOf = (viewshed: Viewshed | null): GroundOverlay | null => {
+    if (!viewshed) return null;
+    let overlay = groundOverlays.get(viewshed);
+    if (!overlay) {
+      overlay = { pixels: viewshedPixels(viewshed), grid: viewshed.grid };
+      groundOverlays.set(viewshed, overlay);
+    }
+    return overlay;
+  };
+  /**
+   * Connects the 3D view to the map's gameplay (docs/adr/0039): its clicks
+   * and drags go through the same controller and commands as the 2D map's,
+   * through the 3D ground projection, and the same tactical overlays are
+   * drawn over it.
+   */
+  const connect3d = (v: BattlefieldView3d) => {
+    const surface = map.surface(
+      () => v.projection(),
+      () => {
+        const rect = v.canvas.getBoundingClientRect();
+        return { width: Math.max(rect.width, 1), height: Math.max(rect.height, 1) };
+      },
+    );
+    v.setPointerHandler({
+      press: (p, button) => surface.press(p, button),
+      drag: (p) => {
+        surface.drag(p);
+      },
+      release: (p) => {
+        surface.release(p);
+      },
+      click: (p, button) => {
+        surface.click(p, button);
+      },
+      hover: (p) => surface.hover(p),
+    });
+    v.setOverlayPainter((ctx) => {
+      surface.draw(ctx);
+    });
+  };
   const showViewMode = () => {
     for (const b of app.querySelectorAll<HTMLButtonElement>('[data-view]'))
       b.setAttribute('aria-pressed', String(b.dataset['view'] === viewMode));
-    if (view3d) view3d.canvas.hidden = viewMode !== '3d';
+    if (view3d) {
+      view3d.canvas.hidden = viewMode !== '3d';
+      view3d.overlay.hidden = viewMode !== '3d';
+    }
     app.dataset['view'] = viewMode;
     ui('fit').title = viewMode === '3d' ? 'Back to the overhead view (F)' : 'Fit the whole map (F)';
     setText(ui('fit'), viewMode === '3d' ? 'Reset view' : 'Fit map');
   };
   const setViewMode = (mode: '2d' | '3d') => {
     if (mode === '2d' || view3d) {
+      if (mode !== viewMode) carryFocus(mode);
       viewMode = mode;
       showViewMode();
       return;
@@ -827,9 +903,15 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
             channels: 3,
           }),
         });
-        ui('attribution').before(view3d.canvas);
+        ui('attribution').before(view3d.canvas, view3d.overlay);
+        connect3d(view3d);
         viewMode = '3d';
         showViewMode();
+        // The first frame lays out the camera; then look where the 2D map did.
+        const opened = view3d;
+        requestAnimationFrame(() => {
+          if (view3d === opened && viewMode === '3d') carryFocus('3d');
+        });
         notify('');
       })
       .catch((error: unknown) => {
@@ -1399,16 +1481,23 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           ? `Tool: ${session.tool === 'killZone' ? 'Kill zone' : 'Waypoints'}`
           : '',
     );
-    const p = viewMode === '3d' ? null : map.pointer;
+    const ground = viewMode === '3d' ? (view3d?.pointer ?? null) : null;
+    const p =
+      viewMode === '3d'
+        ? ground && { east: ground.x, north: ground.y, elevation: ground.z }
+        : map.pointer;
+    const readout = p
+      ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m${
+          o.describePoint ? `   ${o.describePoint({ x: p.east, y: p.north })}` : ''
+        }`
+      : '';
     setText(
       ui('pointer'),
       viewMode === '3d'
-        ? (view3d?.status() ?? 'Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus')
-        : p
-          ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m${
-              o.describePoint ? `   ${o.describePoint({ x: p.east, y: p.north })}` : ''
-            }`
-          : '',
+        ? (view3d?.status() ??
+            (readout ||
+              'Click: select or place · Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus'))
+        : readout,
     );
   };
 
@@ -1439,8 +1528,12 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       exerciseStage.collect(events);
     }
     lastFrameMs = nowMs;
-    if (viewMode === '3d' && view3d) view3d.render();
-    else map.render();
+    if (viewMode === '3d' && view3d) {
+      // The 2D map is not drawn, but its viewsheds stay current: the 3D ground shows the same ones.
+      map.update();
+      view3d.setGroundOverlay(groundOverlayOf(map.visibility?.viewshed ?? null));
+      view3d.render();
+    } else map.render();
     updatePanels();
     frameId = requestAnimationFrame(frame);
   };
@@ -1453,6 +1546,62 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     window.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('visibilitychange', onVisibilityChange);
   };
+
+  // For automated browser checks (docs/adr/0039): a plain snapshot of the
+  // shared game state, whichever view is shown. Read-only.
+  Object.defineProperty(app, 'ambushState', {
+    configurable: true,
+    value: () => {
+      const e = exercise;
+      const recording = reviewed();
+      const score = currentScore();
+      return {
+        stage,
+        view: viewMode,
+        session: { ...session },
+        plans: e
+          ? e.simulation.state.soldiers.flatMap((s) => {
+              const plan = e.displayedPlan(s.id);
+              const facing = e.displayedFacing(s.id);
+              return plan
+                ? [
+                    {
+                      id: s.id,
+                      position: { x: s.position.x, y: s.position.y, z: s.position.z },
+                      destination: plan.destination ?? null,
+                      facing: facing
+                        ? { azimuth: facing.azimuth, explicit: facing.explicit }
+                        : null,
+                    },
+                  ]
+                : [];
+            })
+          : [],
+        killZone: e?.killZone?.vertices.map((v) => ({ x: v.x, y: v.y })) ?? null,
+        formations: e
+          ? e.formationGroups.flatMap((g) => {
+              const f = e.formation(g.unitId);
+              return f ? [{ unitId: g.unitId, centre: f.centre, azimuth: f.azimuth }] : [];
+            })
+          : [],
+        visibility: map.visibility
+          ? {
+              observer: map.visibility.observer,
+              cells: map.visibility.viewshed
+                ? Array.from(map.visibility.viewshed.visible).reduce((a, b) => a + b, 0)
+                : null,
+              pending: map.visibility.pending,
+            }
+          : null,
+        combatLog: e ? e.combatLog.map((c) => ({ ...c })) : [],
+        simulationSeconds: e?.simulation.timeSeconds ?? 0,
+        replay: recording
+          ? { seconds: replay.seconds, playing: replay.playing, frame: replayFrame() }
+          : null,
+        score: score ? (JSON.parse(JSON.stringify(score)) as unknown) : null,
+      };
+    },
+  });
 
   enter(stage);
   if (o.notice) notify(o.notice);

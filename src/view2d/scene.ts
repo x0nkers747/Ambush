@@ -23,12 +23,60 @@ import {
   type Vec2,
   type Viewshed,
 } from '#sim';
-import { worldToScreen, type Camera, type Viewport } from './camera';
+import { screenToWorld, worldToScreen, type Camera, type Viewport } from './camera';
 import { engagementWedge, type EngagementWedge } from './engagement';
 import { FACING_REACH, type Affiliation } from './soldier-icons';
 
 // What the map shows and where, in screen pixels, plus hit-testing on it.
 // Pure: shared by the renderer and the interaction controller.
+//
+// "Where on screen" goes through a `MapProjection`: the 2D map's camera, or
+// the 3D battlefield's ground projection (docs/adr/0039). Everything that
+// hit-tests or draws the tactical picture uses it, so the same scene, the
+// same controller and the same commands serve both views.
+
+/**
+ * How map points meet the screen (CSS pixels): the 2D map's plan view, or a
+ * perspective view of the ground (the 3D battlefield).
+ */
+export interface MapProjection {
+  /**
+   * The screen point of a map point on the ground, raised `lift` metres
+   * where the view shows height (ignored in plan view). NaN coordinates when
+   * it cannot be drawn (behind a perspective camera): such a point hits
+   * nothing, and lines are broken there.
+   */
+  toScreen(point: Vec2, lift?: number): Vec2;
+  /** The map point on the ground under a screen point, or `null` (the sky). */
+  toWorld(screen: Vec2): Vec2 | null;
+  /** The screen point `px` pixels from `point`'s screen point, toward map bearing `azimuth`. */
+  along(point: Vec2, azimuth: number, px: number): Vec2;
+  /**
+   * A map polyline on screen. In perspective, extra points follow the ground
+   * between the given ones, so the line lies on the terrain.
+   */
+  line(points: readonly Vec2[]): Vec2[];
+  /** Whether this is a perspective view: no grid, scale bar or plan-view circles in metres. */
+  readonly perspective: boolean;
+}
+
+/** The 2D map's projection: plan view through its camera. */
+export function cameraProjection(camera: Camera, viewport: Viewport): MapProjection {
+  const toScreen = (point: Vec2) => worldToScreen(camera, viewport, point);
+  return {
+    toScreen,
+    toWorld: (screen) => screenToWorld(camera, viewport, screen),
+    along: (point, azimuth, px) => {
+      const at = toScreen(point);
+      return { x: at.x + Math.sin(azimuth) * px, y: at.y - Math.cos(azimuth) * px };
+    },
+    line: (points) => points.map(toScreen),
+    perspective: false,
+  };
+}
+
+/** Height above the ground at which a soldier is picked and labelled in perspective (about his middle). */
+export const SOLDIER_LIFT_M = 0.9;
 
 /** How a trainee soldier is drawn: its role icon and short role label. */
 export interface SoldierMarking {
@@ -39,8 +87,11 @@ export interface SoldierMarking {
 }
 
 export interface MapScene {
+  /** The 2D map's camera (plan-view drawing); a perspective view leaves it unused. */
   readonly camera: Camera;
   readonly viewport: Viewport;
+  /** Where map points are on screen, for hit-testing and the tactical overlays. */
+  readonly projection: MapProjection;
   readonly soldiers: readonly DeepReadonly<Soldier>[];
   readonly selectedId: SoldierId | null;
   /** The selected fire team (docs/adr/0022), or `null`; never set together with `selectedId`. */
@@ -160,6 +211,8 @@ export function buildScene(
   visibility: VisibilityView | null = null,
   /** The trainee's squad is not placed yet: neither it nor its ORP is drawn (or can be selected). */
   hideTrainee = false,
+  /** Where map points are on screen; by default the 2D map's plan view through `camera`. */
+  projection: MapProjection = cameraProjection(camera, viewport),
 ): MapScene {
   const { world } = exercise.simulation;
   const state = hideTrainee
@@ -185,6 +238,7 @@ export function buildScene(
   return {
     camera,
     viewport,
+    projection,
     soldiers: state.soldiers,
     selectedId: session.selectedSoldierId,
     selectedTeam,
@@ -362,15 +416,11 @@ export interface FormationGeometry {
 export function formationGeometry(scene: MapScene): FormationGeometry | undefined {
   const formation = scene.selectedTeam?.formation;
   if (!formation) return undefined;
-  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
-  const centre = toScreen(formation.centre);
+  const { projection } = scene;
   return {
-    centre,
-    slots: formation.slots.map((s) => toScreen(s.point)),
-    facingTip: {
-      x: centre.x + Math.sin(formation.azimuth) * FACING_ARROW_PX,
-      y: centre.y - Math.cos(formation.azimuth) * FACING_ARROW_PX,
-    },
+    centre: projection.toScreen(formation.centre),
+    slots: formation.slots.map((s) => projection.toScreen(s.point)),
+    facingTip: projection.along(formation.centre, formation.azimuth, FACING_ARROW_PX),
     azimuth: formation.azimuth,
   };
 }
@@ -402,12 +452,14 @@ export function deploymentGeometry(
   const plan = scene.plans.find((p) => p.soldierId === id);
   const facing = id === null ? undefined : scene.facings.get(id);
   if (!soldier || !plan || !facing) return undefined;
-  const toScreen = (p: Vec2) => worldToScreen(scene.camera, scene.viewport, p);
-  const start = toScreen(soldier.position);
-  const destination = plan.destination ? toScreen(toVec2(plan.destination)) : null;
+  const { projection } = scene;
+  const start = projection.toScreen(soldier.position);
+  const target = plan.destination ? toVec2(plan.destination) : null;
+  const destination = target ? projection.toScreen(target) : null;
   const leg = scene.routes.get(soldier.id)?.legs[0];
-  const path = destination ? [start, ...(leg?.turns ?? []).map(toScreen), destination] : [];
+  const path = target ? projection.line([soldier.position, ...(leg?.turns ?? []), target]) : [];
   const facingAnchor = destination ?? start;
+  const anchorPoint = target ?? soldier.position;
   const clear =
     distance(facingAnchor, start) <= SOLDIER_ICON_PX / 2 ? FACING_REACH * SOLDIER_ICON_PX + 1 : 0;
   return {
@@ -416,14 +468,8 @@ export function deploymentGeometry(
     path,
     impossible: destination !== null && (leg?.turns ?? null) === null,
     facingAnchor,
-    facingShaftStart: {
-      x: facingAnchor.x + Math.sin(facing.azimuth) * clear,
-      y: facingAnchor.y - Math.cos(facing.azimuth) * clear,
-    },
-    facingTip: {
-      x: facingAnchor.x + Math.sin(facing.azimuth) * FACING_ARROW_PX,
-      y: facingAnchor.y - Math.cos(facing.azimuth) * FACING_ARROW_PX,
-    },
+    facingShaftStart: projection.along(anchorPoint, facing.azimuth, clear),
+    facingTip: projection.along(anchorPoint, facing.azimuth, FACING_ARROW_PX),
     facing,
   };
 }
@@ -433,7 +479,7 @@ export function soldierAt(scene: MapScene, screen: Vec2): DeepReadonly<Soldier> 
   let best: DeepReadonly<Soldier> | undefined;
   let bestDistance = SOLDIER_HIT_RADIUS_PX;
   for (const soldier of scene.soldiers) {
-    const d = distance(worldToScreen(scene.camera, scene.viewport, soldier.position), screen);
+    const d = distance(scene.projection.toScreen(soldier.position, SOLDIER_LIFT_M), screen);
     if (d <= bestDistance) {
       best = soldier;
       bestDistance = d;
@@ -507,7 +553,7 @@ export function symbolLayout(scene: MapScene): ReadonlyMap<SoldierId, SymbolPlac
   const hidden = new Map<SoldierId, { id: SoldierId; affiliation: Affiliation }[]>();
   const half = SYMBOL_BOX_PX / 2;
   for (const soldier of ordered) {
-    const at = worldToScreen(scene.camera, scene.viewport, soldier.position);
+    const at = scene.projection.toScreen(soldier.position, SOLDIER_LIFT_M);
     const affiliation = affiliationOf(soldier.side);
     const box = { x0: at.x - half, y0: at.y - half, x1: at.x + half, y1: at.y + half };
     const selected = isSelected(scene, soldier.id);
@@ -569,7 +615,7 @@ export function selectableSoldiersAt(scene: MapScene, screen: Vec2): SoldierId[]
   return scene.soldiers
     .filter((s) => scene.markings.has(s.id))
     .map((s, order) => {
-      const at = worldToScreen(scene.camera, scene.viewport, s.position);
+      const at = scene.projection.toScreen(s.position, SOLDIER_LIFT_M);
       return { id: s.id, at, order, d: distance(at, screen) };
     })
     .filter(({ at }) => Math.abs(at.x - screen.x) <= half && Math.abs(at.y - screen.y) <= half)
@@ -606,7 +652,7 @@ export function killZoneVertexAt(scene: MapScene, screen: Vec2): number | undefi
   let best: number | undefined;
   let bestDistance = KILL_ZONE_VERTEX_HIT_RADIUS_PX;
   scene.killZone?.vertices.forEach((v, i) => {
-    const d = distance(worldToScreen(scene.camera, scene.viewport, v), screen);
+    const d = distance(scene.projection.toScreen(v), screen);
     if (d <= bestDistance) {
       best = i;
       bestDistance = d;
@@ -623,18 +669,24 @@ export function killZoneVertexAt(scene: MapScene, screen: Vec2): number | undefi
 export function killZoneInsertionIndexAt(scene: MapScene, screen: Vec2): number | undefined {
   const vertices = scene.killZone?.vertices ?? [];
   if (vertices.length < 2) return undefined;
-  const points = vertices.map((v) => worldToScreen(scene.camera, scene.viewport, v));
-  const sides = vertices.length >= 3 ? points.length : 1;
+  const sides = vertices.length >= 3 ? vertices.length : 1;
   let best: number | undefined;
   let bestDistance = SEGMENT_HIT_DISTANCE_PX;
   for (let i = 0; i < sides; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
     if (!a || !b) continue;
-    const d = distanceToSegment(screen, a, b);
-    if (d <= bestDistance) {
-      best = i + 1;
-      bestDistance = d;
+    // The side as drawn (on the ground, in perspective).
+    const points = scene.projection.line([a, b]);
+    for (let k = 1; k < points.length; k += 1) {
+      const p = points[k - 1];
+      const q = points[k];
+      if (!p || !q) continue;
+      const d = distanceToSegment(screen, p, q);
+      if (d <= bestDistance) {
+        best = i + 1;
+        bestDistance = d;
+      }
     }
   }
   return best;

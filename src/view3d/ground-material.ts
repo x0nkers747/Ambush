@@ -95,6 +95,19 @@ const PATH_DEFINES: Readonly<Record<GroundPath, Record<string, string>>> = {
   flat: { GROUND_FLAT: '' },
 };
 
+/** A raster painted over the ground: the visibility overlay. */
+export interface GroundOverlay {
+  /** RGBA, not premultiplied, `columns × rows`, row 0 the northernmost. */
+  readonly pixels: Uint8ClampedArray;
+  readonly grid: {
+    readonly originX: number;
+    readonly originY: number;
+    readonly cellSize: number;
+    readonly columns: number;
+    readonly rows: number;
+  };
+}
+
 export interface GroundMaterial {
   readonly material: MeshStandardMaterial;
   /** Starts using a ground map (the terrain's). Replaces any earlier one. */
@@ -103,6 +116,12 @@ export interface GroundMaterial {
   hasMap(): boolean;
   /** Which shader path to use (see `GroundPath`). */
   setPath(path: GroundPath): void;
+  /**
+   * Paints a visibility overlay on the ground (docs/adr/0039): RGBA pixels
+   * over a grid of cells (row 0 the northernmost, as the 2D map draws it), or
+   * `null` for none. The same array again changes nothing.
+   */
+  setOverlay(overlay: GroundOverlay | null): void;
   /** Resolves when the textures are in use (false: they could not load; the layers' colours stay). */
   readonly ready: Promise<boolean>;
   /** Whether the ground textures are in use (else the layers' plain colours). */
@@ -273,6 +292,9 @@ uniform float groundRough[${String(LAYERS)}];
 uniform float groundMeanLum[${String(LAYERS)}];
 uniform vec3 groundColor[${String(LAYERS)}];
 uniform float groundOn;
+uniform sampler2D groundOverlay;
+uniform vec4 groundOverlayXform;
+uniform float groundOverlayOn;
 varying vec2 vGroundXY;
 
 float groundLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -404,6 +426,18 @@ if (groundOn > 0.5) {
 }
 `;
 
+// The visibility overlay, in output colour space like the 2D map's canvas,
+// before fog. Its pixels are premultiplied, so filtering leaves no dark fringe.
+const FRAGMENT_OVERLAY = /* glsl */ `
+if (groundOverlayOn > 0.5) {
+  vec2 ou = vGroundXY * groundOverlayXform.xy + groundOverlayXform.zw;
+  if (all(greaterThanEqual(ou, vec2(0.0))) && all(lessThanEqual(ou, vec2(1.0)))) {
+    vec4 o = texture(groundOverlay, ou);
+    gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - o.a) + o.rgb;
+  }
+}
+`;
+
 const FRAGMENT_ROUGHNESS = /* glsl */ `
 if (groundOn > 0.5) roughnessFactor = groundRoughness;
 `;
@@ -460,6 +494,9 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
       }),
     },
     groundOn: { value: 0 },
+    groundOverlay: { value: empty as Texture },
+    groundOverlayXform: { value: [0, 0, 0, 0] as number[] },
+    groundOverlayOn: { value: 0 },
   };
   let path: GroundPath = options.path ?? 'full';
   const material = new MeshStandardMaterial({
@@ -484,11 +521,17 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>${FRAGMENT_NORMAL}`,
+      )
+      .replace(
+        '#include <colorspace_fragment>',
+        `#include <colorspace_fragment>${FRAGMENT_OVERLAY}`,
       );
   };
   material.customProgramCacheKey = () => `ambush-ground-${path}`;
 
   let disposed = false;
+  let overlayPixels: Uint8ClampedArray | null = null;
+  let overlayTexture: DataTexture | null = null;
   let mapTextures: DataTexture[] = [];
   let textures: DataArrayTexture[] = [holders.albedo, holders.normal];
   let mapBytes = 0;
@@ -553,6 +596,46 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
     hasMap() {
       return uniforms.groundOn.value === 1;
     },
+    setOverlay(overlay) {
+      if (disposed || (overlay?.pixels ?? null) === overlayPixels) return;
+      overlayPixels = overlay?.pixels ?? null;
+      overlayTexture?.dispose();
+      overlayTexture = null;
+      if (!overlay) {
+        uniforms.groundOverlayOn.value = 0;
+        uniforms.groundOverlay.value = empty;
+        return;
+      }
+      const { grid, pixels } = overlay;
+      const data = new Uint8Array(pixels.length);
+      for (let i = 0; i < pixels.length; i += 4) {
+        const a = (pixels[i + 3] ?? 0) / 255;
+        data[i] = Math.round((pixels[i] ?? 0) * a);
+        data[i + 1] = Math.round((pixels[i + 1] ?? 0) * a);
+        data[i + 2] = Math.round((pixels[i + 2] ?? 0) * a);
+        data[i + 3] = pixels[i + 3] ?? 0;
+      }
+      const t = new DataTexture(data, grid.columns, grid.rows, RGBAFormat, UnsignedByteType);
+      t.colorSpace = NoColorSpace;
+      t.wrapS = ClampToEdgeWrapping;
+      t.wrapT = ClampToEdgeWrapping;
+      t.magFilter = LinearFilter;
+      t.minFilter = LinearFilter;
+      t.generateMipmaps = false;
+      t.needsUpdate = true;
+      overlayTexture = t;
+      const width = grid.columns * grid.cellSize;
+      const height = grid.rows * grid.cellSize;
+      // u east from the grid's west edge; v from its north edge (row 0), down.
+      uniforms.groundOverlayXform.value = [
+        1 / width,
+        -1 / height,
+        -grid.originX / width,
+        1 + grid.originY / height,
+      ];
+      uniforms.groundOverlay.value = t;
+      uniforms.groundOverlayOn.value = 1;
+    },
     setPath(next) {
       if (next === path) return;
       path = next;
@@ -578,6 +661,7 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
     dispose() {
       disposed = true;
       for (const t of [...textures, ...mapTextures, empty, noise]) t.dispose();
+      overlayTexture?.dispose();
       material.dispose();
     },
   };
