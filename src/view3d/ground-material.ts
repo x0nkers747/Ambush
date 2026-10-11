@@ -38,7 +38,8 @@ import { srgbToLinear } from './terrain-mesh';
 //   ground darker and a little smoother, dry grass paler.
 //
 // Until the map and textures arrive, the terrain shows its vertex colours
-// (land-cover tints), so it never looks broken. A simpler path (one sample per
+// (land-cover tints), so it never looks broken. Cheaper paths serve low
+// quality and software renderers (`GroundPath`). A simpler path (one sample per
 // layer, no normal maps) is used at the low quality level.
 
 const ALBEDO_URLS: readonly string[] = [
@@ -81,14 +82,27 @@ const NORMAL_PX = 256;
 const NOISE_PX = 256;
 const LAYERS = GROUND_LAYERS.length;
 
+/**
+ * The shader's paths: `full` (medium and high quality), `simple` (low: one
+ * sample per layer, no normal maps) and `flat` (software renderers at low
+ * quality: each layer its plain colour, no texture reads beyond the map).
+ */
+export type GroundPath = 'full' | 'simple' | 'flat';
+
+const PATH_DEFINES: Readonly<Record<GroundPath, Record<string, string>>> = {
+  full: {},
+  simple: { GROUND_SIMPLE: '' },
+  flat: { GROUND_FLAT: '' },
+};
+
 export interface GroundMaterial {
   readonly material: MeshStandardMaterial;
   /** Starts using a ground map (the terrain's). Replaces any earlier one. */
   setMap(map: GroundMap): void;
   /** Whether a ground map is in use. */
   hasMap(): boolean;
-  /** The simpler shader (low quality). */
-  setSimple(simple: boolean): void;
+  /** Which shader path to use (see `GroundPath`). */
+  setPath(path: GroundPath): void;
   /** Resolves when the textures are in use (false: they could not load; the layers' colours stay). */
   readonly ready: Promise<boolean>;
   /** Whether the ground textures are in use (else the layers' plain colours). */
@@ -257,6 +271,7 @@ uniform vec3 groundTint[${String(LAYERS)}];
 uniform float groundTile[${String(LAYERS)}];
 uniform float groundRough[${String(LAYERS)}];
 uniform float groundMeanLum[${String(LAYERS)}];
+uniform vec3 groundColor[${String(LAYERS)}];
 uniform float groundOn;
 varying vec2 vGroundXY;
 
@@ -272,7 +287,11 @@ void groundLayer(int i, vec2 p, vec2 dpx, vec2 dpy, float dist, out vec3 albedo,
   vec2 uv = p * inv;
   vec2 gx = dpx * inv;
   vec2 gy = dpy * inv;
-#ifdef GROUND_SIMPLE
+#if defined(GROUND_FLAT)
+  albedo = groundColor[i];
+  nxy = vec2(0.0);
+  return;
+#elif defined(GROUND_SIMPLE)
   mat2 r0 = groundRot(1.3 * layer);
   albedo = textureGrad(groundAlbedo, vec3(r0 * uv, layer), r0 * gx, r0 * gy).rgb;
   nxy = vec2(0.0);
@@ -331,7 +350,11 @@ if (groundOn > 0.5) {
     if (w[i] < 0.02) continue;
     groundLayer(i, p, dpx, dpy, dist, col[i], nrm[i]);
     // Height for blending: the texture's brightness against its average.
+#ifdef GROUND_FLAT
+    h[i] = 0.5;
+#else
     h[i] = clamp(0.5 * groundLum(col[i]) / max(groundLum(groundTint[i]) * groundMeanLum[i], 1e-3), 0.0, 1.0);
+#endif
     top = max(top, w[i] + 0.6 * h[i]);
   }
   // Height blending near the camera; plain weights far away (no colour shift with distance).
@@ -399,7 +422,7 @@ if (groundOn > 0.5 && dot(groundNxy, groundNxy) > 1e-6) {
 `;
 
 /** The terrain's material. Starts with vertex colours; `setMap` turns the ground textures on. */
-export function createGroundMaterial(options: { simple?: boolean } = {}): GroundMaterial {
+export function createGroundMaterial(options: { path?: GroundPath } = {}): GroundMaterial {
   const holders = placeholders();
   const tints = GROUND_LAYERS.map(() => new Vector3(1, 1, 1));
   const meanLum = GROUND_LAYERS.map((l) => {
@@ -425,16 +448,27 @@ export function createGroundMaterial(options: { simple?: boolean } = {}): Ground
     groundTile: { value: GROUND_LAYERS.map((l) => GROUND_LOOK[l].tile) },
     groundRough: { value: GROUND_LAYERS.map((l) => GROUND_LOOK[l].roughness) },
     groundMeanLum: { value: meanLum },
+    // The layers' colours, linear: the flat path's albedo.
+    groundColor: {
+      value: GROUND_LAYERS.map((l) => {
+        const c = GROUND_LOOK[l].color;
+        return new Vector3(
+          srgbToLinear((c >> 16) & 255),
+          srgbToLinear((c >> 8) & 255),
+          srgbToLinear(c & 255),
+        );
+      }),
+    },
     groundOn: { value: 0 },
   };
-  let simple = options.simple ?? false;
+  let path: GroundPath = options.path ?? 'full';
   const material = new MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
     roughness: 0.95,
     metalness: 0,
   });
-  material.defines = simple ? { GROUND_SIMPLE: '' } : {};
+  material.defines = { ...PATH_DEFINES[path] };
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -452,7 +486,7 @@ export function createGroundMaterial(options: { simple?: boolean } = {}): Ground
         `#include <normal_fragment_maps>${FRAGMENT_NORMAL}`,
       );
   };
-  material.customProgramCacheKey = () => `ambush-ground-${simple ? 'simple' : 'full'}`;
+  material.customProgramCacheKey = () => `ambush-ground-${path}`;
 
   let disposed = false;
   let mapTextures: DataTexture[] = [];
@@ -519,10 +553,10 @@ export function createGroundMaterial(options: { simple?: boolean } = {}): Ground
     hasMap() {
       return uniforms.groundOn.value === 1;
     },
-    setSimple(next) {
-      if (next === simple) return;
-      simple = next;
-      material.defines = simple ? { GROUND_SIMPLE: '' } : {};
+    setPath(next) {
+      if (next === path) return;
+      path = next;
+      material.defines = { ...PATH_DEFINES[path] };
       material.needsUpdate = true;
     },
     ready,

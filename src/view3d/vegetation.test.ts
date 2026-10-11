@@ -17,7 +17,7 @@ import {
   WATER_CLEARANCE_M,
 } from './exclusion';
 import { LOD_LEVELS, PLANTS, PLANTS_BY_KIND, plantModels } from './plant-models';
-import { detectQuality, QUALITY_PRESETS } from './quality';
+import { detectQuality, isSoftwareRenderer, QUALITY_PRESETS } from './quality';
 import { VERGE_M } from './road-geometry';
 import { distanceToLine, roughGround } from './test-helpers';
 import { createVegetationLayer } from './vegetation-layer';
@@ -503,6 +503,15 @@ describe('quality presets', () => {
     expect(detectQuality('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)')).toBe('low');
     expect(detectQuality('Apple M2')).toBe('medium');
     expect(detectQuality('ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11)')).toBe('high');
+    // Software renderers (the terrain then draws its flat ground path, docs/adr/0038).
+    expect(isSoftwareRenderer('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))')).toBe(
+      true,
+    );
+    expect(isSoftwareRenderer('llvmpipe (LLVM 15.0.7, 256 bits)')).toBe(true);
+    expect(isSoftwareRenderer('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)')).toBe(
+      false,
+    );
+    expect(isSoftwareRenderer(null)).toBe(false);
     expect(detectQuality('ANGLE (AMD, AMD Radeon RX 6700 XT)')).toBe('high');
     expect(detectQuality(null)).toBe('medium');
   });

@@ -53,9 +53,14 @@ export const QUALITY_PRESETS: Readonly<Record<QualityLevel, QualityPreset>> = {
  */
 export function detectQuality(renderer: string | null): QualityLevel {
   const r = (renderer ?? '').toLowerCase();
-  if (/swiftshader|llvmpipe|softpipe|software|basic render/.test(r)) return 'low';
+  if (isSoftwareRenderer(renderer)) return 'low';
   if (r.includes('intel')) return 'low';
   if (r.includes('apple')) return 'medium';
   if (/nvidia|geforce|rtx|quadro|radeon|amd/.test(r)) return 'high';
   return 'medium';
+}
+
+/** Whether WebGL is drawn on the CPU (SwiftShader, llvmpipe, Microsoft Basic Render). */
+export function isSoftwareRenderer(renderer: string | null): boolean {
+  return /swiftshader|llvmpipe|softpipe|software|basic render/.test((renderer ?? '').toLowerCase());
 }

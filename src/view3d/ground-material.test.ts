@@ -156,19 +156,40 @@ describe('createGroundMaterial', () => {
     expect(late.hasMap()).toBe(false);
   });
 
-  it('one program per quality path, shared by every terrain', () => {
+  it('one program per path, shared by every terrain', () => {
     const a = createGroundMaterial();
     const b = createGroundMaterial();
     expect(a.material.customProgramCacheKey()).toBe(b.material.customProgramCacheKey());
-    const version = a.material.version;
-    a.setSimple(true);
-    expect(a.material.customProgramCacheKey()).not.toBe(b.material.customProgramCacheKey());
-    expect(a.material.defines).toHaveProperty('GROUND_SIMPLE');
-    expect(a.material.version).toBeGreaterThan(version);
-    a.setSimple(false);
+    const keys = new Set<string>();
+    for (const [path, define] of [
+      ['simple', 'GROUND_SIMPLE'],
+      ['flat', 'GROUND_FLAT'],
+    ] as const) {
+      const version = a.material.version;
+      a.setPath(path);
+      keys.add(a.material.customProgramCacheKey());
+      expect(a.material.defines).toHaveProperty(define);
+      expect(a.material.version).toBeGreaterThan(version);
+    }
+    expect(keys.size).toBe(2);
+    expect(createGroundMaterial({ path: 'flat' }).material.customProgramCacheKey()).toBe(
+      a.material.customProgramCacheKey(),
+    );
+    a.setPath('full');
+    expect(a.material.defines).toEqual({});
     expect(a.material.customProgramCacheKey()).toBe(b.material.customProgramCacheKey());
     a.dispose();
     b.dispose();
+  });
+
+  it('every path’s shader keeps the hooks', () => {
+    for (const path of ['full', 'simple', 'flat'] as const) {
+      const g = createGroundMaterial({ path });
+      const { fragmentShader } = compiled(g.material);
+      expect(fragmentShader).toContain('#ifdef GROUND_FLAT');
+      expect(fragmentShader).toContain('diffuseColor.rgb = albedo;');
+      g.dispose();
+    }
   });
 });
 

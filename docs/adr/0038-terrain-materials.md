@@ -206,10 +206,20 @@ space. The layer colours were chosen against this lighting:
 
 ### 9. Quality levels
 
-At the **low** level (integrated GPUs and software renderers), `GROUND_SIMPLE` compiles a cheaper
-path: one rotated sample per layer, no broad sample and no normal maps. The map, blending, furrows,
-wetness and macro noise are kept. Medium and high use the full path. Switching level recompiles the
-terrain program (one program per path, shared by all terrains).
+The shader has three paths (`GroundPath`), one program each, shared by all terrains. Switching
+quality level recompiles the terrain program.
+
+- **full** (medium and high): everything above.
+- **simple** (low, on a GPU, such as integrated graphics): one rotated sample per layer, with no
+  broad sample and no normal maps. It keeps the map, height blending, furrows, wetness and macro
+  noise.
+- **flat** (low, on a software renderer such as SwiftShader or llvmpipe): each layer is its plain
+  colour, with no texture-array reads at all. Only the map, the noise, furrow shading and wetness
+  remain.
+  - Measured in SwiftShader, even the simple path more than doubled the time per frame against the
+    vertex-coloured baseline, from about 2.5–4 s to about 7 s.
+  - A software renderer is a fallback, not a target, so it keeps the map's layout of the ground
+    without the texture detail.
 
 ### 10. Determinism, versions and compatibility
 
@@ -252,8 +262,17 @@ be well within budget (about 10–15 texture reads per pixel for a typical two- 
 - The first 3D frame shows the vertex colours and does not wait for the bake or the textures. The
   only first-frame cost is compiling the extended terrain program, which is one program per quality
   path.
-- On SwiftShader the full path is slow per frame: a still at 25 m altitude takes several seconds.
-  This is why software renderers are detected as the low level, which uses the simple path.
+- Software rendering, measured on Quantico in SwiftShader with steady frames:
+
+  | Path                    | Wide view frame | Close view frame | Features and vegetation ready |
+  | ----------------------- | --------------- | ---------------- | ----------------------------- |
+  | Baseline (no textures)  | 2.2–5.6 s       | 1.7–3.6 s        | 21.6 s                        |
+  | simple                  | 7.3–7.5 s       | 6.7–7.0 s        | 44.7 s                        |
+  | flat (software default) | 4.6–5.2 s       | 2.6–5.2 s        | 34.4 s                        |
+
+  The extra time before features and vegetation appear comes from the slower frames during their
+  reveal, and from the bake worker sharing the CPU with the renderer. The first 3D frame is
+  unchanged: 9.8 s before and 9.8–11.2 s after. No GPU timings were possible here.
 
 The browser checks covered the demo, Quantico and Grafenwöhr. Views included wide overhead
 (2.5 km), medium oblique (700 m), grassland (120 m), forest floors under broadleaf and conifer

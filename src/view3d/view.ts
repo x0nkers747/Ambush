@@ -30,11 +30,17 @@ import {
   type GenerationStage,
 } from './generation';
 import { GROUND_MATERIAL_VERSION } from './ground-map';
-import { createGroundMaterial, type GroundMaterial } from './ground-material';
+import { createGroundMaterial, type GroundMaterial, type GroundPath } from './ground-material';
 import { landCoverTints } from './landcover';
 import { createMarkerLayer } from './markers';
 import { plantModels, type PlantModel } from './plant-models';
-import { detectQuality, QUALITY_PRESETS, type QualityLevel, type QualityPreset } from './quality';
+import {
+  detectQuality,
+  isSoftwareRenderer,
+  QUALITY_PRESETS,
+  type QualityLevel,
+  type QualityPreset,
+} from './quality';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
 import { apronElevation, skirtMesh, terrainMesh, type TerrainMeshData } from './terrain-mesh';
 import { destinationMarkers, unitMarkers } from './unit-markers';
@@ -158,6 +164,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
   renderer.shadowMap.enabled = quality.shadows !== null;
 
+  /** The terrain shader's path: plain layer colours on software renderers at low quality. */
+  const groundPath = (): GroundPath =>
+    quality.level !== 'low' ? 'full' : isSoftwareRenderer(gpu) ? 'flat' : 'simple';
+
   const scene = new Scene();
   scene.background = HAZE;
 
@@ -214,7 +224,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     if (data.colors) geometry.setAttribute('color', new BufferAttribute(data.colors, 3));
     geometry.setIndex(new BufferAttribute(data.indices, 1));
     geometry.computeBoundingSphere();
-    const ground = createGroundMaterial({ simple: quality.level === 'low' });
+    const ground = createGroundMaterial({ path: groundPath() });
     const mesh = new Mesh(geometry, ground.material);
     mesh.name = 'terrain';
     mesh.receiveShadow = true;
@@ -445,7 +455,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       if (obj instanceof Mesh) (obj.material as MeshStandardMaterial).needsUpdate = true;
     });
     current?.vegetation?.setSettings(quality.vegetation, vegetationShadows(quality));
-    current?.ground.setSimple(quality.level === 'low');
+    current?.ground.setPath(groundPath());
   };
   if (quality.shadows) sun.shadow.mapSize.set(quality.shadows.mapSize, quality.shadows.mapSize);
 
@@ -552,7 +562,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
               version: GROUND_MATERIAL_VERSION,
               map: current.ground.hasMap(),
               textures: current.ground.texturesReady(),
-              simple: quality.level === 'low',
+              path: groundPath(),
               ...current.groundBake,
               textureBytes: current.ground.textureBytes(),
             }
