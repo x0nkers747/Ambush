@@ -82,6 +82,7 @@ export {
   type Waterway,
   type WaterwayKind,
   type DecorFeatures,
+  type RoadTraffic,
   type DecorLine,
   type DecorLineKind,
   type DecorPoint,

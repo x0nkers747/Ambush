@@ -10,7 +10,7 @@ import { srgbToLinear } from './terrain-mesh';
 import type { PlacedInstance } from './vegetation-placement';
 
 // The roadside and settlement details of a battlefield (docs/adr/0036):
-// paths and driveways, street lamps, utility poles and wires, fences, walls
+// paths and driveways, street lamps, utility poles, fences, walls
 // and hedges, roadside and garden trees, signs and a little street furniture.
 // Decorative only: none of it is an obstacle, cover or concealment, and the
 // simulation never sees it. Mapped features (the terrain's `decor`, and the
@@ -32,10 +32,7 @@ import type { PlacedInstance } from './vegetation-placement';
 // so the same battlefield always gets the same details. Pure.
 
 /** Bump when the generated details change (independent of the terrain and simulation). */
-export const DECOR_VERSION = 1;
-
-/** Map-coordinate wire segments: x0, y0, z0, x1, y1, z1 per segment. */
-export type WireSegments = Float32Array;
+export const DECOR_VERSION = 2;
 
 export interface DecorStats {
   /** Details by kind and origin (mapped or inferred). */
@@ -46,7 +43,6 @@ export interface DecorStats {
     readonly refused: number;
     readonly reasons: Readonly<Record<string, number>>;
   };
-  readonly wireSpans: number;
   readonly ms: number;
 }
 
@@ -54,7 +50,6 @@ export interface DecorPlan {
   readonly paths: readonly PathLine[];
   /** Plants and props, drawn by the vegetation layer. */
   readonly instances: readonly PlacedInstance[];
-  readonly wires: WireSegments;
   readonly stats: DecorStats;
 }
 
@@ -64,27 +59,6 @@ const lin = (hex: number): [number, number, number] => [
   srgbToLinear((hex >> 8) & 255) / srgbToLinear(230),
   srgbToLinear(hex & 255) / srgbToLinear(230),
 ];
-
-/** Wire attachment points of a support, in its own frame (x along the line, z across). */
-const ATTACH: Partial<Record<PropName, readonly (readonly [number, number])[]>> = {
-  // [height, across]
-  poleTimber: [
-    [9.42, -1.05],
-    [9.42, 0],
-    [9.42, 1.05],
-  ],
-  poleConcrete: [
-    [8.82, -0.75],
-    [8.82, 0],
-    [8.82, 0.75],
-  ],
-  pylon: [
-    [22.1, -5.6],
-    [22.1, 5.6],
-    [27.1, -4.1],
-    [27.1, 4.1],
-  ],
-};
 
 type Settlement = 'industrial' | 'town' | 'suburb' | 'rural';
 
@@ -97,7 +71,6 @@ export function planDecor(
   const ctx = decorContext(terrain);
   const space = new DecorSpace();
   const instances: PlacedInstance[] = [];
-  const wires: number[] = [];
   const counts: Record<string, number> = {};
   const eu = ctx.region === 'central-european';
   const na = ctx.region === 'north-american';
@@ -167,7 +140,7 @@ export function planDecor(
     space.addDisc(x, y, 0.4, 'post');
   }
 
-  // Power lines and their supports.
+  // Power lines: their supports only (no wires are drawn, docs/adr/0037).
   const supportName = (kind: 'powerLine' | 'minorLine'): PropName =>
     kind === 'powerLine' ? 'pylon' : eu ? 'poleConcrete' : 'poleTimber';
   const usedSupports = new Set<string>();
@@ -182,54 +155,10 @@ export function planDecor(
     put(sp.name, sp.x, sp.y, sp.yaw, origin, seed);
     space.addDisc(sp.x, sp.y, sp.name === 'pylon' ? 4 : 0.5, 'post');
   };
-  let wireSpans = 0;
-  const span = (a: Support, b: Support, minClearance: number): boolean => {
-    const ta = ATTACH[a.name];
-    const tb = ATTACH[b.name];
-    if (!ta || !tb) return false;
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len < 2 || len > (a.name === 'pylon' ? 600 : 80)) return false;
-    // The wire's ground track: not over buildings, nor (for inferred lines) over roads.
-    const n = Math.max(4, Math.ceil(len / 6));
-    for (let k = 1; k < n; k += 1) {
-      const t = k / n;
-      const x = a.x + t * (b.x - a.x);
-      const y = a.y + t * (b.y - a.y);
-      if (ctx.buildingAt(x, y) >= 0 || ctx.walls.near(x, y, 1)) return false;
-    }
-    const sag = 0.018 * len;
-    const wiresOut: number[] = [];
-    const pairs = Math.min(ta.length, tb.length);
-    for (let w = 0; w < pairs; w += 1) {
-      const [ha, za] = ta[w] ?? [0, 0];
-      const [hb, zb] = tb[w] ?? [0, 0];
-      // Local (along, across) to map: across maps to (sin yaw, −cos yaw).
-      const ax = a.x + za * Math.sin(a.yaw);
-      const ay = a.y - za * Math.cos(a.yaw);
-      const bx = b.x + zb * Math.sin(b.yaw);
-      const by = b.y - zb * Math.cos(b.yaw);
-      const az = ctx.ground(a.x, a.y) + ha;
-      const bz = ctx.ground(b.x, b.y) + hb;
-      let prev: [number, number, number] = [ax, ay, az];
-      for (let k = 1; k <= n; k += 1) {
-        const t = k / n;
-        const x = ax + t * (bx - ax);
-        const y = ay + t * (by - ay);
-        const z = az + t * (bz - az) - 4 * sag * t * (1 - t);
-        if (z - ctx.ground(x, y) < minClearance) return false;
-        wiresOut.push(...prev, x, y, z);
-        prev = [x, y, z];
-      }
-    }
-    wires.push(...wiresOut);
-    wireSpans += 1;
-    return true;
-  };
 
   for (const line of lines.filter((l) => l.kind === 'powerLine' || l.kind === 'minorLine')) {
     const kind = line.kind as 'powerLine' | 'minorLine';
     const pts = line.points;
-    let prev: Support | null = null;
     pts.forEach((v, i) => {
       const a = pts[Math.max(0, i - 1)] ?? v;
       const b = pts[Math.min(pts.length - 1, i + 1)] ?? v;
@@ -238,10 +167,9 @@ export function planDecor(
       const mappedHere = supports.find(
         (s) => !usedSupports.has(s.id) && Math.hypot(s.position.x - v.x, s.position.y - v.y) < 6,
       );
-      let sp: Support | null = null;
       if (mappedHere) {
         usedSupports.add(mappedHere.id);
-        sp = {
+        const sp: Support = {
           x: mappedHere.position.x,
           y: mappedHere.position.y,
           yaw,
@@ -253,11 +181,9 @@ export function planDecor(
         ctx.buildingAt(v.x, v.y) < 0 &&
         !ctx.water(v.x, v.y, 1)
       ) {
-        sp = { x: v.x, y: v.y, yaw, name: supportName(kind) };
+        const sp: Support = { x: v.x, y: v.y, yaw, name: supportName(kind) };
         placeSupport(sp, 'mapped', hashString(`${line.id}:${String(i)}`));
       }
-      if (prev && sp) span(prev, sp, kind === 'powerLine' ? 7 : 4);
-      prev = sp;
     });
   }
   // Mapped supports on no mapped line (their line is outside the query, or unmapped).
@@ -429,7 +355,7 @@ export function planDecor(
   /** Which side of a road its lamps stand on (+1 left, −1 right); poles take the other. */
   const lampSide = (r: Road) => (unit(hashString(`${r.id}:side`)) < 0.5 ? 1 : -1);
 
-  // Poles first (they carry wires and need runs), along some roads near buildings.
+  // Utility poles along some roads near buildings (standalone: no wires, docs/adr/0037).
   const poleShare = na ? 0.7 : eu ? 0.22 : 0.35;
   for (const r of ctx.roads) {
     if (!isStreet(r) || roadLength(r) < 90) continue;
@@ -448,10 +374,6 @@ export function planDecor(
     const name: PropName = eu ? 'poleConcrete' : 'poleTimber';
     const spacing = eu ? 48 : 42;
     const offset = roadEdge(r) + 2.2;
-    let run: Support[] = [];
-    const flush = () => {
-      run = [];
-    };
     walk(r, spacing, spacing * 0.5 * unit(hashString(`${r.id}:phase`)), (cx, cy, dx, dy, s) => {
       let placed: Support | null = null;
       for (const shift of [0, 3, -3]) {
@@ -463,14 +385,8 @@ export function planDecor(
         placed = { x, y, yaw: Math.atan2(dy, dx), name };
         break;
       }
-      if (!placed) {
-        flush();
-        return;
-      }
+      if (!placed) return;
       placeSupport(placed, 'inferred', hashInts(hashString(r.id), Math.round(s), 0x9a));
-      const last = run[run.length - 1];
-      if (last && !span(last, placed, 4.5)) run = [];
-      run.push(placed);
     });
   }
 
@@ -832,7 +748,6 @@ export function planDecor(
   return {
     paths: pathResult.paths,
     instances,
-    wires: Float32Array.from(wires),
     stats: {
       counts,
       paths: {
@@ -841,7 +756,6 @@ export function planDecor(
         refused: pathResult.refused,
         reasons: pathResult.reasons,
       },
-      wireSpans,
       ms: performance.now() - started,
     },
   };

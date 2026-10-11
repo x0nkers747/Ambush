@@ -29,6 +29,7 @@ export function decorStatements(bbox: string): string[] {
     `node["traffic_sign"](${bbox});`,
     `node["amenity"~"^(bench|waste_basket|post_box)$"](${bbox});`,
     `node["barrier"="bollard"](${bbox});`,
+    `node["highway"="crossing"](${bbox});`,
   ];
 }
 
@@ -68,7 +69,32 @@ export function decorPointKind(t: Tags): DecorPointKind | null {
   if (t['amenity'] === 'waste_basket') return 'wasteBasket';
   if (t['amenity'] === 'post_box') return 'postBox';
   if (t['barrier'] === 'bollard') return 'bollard';
+  if (t['highway'] === 'crossing' && crossingPaint(t)) return 'crossing';
   return null;
+}
+
+/**
+ * How a crossing is painted: zebra stripes (`crossing_ref=zebra`,
+ * `crossing=zebra`, `crossing:markings=zebra`) or transverse lines (other
+ * marked crossings); null when unmarked or unknown.
+ */
+export function crossingPaint(t: Tags): 'zebra' | 'lines' | null {
+  const markings = t['crossing:markings'];
+  if (markings === 'no') return null;
+  if (t['crossing_ref'] === 'zebra' || t['crossing'] === 'zebra' || markings === 'zebra') {
+    return 'zebra';
+  }
+  if (
+    markings !== undefined &&
+    markings !== 'yes' &&
+    markings !== 'lines' &&
+    markings !== 'dashes'
+  ) {
+    return markings === 'ladder' || markings === 'ladder:skewed' ? 'zebra' : null;
+  }
+  if (markings !== undefined) return 'lines';
+  const c = t['crossing'];
+  return c === 'marked' || c === 'traffic_signals' || c === 'uncontrolled' ? 'lines' : null;
 }
 
 /** The kind of a way, or null if it is not a detail. */
@@ -140,6 +166,7 @@ export function decorFromOsm(
         ...(leaf === 'broadleaved' || leaf === 'needleleaved' ? { leafType: leaf } : {}),
         ...(h !== null ? { heightMeters: h } : {}),
         ...(sign !== undefined ? { sign } : {}),
+        ...(kind === 'crossing' ? { crossing: crossingPaint(tags) ?? 'lines' } : {}),
       });
     } else if (el.type === 'way') {
       const tags = el.tags ?? {};

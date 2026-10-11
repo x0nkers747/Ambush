@@ -1,6 +1,6 @@
 # ADR 0036: Procedural environmental detail
 
-- Status: Accepted
+- Status: Accepted; overhead wires (section 7) removed by ADR 0037, which keeps the poles and pylons
 - Date: 2026-10-11
 - Implements visual milestone B of `docs/3d-visual-realism-research.md`. Builds on ADR 0030
   (geographic features), ADR 0031 (procedural vegetation and the generation worker), ADR 0032
@@ -272,6 +272,9 @@ a tree depends on context:
 - The lamp glass is a pale vertex colour. There are no lights: no point light is created.
 
 ### 7. Utility poles and wires
+
+> Superseded in part by ADR 0037: wires are no longer generated or drawn. Poles and pylons, mapped
+> and inferred, stay as described here, as standalone objects.
 
 **Mapped power lines** are drawn as follows:
 

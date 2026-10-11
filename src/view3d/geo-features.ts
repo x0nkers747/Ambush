@@ -2,8 +2,6 @@ import {
   BufferAttribute,
   BufferGeometry,
   Group,
-  LineBasicMaterial,
-  LineSegments,
   Mesh,
   MeshStandardMaterial,
   NotEqualStencilFunc,
@@ -12,10 +10,12 @@ import {
 import type { TerrainDataset } from '#sim';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
-import { PATH_COLOR, pathGeometry, wirePositions } from './decor-geometry';
+import { regionOf } from './building-style';
+import { PATH_COLOR, pathGeometry } from './decor-geometry';
 import type { PathStyle } from './decor-paths';
 import { DECOR_VERSION, planDecor, type DecorStats } from './decor-plan';
 import { createDraper, type MeshData } from './drape';
+import { MARKING_VERSION, roadMarkings, type MarkingStats } from './road-markings';
 import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-geometry';
 import type { SurfaceMeshData } from './surface-mesh';
 import type { PlacedInstance } from './vegetation-placement';
@@ -33,6 +33,8 @@ import { waterGeometry } from './water-geometry';
 export const GEOMETRY_VERSION = 3;
 /** The roadside details' own version (docs/adr/0036). */
 export { DECOR_VERSION };
+/** The road markings' own version (docs/adr/0037). */
+export { MARKING_VERSION };
 
 export interface GeoFeatureStats {
   readonly roadTriangles: number;
@@ -46,7 +48,9 @@ export interface GeoFeatureStats {
   /** Buildings whose uphill corners stand higher than their roof (steep ground). */
   readonly buriedBuildings: number;
   /** Roadside and settlement details (docs/adr/0036). */
-  readonly decor: DecorStats & { readonly pathTriangles: number; readonly wireSegments: number };
+  readonly decor: DecorStats & { readonly pathTriangles: number };
+  /** Painted road markings (docs/adr/0037). */
+  readonly markings: MarkingStats;
   /** Generation times in milliseconds. */
   readonly ms: {
     readonly roads: number;
@@ -66,8 +70,8 @@ export interface FeatureGeometry {
   readonly entrances: readonly BuildingEntrance[];
   /** Inferred paths and driveways, by style (docs/adr/0036). */
   readonly paths: readonly (readonly [PathStyle, MeshData])[];
-  /** Overhead wires: line segments in Three.js axes. */
-  readonly wires: Float32Array;
+  /** Road markings: one vertex-coloured mesh (docs/adr/0037). */
+  readonly markings: MeshData;
   readonly stats: GeoFeatureStats;
 }
 
@@ -110,8 +114,8 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   t = clock();
   const decor = planDecor(terrain, buildings.designs, buildings.entrances);
   const paths = pathGeometry(decor.paths, draper);
-  const wires = wirePositions(decor.wires);
   const decorMs = clock() - t;
+  const markings = roadMarkings(terrain, draper, regionOf(terrain));
   const geometry: FeatureGeometry = {
     roads: roadList,
     water: water.mesh,
@@ -119,7 +123,7 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
     openings: buildings.openings,
     entrances: buildings.entrances,
     paths,
-    wires,
+    markings: markings.mesh,
     stats: {
       roadTriangles: roadList.reduce((s, [, d]) => s + d.triangleCount, 0),
       waterTriangles: water.mesh.triangleCount,
@@ -131,8 +135,8 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
       decor: {
         ...decor.stats,
         pathTriangles: paths.reduce((sum, [, d]) => sum + d.triangleCount, 0),
-        wireSegments: wires.length / 6,
       },
+      markings: markings.stats,
       ms: { roads: roadMs, water: waterMs, buildings: buildingMs, decor: decorMs },
     },
   };
@@ -147,17 +151,15 @@ export function featureBuffers(f: FeatureGeometry): ArrayBuffer[] {
     f.water,
     f.buildings,
     f.openings,
-  ]
-    .flatMap((d) =>
-      [
-        d.positions,
-        d.normals,
-        d.colors,
-        'uvs' in d ? (d as SurfaceMeshData).uvs : null,
-        'layers' in d ? (d as SurfaceMeshData).layers : null,
-      ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
-    )
-    .concat(f.wires.length > 0 ? [f.wires.buffer as ArrayBuffer] : []);
+  ].flatMap((d) =>
+    [
+      d.positions,
+      d.normals,
+      d.colors,
+      'uvs' in d ? (d as SurfaceMeshData).uvs : null,
+      'layers' in d ? (d as SurfaceMeshData).layers : null,
+    ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
+  );
 }
 
 function geometryOf(data: MeshData): BufferGeometry {
@@ -223,19 +225,20 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
     if (mesh) mesh.receiveShadow = true;
   });
 
-  // Overhead wires: thin dark lines, one draw call.
-  let wireMesh: LineSegments<BufferGeometry, LineBasicMaterial> | null = null;
-  if (features.wires.length > 0) {
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(features.wires, 3));
-    g.computeBoundingSphere();
-    wireMesh = new LineSegments(
-      g,
-      new LineBasicMaterial({ color: 0x3c3f3d, transparent: true, opacity: 0.75 }),
-    );
-    wireMesh.name = 'overhead wires';
-    group.add(wireMesh);
-  }
+  // Painted road markings (docs/adr/0037), just above their roads: one draw call.
+  const markingMesh = add(
+    'road markings',
+    features.markings,
+    new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.7,
+      metalness: 0,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -16,
+    }),
+  );
+  if (markingMesh) markingMesh.receiveShadow = true;
 
   // Slightly transparent. The stencil lets each pixel take water once, so
   // where a river's line overlaps its area, or its own bends, it is no darker.
@@ -294,8 +297,6 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
         m.material.dispose();
       }
       materials.dispose();
-      wireMesh?.geometry.dispose();
-      wireMesh?.material.dispose();
       group.clear();
     },
   };

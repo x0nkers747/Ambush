@@ -399,15 +399,8 @@ describe('street lamps', () => {
   });
 });
 
-describe('utility poles and wires', () => {
-  const pts = (w: Float32Array) =>
-    Array.from({ length: w.length / 3 }, (_, i) => ({
-      x: w[i * 3] ?? 0,
-      y: w[i * 3 + 1] ?? 0,
-      z: w[i * 3 + 2] ?? 0,
-    }));
-
-  it('wire served roads with sagging spans, clear of the ground and of buildings', () => {
+describe('utility poles (standalone: no overhead wires, docs/adr/0037)', () => {
+  it('stand along served roads, with no wire geometry anywhere', () => {
     // Several roads: some get poles (by their id), all along houses.
     const roads = Array.from({ length: 8 }, (_, i) =>
       road(`r${String(i)}`, [
@@ -424,83 +417,41 @@ describe('utility poles and wires', () => {
     const p = plan(terrain);
     const poles = p.instances.filter((i) => isProp(i.plant, ['poleTimber']));
     expect(poles.length).toBeGreaterThan(5);
-    expect(p.stats.wireSpans).toBeGreaterThan(3);
-    const w = pts(p.wires);
-    for (const q of w) {
-      expect(q.z - heightAt(terrain, q.x, q.y)).toBeGreaterThan(4);
+    for (const q of poles) {
       for (const b of buildings) expect(pointInPolygon(q, b.footprint)).toBe(false);
     }
-    // Each wire sags: its middle is below the straight line between its ends.
-    const segs = w.length / 2;
-    expect(segs).toBeGreaterThan(10);
-    // Wires are polylines of short pieces; check a span's first and middle pieces.
-    let sagging = 0;
-    for (let i = 0; i + 1 < w.length; i += 2) {
-      const a = w[i];
-      const b = w[i + 1];
-      if (a && b && b.z < a.z - 1e-4) sagging += 1;
-    }
-    expect(sagging).toBeGreaterThan(0);
-    // No span is longer than a pole spacing: gaps break the line rather than bridge it.
-    for (let i = 0; i + 1 < w.length; i += 2) {
-      const a = w[i];
-      const b = w[i + 1];
-      if (a && b) expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeLessThan(15);
-    }
+    // The plan has no wires, and the scene no line meshes.
+    expect('wires' in p).toBe(false);
+    expect('wireSpans' in p.stats).toBe(false);
+    const layer = createGeoFeatures(buildFeatures(terrain).geometry);
+    expect(layer.group.children.some((c) => c.type === 'LineSegments' || c.type === 'Line')).toBe(
+      false,
+    );
+    layer.dispose();
   });
 
-  it('draw mapped power lines on their mapped pylons', () => {
-    const terrain = world(
-      { roads: [], buildings: [] },
-      {
-        decor: {
+  it("keep mapped power lines' supports, without their wires", () => {
+    const line = (kind: 'powerLine' | 'minorLine'): DecorFeatures => ({
+      points: [
+        { id: 'osm-n1', kind: 'powerTower', position: { x: -200, y: 0 } },
+        { id: 'osm-n2', kind: 'powerTower', position: { x: 100, y: 0 } },
+      ],
+      lines: [
+        {
+          id: 'osm-w1',
+          kind,
           points: [
-            { id: 'osm-n1', kind: 'powerTower', position: { x: -200, y: 0 } },
-            { id: 'osm-n2', kind: 'powerTower', position: { x: 100, y: 0 } },
-          ],
-          lines: [
-            {
-              id: 'osm-w1',
-              kind: 'powerLine',
-              points: [
-                { x: -200, y: 0 },
-                { x: 100, y: 0 },
-              ],
-            },
+            { x: -200, y: 0 },
+            { x: 100, y: 0 },
+            { x: 150, y: 50 },
           ],
         },
-      },
-    );
-    const p = plan(terrain);
-    expect(p.stats.counts['pylon:mapped']).toBe(2);
-    expect(p.stats.wireSpans).toBe(1);
-  });
-
-  it('leave out a span that would hit the ground', () => {
-    // A hill between two mapped poles.
-    const hill = (x: number) => GROUND + Math.max(0, 20 - Math.abs(x) * 0.5);
-    const terrain = world(
-      { roads: [], buildings: [] },
-      {
-        ground: (x) => hill(x),
-        decor: {
-          points: [],
-          lines: [
-            {
-              id: 'osm-w2',
-              kind: 'minorLine',
-              points: [
-                { x: -60, y: 0 },
-                { x: 60, y: 0 },
-              ],
-            },
-          ],
-        },
-      },
-    );
-    const p = plan(terrain);
-    expect(p.stats.wireSpans).toBe(0);
-    expect(p.instances.filter((i) => isProp(i.plant, ['poleTimber']))).toHaveLength(2);
+      ],
+    });
+    const p = plan(world({ roads: [], buildings: [] }, { decor: line('powerLine') }));
+    expect(p.stats.counts['pylon:mapped']).toBe(3);
+    const q = plan(world({ roads: [], buildings: [] }, { decor: line('minorLine') }));
+    expect(q.instances.filter((i) => isProp(i.plant, ['poleTimber', 'pylon']))).toHaveLength(3);
   });
 });
 
@@ -639,16 +590,14 @@ describe('the roadside details as a whole', () => {
     const b = plan(shuffled);
     expect(b.instances).toEqual(a.instances);
     expect(b.paths).toEqual(a.paths);
-    expect(Array.from(b.wires)).toEqual(Array.from(a.wires));
     expect(b.stats.counts).toEqual(a.stats.counts);
-    expect(DECOR_VERSION).toBe(1);
+    expect(DECOR_VERSION).toBe(2);
   });
 
   it('produce only finite, grounded geometry', () => {
     const built = buildFeatures(terrain);
     for (const [, m] of built.geometry.paths)
       for (const v of m.positions) expect(Number.isFinite(v)).toBe(true);
-    for (const v of built.geometry.wires) expect(Number.isFinite(v)).toBe(true);
     for (const i of built.decorInstances) {
       for (const v of [i.x, i.y, i.yaw, i.scaleW, i.scaleH, ...i.tint])
         expect(Number.isFinite(v)).toBe(true);
@@ -692,11 +641,12 @@ describe('the roadside details as a whole', () => {
   it('dispose of the scene meshes they add', () => {
     const built = buildFeatures(terrain);
     const layer = createGeoFeatures(built.geometry);
-    const wires = layer.group.children.find((c) => c.name === 'overhead wires');
     const paths = layer.group.children.filter((c) => c.name.startsWith('paths: '));
+    const markings = layer.group.children.find((c) => c.name === 'road markings');
     expect(paths.length).toBeGreaterThan(0);
+    expect(markings).toBeDefined();
     let disposed = 0;
-    for (const o of [wires, ...paths]) {
+    for (const o of [markings, ...paths]) {
       const g = (
         o as { geometry?: { addEventListener: (t: string, f: () => void) => void } } | undefined
       )?.geometry;
@@ -705,7 +655,7 @@ describe('the roadside details as a whole', () => {
       });
     }
     layer.dispose();
-    expect(disposed).toBe(paths.length + (wires ? 1 : 0));
+    expect(disposed).toBe(paths.length + 1);
     expect(layer.group.children).toHaveLength(0);
   });
 

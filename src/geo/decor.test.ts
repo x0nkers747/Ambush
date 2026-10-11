@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { validateTerrain, type TerrainDataset } from '#sim';
-import { decorFromOsm, decorLineKind, decorPointKind, decorQuery } from './decor';
+import { crossingPaint, decorFromOsm, decorLineKind, decorPointKind, decorQuery } from './decor';
 import { createFrame, toGeo } from './frame';
-import { featuresFromOsm, overpassQuery, type OverpassResponse } from './osm';
+import {
+  featuresFromOsm,
+  overpassQuery,
+  parseMaxspeed,
+  roadTraffic,
+  type OverpassResponse,
+} from './osm';
 
 // Mapped roadside details (docs/adr/0036): imported for display only.
 
@@ -130,5 +136,88 @@ describe('roadside details from OpenStreetMap', () => {
     expect(() => {
       validateTerrain({ ...base, decor: { points: 'nope' } } as unknown as TerrainDataset);
     }).toThrow(/decor/);
+  });
+});
+
+describe('road attributes and crossings for road markings (docs/adr/0037)', () => {
+  it('keeps traffic attributes for display, valid values only, with roads unchanged', () => {
+    expect(
+      roadTraffic({
+        highway: 'primary',
+        lanes: '4',
+        'lanes:forward': '2',
+        'lanes:backward': '2',
+        oneway: 'no',
+        surface: 'asphalt',
+        maxspeed: '35 mph',
+        lit: 'yes',
+        overtaking: 'both',
+        lane_markings: 'yes',
+        divider: 'barrier',
+        sidewalk: 'both',
+      }),
+    ).toEqual({
+      lanes: 4,
+      lanesForward: 2,
+      lanesBackward: 2,
+      oneway: 'no',
+      surface: 'asphalt',
+      maxspeedKmh: 56,
+      lit: true,
+      overtaking: 'yes',
+      laneMarkings: true,
+      divider: 'barrier',
+      sidewalk: 'both',
+    });
+    // Malformed values are left out; roundabouts are one-way.
+    expect(
+      roadTraffic({ lanes: 'two', oneway: 'perhaps', maxspeed: 'fast', junction: 'roundabout' }),
+    ).toEqual({
+      oneway: 'yes',
+      junction: 'roundabout',
+    });
+    expect(roadTraffic({ highway: 'residential' })).toBeNull();
+    expect(parseMaxspeed('DE:urban')).toBe(50);
+    expect(parseMaxspeed('DE:rural')).toBe(100);
+    expect(parseMaxspeed('none')).toBeNull();
+    // The importer keeps them on roads, without touching class or width.
+    const data: OverpassResponse = {
+      elements: [
+        way(30, { highway: 'secondary', lanes: '2', oneway: 'yes' }, [
+          [-100, 0],
+          [100, 0],
+        ]),
+      ],
+    };
+    const [r] = featuresFromOsm(data, frame).features.roads;
+    expect(r).toMatchObject({
+      roadClass: 'major',
+      widthMeters: 8,
+      traffic: { lanes: 2, oneway: 'yes' },
+    });
+  });
+
+  it('imports marked pedestrian crossings, and how they are painted', () => {
+    expect(crossingPaint({ crossing: 'uncontrolled' })).toBe('lines');
+    expect(crossingPaint({ crossing: 'uncontrolled', 'crossing:markings': 'zebra' })).toBe('zebra');
+    expect(crossingPaint({ crossing_ref: 'zebra' })).toBe('zebra');
+    expect(crossingPaint({ crossing: 'unmarked' })).toBeNull();
+    expect(crossingPaint({ crossing: 'marked', 'crossing:markings': 'no' })).toBeNull();
+    const { decor } = decorFromOsm(
+      [
+        node(40, 0, 0, { highway: 'crossing', crossing: 'marked', crossing_ref: 'zebra' }),
+        node(41, 5, 0, { highway: 'crossing', crossing: 'unmarked' }),
+      ],
+      frame,
+      rect,
+    );
+    expect(decor.points).toEqual([
+      {
+        id: 'osm-n40',
+        kind: 'crossing',
+        position: expect.anything() as unknown,
+        crossing: 'zebra',
+      },
+    ]);
   });
 });

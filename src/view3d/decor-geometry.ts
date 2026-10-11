@@ -1,13 +1,11 @@
 import { finishMesh, type Draper, type MeshData } from './drape';
 import type { PathLine, PathStyle } from './decor-paths';
 import { drapeNetwork, type NetworkLine } from './line-network';
-import type { WireSegments } from './decor-plan';
 
-// Inferred paths and driveways, and overhead wires, as geometry
-// (docs/adr/0036). Paths are draped on the authoritative ground like the
-// roads (line-network.ts), just under the lowest road layer, so where a path
-// meets a road the road is drawn over its end and the join is clean. Wires
-// are thin lines, one draw call for all of them. Pure.
+// Inferred paths and driveways as geometry (docs/adr/0036). Paths are draped
+// on the authoritative ground like the roads (line-network.ts), just under
+// the lowest road layer, so where a path meets a road the road is drawn over
+// its end and the join is clean. Pure.
 
 export const PATH_STYLES: readonly PathStyle[] = [
   'trackDirt',
@@ -49,15 +47,4 @@ export function pathGeometry(
     const b = built.get(style);
     return b && b.positions.length > 0 ? [[style, finishMesh(b)] as const] : [];
   });
-}
-
-/** Wire segments in Three.js axes (x, z, −y), for a line mesh. */
-export function wirePositions(wires: WireSegments): Float32Array {
-  const out = new Float32Array(wires.length);
-  for (let i = 0; i < wires.length; i += 3) {
-    out[i] = wires[i] ?? 0;
-    out[i + 1] = wires[i + 2] ?? 0;
-    out[i + 2] = -(wires[i + 1] ?? 0);
-  }
-  return out;
 }

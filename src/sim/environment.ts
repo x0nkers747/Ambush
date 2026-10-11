@@ -38,6 +38,35 @@ export interface Road {
    */
   readonly highway?: string;
   readonly service?: string;
+  /**
+   * What the source says about the road's traffic and surface, kept for
+   * display (road markings, docs/adr/0037). The simulation never reads it.
+   */
+  readonly traffic?: RoadTraffic;
+}
+
+/** Mapped traffic attributes of a road (OSM tags), each present only when tagged and valid. */
+export interface RoadTraffic {
+  /** `lanes`, `lanes:forward`, `lanes:backward`. */
+  readonly lanes?: number;
+  readonly lanesForward?: number;
+  readonly lanesBackward?: number;
+  /** `oneway`: along the way, against it (`-1`), or explicitly two-way. */
+  readonly oneway?: 'yes' | 'reverse' | 'no';
+  readonly surface?: string;
+  /** `maxspeed`, in km/h (mph converted); absent for `none` or unreadable values. */
+  readonly maxspeedKmh?: number;
+  readonly lit?: boolean;
+  /** `overtaking`: who may pass (forward and backward: along and against the way). */
+  readonly overtaking?: 'yes' | 'no' | 'forward' | 'backward';
+  /** `lane_markings`: whether the road is painted. */
+  readonly laneMarkings?: boolean;
+  /** `junction=roundabout|circular`. */
+  readonly junction?: 'roundabout' | 'circular';
+  /** `divider` (e.g. "barrier", "solid_line", "dashed_line"). */
+  readonly divider?: string;
+  /** `sidewalk` (e.g. "both", "left", "no"). */
+  readonly sidewalk?: string;
 }
 
 /**
@@ -203,7 +232,9 @@ export type DecorPointKind =
   | 'bollard'
   | 'bench'
   | 'wasteBasket'
-  | 'postBox';
+  | 'postBox'
+  /** A marked pedestrian crossing on a road (docs/adr/0037). */
+  | 'crossing';
 
 export interface DecorPoint {
   readonly id: string;
@@ -215,6 +246,8 @@ export interface DecorPoint {
   readonly heightMeters?: number;
   /** Signs: the sign's class, from `traffic_sign` or `highway=stop|give_way` (e.g. "stop"). */
   readonly sign?: string;
+  /** Crossings: how they are painted. */
+  readonly crossing?: 'zebra' | 'lines';
 }
 
 export type DecorLineKind = 'powerLine' | 'minorLine' | 'fence' | 'wall' | 'guardRail';

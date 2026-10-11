@@ -13,11 +13,11 @@ import {
 } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
 
-// Building and road attributes kept for display (docs/adr/0035), and mapped
-// roadside details (docs/adr/0036), must never reach the simulation: the same
-// battlefield with and without them grades identically, has the same roofs
-// for line of sight, gives the same sight lines, and runs to the same state,
-// events and hash.
+// Building and road attributes kept for display (docs/adr/0035, 0037), and
+// mapped roadside details (docs/adr/0036), must never reach the simulation:
+// the same battlefield with and without them grades identically, has the
+// same roofs for line of sight, gives the same sight lines, and runs to the
+// same state, events and hash.
 
 /** The demo battlefield with every display attribute set, some contradicting the simulated values. */
 function decorated(terrain: TerrainDataset): TerrainDataset {
@@ -57,7 +57,13 @@ function decorated(terrain: TerrainDataset): TerrainDataset {
           country: 'DE',
         },
       })),
-      roads: terrain.features.roads.map((r) => ({ ...r, highway: 'service', service: 'driveway' })),
+      roads: terrain.features.roads.map((r) => ({
+        ...r,
+        highway: 'service',
+        service: 'driveway',
+        // Road-marking attributes (docs/adr/0037), contradicting the simulated road.
+        traffic: { lanes: 6, oneway: 'yes', laneMarkings: true, maxspeedKmh: 130 },
+      })),
     },
   } as TerrainDataset;
 }

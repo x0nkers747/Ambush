@@ -10,6 +10,7 @@ import {
   type LandUseKind,
   type Road,
   type RoadClass,
+  type RoadTraffic,
   type Vec2,
   type VegetationArea,
   type WaterArea,
@@ -161,6 +162,66 @@ function roadType(t: Tags): { highway?: string; service?: string } {
   const highway = plain(t['highway']);
   const service = highway === 'service' ? plain(t['service']) : undefined;
   return { ...(highway ? { highway } : {}), ...(service ? { service } : {}) };
+}
+
+/** A lane count: a whole number from 1 to 12, or null. */
+function laneCount(v: string | undefined): number | null {
+  if (v === undefined || !/^\s*\d{1,2}\s*$/.test(v)) return null;
+  const n = Number(v);
+  return n >= 1 && n <= 12 ? n : null;
+}
+
+/** A speed limit in km/h from "50", "35 mph", "DE:urban" and the like; null for "none" or anything else. */
+export function parseMaxspeed(v: string | undefined): number | null {
+  if (v === undefined) return null;
+  const t = v.trim().toLowerCase();
+  const zones: Readonly<Record<string, number>> = { urban: 50, rural: 100, living_street: 7 };
+  const zone = /^[a-z]{2}:(urban|rural|living_street)$/.exec(t);
+  if (zone) return zones[zone[1] ?? ''] ?? null;
+  const m = /^(\d{1,3}(?:\.\d+)?)\s*(mph|km\/h|kmh)?$/.exec(t);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const kmh = m[2] === 'mph' ? n * 1.609344 : n;
+  return kmh > 0 && kmh <= 200 ? Math.round(kmh) : null;
+}
+
+/**
+ * The road's traffic attributes (display only, docs/adr/0037): each kept
+ * only when tagged with a valid value. Roundabouts are one-way.
+ */
+export function roadTraffic(t: Tags): RoadTraffic | null {
+  const out: Record<string, unknown> = {};
+  const lanes = laneCount(t['lanes']);
+  if (lanes !== null) out['lanes'] = lanes;
+  const fwd = laneCount(t['lanes:forward']);
+  if (fwd !== null) out['lanesForward'] = fwd;
+  const back = laneCount(t['lanes:backward']);
+  if (back !== null) out['lanesBackward'] = back;
+  const ow = t['oneway'];
+  const junction = t['junction'];
+  if (ow === 'yes' || ow === 'true' || ow === '1') out['oneway'] = 'yes';
+  else if (ow === '-1' || ow === 'reverse') out['oneway'] = 'reverse';
+  else if (ow === 'no' || ow === 'false' || ow === '0') out['oneway'] = 'no';
+  else if (junction === 'roundabout') out['oneway'] = 'yes';
+  if (junction === 'roundabout' || junction === 'circular') out['junction'] = junction;
+  const word = (v: string | undefined) =>
+    v !== undefined && /^[a-z_;:]{1,40}$/.test(v) ? v : undefined;
+  const surface = word(t['surface']);
+  if (surface) out['surface'] = surface;
+  const speed = parseMaxspeed(t['maxspeed']);
+  if (speed !== null) out['maxspeedKmh'] = speed;
+  if (t['lit'] === 'yes') out['lit'] = true;
+  else if (t['lit'] === 'no') out['lit'] = false;
+  const ov = t['overtaking'];
+  if (ov === 'yes' || ov === 'both') out['overtaking'] = 'yes';
+  else if (ov === 'no' || ov === 'forward' || ov === 'backward') out['overtaking'] = ov;
+  if (t['lane_markings'] === 'yes') out['laneMarkings'] = true;
+  else if (t['lane_markings'] === 'no') out['laneMarkings'] = false;
+  const divider = word(t['divider']);
+  if (divider) out['divider'] = divider;
+  const sidewalk = word(t['sidewalk']);
+  if (sidewalk) out['sidewalk'] = sidewalk;
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** Default storey height when only `building:levels` is known. */
@@ -527,6 +588,7 @@ export function featuresFromOsm(
             ) >= 0.5,
         );
         const tagged = parseMetres(tags['width']);
+        const traffic = roadClass ? roadTraffic(tags) : null;
         ids(base, pieces.length).forEach((id, i) => {
           const centerline = pieces[i];
           if (!centerline) return;
@@ -539,6 +601,7 @@ export function featuresFromOsm(
               source: tagged !== null ? { ref } : { ref, estimated: ['widthMeters'] },
               // The OSM road type, kept for display (docs/adr/0035): driveways stay driveways.
               ...roadType(tags),
+              ...(traffic ? { traffic } : {}),
             });
           } else if (waterway) {
             waterways.push({
