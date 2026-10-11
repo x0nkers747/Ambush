@@ -54,6 +54,29 @@ export function terrainRaster(terrain: TerrainDataset): TerrainRaster {
   return { width: columns, height: rows, data };
 }
 
+/**
+ * The map's elevation tints without the hillshade, one RGB colour per sample
+ * in heightfield order (row-major from the south-west corner). For views that
+ * light the terrain themselves, e.g. the 3D view (docs/adr/0029). The tints
+ * span `min`–`max` (default: the whole elevation range); samples outside it
+ * take the end colours.
+ */
+export function elevationTints(
+  terrain: TerrainDataset,
+  { min, max }: { min: number; max: number } = elevationRange(terrain),
+): Uint8ClampedArray {
+  const { elevations } = terrain.heightfield;
+  const range = max - min || 1;
+  const data = new Uint8ClampedArray(elevations.length * 3);
+  elevations.forEach((z, i) => {
+    const [red, green, blue] = tint((z - min) / range);
+    data[i * 3] = red;
+    data[i * 3 + 1] = green;
+    data[i * 3 + 2] = blue;
+  });
+  return data;
+}
+
 function tint(t: number): [number, number, number] {
   const scaled = Math.min(Math.max(t, 0), 1) * (TINTS.length - 1);
   const i = Math.min(Math.floor(scaled), TINTS.length - 2);
@@ -163,6 +186,17 @@ export function elevationRange(terrain: TerrainDataset): { min: number; max: num
     max = Math.max(max, e);
   }
   return { min, max };
+}
+
+/**
+ * The elevation range of most of the ground: the 1st to 99th percentile of
+ * the samples, so that a few outliers (e.g. a bad elevation sample hundreds
+ * of metres deep) do not squeeze the rest of the ground into one tint.
+ */
+export function typicalElevationRange(terrain: TerrainDataset): { min: number; max: number } {
+  const sorted = Float64Array.from(terrain.heightfield.elevations).sort();
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
+  return { min: at(0.01), max: at(0.99) };
 }
 
 // --- Spot heights (docs/adr/0024) --------------------------------------------

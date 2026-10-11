@@ -1,3 +1,10 @@
-// Public API of the 3D observer view (`#view3d`). Intentionally empty until Phase 4,
-// when Three.js is added.
-export {};
+// Public API of the 3D battlefield view (`#view3d`, docs/adr/0029). The app
+// loads it with a dynamic `import()` the first time 3D is opened, so Three.js
+// is not part of the initial bundle.
+
+export {
+  createBattlefieldView3d,
+  type BattlefieldView3d,
+  type BattlefieldView3dOptions,
+  type TerrainTints,
+} from './view';

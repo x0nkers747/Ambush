@@ -17,7 +17,11 @@ with Ambush!'s own role icons (not APP-6, see
 springs the ambush with Trigger Ambush
 ([ADR 0021](docs/adr/0021-manual-ambush-trigger.md)), starting a probabilistic two-sided engagement of up to 60 simulated
 seconds ([ADR 0019](docs/adr/0019-probabilistic-engagements.md)), on the demo or on any
-battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. No 3D yet.
+battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario editor. A
+**3D view** ([ADR 0029](docs/adr/0029-3d-view-milestone-1.md)) shows the same battlefield and
+soldiers on the simulated terrain: switch with **2D | 3D** under the map; drag to orbit,
+right-drag to pan, use the wheel to zoom and double-click to focus. Roads, buildings and
+vegetation are not in 3D yet.
 
 ## Requirements
 
@@ -138,7 +142,7 @@ sources, their resolution and accuracy, and the credits their licences require. 
 | Backspace / Delete              | Clear the selected Marine's destination             |
 | Drag the map / middle-drag      | Pan                                                 |
 | Mouse wheel                     | Zoom at the cursor                                  |
-| F                               | Fit the whole map                                   |
+| F                               | Fit the whole map (3D: back to the overhead view)   |
 | Space                           | Pause / Resume                                      |
 | 1 · 4 · 8                       | Time scale 1× · 4× · 8×                             |
 | + / −                           | Faster / slower through 1× · 4× · 8× · 16×          |
@@ -212,3 +216,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 26. [After Action Review replay](docs/adr/0026-aar-replay.md)
 27. [After Action Review scoring and recommendations](docs/adr/0027-aar-scoring.md)
 28. [OPFOR reactions under fire, and escape by distance run](docs/adr/0028-opfor-reactions-and-escape.md)
+29. [The 3D battlefield view, milestone 1](docs/adr/0029-3d-view-milestone-1.md)

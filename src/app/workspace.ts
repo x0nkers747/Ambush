@@ -35,11 +35,14 @@ import {
 } from '#sim';
 import {
   createTacticalMap,
+  elevationTints,
   formatBearing,
+  typicalElevationRange,
   type MapBinding,
   type MapEditor,
   type TacticalMap,
 } from '#view2d';
+import type { BattlefieldView3d } from '#view3d';
 import { carryPlans, type CarryResult } from './carry-plans';
 import {
   clock,
@@ -174,6 +177,10 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       <span class="pointer" data-ui="pointer"></span>
       <span class="spacer"></span>
       <span class="mapbar-tool" data-ui="tool-label"></span>
+      <div class="view-toggle" role="group" aria-label="Map view">
+        <button class="small" data-view="2d" aria-pressed="true" title="The 2D tactical map">2D</button>
+        <button class="small" data-view="3d" aria-pressed="false" title="The 3D battlefield view">3D</button>
+      </div>
       <button class="small" data-ui="fit" title="Fit the whole map (F)">Fit map</button>
     </div>
   </main>
@@ -781,9 +788,68 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     },
     map,
   });
-  ui('fit').addEventListener('click', () => {
-    map.fitView();
-  });
+  // --- 2D / 3D view (docs/adr/0029) ----------------------------------------
+  // The 3D view is loaded the first time it is opened and then kept, with its
+  // camera, until the page is left. Both views show the same exercise
+  // (`shown()`: live, the scenario preview or the replay frame) and the same
+  // selection; switching only changes which one draws.
+  let viewMode: '2d' | '3d' = '2d';
+  let view3d: BattlefieldView3d | null = null;
+  let loading3d = false;
+  let stopped = false;
+  const showViewMode = () => {
+    for (const b of app.querySelectorAll<HTMLButtonElement>('[data-view]'))
+      b.setAttribute('aria-pressed', String(b.dataset['view'] === viewMode));
+    if (view3d) view3d.canvas.hidden = viewMode !== '3d';
+    app.dataset['view'] = viewMode;
+    ui('fit').title = viewMode === '3d' ? 'Back to the overhead view (F)' : 'Fit the whole map (F)';
+    setText(ui('fit'), viewMode === '3d' ? 'Reset view' : 'Fit map');
+  };
+  const setViewMode = (mode: '2d' | '3d') => {
+    if (mode === '2d' || view3d) {
+      viewMode = mode;
+      showViewMode();
+      return;
+    }
+    if (loading3d) return;
+    loading3d = true;
+    notify('Loading the 3D view…');
+    import('#view3d')
+      .then(({ createBattlefieldView3d }) => {
+        loading3d = false;
+        if (stopped) return;
+        view3d = createBattlefieldView3d({
+          exercise: shown,
+          session: () => session,
+          hideTrainee: squadHidden,
+          tints: (terrain) => ({
+            data: elevationTints(terrain, typicalElevationRange(terrain)),
+            channels: 3,
+          }),
+        });
+        ui('attribution').before(view3d.canvas);
+        viewMode = '3d';
+        showViewMode();
+        notify('');
+      })
+      .catch((error: unknown) => {
+        loading3d = false;
+        notify(
+          `The 3D view could not be opened: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  };
+  for (const b of app.querySelectorAll<HTMLButtonElement>('[data-view]')) {
+    b.addEventListener('click', () => {
+      setViewMode(b.dataset['view'] === '3d' ? '3d' : '2d');
+    });
+  }
+  /** Fits the 2D map, or returns the 3D view to its overhead view. */
+  const fitView = () => {
+    if (viewMode === '3d' && view3d) view3d.resetView();
+    else map.fitView();
+  };
+  ui('fit').addEventListener('click', fitView);
   if (o.attribution.length > 0) {
     // Compact on the map; the full list is under Battlefield Information.
     ui('attribution').hidden = false;
@@ -828,7 +894,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     switch (event.key) {
       case 'f':
       case 'F':
-        map.fitView();
+        fitView();
         break;
       case 'Escape':
         session = clearSelection(session);
@@ -1333,14 +1399,16 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           ? `Tool: ${session.tool === 'killZone' ? 'Kill zone' : 'Waypoints'}`
           : '',
     );
-    const p = map.pointer;
+    const p = viewMode === '3d' ? null : map.pointer;
     setText(
       ui('pointer'),
-      p
-        ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m${
-            o.describePoint ? `   ${o.describePoint({ x: p.east, y: p.north })}` : ''
-          }`
-        : '',
+      viewMode === '3d'
+        ? 'Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus'
+        : p
+          ? `E ${p.east.toFixed(1)} m   N ${p.north.toFixed(1)} m   Elev ${p.elevation.toFixed(1)} m${
+              o.describePoint ? `   ${o.describePoint({ x: p.east, y: p.north })}` : ''
+            }`
+          : '',
     );
   };
 
@@ -1371,12 +1439,16 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       exerciseStage.collect(events);
     }
     lastFrameMs = nowMs;
-    map.render();
+    if (viewMode === '3d' && view3d) view3d.render();
+    else map.render();
     updatePanels();
     frameId = requestAnimationFrame(frame);
   };
   /** Stops the page (frame loop and global listeners); the map is handed on, not disposed. */
   const stop = () => {
+    stopped = true;
+    view3d?.dispose();
+    view3d = null;
     cancelAnimationFrame(frameId);
     window.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('visibilitychange', onVisibilityChange);
