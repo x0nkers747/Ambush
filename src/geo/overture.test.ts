@@ -141,6 +141,37 @@ describe('buildingsFromOverture', () => {
     expect(polygonArea(b?.footprint ?? [])).toBeCloseTo(areaOf(whole), 6);
   });
 
+  it('keeps Overture’s architecture fields for display, leaving the height rule as it was', () => {
+    const r = rect(x0 + 1000, y0 + 1000, x0 + 1100, y0 + 1080);
+    const result = buildingsFromOverture(
+      [
+        tile(X, Y, [
+          building('h', [r], {
+            class: 'house',
+            num_floors: 2,
+            roof_shape: 'gabled',
+            roof_direction: 30,
+            roof_material: 'roof_tiles',
+            facade_color: 'white',
+          }),
+        ]),
+      ],
+      frame,
+    );
+    const [b] = result.buildings;
+    // Two floors × 3 m, as before.
+    expect(b?.heightMeters).toBe(6);
+    expect(b?.appearance).toEqual({
+      kind: 'house',
+      levels: 2,
+      roofShape: 'gabled',
+      // The ridge bears 30°; the main face points 90° from it.
+      roofDirectionDegrees: 120,
+      roofMaterial: 'roof_tiles',
+      wallColour: '#ffffff',
+    });
+  });
+
   it('joins a U-shaped building that crosses a seam twice, and one cut four ways at a tile corner', () => {
     // A U opening south across the seam at x0 + 4096.
     const u: [number, number][] = [

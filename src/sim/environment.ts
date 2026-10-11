@@ -30,6 +30,14 @@ export interface Road {
   /** Full carriageway width in metres. */
   readonly widthMeters: number;
   readonly source?: FeatureSource;
+  /**
+   * The source's own road type, kept for display (docs/adr/0035): the OSM
+   * `highway` value (e.g. "residential", "service") and, for service roads,
+   * `service` (e.g. "driveway", "parking_aisle"). The simulation and grading
+   * use `roadClass` only.
+   */
+  readonly highway?: string;
+  readonly service?: string;
 }
 
 /**
@@ -43,6 +51,61 @@ export interface Building {
   readonly footprint: readonly Vec2[];
   readonly heightMeters: number;
   readonly source?: FeatureSource;
+  /** What the source says about the building's look; display only (docs/adr/0035). */
+  readonly appearance?: BuildingAppearance;
+}
+
+/** Roof shapes as the sources name them (OSM `roof:shape`, Overture `roof_shape`). */
+export type RoofShape =
+  | 'flat'
+  | 'gabled'
+  | 'hipped'
+  | 'half-hipped'
+  | 'skillion'
+  | 'pyramidal'
+  | 'gambrel'
+  | 'mansard'
+  | 'saltbox'
+  | 'dome'
+  | 'onion'
+  | 'round'
+  | 'sawtooth';
+
+/**
+ * What a source records about a building's architecture (docs/adr/0035).
+ * Every field is explicit source data, never a default: a field is absent
+ * when the source does not give it, or gives something unusable. The 3D view
+ * infers the rest. The simulation never reads any of it: a tagged
+ * `roofHeightMeters` or `minHeightMeters` does not change `heightMeters`.
+ */
+export interface BuildingAppearance {
+  /** OSM `building` (other than "yes") or Overture `class`, e.g. "house", "garage", "industrial". */
+  readonly kind?: string;
+  /** OSM `building:part`, when a footprint is mapped as a part. */
+  readonly part?: string;
+  /** A use from other tags: `amenity`, `shop` or `military`, as "amenity=school" etc. */
+  readonly use?: string;
+  readonly levels?: number;
+  readonly levelsUnderground?: number;
+  /** The tagged height, metres, as metadata (the simulation's `heightMeters` is decided separately). */
+  readonly heightMeters?: number;
+  readonly minHeightMeters?: number;
+  readonly roofShape?: RoofShape;
+  readonly roofHeightMeters?: number;
+  readonly roofLevels?: number;
+  readonly roofAngleDegrees?: number;
+  /** Ridge along or across the longest side. */
+  readonly roofOrientation?: 'along' | 'across';
+  /** Compass bearing the main roof face points to, degrees. */
+  readonly roofDirectionDegrees?: number;
+  /** Normalised material names, e.g. "roof_tiles", "slate", "metal", "brick", "plaster". */
+  readonly roofMaterial?: string;
+  readonly wallMaterial?: string;
+  /** Colours as "#rrggbb". */
+  readonly roofColour?: string;
+  readonly wallColour?: string;
+  /** ISO 3166-1 alpha-2 country code from the address, upper case. */
+  readonly country?: string;
 }
 
 export type VegetationKind = 'woodland' | 'treeLine' | 'scrub';
@@ -174,6 +237,10 @@ export function validateFeatures(
       fail(`building "${building.id}" footprint must be a simple polygon`);
     }
     positive(`building "${building.id}" height`, building.heightMeters);
+    const look: unknown = building.appearance;
+    if (look !== undefined && (typeof look !== 'object' || look === null || Array.isArray(look))) {
+      fail(`building "${building.id}" appearance must be an object`);
+    }
   }
   /** A simple boundary and simple holes, each hole inside the boundary. */
   const checkArea = (

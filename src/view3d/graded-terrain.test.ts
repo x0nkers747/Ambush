@@ -11,6 +11,7 @@ import {
   type TerrainDataset,
 } from '#sim';
 import { buildingGeometry } from './building-geometry';
+import { MIN_WALL_M } from './roof-geometry';
 import { terrainGround } from './camera-math';
 import { createDraper } from './drape';
 import { roadGeometry, ROAD_STYLE } from './road-geometry';
@@ -167,8 +168,12 @@ describe('the 3D view on graded terrain', () => {
     const pad = heightAt(graded, 100, 120);
     const roof = buildingRoofElevations(graded).get('house') ?? NaN;
     expect(roof).toBeCloseTo(pad + 7, 6);
-    const zs = triangles(built.mesh).flatMap((t) => [t.a.z, t.b.z, t.c.z]);
-    expect(Math.max(...zs)).toBeCloseTo(roof, 3);
+    const zs = triangles(built.surfaces).flatMap((t) => [t.a.z, t.b.z, t.c.z]);
+    // A pitched roof's ridge stands as far above line of sight's roof as its
+    // eaves stand below; a flat one lies at it (docs/adr/0035).
+    const top = Math.max(...zs);
+    expect(top).toBeGreaterThanOrEqual(roof - 1e-3);
+    expect(top - roof).toBeLessThan(roof - pad - MIN_WALL_M + 1e-3);
     // The walls stop just under the level pad: no visible foundation step.
     expect(Math.min(...zs)).toBeGreaterThan(pad - 0.6);
     expect(Math.min(...zs)).toBeLessThan(pad);

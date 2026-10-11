@@ -15,6 +15,7 @@ import {
   type Waterway,
   type WaterwayKind,
 } from '#sim';
+import { buildingAppearance, osmBuildingAttributes } from './building-tags';
 import { clipPolygon, clipPolyline, dedupe, type Rect } from './clip';
 import { joinCoastlines, seaFromCoastlines } from './coastline';
 import { toLocal, type BattlefieldFrame, type GeoBox } from './frame';
@@ -135,6 +136,15 @@ function roadClassOf(t: Tags): RoadClass | null {
   if (PATH.test(h)) return 'path';
   if (h === 'track') return 'track';
   return t['surface'] && UNPAVED_SURFACE.test(t['surface']) ? 'unpaved' : 'paved';
+}
+
+/** The OSM `highway` (and `service`) values of a road, when they are plain words. */
+function roadType(t: Tags): { highway?: string; service?: string } {
+  const plain = (v: string | undefined) =>
+    v !== undefined && /^[a-z_]{1,32}$/.test(v) ? v : undefined;
+  const highway = plain(t['highway']);
+  const service = highway === 'service' ? plain(t['service']) : undefined;
+  return { ...(highway ? { highway } : {}), ...(service ? { service } : {}) };
 }
 
 /** Default storey height when only `building:levels` is known. */
@@ -357,6 +367,8 @@ export function featuresFromOsm(
       const levels = parseMetres(tags['building:levels']);
       const height =
         tagged ?? (levels !== null ? Math.max(2, levels * STOREY_M) : DEFAULT_BUILDING_M);
+      // Display only (docs/adr/0035): kept as tagged, never used for the height above.
+      const appearance = buildingAppearance(osmBuildingAttributes(tags));
       ids(base, clipped.length).forEach((id, i) => {
         const s = clipped[i];
         if (!s) return;
@@ -366,6 +378,7 @@ export function featuresFromOsm(
           footprint: s.outer,
           heightMeters: height,
           source: source(tagged !== null ? [] : ['heightMeters']),
+          ...(appearance ? { appearance } : {}),
         });
       });
       return true;
@@ -504,6 +517,8 @@ export function featuresFromOsm(
               centerline,
               widthMeters: tagged ?? ROAD_WIDTH[roadClass],
               source: tagged !== null ? { ref } : { ref, estimated: ['widthMeters'] },
+              // The OSM road type, kept for display (docs/adr/0035): driveways stay driveways.
+              ...roadType(tags),
             });
           } else if (waterway) {
             waterways.push({

@@ -30,7 +30,12 @@ used by everything: the 2D map, the 3D view, movement, line of sight and replay
 ([ADR 0032](docs/adr/0032-authoritative-graded-terrain.md)). Faulty elevation samples in the
 source data (voids, spikes, no-data values) are found and repaired before grading, real cliffs and
 ravines are left alone, and Battlefield Information reports what was found
-([ADR 0033](docs/adr/0033-dem-quality-validation.md)).
+([ADR 0033](docs/adr/0033-dem-quality-validation.md)). Buildings in 3D are procedural: gable,
+hip, shed and flat roofs on rectangles and L/T plans, textured walls and roofs at real scale,
+windows, and doors facing the nearest road, styled for the battlefield's region (North American
+or central European) from the source's building tags where it has them. They are display only:
+the simulated building heights, line of sight, grading and movement are unchanged
+([ADR 0035](docs/adr/0035-procedural-buildings.md)).
 
 ## Requirements
 
@@ -230,3 +235,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 31. [Procedural vegetation in the 3D view](docs/adr/0031-3d-procedural-vegetation.md)
 32. [One authoritative, graded terrain](docs/adr/0032-authoritative-graded-terrain.md)
 33. [DEM quality validation and repair](docs/adr/0033-dem-quality-validation.md)
+34. [Procedural buildings and richer OSM building data](docs/adr/0035-procedural-buildings.md)

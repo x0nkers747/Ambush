@@ -9,10 +9,11 @@ import {
   type EnvironmentFeatures,
   type TerrainDataset,
 } from '#sim';
-import { buildingColors, buildingGeometry } from './building-geometry';
+import { buildingGeometry, designBuildings, ROOF_LAYER_BASE } from './building-geometry';
 import { createDraper } from './drape';
 import { classifyLandCover, LAND_COVER_COLORS, landCoverTints } from './landcover';
 import { terrainMesh } from './terrain-mesh';
+import { planRoof } from './roof-geometry';
 import { coverage, roughGround, triangles, triArea } from './test-helpers';
 import { WATER_OFFSET_M, waterGeometry } from './water-geometry';
 
@@ -80,38 +81,63 @@ const terrain = roughGround(features);
 
 describe('buildingGeometry', () => {
   const built = buildingGeometry(terrain);
-  const tris = triangles(built.mesh);
-
-  it('puts every roof exactly where line of sight finds it', () => {
-    const roofs = buildingRoofElevations(terrain);
-    for (const b of terrain.features.buildings) {
-      const roofZ = roofs.get(b.id) ?? NaN;
-      const box = {
-        minX: Math.min(...b.footprint.map((p) => p.x)),
-        maxX: Math.max(...b.footprint.map((p) => p.x)),
-        minY: Math.min(...b.footprint.map((p) => p.y)),
-        maxY: Math.max(...b.footprint.map((p) => p.y)),
-      };
-      const mine = tris.filter((t) =>
+  const tris = triangles(built.surfaces);
+  const layerOf = (i: number) => built.surfaces.layers[i * 3] ?? NaN;
+  const roofs = buildingRoofElevations(terrain);
+  const designs = designBuildings(terrain);
+  /** The triangles within a building's footprint box, widened by its overhang. */
+  const near = (b: (typeof features.buildings)[number], margin: number) => {
+    const box = {
+      minX: Math.min(...b.footprint.map((p) => p.x)) - margin,
+      maxX: Math.max(...b.footprint.map((p) => p.x)) + margin,
+      minY: Math.min(...b.footprint.map((p) => p.y)) - margin,
+      maxY: Math.max(...b.footprint.map((p) => p.y)) + margin,
+    };
+    return tris
+      .map((t, i) => ({ t, layer: layerOf(i) }))
+      .filter(({ t }) =>
         [t.a, t.b, t.c].every(
-          (v) =>
-            v.x >= box.minX - 1e-3 &&
-            v.x <= box.maxX + 1e-3 &&
-            v.y >= box.minY - 1e-3 &&
-            v.y <= box.maxY + 1e-3,
+          (v) => v.x >= box.minX && v.x <= box.maxX && v.y >= box.minY && v.y <= box.maxY,
         ),
       );
-      const top = Math.max(...mine.flatMap((t) => [t.a.z, t.b.z, t.c.z]));
-      expect(Math.abs(top - roofZ)).toBeLessThan(0.01);
-      // The flat roof covers the footprint exactly.
-      const roof = mine.filter((t) => [t.a, t.b, t.c].every((v) => Math.abs(v.z - roofZ) < 1e-3));
-      const area = roof.reduce((s, t) => s + triArea(t), 0);
-      let footprint = 0;
-      b.footprint.forEach((p, i) => {
-        const q = b.footprint[(i + 1) % b.footprint.length] ?? p;
-        footprint += (p.x * q.y - q.x * p.y) / 2;
+  };
+
+  it('keeps every roof where line of sight finds it: at it if flat, around it if pitched', () => {
+    for (const b of terrain.features.buildings) {
+      const roofZ = roofs.get(b.id) ?? NaN;
+      const design = designs.get(b.id);
+      const shape = design?.shape;
+      if (!design || !shape) throw new Error(`no design for ${b.id}`);
+      const corners = b.footprint.map((p) => heightAt(terrain, p.x, p.y));
+      const plan = planRoof({
+        shape,
+        kind: design.style.roof,
+        pitchDegrees: design.style.pitchDegrees,
+        overhangM: design.style.overhangM,
+        reference: roofZ,
+        base: Math.min(...corners),
+        appearance: b.appearance,
+        chance: 0,
       });
-      expect(area).toBeCloseTo(Math.abs(footprint), 3);
+      const mine = near(b, 1.5 * design.style.overhangM + 0.01);
+      const roof = mine.filter(({ layer }) => layer >= ROOF_LAYER_BASE).map(({ t }) => t);
+      expect(roof.length).toBeGreaterThan(0);
+      const top = Math.max(...roof.flatMap((t) => [t.a.z, t.b.z, t.c.z]));
+      if (plan.kind === 'flat') {
+        // The flat roof covers the footprint exactly, at the reference.
+        expect(Math.abs(top - roofZ)).toBeLessThan(0.01);
+        const area = roof.reduce((sum, t) => sum + triArea(t), 0);
+        let footprint = 0;
+        b.footprint.forEach((p, i) => {
+          const q = b.footprint[(i + 1) % b.footprint.length] ?? p;
+          footprint += (p.x * q.y - q.x * p.y) / 2;
+        });
+        expect(area).toBeCloseTo(Math.abs(footprint), 3);
+      } else {
+        // The ridge as far above the reference as the eaves are below it.
+        expect(top).toBeCloseTo(plan.top, 3);
+        if (shape.kind === 'rectangle') expect(plan.top - roofZ).toBeCloseTo(roofZ - plan.eaves, 6);
+      }
       // Roof triangles face up.
       for (const t of roof) expect(triArea(t)).toBeGreaterThan(0);
     }
@@ -137,7 +163,6 @@ describe('buildingGeometry', () => {
       }
     }
     // Buildings whose uphill corners stand above their roof are counted.
-    const roofs = buildingRoofElevations(terrain);
     const buried = terrain.features.buildings.filter((x) =>
       x.footprint.some((p) => heightAt(terrain, p.x, p.y) > (roofs.get(x.id) ?? 0)),
     ).length;
@@ -147,12 +172,14 @@ describe('buildingGeometry', () => {
 
   it('turns every wall outwards', () => {
     let walls = 0;
-    for (const t of tris) {
+    tris.forEach((t, i) => {
+      const layer = layerOf(i);
+      if (layer < 0 || layer >= ROOF_LAYER_BASE) return; // roofs and trim
       const nx = (t.b.y - t.a.y) * (t.c.z - t.a.z) - (t.b.z - t.a.z) * (t.c.y - t.a.y);
       const ny = (t.b.z - t.a.z) * (t.c.x - t.a.x) - (t.b.x - t.a.x) * (t.c.z - t.a.z);
       const nz = (t.b.x - t.a.x) * (t.c.y - t.a.y) - (t.b.y - t.a.y) * (t.c.x - t.a.x);
       const len = Math.hypot(nx, ny, nz);
-      if (Math.abs(nz) / len > 0.5) continue; // roof
+      expect(Math.abs(nz) / len).toBeLessThan(1e-3);
       walls += 1;
       // Just in front of the wall (its winding's normal) is outside the
       // building, just behind it inside.
@@ -164,30 +191,26 @@ describe('buildingGeometry', () => {
         );
       expect(inside(0.05)).toBe(false);
       expect(inside(-0.05)).toBe(true);
-    }
+    });
     expect(walls).toBeGreaterThan(20);
   });
 
-  it('colours buildings from their ids alone, from a muted palette', () => {
-    expect(buildingColors('osm:way/1')).toEqual(buildingColors('osm:way/1'));
-    const walls = new Set(
-      Array.from({ length: 50 }, (_, i) => buildingColors(`b${String(i)}`).wall.join()),
-    );
-    expect(walls.size).toBeGreaterThan(3);
-    for (const id of ['a', 'b', 'c']) {
-      for (const v of buildingColors(id).wall) {
-        expect(v).toBeGreaterThan(0.1);
-        expect(v).toBeLessThan(0.8);
-      }
+  it('draws buildings from their ids alone, in muted colours', () => {
+    const again = designBuildings(terrain);
+    for (const [id, d] of designs) expect(again.get(id)).toEqual(d);
+    for (const v of built.surfaces.colors) {
+      expect(v).toBeGreaterThan(0.05);
+      expect(v).toBeLessThanOrEqual(1);
     }
-    // The same buildings in another order give the same mesh.
+    // The same buildings in another order give the same meshes.
     const shuffled: TerrainDataset = {
       ...terrain,
       features: { ...features, buildings: [...features.buildings].reverse() },
     };
-    expect(Array.from(buildingGeometry(shuffled).mesh.colors ?? [])).toEqual(
-      Array.from(built.mesh.colors ?? []),
-    );
+    const other = buildingGeometry(shuffled);
+    expect(Array.from(other.surfaces.colors)).toEqual(Array.from(built.surfaces.colors));
+    expect(Array.from(other.surfaces.positions)).toEqual(Array.from(built.surfaces.positions));
+    expect(Array.from(other.openings.positions)).toEqual(Array.from(built.openings.positions));
   });
 });
 

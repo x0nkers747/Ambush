@@ -8,9 +8,11 @@ import {
   ReplaceStencilOp,
 } from 'three';
 import type { TerrainDataset } from '#sim';
-import { buildingGeometry } from './building-geometry';
+import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
+import { createBuildingMaterials } from './building-materials';
 import { createDraper, type MeshData } from './drape';
 import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-geometry';
+import type { SurfaceMeshData } from './surface-mesh';
 import { waterGeometry } from './water-geometry';
 
 // The battlefield's geographic features (docs/adr/0030): roads, water and
@@ -19,16 +21,20 @@ import { waterGeometry } from './water-geometry';
 // scene meshes. Built once per terrain and kept until the terrain changes;
 // nothing is rebuilt per frame. Each kind of surface is one mesh with one
 // material, so the whole battlefield adds about eight draw calls however many
-// features it has.
+// features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 1;
+export const GEOMETRY_VERSION = 2;
 
 export interface GeoFeatureStats {
   readonly roadTriangles: number;
   readonly waterTriangles: number;
+  /** Walls, roofs and trim; and windows and doors. */
   readonly buildingTriangles: number;
+  readonly openingTriangles: number;
   readonly buildings: number;
+  /** Roof shapes, footprint shapes, windows and doors drawn, and the region's style. */
+  readonly buildingDetail: BuildingStats;
   /** Buildings whose uphill corners stand higher than their roof (steep ground). */
   readonly buriedBuildings: number;
   /** Generation times in milliseconds. */
@@ -39,13 +45,18 @@ export interface GeoFeatureStats {
 export interface FeatureGeometry {
   readonly roads: readonly (readonly [RoadLayer, MeshData])[];
   readonly water: MeshData;
-  readonly buildings: MeshData;
+  readonly buildings: SurfaceMeshData;
+  readonly openings: SurfaceMeshData;
+  /** Building entrances (doors and garage doors): display metadata. */
+  readonly entrances: readonly BuildingEntrance[];
   readonly stats: GeoFeatureStats;
 }
 
 export interface GeoFeatureLayer {
   readonly group: Group;
   readonly stats: GeoFeatureStats;
+  /** Resolves when the building textures are in use (false if they could not load). */
+  readonly ready: Promise<boolean>;
   dispose(): void;
 }
 
@@ -69,12 +80,16 @@ export function buildFeatureGeometry(terrain: TerrainDataset): FeatureGeometry {
   return {
     roads: roadList,
     water: water.mesh,
-    buildings: buildings.mesh,
+    buildings: buildings.surfaces,
+    openings: buildings.openings,
+    entrances: buildings.entrances,
     stats: {
       roadTriangles: roadList.reduce((s, [, d]) => s + d.triangleCount, 0),
       waterTriangles: water.mesh.triangleCount,
-      buildingTriangles: buildings.mesh.triangleCount,
+      buildingTriangles: buildings.surfaces.triangleCount,
+      openingTriangles: buildings.openings.triangleCount,
       buildings: buildings.count,
+      buildingDetail: buildings.stats,
       buriedBuildings: buildings.buried,
       ms: { roads: roadMs, water: waterMs, buildings: buildingMs },
     },
@@ -83,8 +98,14 @@ export function buildFeatureGeometry(terrain: TerrainDataset): FeatureGeometry {
 
 /** The typed arrays of a feature geometry, for transferring them to another thread. */
 export function featureBuffers(f: FeatureGeometry): ArrayBuffer[] {
-  return [...f.roads.map(([, d]) => d), f.water, f.buildings].flatMap((d) =>
-    [d.positions, d.normals, d.colors].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
+  return [...f.roads.map(([, d]) => d), f.water, f.buildings, f.openings].flatMap((d) =>
+    [
+      d.positions,
+      d.normals,
+      d.colors,
+      'uvs' in d ? (d as SurfaceMeshData).uvs : null,
+      'layers' in d ? (d as SurfaceMeshData).layers : null,
+    ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
   );
 }
 
@@ -156,24 +177,41 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
     }),
   );
 
-  const buildings = add(
-    'buildings',
-    features.buildings,
-    new MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
-  );
+  // Buildings: walls, roofs and trim from a texture array; windows and doors
+  // from an atlas, shown once it has loaded.
+  const materials = createBuildingMaterials();
+  const buildings = add('buildings', features.buildings, materials.surfaces);
   if (buildings) {
+    buildings.geometry.setAttribute('surfaceUv', new BufferAttribute(features.buildings.uvs, 2));
+    buildings.geometry.setAttribute(
+      'surfaceLayer',
+      new BufferAttribute(features.buildings.layers, 1),
+    );
     buildings.castShadow = true;
     buildings.receiveShadow = true;
   }
+  const openings = add('building openings', features.openings, materials.openings);
+  if (openings) {
+    openings.geometry.setAttribute('uv', new BufferAttribute(features.openings.uvs, 2));
+    openings.receiveShadow = true;
+    openings.visible = false;
+  }
+  let disposed = false;
+  void materials.ready.then((loaded) => {
+    if (loaded && !disposed && openings) openings.visible = true;
+  });
 
   return {
     group,
     stats: features.stats,
+    ready: materials.ready,
     dispose() {
+      disposed = true;
       for (const m of meshes) {
         m.geometry.dispose();
         m.material.dispose();
       }
+      materials.dispose();
       group.clear();
     },
   };

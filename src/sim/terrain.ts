@@ -51,6 +51,12 @@ export interface TerrainMetadata {
   readonly elevationResolutionM: number | null;
   /** `DTM`: bare earth; `DSM`: includes canopy and buildings; `mixed` or `unknown`. */
   readonly surfaceModel: 'DTM' | 'DSM' | 'mixed' | 'unknown';
+  /**
+   * The architectural style the 3D view draws buildings in (docs/adr/0035),
+   * when set: display only. When absent the view decides from the buildings'
+   * addresses or the battlefield's location.
+   */
+  readonly architecture?: 'north-american' | 'central-european' | 'generic';
 }
 
 /**

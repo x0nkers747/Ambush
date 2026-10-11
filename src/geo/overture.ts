@@ -1,4 +1,5 @@
 import { isSimplePolygon, polygonArea, type Building, type FeatureSource } from '#sim';
+import { buildingAppearance } from './building-tags';
 import { clipPolygon, dedupe, type Rect } from './clip';
 import { geographicBounds, toLocal, type BattlefieldFrame } from './frame';
 import { decodeMvt, ringArea, type MvtValue } from './mvt';
@@ -365,12 +366,30 @@ export function buildingsFromOverture(
     for (const d of datasetsOf(p['sources'])) datasets.add(d);
     if (typeof geometrySource === 'string') datasets.add(geometrySource);
     const base = `ovt-${id}`;
+    // Display only (docs/adr/0035): Overture's architecture fields, as given.
+    const appearance = buildingAppearance({
+      kind: p['class'] ?? p['subtype'],
+      levels: p['num_floors'],
+      levelsUnderground: p['num_floors_underground'],
+      height: p['height'],
+      minHeight: p['min_height'],
+      roofShape: p['roof_shape'],
+      roofHeight: p['roof_height'],
+      roofOrientation: p['roof_orientation'],
+      // Overture gives the ridge's bearing; OSM (and `roofDirectionDegrees`) the face's.
+      roofDirection: typeof p['roof_direction'] === 'number' ? p['roof_direction'] + 90 : undefined,
+      roofMaterial: p['roof_material'],
+      wallMaterial: p['facade_material'],
+      roofColour: p['roof_color'],
+      wallColour: p['facade_color'],
+    });
     outlines.forEach((footprint, i) => {
       buildings.push({
         id: outlines.length === 1 ? base : `${base}-${String(i + 1)}`,
         footprint,
         heightMeters: height,
         source,
+        ...(appearance ? { appearance } : {}),
       });
     });
   }

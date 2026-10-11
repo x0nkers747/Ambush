@@ -733,7 +733,7 @@ Start with **A0 and A together, in this order**:
 4. **One curated texture set** (§10): 6–8 wall layers and 5–6 roof layers, CC0, 512 px, KTX2, with
    a credits file. That is about 6–10 MB.
 5. **Batching and LOD:** per 250 m tile, in the existing generation worker.
-6. **An ADR** (0034), screenshot review at fixed views, and the acceptance criteria of milestone A.
+6. **An ADR** (0034; written as ADR 0035, `docs/adr/0035-procedural-buildings.md`), screenshot review at fixed views, and the acceptance criteria of milestone A.
 
 Do **not** start with shadows, post-processing or street furniture: the prototype shows the
 buildings' and ground's materials limit the look far more.
