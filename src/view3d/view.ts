@@ -20,12 +20,15 @@ import type { Exercise } from '#exercise';
 import type { Session } from '#session';
 import { heightAt, isOnTerrain, type TerrainDataset } from '#sim';
 import type { BattlefieldExtent, GroundAt } from './camera-math';
+import { createGeoFeatures, type GeoFeatureLayer } from './geo-features';
+import { landCoverTints } from './landcover';
 import { createMarkerLayer } from './markers';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
 import { apronElevation, skirtMesh, terrainMesh, type TerrainMeshData } from './terrain-mesh';
 import { destinationMarkers, unitMarkers } from './unit-markers';
 
-// The 3D battlefield view (docs/adr/0029), Milestone 1: the simulated terrain,
+// The 3D battlefield view (docs/adr/0029, docs/adr/0030): the simulated
+// terrain coloured by land cover, the roads, water and buildings on it,
 // daylight, sky and fog, the tactical camera, and the soldiers. Like the 2D
 // map it renders whatever exercise it is given (live, the scenario preview, or
 // an After Action Review frame) and owns no game state: it reads, never writes.
@@ -42,7 +45,7 @@ export interface BattlefieldView3dOptions {
   readonly session: () => Session;
   /** Whether the trainee's squad is hidden (no ORP yet), as on the 2D map. */
   readonly hideTrainee: () => boolean;
-  /** Colours for the ground (e.g. the 2D map's elevation tints). */
+  /** Colours for ground with no land cover (e.g. the 2D map's elevation tints). */
   readonly tints?: TerrainTints;
 }
 
@@ -62,6 +65,10 @@ interface TerrainEntry {
   readonly terrain: TerrainDataset;
   readonly data: TerrainMeshData;
   readonly mesh: Mesh<BufferGeometry, MeshStandardMaterial>;
+  /** Roads, water and buildings. */
+  readonly features: GeoFeatureLayer;
+  /** Time taken to build the terrain mesh (with its land cover) and the features, in ms. */
+  readonly buildMs: { readonly terrain: number; readonly features: number };
   /** The edge walls and the plain around the battlefield (decoration, not simulated ground). */
   readonly surround: Mesh<BufferGeometry, MeshStandardMaterial>[];
   readonly extent: BattlefieldExtent;
@@ -86,6 +93,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     canvas,
     antialias: true,
     powerPreference: 'high-performance',
+    // For water, which takes each pixel once (geo-features.ts).
+    stencil: true,
   });
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -123,6 +132,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   scene.add(markers.group);
 
   let current: TerrainEntry | null = null;
+  /** How many times a terrain's meshes have been built (for checks: once per terrain). */
+  let terrainBuilds = 0;
   let width = 0;
   let height = 0;
 
@@ -130,7 +141,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   const terrainEntry = (terrain: TerrainDataset): TerrainEntry => {
     if (current?.terrain === terrain) return current;
     if (current) dropTerrain(current);
-    const data = terrainMesh(terrain, o.tints?.(terrain));
+    terrainBuilds += 1;
+    const started = performance.now();
+    const data = terrainMesh(terrain, landCoverTints(terrain, o.tints?.(terrain)));
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
     geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
@@ -146,6 +159,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     const mesh = new Mesh(geometry, material);
     mesh.name = 'terrain';
     scene.add(mesh);
+    const terrainMs = performance.now() - started;
+    const features = createGeoFeatures(terrain, data.normals);
+    scene.add(features.group);
+    const buildMs = { terrain: terrainMs, features: performance.now() - started - terrainMs };
 
     const b = data.bounds;
     const extent = { minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY };
@@ -182,7 +199,18 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
 
     const camera = createTacticalCamera(canvas, extent, groundAt, apronZ);
     if (width > 0) camera.resize(width, height);
-    current = { terrain, data, mesh, surround: [walls, apron], extent, groundAt, apronZ, camera };
+    current = {
+      terrain,
+      data,
+      mesh,
+      features,
+      buildMs,
+      surround: [walls, apron],
+      extent,
+      groundAt,
+      apronZ,
+      camera,
+    };
     return current;
   };
 
@@ -192,6 +220,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       m.geometry.dispose();
       m.material.dispose();
     }
+    scene.remove(entry.features.group);
+    entry.features.dispose();
     entry.camera.dispose();
   };
 
@@ -244,6 +274,22 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       canvas.remove();
     },
   };
+  // For automated browser checks: a camera pose in battlefield metres. The
+  // camera looks at ground point (x, y) from `distance` metres away, `pitch`
+  // degrees down, facing `azimuth` degrees (clockwise from north).
+  Object.defineProperty(canvas, 'ambushSetView', {
+    value: (x: number, y: number, distance: number, pitch: number, azimuth: number) => {
+      if (!current) return;
+      const z = current.groundAt(x, -y) ?? current.apronZ;
+      const p = (pitch * Math.PI) / 180;
+      const a = (azimuth * Math.PI) / 180;
+      const back = distance * Math.cos(p);
+      current.camera.setPose(
+        new Vector3(x, z, -y),
+        new Vector3(x - back * Math.sin(a), z + distance * Math.sin(p), -(y - back * Math.cos(a))),
+      );
+    },
+  });
   // For automated browser checks: camera pose and renderer statistics.
   Object.defineProperty(canvas, 'ambushDebug', {
     value: () => {
@@ -256,6 +302,20 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         geometries: renderer.info.memory.geometries,
         textures: renderer.info.memory.textures,
         terrainVertices: current?.data.vertexCount ?? 0,
+        terrainBuilds,
+        features: current?.features.stats ?? null,
+        // Vertex and index buffers in the scene, in bytes.
+        geometryBytes: (() => {
+          let bytes = 0;
+          scene.traverse((o) => {
+            if (!(o instanceof Mesh)) return;
+            const g = o.geometry as BufferGeometry;
+            for (const a of Object.values(g.attributes)) bytes += a.array.byteLength;
+            bytes += g.index?.array.byteLength ?? 0;
+          });
+          return bytes;
+        })(),
+        buildMs: current?.buildMs ?? null,
         bounds: current?.data.bounds ?? null,
         markers: markers.group.children.length,
         clearance:

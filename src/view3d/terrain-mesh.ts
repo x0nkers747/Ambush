@@ -30,9 +30,39 @@ export interface TerrainMeshData {
 }
 
 /** sRGB (0–255) to linear (0–1), as Three.js expects for vertex colours. */
-function srgbToLinear(value: number): number {
+export function srgbToLinear(value: number): number {
   const c = value / 255;
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * Smooth unit normals for shading, one per sample in heightfield order, in
+ * Three.js axes: central differences (one-sided at the edges) give the surface
+ * normal (−dz/dx, −dz/dy, 1), normalised, then turned into Three.js axes.
+ */
+export function terrainNormals(terrain: TerrainDataset): Float32Array {
+  const { cellSize, columns, rows, elevations } = terrain.heightfield;
+  const normals = new Float32Array(columns * rows * 3);
+  const at = (c: number, r: number) =>
+    elevations[
+      Math.min(Math.max(r, 0), rows - 1) * columns + Math.min(Math.max(c, 0), columns - 1)
+    ] ?? 0;
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const i = r * columns + c;
+      const dzdx =
+        (at(c + 1, r) - at(c - 1, r)) /
+        ((Math.min(c + 1, columns - 1) - Math.max(c - 1, 0)) * cellSize);
+      const dzdy =
+        (at(c, r + 1) - at(c, r - 1)) /
+        ((Math.min(r + 1, rows - 1) - Math.max(r - 1, 0)) * cellSize);
+      const length = Math.hypot(dzdx, dzdy, 1);
+      normals[i * 3] = -dzdx / length;
+      normals[i * 3 + 1] = 1 / length;
+      normals[i * 3 + 2] = dzdy / length;
+    }
+  }
+  return normals;
 }
 
 /**
@@ -47,12 +77,8 @@ export function terrainMesh(
   const { originX, originY, cellSize, columns, rows, elevations } = terrain.heightfield;
   const count = columns * rows;
   const positions = new Float32Array(count * 3);
-  const normals = new Float32Array(count * 3);
+  const normals = terrainNormals(terrain);
   const colors = tints ? new Float32Array(count * 3) : null;
-  const at = (c: number, r: number) =>
-    elevations[
-      Math.min(Math.max(r, 0), rows - 1) * columns + Math.min(Math.max(c, 0), columns - 1)
-    ] ?? 0;
   let minZ = Infinity;
   let maxZ = -Infinity;
   for (let r = 0; r < rows; r += 1) {
@@ -65,18 +91,6 @@ export function terrainMesh(
       positions[i * 3] = originX + c * cellSize;
       positions[i * 3 + 1] = z;
       positions[i * 3 + 2] = -(originY + r * cellSize);
-      // Central differences (one-sided at the edges): the surface normal
-      // (−dz/dx, −dz/dy, 1), normalised, then into Three.js axes.
-      const dzdx =
-        (at(c + 1, r) - at(c - 1, r)) /
-        ((Math.min(c + 1, columns - 1) - Math.max(c - 1, 0)) * cellSize);
-      const dzdy =
-        (at(c, r + 1) - at(c, r - 1)) /
-        ((Math.min(r + 1, rows - 1) - Math.max(r - 1, 0)) * cellSize);
-      const length = Math.hypot(dzdx, dzdy, 1);
-      normals[i * 3] = -dzdx / length;
-      normals[i * 3 + 1] = 1 / length;
-      normals[i * 3 + 2] = dzdy / length;
       if (colors && tints) {
         const t = i * tints.channels;
         colors[i * 3] = srgbToLinear(tints.data[t] ?? 0);

@@ -35,6 +35,8 @@ export interface TacticalCamera extends CameraMode {
   focusAt(clientX: number, clientY: number): boolean;
   /** The focus point and camera position, in Three.js axes (for tests and persistence). */
   pose(): { target: Vector3; position: Vector3 };
+  /** Moves to a pose (Three.js axes), within the usual limits. */
+  setPose(target: Vector3, position: Vector3): void;
   /** Fits the camera to the canvas size. */
   resize(width: number, height: number): void;
 }
@@ -156,6 +158,14 @@ export function createTacticalCamera(
       fitClipping();
     },
     pose: () => ({ target: controls.target.clone(), position: camera.position.clone() }),
+    setPose(target, position) {
+      focus = null;
+      controls.target.copy(target);
+      camera.position.copy(position);
+      camera.lookAt(controls.target);
+      controls.update();
+      constrain();
+    },
     resize(width, height) {
       aspect = width / Math.max(height, 1);
       camera.aspect = aspect;
