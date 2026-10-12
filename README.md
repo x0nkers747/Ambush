@@ -138,7 +138,8 @@ sources, their resolution and accuracy, and the credits their licences require. 
 
 1. **BLUEFOR Planning (stage 3).** The squad starts in the ORP (dashed circle). Choose a Marine in the
    roster or on the map and click the map to give them a destination; drag the yellow handle to
-   set their facing. Marines you leave alone stay in the ORP. Press **K** to switch to the kill
+   set their facing. Marines you leave alone stay in the ORP. Clicking a Marine's destination (waypoint) selects
+   that Marine, just as clicking the Marine does. Press **K** to switch to the kill
    zone and draw it across the expected enemy route (the dark-red dashed line).
    Press **V** (Visibility) to shade light purple everything the selected Marine can see in their
    firing arc (the wedge in front of them) from their destination, with the share of the kill zone

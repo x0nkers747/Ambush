@@ -494,6 +494,28 @@ export function isOnDestination(scene: MapScene, screen: Vec2): boolean {
   return destination != null && distance(destination, screen) <= DESTINATION_HIT_RADIUS_PX;
 }
 
+/**
+ * The trainee soldier whose destination marker (waypoint) is at `screen`,
+ * nearest first, other than the selected soldier (his own is a handle):
+ * clicking another soldier's waypoint selects him, as clicking him does.
+ */
+export function destinationOwnerAt(scene: MapScene, screen: Vec2): SoldierId | undefined {
+  let best: SoldierId | undefined;
+  let bestDistance = DESTINATION_HIT_RADIUS_PX;
+  for (const plan of scene.plans) {
+    if (plan.soldierId === scene.selectedId || !plan.destination) continue;
+    if (!scene.markings.has(plan.soldierId)) continue;
+    const marker = deploymentGeometry(scene, plan.soldierId)?.destination;
+    if (!marker) continue;
+    const d = distance(marker, screen);
+    if (d <= bestDistance) {
+      best = plan.soldierId;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
+
 export function isOnFacingHandle(scene: MapScene, screen: Vec2): boolean {
   const geometry = deploymentGeometry(scene);
   return (

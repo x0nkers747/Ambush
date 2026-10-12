@@ -165,7 +165,8 @@ describe('the 3D terrain mesh', () => {
       }
     }
     expect(worstError(mesh, terrain, points)).toBeLessThan(TOLERANCE_M);
-  });
+    // About 3.5 s alone: under the whole suite's parallel load it can pass the 5 s default.
+  }, 20_000);
 
   it('agrees with heightAt at 20,000 random points', () => {
     const next = random(29);

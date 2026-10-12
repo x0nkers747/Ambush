@@ -3,6 +3,7 @@ import { facingToward } from './bearing';
 import { panBy, zoomAt, type Camera } from './camera';
 import {
   formationGeometry,
+  destinationOwnerAt,
   isOnDestination,
   isOnFacingHandle,
   isOnFormationCentre,
@@ -21,6 +22,8 @@ import {
 // wheel input and it calls `MapActions`.
 //
 //   Left click a BLUEFOR soldier      select it
+//   Left click another soldier's      select him, as clicking him does
+//     destination (waypoint)
 //   Left click the map                set (or move) the selected soldier's destination
 //   Left drag the destination         move it
 //   Left drag the facing arrow tip    set the facing
@@ -123,6 +126,7 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     if (team && (isOnFormationFacingHandle(s, p) || isOnFormationCentre(s, p))) return 'move';
     if (s.editable && (isOnFacingHandle(s, p) || isOnDestination(s, p))) return 'move';
     if (selectableSoldiersAt(s, p).length > 0) return 'pointer';
+    if (destinationOwnerAt(s, p) !== undefined) return 'pointer';
     return s.editable || team ? 'crosshair' : 'grab';
   };
 
@@ -140,6 +144,12 @@ export function createMapController(scene: () => MapScene, actions: MapActions):
     const next = nextSelectionAt(s, p);
     if (next !== undefined) {
       actions.select(next);
+      return;
+    }
+    // A click on another soldier's waypoint selects him, as a click on him would.
+    const owner = destinationOwnerAt(s, p);
+    if (owner !== undefined) {
+      actions.select(owner);
       return;
     }
     // A click on an OPFOR symbol selects nothing and sets no destination.

@@ -107,6 +107,7 @@ The 3D view listens in the capture phase, before OrbitControls:
 | Gesture                                                               | 2D                                       | 3D                               |
 | --------------------------------------------------------------------- | ---------------------------------------- | -------------------------------- |
 | Left click on a soldier                                               | select (cycle a cluster)                 | the same                         |
+| Left click on another soldier's destination (waypoint)                | select that soldier (added later)        | the same                         |
 | Left click on the ground                                              | destination, formation, kill-zone corner | the same                         |
 | Left drag on a handle (destination, arrow, formation, corner, editor) | drag it                                  | the same; the camera stays still |
 | Left drag elsewhere                                                   | pan                                      | pan along the ground             |

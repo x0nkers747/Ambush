@@ -215,6 +215,28 @@ describe('selection', () => {
     expect(ui.exercise.draft(soldierId('E'))).toBeUndefined();
   });
 
+  it('selects a soldier by clicking his waypoint (destination), as clicking him does', () => {
+    const ui = setup();
+    ui.click(0, 0);
+    ui.click(-50, 40);
+    expect(ui.destination()).toEqual([-50, 40]);
+    ui.click(52, 3);
+    expect(ui.session.selectedSoldierId).toBe('B');
+    // B's click on A's waypoint selects A; nobody's destination moves there.
+    expect(ui.controller.cursor).toBeDefined();
+    ui.controller.pointerMove({ ...screen(-50, 40), button: 0 });
+    expect(ui.controller.cursor).toBe('pointer');
+    ui.click(-50, 40);
+    expect(ui.session.selectedSoldierId).toBe('A');
+    expect(ui.destination()).toEqual([-50, 40]);
+    expect(ui.exercise.draft(soldierId('B'))?.destination ?? null).toBeNull();
+    // Also with the view tool, once planning is over.
+    ui.click(52, 3);
+    ui.useTool('view');
+    ui.click(-50, 40);
+    expect(ui.session.selectedSoldierId).toBe('A');
+  });
+
   it('does nothing when clicking the map with no selection', () => {
     const ui = setup();
     ui.click(30, 30);
