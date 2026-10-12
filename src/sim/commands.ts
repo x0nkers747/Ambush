@@ -1,3 +1,4 @@
+import type { PathPoint } from './bridge-navigation';
 import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
@@ -88,7 +89,10 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
 
 function validateOrders(orders: Orders | null): void {
   if (orders === null) return;
-  const { finalFacing } = orders;
+  const { finalFacing, followRoads } = orders;
+  if (followRoads !== undefined && typeof followRoads !== 'boolean') {
+    throw new RangeError(`followRoads must be a boolean when given, got ${String(followRoads)}`);
+  }
   if (!(finalFacing >= 0 && finalFacing < 2 * Math.PI)) {
     throw new RangeError(`finalFacing must be an azimuth in [0, 2π), got ${String(finalFacing)}`);
   }
@@ -145,11 +149,12 @@ function applySetOrders(
     return;
   }
   // Plan every leg now, from where the soldier stands: the route is fixed when
-  // the orders are given (docs/adr/0011).
-  const legPaths: Vec2[][] = [];
+  // the orders are given (docs/adr/0011), along the roads if they say so (docs/adr/0043).
+  const legPaths: PathPoint[][] = [];
   let from: Vec2 = { x: soldier.position.x, y: soldier.position.y };
+  const options = { followRoads: orders.followRoads === true };
   for (const waypoint of orders.waypoints) {
-    const path = planPath(world.terrain, from, waypoint);
+    const path = planPath(world.terrain, from, waypoint, options);
     if (!path.ok) {
       const reason =
         path.problem.kind === 'offTerrain'
@@ -160,7 +165,9 @@ function applySetOrders(
       events.push({ type: 'commandRejected', tick: state.tick, command, reason });
       return;
     }
-    legPaths.push(path.turns.map((p) => ({ x: p.x, y: p.y })));
+    legPaths.push(
+      path.turns.map((p) => (p.z === undefined ? { x: p.x, y: p.y } : { x: p.x, y: p.y, z: p.z })),
+    );
     from = waypoint;
   }
   soldier.orders = {

@@ -1,3 +1,4 @@
+import { surfaceHeightAt } from './bridge-navigation';
 import type { Vec2 } from './geometry';
 import {
   STANDING_EYE_HEIGHT_M,
@@ -141,8 +142,9 @@ export function computeViewshedRows(
   const eye = {
     x: observer.x,
     y: observer.y,
+    // The observer on the surface stood on, as for line of sight (docs/adr/0043).
     z:
-      heightAt(terrain, observer.x, observer.y) +
+      surfaceHeightAt(terrain, observer.x, observer.y) +
       (options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M),
   };
   const aim = options.targetHeightMeters ?? STANDING_TARGET_HEIGHT_M;
@@ -274,8 +276,9 @@ export function computeViewshedRowsReference(
   const eye = {
     x: observer.x,
     y: observer.y,
+    // The observer on the surface stood on, as for line of sight (docs/adr/0043).
     z:
-      heightAt(terrain, observer.x, observer.y) +
+      surfaceHeightAt(terrain, observer.x, observer.y) +
       (options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M),
   };
   const aim = options.targetHeightMeters ?? STANDING_TARGET_HEIGHT_M;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createExercise, DEMO_SCENARIO, TRAINEE_SIDE } from '#exercise';
 import { createSession, selectFireTeam, selectSoldier } from '#session';
-import { DEFAULT_TICK_RATE_HZ, heightAt, soldierId } from '#sim';
+import { DEFAULT_TICK_RATE_HZ, soldierId, surfaceHeightAt } from '#sim';
 import { destinationMarkers, unitMarkers } from './unit-markers';
 
 // The 3D view's soldiers come straight from the exercise (docs/adr/0029).
@@ -13,7 +13,7 @@ const demo = () =>
   });
 
 describe('3D unit markers', () => {
-  it('are every soldier, at the simulated position, on the ground, with side and facing', () => {
+  it('are every soldier, at the simulated position, on the surface stood on, with side and facing', () => {
     const exercise = demo();
     const markers = unitMarkers(exercise, createSession(), false);
     const soldiers = exercise.simulation.state.soldiers;
@@ -23,7 +23,7 @@ describe('3D unit markers', () => {
       if (!s) throw new Error('missing soldier');
       expect(m.position).toEqual(s.position);
       expect(m.position.z).toBeCloseTo(
-        heightAt(exercise.simulation.world.terrain, s.position.x, s.position.y),
+        surfaceHeightAt(exercise.simulation.world.terrain, s.position.x, s.position.y),
         9,
       );
       expect(m.azimuth).toBe(s.azimuth);
@@ -68,7 +68,7 @@ describe('3D unit markers', () => {
     expect(planned[0]?.position.x).toBe(-60);
     expect(planned[0]?.position.y).toBe(-200);
     expect(planned[0]?.position.z).toBeCloseTo(
-      heightAt(exercise.simulation.world.terrain, -60, -200),
+      surfaceHeightAt(exercise.simulation.world.terrain, -60, -200),
       9,
     );
     const before = unitMarkers(exercise, createSession(), false).find((m) => m.id === id);

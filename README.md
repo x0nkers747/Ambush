@@ -105,7 +105,10 @@ button.
      ORP, so the squad is not shown until you place one.
    - **Place OPFOR**: click where the OPFOR patrol (three soldiers) starts (or drag it).
    - **Edit OPFOR route**: click to add waypoints in order; drag a waypoint to move it; right-click
-     to delete it. The patrol walks straight between waypoints, round buildings where needed.
+     to delete it. To a waypoint on a road, the patrol follows the roads (joining the nearest one
+     it can reach, and crossing bridges); to a waypoint off the roads it walks straight, round
+     buildings and water where needed ([ADR 0043](docs/adr/0043-bridge-and-road-navigation.md)).
+     Every soldier can cross the bridges drawn over rivers and lakes.
    - **Clear route** keeps the OPFOR where it starts; **Reset scenario** asks first, then starts
      over. Changes are saved as you make them. The demo's scenario is fixed and shown read-only.
    - **Continue to BLUEFOR Planning** once the status says the scenario is ready.
@@ -277,3 +280,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 40. [Water surface flattening, shorelines and beaches](docs/adr/0040-water-grading-and-shorelines.md)
 41. [Procedural road bridges](docs/adr/0041-procedural-road-bridges.md)
 42. [Viewsheds limited to the firing arc](docs/adr/0042-viewshed-in-the-firing-arc.md)
+43. [Bridge crossing and OPFOR road following](docs/adr/0043-bridge-and-road-navigation.md)

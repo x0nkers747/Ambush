@@ -1,3 +1,4 @@
+import { surfaceHeightAt } from './bridge-navigation';
 import { validateCombatConfig, weaponCombatProfile } from './combat-config';
 import { azimuthFromDegrees, type Vec2 } from './geometry';
 import { pointProblem } from './navigation';
@@ -14,7 +15,7 @@ import {
   type SimState,
   type Soldier,
 } from './state';
-import { heightAt, isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
+import { isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
 import {
   validateMovementParams,
   type CombatSetup,
@@ -155,7 +156,7 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     position: {
       x: soldier.position.x,
       y: soldier.position.y,
-      z: heightAt(terrain, soldier.position.x, soldier.position.y),
+      z: surfaceHeightAt(terrain, soldier.position.x, soldier.position.y),
     },
     azimuth: azimuthFromDegrees(soldier.azimuthDeg),
     posture: soldier.posture,

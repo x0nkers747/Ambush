@@ -1,3 +1,4 @@
+import { surfaceHeightAt } from './bridge-navigation';
 import { boundsOf, type Box } from './environment';
 import type { Vec2, Vec3 } from './geometry';
 import { pointInPolygon, segmentIntersectionParams } from './polygon';
@@ -74,8 +75,9 @@ export function lineOfSight(
   }
   const eye = options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M;
   const aim = options.targetHeightMeters ?? STANDING_TARGET_HEIGHT_M;
-  const a: Vec3 = { x: from.x, y: from.y, z: heightAt(terrain, from.x, from.y) + eye };
-  const b: Vec3 = { x: to.x, y: to.y, z: heightAt(terrain, to.x, to.y) + aim };
+  // From and to the surface stood on: the ground, or a bridge's deck over water (docs/adr/0043).
+  const a: Vec3 = { x: from.x, y: from.y, z: surfaceHeightAt(terrain, from.x, from.y) + eye };
+  const b: Vec3 = { x: to.x, y: to.y, z: surfaceHeightAt(terrain, to.x, to.y) + aim };
   const distance = Math.hypot(b.x - a.x, b.y - a.y);
   const hit = distance === 0 ? null : traceSightLine(terrain, a, b);
   return {

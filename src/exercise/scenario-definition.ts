@@ -143,7 +143,8 @@ function standProblem(terrain: TerrainDataset, point: Vec2): string | null {
 
 /** Why OPFOR cannot walk from `from` to `to`, or `null`. */
 function legProblem(terrain: TerrainDataset, from: Vec2, to: Vec2): string | null {
-  const path = planPath(terrain, from, to);
+  // As OPFOR's orders walk it: along the roads (docs/adr/0043).
+  const path = planPath(terrain, from, to, { followRoads: true });
   return path.ok
     ? null
     : `OPFOR cannot walk there: the point is ${describePathProblem(path.problem)}.`;
@@ -265,7 +266,8 @@ function opforStarts(terrain: TerrainDataset, d: ScenarioDefinition): Vec2[] {
   const az = next ? azimuthOf(next.east - s.x, next.north - s.y) : Math.PI;
   const back = { x: -Math.sin(az), y: -Math.cos(az) };
   const usable = (p: Vec2) =>
-    pointProblem(terrain, p) === null && (!next || planPath(terrain, p, toVec2(next)).ok);
+    pointProblem(terrain, p) === null &&
+    (!next || planPath(terrain, p, toVec2(next), { followRoads: true }).ok);
   return force.soldiers.map((_, k) => {
     if (k === 0) return s;
     // In file behind the leader; otherwise the nearest usable spot round the start; else on it.

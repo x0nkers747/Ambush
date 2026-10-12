@@ -1578,6 +1578,27 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
             })
           : [],
         killZone: e?.killZone?.vertices.map((v) => ({ x: v.x, y: v.y })) ?? null,
+        // Every soldier where the simulation has them (z: the surface stood on), and
+        // OPFOR's routes as shown, turn points with a bridge deck's height (docs/adr/0043).
+        soldiers: e
+          ? e.simulation.state.soldiers.map((s) => ({
+              id: s.id,
+              side: s.side,
+              position: { x: s.position.x, y: s.position.y, z: s.position.z },
+              legPaths: s.orders?.legPaths.map((leg) => leg.map((p) => ({ ...p }))) ?? null,
+            }))
+          : [],
+        opforRoutes: e
+          ? e.opforRoutes.map((r) => ({
+              id: r.id,
+              soldierId: r.soldierId,
+              legs:
+                e.opforRoutePaths.get(r.id)?.legs.map((l) => ({
+                  to: l.to,
+                  turns: l.turns?.map((p) => ({ ...p })) ?? null,
+                })) ?? [],
+            }))
+          : [],
         formations: e
           ? e.formationGroups.flatMap((g) => {
               const f = e.formation(g.unitId);

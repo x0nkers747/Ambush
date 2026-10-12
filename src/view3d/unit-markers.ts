@@ -1,7 +1,7 @@
 import { TRAINEE_SIDE, type Exercise } from '#exercise';
 import type { Session } from '#session';
 import {
-  heightAt,
+  surfaceHeightAt,
   isOnTerrain,
   type Azimuth,
   type Posture,
@@ -17,7 +17,7 @@ import {
 export interface UnitMarker {
   readonly id: SoldierId;
   readonly affiliation: 'friendly' | 'enemy';
-  /** Where the simulation has the soldier: z is the ground (`heightAt`). */
+  /** Where the simulation has the soldier: z is the surface stood on (`surfaceHeightAt`: the ground, or a bridge deck). */
   readonly position: Vec3;
   readonly azimuth: Azimuth;
   readonly posture: Posture;
@@ -79,7 +79,7 @@ export function destinationMarkers(
     return [
       {
         id: s.id,
-        position: { x: d.east, y: d.north, z: heightAt(terrain, d.east, d.north) },
+        position: { x: d.east, y: d.north, z: surfaceHeightAt(terrain, d.east, d.north) },
         selected: session.selectedSoldierId === s.id || (team?.memberIds.includes(s.id) ?? false),
       },
     ];

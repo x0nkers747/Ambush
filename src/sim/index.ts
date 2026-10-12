@@ -106,13 +106,18 @@ export {
   type SightLineHit,
 } from './los';
 export {
+  ASHORE_MARGIN_M,
+  bridgeCrossings,
   isSegmentWalkable,
   NAV_CELL_M,
   OBSTACLE_CLEARANCE_M,
+  pathLength,
+  planOffRoad,
   planPath,
   nearestClearPoint,
   pointProblem,
   stringPull,
+  type PathOptions,
   type PathResult,
   type PointProblem,
 } from './navigation';
@@ -254,3 +259,40 @@ export {
   type WaterQuery,
   type WaterSurfaces,
 } from './water-grading';
+export {
+  APPROACH_M,
+  BRIDGE_MIN_WATERWAY_M,
+  BRIDGE_STYLES,
+  BRIDGE_VERSION,
+  bridgeIndex,
+  bridgeStyleOf,
+  CLEARANCE_M,
+  END_BLEND_M,
+  FOOT_CLEARANCE_M,
+  MAX_GRADE,
+  MAX_RAMP_M,
+  MERGE_GAP_M,
+  MIN_CROSSING_M,
+  planBridges,
+  type Bridge,
+  type BridgeIndex,
+  type BridgePlan,
+  type BridgeStyle,
+  type BridgeStyleSpec,
+} from './bridges';
+export {
+  bridgeSurfaces,
+  deckBetween,
+  surfaceHeightAt,
+  type BridgeSurfaces,
+  type DeckPoint,
+  type NavBridge,
+  type PathPoint,
+} from './bridge-navigation';
+export {
+  ROAD_REACH_M,
+  planRoadPath,
+  roadNetwork,
+  roadPointAt,
+  type RoadNetwork,
+} from './road-network';

@@ -770,6 +770,8 @@ describe('OPFOR approach', () => {
     expect(soldier(exercise, 'E').orders?.orders).toEqual({
       waypoints: [{ id: 'E-route.1', x: 0, y: -150 }],
       finalFacing: Math.PI,
+      // OPFOR route orders follow the roads (docs/adr/0043).
+      followRoads: true,
     });
     expect(soldier(exercise, 'E').position.y).toBeCloseTo(140, 9);
     expect(soldier(exercise, 'E2').position.y).toBeCloseTo(150, 9);

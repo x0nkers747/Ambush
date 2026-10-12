@@ -1,7 +1,8 @@
 import type { SimEvent } from './events';
 import { azimuthDelta, azimuthOf, turnToward, type Vec2 } from './geometry';
-import type { SimState, Soldier, SoldierId } from './state';
-import { heightAt } from './terrain';
+import type { PathPoint } from './bridge-navigation';
+import { surfaceHeightAt } from './bridge-navigation';
+import type { ActiveOrders, SimState, Soldier, SoldierId } from './state';
 import type { SimWorld } from './world';
 
 // Movement system (docs/adr/0008, docs/adr/0011). Soldiers travel at constant
@@ -12,9 +13,14 @@ import type { SimWorld } from './world';
 // Facing turns toward the direction of travel at a limited rate but does not
 // steer the path.
 //
-// Navigation seam: a leg is currently the straight line to the next waypoint.
-// A future pathfinder replaces only how a leg is travelled (a route stored
-// alongside the progress in `ActiveOrders`); the trainee's `Orders` stay as given.
+// Navigation (docs/adr/0011, docs/adr/0043) plans how each leg is travelled:
+// the turn points stored alongside the progress in `ActiveOrders`; the
+// trainee's `Orders` stay as given.
+//
+// Height: a soldier stands on the surface (`surfaceHeightAt`: the ground, or
+// a bridge's deck over water). Between two route points that both carry a
+// deck height (a bridge's centreline), it follows the deck's profile between
+// them instead, so a soldier crossing a bridge stays on it over dry land too.
 
 /**
  * Tolerance, in seconds of travel or turning, for completing a leg or a turn
@@ -94,20 +100,23 @@ function moveSoldier(
     }
     const from = { x: soldier.position.x, y: soldier.position.y };
     const start = time.startSeconds + elapsed;
+    const previous = previousPoint(active);
     if (!arrives) {
       const fraction = (speed * seconds) / distance;
-      placeOnTerrain(
+      place(
         soldier,
         world,
         soldier.position.x + dx * fraction,
         soldier.position.y + dy * fraction,
+        previous,
+        target,
       );
       record(path, soldier, from, start, time.startSeconds + time.dtSeconds);
       return;
     }
 
     // Arrive exactly on the point and carry the rest of the tick forward.
-    placeOnTerrain(soldier, world, target.x, target.y);
+    place(soldier, world, target.x, target.y, previous, target);
     elapsed += seconds;
     record(path, soldier, from, start, time.startSeconds + elapsed);
     if (turn) {
@@ -155,8 +164,35 @@ function record(
   path.push({ soldierId: soldier.id, from, to, startSeconds, endSeconds });
 }
 
-function placeOnTerrain(soldier: Soldier, world: SimWorld, x: number, y: number): void {
+/** The route point the soldier is walking from, if it is one (not where the orders were given). */
+function previousPoint(active: ActiveOrders): PathPoint | null {
+  const leg = active.nextWaypointIndex;
+  if (active.nextTurnIndex > 0) return active.legPaths[leg]?.[active.nextTurnIndex - 1] ?? null;
+  return leg > 0 ? (active.orders.waypoints[leg - 1] ?? null) : null;
+}
+
+/**
+ * Places a soldier at (x, y) on the way from `previous` to `target`: on the
+ * deck's profile when both are deck points, else on the surface there.
+ */
+function place(
+  soldier: Soldier,
+  world: SimWorld,
+  x: number,
+  y: number,
+  previous: PathPoint | null,
+  target: PathPoint,
+): void {
   soldier.position.x = x;
   soldier.position.y = y;
-  soldier.position.z = heightAt(world.terrain, x, y);
+  if (previous?.z !== undefined && target.z !== undefined) {
+    const length = Math.hypot(target.x - previous.x, target.y - previous.y);
+    const t =
+      length > 0
+        ? Math.min(1, Math.max(0, Math.hypot(x - previous.x, y - previous.y) / length))
+        : 1;
+    soldier.position.z = previous.z + t * (target.z - previous.z);
+    return;
+  }
+  soldier.position.z = surfaceHeightAt(world.terrain, x, y);
 }

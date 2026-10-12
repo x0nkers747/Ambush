@@ -623,6 +623,8 @@ export function createExercise({
     fingerprint: fingerprintPlainData(combat),
   });
   const pathFor = createPathCache(terrain);
+  /** OPFOR route legs, planned as their orders follow them: along the roads (docs/adr/0043). */
+  const opforPathFor = createPathCache(terrain, 2000, { followRoads: true });
 
   let phase: ExercisePhase = 'bluforPlanning';
   let paused = false;
@@ -639,7 +641,7 @@ export function createExercise({
   const opforRoutePaths = new Map<string, PlannedRoute>();
   for (const route of scenario.opforRoutes) {
     const planned = planRoute(
-      pathFor,
+      opforPathFor,
       starts.get(route.soldierId) ?? { x: 0, y: 0 },
       route.waypoints,
     );
@@ -1440,6 +1442,7 @@ export function createExercise({
           orders: {
             waypoints: route.waypoints.map((w) => ({ id: waypointId(w.id), x: w.x, y: w.y })),
             finalFacing: azimuthFromDegrees(route.finalFacingDeg),
+            followRoads: true,
           },
         });
       }

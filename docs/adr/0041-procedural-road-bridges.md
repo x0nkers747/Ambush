@@ -38,7 +38,9 @@ What the data offers:
 ## Decision
 
 Bridges are decoration in the 3D view, built with the other feature geometry in the generation
-worker (`view3d/bridges.ts`, called from `geo-features.ts`). Nothing in the simulation, the graded
+worker (`view3d/bridges.ts`, called from `geo-features.ts`). (Since ADR 0043 the planning,
+`planBridges`, is in the simulation layer, `sim/bridges.ts`, so that soldiers cross the same
+bridges; the 3D view draws them unchanged.) Nothing in the simulation, the graded
 ground, the road network or the water changes. Bridges are not obstacles, and picking does not hit
 them.
 
@@ -186,7 +188,9 @@ at the same time, so these are upper bounds.
 
 - **Units on bridges are drawn on the ground.** The simulation has no bridges: soldiers cannot enter
   water areas, and where a levelled channel is crossable (a river mapped only as a line), a soldier
-  walks through it on the ground. Their markers are not lifted onto the deck.
+  walks through it on the ground. Their markers are not lifted onto the deck. _Superseded by ADR
+  0043:_ the bridges are planned in the simulation (`sim/bridges.ts`), soldiers cross those over
+  water, and stand and are drawn on their decks.
 - **Low clearance.** Where the banks are lower than the water's level plus the clearance, or the
   10 m DEM rises above the deck in a narrow creek valley, the deck can sit close to the water or
   dip into the ground. These are counted as `lowClearance`: Woolgoolga's mangrove footbridges, for

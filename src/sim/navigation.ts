@@ -1,6 +1,14 @@
+import {
+  bridgeSurfaces,
+  deckBetween,
+  type DeckPoint,
+  type NavBridge,
+  type PathPoint,
+} from './bridge-navigation';
 import { boundsOf, impassableWater, type Box, type Building, type WaterArea } from './environment';
 import type { Vec2 } from './geometry';
 import { pointInPolygon, segmentIntersectionParams } from './polygon';
+import { planRoadPath } from './road-network';
 import { deepFreeze } from './shared-terrain';
 import { isOnTerrain, type TerrainDataset } from './terrain';
 
@@ -11,6 +19,11 @@ import { isOnTerrain, type TerrainDataset } from './terrain';
 // a navigation grid, then string-pulling into a few straight legs. Pure and
 // deterministic; the same function plans for the simulation and for the
 // planning display, so what is shown is what will be walked.
+//
+// Bridges over water (docs/adr/0043) join the land at their ends: a point on
+// a crossable bridge's deck may be stood on, the grid search may cross a
+// bridge from one end to the other (a link between the grid cells there),
+// and the route then follows the deck's centreline, with the deck's height.
 
 /** How far a soldier's path keeps from building walls, in metres. */
 export const OBSTACLE_CLEARANCE_M = 0.75;
@@ -27,12 +40,20 @@ export type PointProblem =
   | { readonly kind: 'inWater'; readonly waterId: string };
 
 export type PathResult =
-  /** `turns`: the generated intermediate points between start and goal (often none). */
-  | { readonly ok: true; readonly turns: readonly Vec2[] }
+  /**
+   * `turns`: the generated intermediate points between start and goal (often
+   * none). On a bridge they follow its deck, and carry its height (`z`).
+   */
+  | { readonly ok: true; readonly turns: readonly PathPoint[] }
   | { readonly ok: false; readonly problem: PointProblem | { readonly kind: 'unreachable' } };
 
-/** Whether a soldier may stand at `p`, or why not. */
+/** Whether a soldier may stand at `p`, or why not. On a crossable bridge's deck over water, they may. */
 export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | null {
+  return obstacleProblem(terrain, p, true);
+}
+
+/** `pointProblem`, where `decks` says whether a crossable bridge's deck over water may be stood on. */
+function obstacleProblem(terrain: TerrainDataset, p: Vec2, decks: boolean): PointProblem | null {
   if (!isOnTerrain(terrain, p.x, p.y)) return { kind: 'offTerrain' };
   const index = obstacleIndex(terrain);
   // A bucket lists its obstacles in index order (buildings, then water), so
@@ -52,6 +73,7 @@ export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | n
     }
     const water = index.water[i - index.buildings.length];
     if (water && near(water.box, p, 0) && pointInPolygon(p, water.water.boundary)) {
+      if (decks && crossableDeckAt(terrain, p) !== null) continue;
       return { kind: 'inWater', waterId: water.water.id };
     }
   }
@@ -190,26 +212,42 @@ export function isSegmentWalkable(terrain: TerrainDataset, a: Vec2, b: Vec2): bo
   });
 }
 
+/** How a path is planned. */
+export interface PathOptions {
+  /**
+   * Follow the road network to a destination on a road (docs/adr/0043), as
+   * OPFOR route orders do; elsewhere the path is planned as usual.
+   */
+  readonly followRoads?: boolean;
+}
+
 /**
  * A walkable path from `from` to `to`: the generated turn points between them.
  * Fails when `to` is not a valid place to stand or cannot be reached.
  *
- * Paths that need the navigation grid are remembered per terrain (the most
- * recent `PATH_CACHE_SIZE`), since editing and building a scenario plan the
- * same legs many times. The function is pure, so a remembered result is the
- * one it would compute again; results are frozen so no caller can change them.
+ * Paths that need the navigation grid (or the road network) are remembered
+ * per terrain (the most recent `PATH_CACHE_SIZE`), since editing and building
+ * a scenario plan the same legs many times. The function is pure, so a
+ * remembered result is the one it would compute again; results are frozen so
+ * no caller can change them.
  */
-export function planPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult {
+export function planPath(
+  terrain: TerrainDataset,
+  from: Vec2,
+  to: Vec2,
+  options: PathOptions = {},
+): PathResult {
   const problem = pointProblem(terrain, to);
   if (problem) return { ok: false, problem };
-  if (isSegmentWalkable(terrain, from, to)) return { ok: true, turns: [] };
+  const roads = options.followRoads === true;
+  if (!roads && isSegmentWalkable(terrain, from, to)) return { ok: true, turns: [] };
 
   let paths = pathCache.get(terrain);
   if (!paths) {
     paths = new Map();
     pathCache.set(terrain, paths);
   }
-  const key = `${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
+  const key = `${roads ? 'R' : ''}${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
   const known = paths.get(key);
   if (known) {
     // Most recently used last.
@@ -217,7 +255,9 @@ export function planPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathRes
     paths.set(key, known);
     return known;
   }
-  const result = deepFreeze(planGridPath(terrain, from, to));
+  const result = deepFreeze(
+    roads ? planRoadPath(terrain, from, to) : planOffRoad(terrain, from, to),
+  );
   if (paths.size >= PATH_CACHE_SIZE) paths.delete(paths.keys().next().value ?? '');
   paths.set(key, result);
   return result;
@@ -228,19 +268,110 @@ export const PATH_CACHE_SIZE = 256;
 
 const pathCache = new WeakMap<TerrainDataset, Map<string, PathResult>>();
 
-/** `planPath` between points not joined by a straight walkable line. */
+/** The length of a path from `from` through `turns` to `to`, metres. */
+export function pathLength(from: Vec2, turns: readonly Vec2[], to: Vec2): number {
+  let total = 0;
+  let a = from;
+  for (const b of [...turns, to]) {
+    total += Math.hypot(b.x - a.x, b.y - a.y);
+    a = b;
+  }
+  return total;
+}
+
+/** The off-road path (`planPath` without roads) to a standable `to`. */
+export function planOffRoad(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult {
+  if (isSegmentWalkable(terrain, from, to)) return { ok: true, turns: [] };
+  const fromDeck = crossableDeckAt(terrain, from);
+  const toDeck = crossableDeckAt(terrain, to);
+  if (fromDeck || toDeck) return planViaDeck(terrain, from, to, fromDeck, toDeck);
+  return planGridPath(terrain, from, to);
+}
+
+/**
+ * A path from or to a point on a bridge's deck: along the deck to one of its
+ * ends, whichever gives the shorter path, then on as usual. Two points on
+ * the same bridge are joined along its deck.
+ */
+function planViaDeck(
+  terrain: TerrainDataset,
+  from: Vec2,
+  to: Vec2,
+  fromDeck: DeckPoint | null,
+  toDeck: DeckPoint | null,
+): PathResult {
+  const { bridges } = bridgeSurfaces(terrain);
+  if (fromDeck && fromDeck.bridge === toDeck?.bridge) {
+    const bridge = bridges[fromDeck.bridge];
+    if (bridge) return { ok: true, turns: deckBetween(bridge, fromDeck.s, toDeck.s) };
+  }
+  let best: { turns: PathPoint[]; length: number } | null = null;
+  const deck = fromDeck ?? toDeck;
+  const bridge = deck && bridges[deck.bridge];
+  if (!deck || !bridge) return { ok: false, problem: { kind: 'unreachable' } };
+  for (const end of [0, bridge.length]) {
+    let turns: PathPoint[];
+    if (fromDeck) {
+      const along = deckBetween(bridge, deck.s, end);
+      const exit = along[along.length - 1] ?? from;
+      const rest = planOffRoad(terrain, exit, to);
+      if (!rest.ok) continue;
+      turns = [...along, ...rest.turns];
+    } else {
+      const along = deckBetween(bridge, end, deck.s);
+      const entrance = along[0] ?? to;
+      const rest = planOffRoad(terrain, from, entrance);
+      if (!rest.ok) continue;
+      turns = [...rest.turns, ...along];
+    }
+    const length = pathLength(from, turns, to);
+    if (!best || length < best.length) best = { turns, length };
+  }
+  return best ? { ok: true, turns: best.turns } : { ok: false, problem: { kind: 'unreachable' } };
+}
+
+/** `planPath` between points not joined by a straight walkable line, on the grid. */
 function planGridPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult {
   const grid = navGrid(terrain);
   const start = connect(terrain, grid, from);
   const goal = connect(terrain, grid, to);
   // Cells in different connected areas cannot be joined: A* would only find
   // that out by searching the whole of the start's area.
-  if (start === undefined || goal === undefined || !connected(grid, start, goal))
+  if (start === undefined || goal === undefined || !connected(terrain, grid, start, goal))
     return { ok: false, problem: { kind: 'unreachable' } };
-  const cells = aStar(grid, start, goal);
+  const links = bridgeLinks(terrain);
+  const cells = aStar(grid, start, goal, links.byCell);
   if (!cells) return { ok: false, problem: { kind: 'unreachable' } };
-  const nodes = [from, ...cells.map((c) => cellCentre(grid, c)), to];
-  return { ok: true, turns: stringPull(terrain, nodes).slice(1, -1) };
+  // Runs of land between bridges are string-pulled; a bridge is walked along its deck.
+  const { bridges } = bridgeSurfaces(terrain);
+  const all: PathPoint[] = [];
+  let run: PathPoint[] = [from];
+  const endRun = () => {
+    const pulled = stringPull(terrain, run);
+    all.push(...(all.length > 0 ? pulled.slice(1) : pulled));
+  };
+  cells.forEach((cell, k) => {
+    const prev = cells[k - 1];
+    const link = prev === undefined ? undefined : linkBetween(links, prev, cell);
+    const bridge = link && bridges[link.bridge];
+    if (link && bridge) {
+      const deck = deckBetween(
+        bridge,
+        link.forward ? 0 : bridge.length,
+        link.forward ? bridge.length : 0,
+      );
+      const entrance = deck[0];
+      const exit = deck[deck.length - 1];
+      if (entrance) run.push(entrance);
+      endRun();
+      all.push(...deck.slice(1, -1));
+      run = exit ? [exit] : [];
+    }
+    run.push(cellCentre(grid, cell));
+  });
+  run.push(to);
+  endRun();
+  return { ok: true, turns: all.slice(1, -1) };
 }
 
 /**
@@ -248,7 +379,7 @@ function planGridPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult
  * node reachable in a straight walkable line. Deterministic, and never makes a
  * path longer.
  */
-export function stringPull(terrain: TerrainDataset, nodes: readonly Vec2[]): Vec2[] {
+export function stringPull<T extends Vec2>(terrain: TerrainDataset, nodes: readonly T[]): T[] {
   const first = nodes[0];
   if (!first) return [];
   const result = [first];
@@ -676,12 +807,18 @@ function blockPolygon(grid: NavGrid, polygon: readonly Vec2[], box: Box, margin:
 }
 
 /**
- * Whether two free cells are joined by grid steps, i.e. whether `aStar` can
- * find a path between them. Areas are labelled once per grid (`labelAreas`).
+ * Whether two free cells are joined by grid steps and bridges, i.e. whether
+ * `aStar` can find a path between them. Areas are labelled once per grid
+ * (`labelAreas`), and joined across bridges once per terrain.
  */
-function connected(grid: NavGrid, a: number, b: number): boolean {
+function connected(terrain: TerrainDataset, grid: NavGrid, a: number, b: number): boolean {
   grid.areas ??= labelAreas(grid);
-  return grid.areas[a] === grid.areas[b];
+  const la = grid.areas[a] ?? 0;
+  const lb = grid.areas[b] ?? 0;
+  if (la === lb) return true;
+  // Areas joined by bridges.
+  const roots = linkedAreas(terrain, grid);
+  return (roots.get(la) ?? la) === (roots.get(lb) ?? lb);
 }
 
 /**
@@ -743,6 +880,138 @@ function labelAreas(grid: NavGrid): Int32Array {
   return areas;
 }
 
+// --- Bridges ---------------------------------------------------------------------
+
+/** A bridge from the grid cell at one of its ends to the cell at the other. */
+interface Portal {
+  readonly to: number;
+  /** In grid steps: the deck's length, at least the octile distance between the cells. */
+  readonly cost: number;
+  /** Index into `bridgeSurfaces(terrain).bridges`. */
+  readonly bridge: number;
+  /** Whether it goes from the bridge's start to its end. */
+  readonly forward: boolean;
+}
+
+interface BridgeLinks {
+  /** The bridges soldiers can cross (indices into `bridgeSurfaces(terrain).bridges`). */
+  readonly crossable: ReadonlySet<number>;
+  /** The bridges from each cell at a crossable bridge's end. */
+  readonly byCell: ReadonlyMap<number, readonly Portal[]>;
+  /** Bridges over water that cannot be crossed, and why. */
+  readonly rejected: readonly { readonly id: string; readonly reason: string }[];
+  /** Area label → the label of the areas it is joined to by bridges (`connected`). */
+  roots?: ReadonlyMap<number, number>;
+}
+
+const linkCache = new WeakMap<TerrainDataset, BridgeLinks>();
+
+/**
+ * The bridges over impassable water soldiers can cross, built once per
+ * terrain. A bridge is crossable when both its ends stand on open ground
+ * (on the battlefield, not in water, clear of buildings) joined to the
+ * navigation grid by a straight walkable line; otherwise it is reported and
+ * never used. A bridge over a watercourse (not impassable) needs no link: it
+ * only gives the surface walked there.
+ */
+function bridgeLinks(terrain: TerrainDataset): BridgeLinks {
+  const cached = linkCache.get(terrain);
+  if (cached) return cached;
+  const grid = navGrid(terrain);
+  const crossable = new Set<number>();
+  const byCell = new Map<number, Portal[]>();
+  const rejected: { id: string; reason: string }[] = [];
+  bridgeSurfaces(terrain).bridges.forEach((nav, index) => {
+    if (!nav.overWater.some(Boolean)) return;
+    const ends = [nav.points[0], nav.points[nav.points.length - 1]];
+    const cells: number[] = [];
+    for (const end of ends) {
+      const problem = end ? obstacleProblem(terrain, end, false) : { kind: 'offTerrain' as const };
+      if (problem) {
+        rejected.push({ id: nav.id, reason: `an end is ${problem.kind}` });
+        return;
+      }
+      const cell = end && connect(terrain, grid, end);
+      if (cell === undefined) {
+        rejected.push({ id: nav.id, reason: 'an end is not joined to open ground' });
+        return;
+      }
+      cells.push(cell);
+    }
+    const [a, b] = cells;
+    if (a === undefined || b === undefined) return;
+    const dc = Math.abs((a % grid.columns) - (b % grid.columns));
+    const dr = Math.abs(Math.floor(a / grid.columns) - Math.floor(b / grid.columns));
+    const octile = Math.max(dc, dr) + (Math.SQRT2 - 1) * Math.min(dc, dr);
+    const cost = Math.max(nav.length / NAV_CELL_M, octile);
+    crossable.add(index);
+    const add = (cell: number, portal: Portal) => {
+      const list = byCell.get(cell);
+      if (list) list.push(portal);
+      else byCell.set(cell, [portal]);
+    };
+    add(a, { to: b, cost, bridge: index, forward: true });
+    add(b, { to: a, cost, bridge: index, forward: false });
+  });
+  const links: BridgeLinks = { crossable, byCell, rejected };
+  linkCache.set(terrain, links);
+  return links;
+}
+
+/** The bridge taken from cell `a` to cell `b` (the cheapest, then the first), if they are not grid neighbours. */
+function linkBetween(links: BridgeLinks, a: number, b: number): Portal | undefined {
+  let best: Portal | undefined;
+  for (const portal of links.byCell.get(a) ?? []) {
+    if (portal.to === b && (!best || portal.cost < best.cost)) best = portal;
+  }
+  return best;
+}
+
+/** Area labels joined by bridges: each label to the smallest label it is joined to. */
+function linkedAreas(terrain: TerrainDataset, grid: NavGrid): ReadonlyMap<number, number> {
+  const links = bridgeLinks(terrain);
+  if (links.roots) return links.roots;
+  grid.areas ??= labelAreas(grid);
+  const areas = grid.areas;
+  const parent = new Map<number, number>();
+  const find = (label: number): number => {
+    let root = label;
+    while ((parent.get(root) ?? root) !== root) root = parent.get(root) ?? root;
+    return root;
+  };
+  for (const [cell, portals] of links.byCell) {
+    for (const { to } of portals) {
+      const ra = find(areas[cell] ?? 0);
+      const rb = find(areas[to] ?? 0);
+      if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb));
+    }
+  }
+  const roots = new Map<number, number>();
+  for (const label of parent.keys()) roots.set(label, find(label));
+  links.roots = roots;
+  return roots;
+}
+
+/** Where a point is on a crossable bridge's deck over water, or `null`. */
+function crossableDeckAt(terrain: TerrainDataset, p: Vec2): DeckPoint | null {
+  if (!isOnTerrain(terrain, p.x, p.y)) return null;
+  const deck = bridgeSurfaces(terrain).deckAt(p.x, p.y);
+  return deck && bridgeLinks(terrain).crossable.has(deck.bridge) ? deck : null;
+}
+
+/** The bridges over water soldiers can cross, and those they cannot (and why); for tests and diagnostics. */
+export function bridgeCrossings(terrain: TerrainDataset): {
+  readonly crossable: readonly NavBridge[];
+  readonly rejected: readonly { readonly id: string; readonly reason: string }[];
+} {
+  const links = bridgeLinks(terrain);
+  const { bridges } = bridgeSurfaces(terrain);
+  return {
+    crossable: bridges.filter((_, i) => links.crossable.has(i)),
+    rejected: links.rejected,
+  };
+}
+
 function cellCentre(grid: NavGrid, cell: number): Vec2 {
   return {
     x: grid.originX + ((cell % grid.columns) + 0.5) * NAV_CELL_M,
@@ -774,11 +1043,18 @@ const STEP_DR = [0, 0, 1, -1, 1, -1, 1, -1] as const;
 const STEP_COST = [1, 1, 1, 1, Math.SQRT2, Math.SQRT2, Math.SQRT2, Math.SQRT2] as const;
 
 /**
- * A* over the 8-connected grid with the octile-distance heuristic. Diagonal
- * steps may not cut a blocked corner. Ties are broken by lower f, then lower h,
+ * A* over the 8-connected grid with the octile-distance heuristic, and the
+ * bridges (`portals`) from the cell at one end to the cell at the other, at
+ * no less than the octile distance between them (so the heuristic stays
+ * admissible). Diagonal steps may not cut a blocked corner. Ties are broken by lower f, then lower h,
  * then lower cell index, so the result never depends on insertion order.
  */
-function aStar(grid: NavGrid, start: number, goal: number): number[] | undefined {
+function aStar(
+  grid: NavGrid,
+  start: number,
+  goal: number,
+  portals: ReadonlyMap<number, readonly Portal[]>,
+): number[] | undefined {
   const { columns, rows, blocked } = grid;
   const gc = goal % columns;
   const gr = Math.floor(goal / columns);
@@ -826,6 +1102,17 @@ function aStar(grid: NavGrid, start: number, goal: number): number[] | undefined
         g[next] = tentative;
         from[next] = cell + 1;
         const h = heuristic(nc, nr);
+        open.push(tentative + h, h, next);
+      }
+    }
+    // Across a bridge from its end here to its other end.
+    for (const { to: next, cost } of portals.get(cell) ?? []) {
+      if (closed[next]) continue;
+      const tentative = gCell + cost;
+      if (from[next] === 0 || tentative < (g[next] ?? 0)) {
+        g[next] = tentative;
+        from[next] = cell + 1;
+        const h = heuristic(next % columns, Math.floor(next / columns));
         open.push(tentative + h, h, next);
       }
     }
