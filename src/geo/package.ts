@@ -39,7 +39,7 @@ import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './ut
 export const BATTLEFIELD_SCHEMA = 'ambush.battlefield';
 export const BATTLEFIELD_SCHEMA_VERSION = 1;
 /** The importer's own version: tag mapping, defaults and processing rules. */
-export const IMPORTER_VERSION = '1.6.0';
+export const IMPORTER_VERSION = '1.7.0';
 
 /** The only battlefield size offered for now; the format supports others. */
 export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;

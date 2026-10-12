@@ -1,12 +1,4 @@
-import {
-  BufferAttribute,
-  BufferGeometry,
-  Group,
-  Mesh,
-  MeshStandardMaterial,
-  NotEqualStencilFunc,
-  ReplaceStencilOp,
-} from 'three';
+import { BufferAttribute, BufferGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
 import type { TerrainDataset } from '#sim';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
@@ -20,6 +12,7 @@ import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-ge
 import type { SurfaceMeshData } from './surface-mesh';
 import type { PlacedInstance } from './vegetation-placement';
 import { waterGeometry } from './water-geometry';
+import { createWaterMaterial } from './water-material';
 
 // The battlefield's geographic features (docs/adr/0030): roads, water and
 // buildings. `buildFeatureGeometry` runs the pure generators (in the
@@ -240,27 +233,8 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
   );
   if (markingMesh) markingMesh.receiveShadow = true;
 
-  // Slightly transparent. The stencil lets each pixel take water once, so
-  // where a river's line overlaps its area, or its own bends, it is no darker.
-  add(
-    'water',
-    features.water,
-    new MeshStandardMaterial({
-      color: 0x3f6272,
-      roughness: 0.45,
-      metalness: 0,
-      transparent: true,
-      opacity: 0.8,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      stencilWrite: true,
-      stencilRef: 1,
-      stencilFunc: NotEqualStencilFunc,
-      stencilZPass: ReplaceStencilOp,
-    }),
-  );
+  // Water (docs/adr/0040): its own material, colours from the mesh.
+  add('water', features.water, createWaterMaterial());
 
   // Buildings: walls, roofs and trim from a texture array; windows and doors
   // from an atlas, shown once it has loaded.

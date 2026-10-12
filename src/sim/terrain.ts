@@ -1,6 +1,7 @@
 import { validateFeatures, type DecorFeatures, type EnvironmentFeatures } from './environment';
 import type { TerrainCleaning } from './dem-quality';
 import { refinementIndex, sampleSurface } from './terrain-surface';
+import type { WaterSurfaces } from './water-grading';
 
 // Runtime terrain format (docs/adr/0006, docs/adr/0008, docs/adr/0011).
 // Immutable reference data: it is not part of SimState, is never mutated, and
@@ -88,6 +89,12 @@ export interface TerrainGrading {
   readonly version: number;
   /** Spacing of the refined samples, in metres. */
   readonly fineSpacingM: number;
+  /**
+   * The levels of the water levelled into the ground (docs/adr/0040): every
+   * system that shows or queries water uses these. Absent on terrain graded
+   * before water was levelled.
+   */
+  readonly water?: WaterSurfaces;
 }
 
 /** Elevation plus the environment features standing on it. */

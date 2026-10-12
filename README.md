@@ -55,7 +55,14 @@ there, drag his destination or facing arrow, place fire teams, draw the kill zon
 scenario, with the same purple viewsheds painted on the terrain, the same routes, wedges and labels
 on the ground, the shots during the ambush and the full After Action Review replay. Both views run
 the same commands on the same exercise; the 3D view only projects them onto the ground
-([ADR 0039](docs/adr/0039-2d-3d-functional-parity.md)).
+([ADR 0039](docs/adr/0039-2d-3d-functional-parity.md)). Open water is levelled into the
+ground: the sea at 0 m, each lake, reservoir and pond at one exactly horizontal level from its
+shoreline, and rivers and canals at least 8 m wide level across and falling smoothly downstream.
+The ground under the water is a shallow bed, the shores meet the water, and the banks blend into
+the land within a few metres. Every system uses that one graded ground. Shores get sand, shingle,
+mud or rock, as mapped (`natural=beach` and its `surface`, `shingle`, `bare_rock`, `mud`) or
+inferred from the kind of water, the slope and the land cover, with a damp band at the waterline
+([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)).
 
 ## Requirements
 
@@ -261,3 +268,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 37. [Road markings, and no overhead wires](docs/adr/0037-road-markings.md)
 38. [Terrain materials and surface realism](docs/adr/0038-terrain-materials.md)
 39. [Complete 2D/3D functional parity](docs/adr/0039-2d-3d-functional-parity.md)
+40. [Water surface flattening, shorelines and beaches](docs/adr/0040-water-grading-and-shorelines.md)

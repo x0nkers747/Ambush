@@ -6,6 +6,7 @@ import {
   featuresFromOsm,
   overpassQuery,
   parseMetres,
+  waterClassOf,
   type OverpassResponse,
 } from './osm';
 import grafenwoehr from './test-data/grafenwoehr-de.overpass.json';
@@ -99,6 +100,61 @@ describe('OSM import rules', () => {
     expect(features.roads[0]?.centerline.map((p) => Math.round(p.x))).toEqual([-500, 500]);
     expect(features.buildings).toHaveLength(0);
     expect(features.vegetation[0]?.boundary.every(onMap)).toBe(true);
+  });
+
+  it('keeps the kind of each water body, from its tags and never its size (docs/adr/0040)', () => {
+    const data: OverpassResponse = {
+      elements: [
+        way(30, { natural: 'water', water: 'lake' }, sq(-300, -300, 40)),
+        way(31, { natural: 'water', water: 'reservoir' }, sq(-150, -300, 40)),
+        way(32, { natural: 'water', water: 'pond' }, sq(0, -300, 40)),
+        way(33, { natural: 'water', water: 'river' }, sq(150, -300, 40)),
+        way(34, { waterway: 'riverbank' }, sq(300, -300, 40)),
+        way(35, { natural: 'water', water: 'canal' }, sq(-300, 300, 40)),
+        way(36, { landuse: 'reservoir' }, sq(-150, 300, 40)),
+        way(37, { natural: 'water', water: 'wastewater' }, sq(0, 300, 5)),
+        way(38, { natural: 'water' }, sq(150, 300, 40)),
+        way(39, { natural: 'wetland' }, sq(300, 300, 40)),
+      ],
+    };
+    const { features } = featuresFromOsm(data, QUANTICO);
+    expect(features.water.map((w) => [w.id, w.waterClass])).toEqual([
+      ['osm-w30', 'lake'],
+      ['osm-w31', 'reservoir'],
+      ['osm-w32', 'pond'],
+      ['osm-w33', 'river'],
+      ['osm-w34', 'river'],
+      ['osm-w35', 'canal'],
+      ['osm-w36', 'reservoir'],
+      ['osm-w37', 'basin'],
+      ['osm-w38', 'other'],
+      ['osm-w39', undefined],
+    ]);
+    expect(waterClassOf({ natural: 'water', water: 'lagoon' })).toBe('lake');
+  });
+
+  it('imports mapped beaches and bare shores, by their surface (docs/adr/0040)', () => {
+    const data: OverpassResponse = {
+      elements: [
+        way(40, { natural: 'beach' }, sq(-300, 0, 30)),
+        way(41, { natural: 'beach', surface: 'pebblestone' }, sq(-150, 0, 30)),
+        way(42, { natural: 'shingle' }, sq(0, 0, 30)),
+        way(43, { natural: 'bare_rock' }, sq(150, 0, 30)),
+        way(44, { natural: 'mud' }, sq(300, 0, 30)),
+        way(45, { natural: 'sand' }, sq(0, 200, 30)),
+        way(46, { natural: 'beach', surface: 'rock' }, sq(150, 200, 30)),
+      ],
+    };
+    const { features } = featuresFromOsm(data, QUANTICO);
+    expect(features.landUse.map((l) => [l.id, l.kind])).toEqual([
+      ['osm-w40', 'beach'],
+      ['osm-w41', 'shingle'],
+      ['osm-w42', 'shingle'],
+      ['osm-w43', 'bareRock'],
+      ['osm-w44', 'mud'],
+      ['osm-w45', 'beach'],
+      ['osm-w46', 'bareRock'],
+    ]);
   });
 
   it('maps tags to classes, widths and heights', () => {

@@ -125,6 +125,10 @@ const LAND_USE_FILL: Readonly<Record<LandUseKind, string>> = {
   cemetery: 'rgba(170, 196, 170, 0.4)',
   recreation: 'rgba(186, 228, 170, 0.36)',
   other: 'rgba(210, 204, 190, 0.25)',
+  beach: 'rgba(240, 226, 170, 0.6)',
+  shingle: 'rgba(210, 204, 190, 0.55)',
+  bareRock: 'rgba(190, 186, 178, 0.5)',
+  mud: 'rgba(190, 172, 140, 0.45)',
 };
 
 /** Contour lines in one square of the map, so that only the squares in view are drawn. */

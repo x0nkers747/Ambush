@@ -1,12 +1,19 @@
-import { heightAt, type Road, type TerrainDataset, type Vec2 } from '#sim';
+import {
+  heightAt,
+  waterQuery,
+  type Road,
+  type TerrainDataset,
+  type Vec2,
+  type WaterClass,
+} from '#sim';
 import { hashString, NoiseField, unit } from './hash';
 import { rasterizeLandCover, type LandCoverClass, type RasterGrid } from './landcover';
 import { CONIFER_NOISE, coniferShare } from './vegetation-placement';
 
 // What the ground is made of, for the terrain material (docs/adr/0038): a
-// map in battlefield metres giving, at every point, the weights of eight
+// map in battlefield metres giving, at every point, the weights of eleven
 // ground layers (grass, rough grass, leaf litter, needle litter, field soil,
-// bare earth, gravel, rock) and four surface parameters (wetness, dryness,
+// bare earth, gravel, rock, sand, shingle, mud) and four surface parameters (wetness, dryness,
 // and the direction and strength of field furrows). The terrain shader reads
 // it by world position, so it does not depend on the mesh: refined tiles,
 // their edges and the camera change nothing.
@@ -25,13 +32,18 @@ import { CONIFER_NOISE, coniferShare } from './vegetation-placement';
 // - Slopes: bare earth then rock on steep natural ground; graded earthworks
 //   (cuttings, embankments, pad edges) show earth and sparse grass sooner.
 // - Road and track shoulders are worn: gravel or earth beside the surface.
+// - Shores (docs/adr/0040): along levelled water, a band of sand, shingle,
+//   mud or rock, as mapped (`natural=beach`, `shingle`, `bare_rock`, `mud`)
+//   or else from the kind of water, the slope and the land cover, varying
+//   in width along the shore, with a damp band at the waterline; the bed
+//   under the water is sand, shingle or mud likewise.
 //
 // Pure and deterministic: hashes of positions and feature ids, no random
 // numbers, no dependence on load order. Display only: the simulation never
 // reads it, and no vertex moves.
 
 /** Bump when the map's rules change: it changes how the ground looks, nothing else. */
-export const GROUND_MATERIAL_VERSION = 1;
+export const GROUND_MATERIAL_VERSION = 2;
 
 /** The ground layers, in texture-array order. */
 export const GROUND_LAYERS = [
@@ -43,6 +55,9 @@ export const GROUND_LAYERS = [
   'earth',
   'gravel',
   'rock',
+  'sand',
+  'shingle',
+  'mud',
 ] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 const L = Object.fromEntries(GROUND_LAYERS.map((l, i) => [l, i])) as Record<GroundLayer, number>;
@@ -73,8 +88,10 @@ export interface GroundMap {
   readonly grid: RasterGrid;
   /** Layers 0–3 as RGBA bytes, per point, row by row from the south-west corner. */
   readonly weights0: Uint8Array;
-  /** Layers 4–7. Each point's eight weights sum to 255. */
+  /** Layers 4–7. */
   readonly weights1: Uint8Array;
+  /** Layers 8–10, and 0. Each point's weights sum to 255. */
+  readonly weights2: Uint8Array;
   /** Wetness, dryness, furrow direction (0–255 for 0–180° from east), furrow strength. */
   readonly params: Uint8Array;
   readonly stats: {
@@ -87,6 +104,8 @@ export interface GroundMap {
     readonly natural: number;
     readonly steep: number;
     readonly shoulders: number;
+    /** Points on a shore band or a levelled water's bed. */
+    readonly shores: number;
   };
 }
 
@@ -117,6 +136,10 @@ const NATURAL: Readonly<Record<LandCoverClass | 'none', boolean>> = {
   cemetery: false,
   recreation: false,
   other: false,
+  beach: true,
+  shingle: true,
+  bareRock: true,
+  mud: true,
 };
 
 /** The ground of each class, before variation. */
@@ -138,8 +161,13 @@ const RECIPES: Readonly<Record<Exclude<LandCoverClass, 'farmland' | 'woodland'> 
     // Sparse grass over soil.
     scrub: { weights: { meadow: 0.5, grass: 0.25, earth: 0.25 }, dry: 0.3 },
     wetland: { weights: { earth: 0.5, grass: 0.5 }, wet: 0.7 },
-    // The bed under open water.
+    // The bed under open water (levelled water's bed is set by `shores`).
     water: { weights: { earth: 1 }, wet: 1 },
+    // Mapped shores and bare ground (docs/adr/0040).
+    beach: { weights: { sand: 0.9, shingle: 0.1 }, dry: 0.3 },
+    shingle: { weights: { shingle: 0.8, sand: 0.2 } },
+    bareRock: { weights: { rock: 0.8, gravel: 0.2 } },
+    mud: { weights: { mud: 0.85, earth: 0.15 }, wet: 0.5 },
   };
 
 const FIELD_RECIPES: Readonly<Record<FieldLook, Recipe & { furrows: number }>> = {
@@ -249,6 +277,8 @@ interface Noises {
   readonly dry: Noise;
   readonly conifer: Noise;
   readonly shoulder: Noise;
+  readonly shoreWidth: Noise;
+  readonly shoreMix: Noise;
   readonly layers: readonly Noise[];
 }
 
@@ -265,6 +295,8 @@ function noises(grid: RasterGrid): Noises {
     worn: field(60, SEED + 4),
     dry: field(120, SEED + 5),
     shoulder: field(9, SEED + 6),
+    shoreWidth: field(55, SEED + 7),
+    shoreMix: field(18, SEED + 8),
     conifer: field(CONIFER_NOISE.scale, CONIFER_NOISE.seed),
     layers: GROUND_LAYERS.map((_, l) => field(46, SEED + 10 + l)),
   };
@@ -351,12 +383,15 @@ export function bakeGroundMap(terrain: TerrainDataset): GroundMap {
   }
 
   blurNatural(w, p, natural, columns, rows);
-  const steep = slopes(terrain, grid, w, raster.index, raster.classes);
+  const slope = slopeMap(terrain, grid);
+  const steep = slopes(terrain, grid, slope, w, raster.index, raster.classes);
+  const shoreCount = shores(terrain, grid, slope, w, p, classOf, raster.index, noise);
   const shoulders = roadShoulders(terrain, grid, w, noise.shoulder);
 
   // Quantised: each point's weights sum to exactly 255.
   const weights0 = new Uint8Array(n * 4);
   const weights1 = new Uint8Array(n * 4);
+  const weights2 = new Uint8Array(n * 4);
   const params = new Uint8Array(n * 4);
   const totals = new Float64Array(LAYERS);
   const q = new Array<number>(LAYERS);
@@ -380,7 +415,8 @@ export function bakeGroundMap(terrain: TerrainDataset): GroundMap {
       const v = q[l] ?? 0;
       totals[l] = (totals[l] ?? 0) + v / 255;
       if (l < 4) weights0[i * 4 + l] = v;
-      else weights1[i * 4 + l - 4] = v;
+      else if (l < 8) weights1[i * 4 + l - 4] = v;
+      else weights2[i * 4 + l - 8] = v;
     }
     for (let ch = 0; ch < 4; ch += 1) {
       params[i * 4 + ch] = Math.round(255 * Math.min(1, Math.max(0, p[i * 4 + ch] ?? 0)));
@@ -394,8 +430,17 @@ export function bakeGroundMap(terrain: TerrainDataset): GroundMap {
     grid,
     weights0,
     weights1,
+    weights2,
     params,
-    stats: { points: n, classified, layers, natural: naturalCount, steep, shoulders },
+    stats: {
+      points: n,
+      classified,
+      layers,
+      natural: naturalCount,
+      steep,
+      shoulders,
+      shores: shoreCount,
+    },
   };
 }
 
@@ -519,14 +564,8 @@ function blurNatural(
   }
 }
 
-/** Bare earth and rock on steep ground; earth and sparse grass on graded slopes. Returns points changed. */
-function slopes(
-  terrain: TerrainDataset,
-  grid: RasterGrid,
-  w: Float32Array,
-  classIndex: Uint8Array,
-  classes: readonly LandCoverClass[],
-): number {
+/** The ground's slope (rise over run) at every map point. */
+function slopeMap(terrain: TerrainDataset, grid: RasterGrid): Float32Array {
   const { originX, originY, stepX, stepY, columns, rows } = grid;
   const hf = terrain.heightfield;
   const maxX = hf.originX + (hf.columns - 1) * hf.cellSize;
@@ -538,6 +577,32 @@ function slopes(
       z[r * columns + c] = heightAt(terrain, Math.min(originX + c * stepX, maxX), y);
     }
   }
+  const slope = new Float32Array(columns * rows);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const c0 = Math.max(c - 1, 0);
+      const c1 = Math.min(c + 1, columns - 1);
+      const r0 = Math.max(r - 1, 0);
+      const r1 = Math.min(r + 1, rows - 1);
+      const dzdx = ((z[r * columns + c1] ?? 0) - (z[r * columns + c0] ?? 0)) / ((c1 - c0) * stepX);
+      const dzdy = ((z[r1 * columns + c] ?? 0) - (z[r0 * columns + c] ?? 0)) / ((r1 - r0) * stepY);
+      slope[r * columns + c] = Math.hypot(dzdx, dzdy);
+    }
+  }
+  return slope;
+}
+
+/** Bare earth and rock on steep ground; earth and sparse grass on graded slopes. Returns points changed. */
+function slopes(
+  terrain: TerrainDataset,
+  grid: RasterGrid,
+  slope: Float32Array,
+  w: Float32Array,
+  classIndex: Uint8Array,
+  classes: readonly LandCoverClass[],
+): number {
+  const { originX, originY, stepX, stepY, columns, rows } = grid;
+  const hf = terrain.heightfield;
   // Graded cells: where the ground was shaped for a road or a building pad.
   const graded = new Uint8Array((hf.columns - 1) * (hf.rows - 1));
   for (const cell of terrain.refinement?.cells ?? []) graded[cell] = 1;
@@ -547,13 +612,7 @@ function slopes(
     for (let c = 0; c < columns; c += 1) {
       const i = r * columns + c;
       if (water > 0 && classIndex[i] === water) continue;
-      const c0 = Math.max(c - 1, 0);
-      const c1 = Math.min(c + 1, columns - 1);
-      const r0 = Math.max(r - 1, 0);
-      const r1 = Math.min(r + 1, rows - 1);
-      const dzdx = ((z[r * columns + c1] ?? 0) - (z[r * columns + c0] ?? 0)) / ((c1 - c0) * stepX);
-      const dzdy = ((z[r1 * columns + c] ?? 0) - (z[r0 * columns + c] ?? 0)) / ((r1 - r0) * stepY);
-      const s = Math.hypot(dzdx, dzdy);
+      const s = slope[i] ?? 0;
       const x = originX + c * stepX;
       const y = originY + r * stepY;
       const gc = Math.min(Math.floor((x - hf.originX) / hf.cellSize), hf.columns - 2);
@@ -660,7 +719,11 @@ export function groundWeightsAt(map: GroundMap, x: number, y: number): Record<Gr
   return Object.fromEntries(
     GROUND_LAYERS.map((l, k) => [
       l,
-      (k < 4 ? (map.weights0[i + k] ?? 0) : (map.weights1[i + k - 4] ?? 0)) / 255,
+      (k < 4
+        ? (map.weights0[i + k] ?? 0)
+        : k < 8
+          ? (map.weights1[i + k - 4] ?? 0)
+          : (map.weights2[i + k - 8] ?? 0)) / 255,
     ]),
   ) as Record<GroundLayer, number>;
 }
@@ -685,5 +748,219 @@ export function groundParamsAt(
 
 /** The map's buffers, to transfer them from a worker. */
 export function groundMapBuffers(map: GroundMap): ArrayBuffer[] {
-  return [map.weights0, map.weights1, map.params].map((a) => a.buffer as ArrayBuffer);
+  return [map.weights0, map.weights1, map.weights2, map.params].map((a) => a.buffer as ArrayBuffer);
+}
+
+/** How each kind of water's shore and bed look (docs/adr/0040). */
+interface ShoreLook {
+  /** Width of the shore band from the waterline, metres (varies along the shore). */
+  readonly width: readonly [number, number];
+  /** Width of the damp band at the waterline, metres. */
+  readonly wet: readonly [number, number];
+  /** The shore's ground, and a second mix it drifts towards in patches. */
+  readonly shore: Weights;
+  readonly mixed: Weights;
+  /** The bed under the water. */
+  readonly bed: Weights;
+}
+
+const SAND_SHORE: ShoreLook = {
+  width: [5, 30],
+  wet: [2.5, 6],
+  shore: { sand: 1 },
+  mixed: { sand: 0.6, shingle: 0.4 },
+  bed: { sand: 0.85, shingle: 0.15 },
+};
+const LAKE_SHORE: ShoreLook = {
+  width: [2, 12],
+  wet: [1, 2.5],
+  shore: { sand: 0.55, earth: 0.25, shingle: 0.2 },
+  mixed: { shingle: 0.5, gravel: 0.2, earth: 0.3 },
+  bed: { mud: 0.6, sand: 0.4 },
+};
+const RIVER_SHORE: ShoreLook = {
+  width: [1, 6],
+  wet: [0.6, 1.5],
+  shore: { shingle: 0.55, sand: 0.25, mud: 0.2 },
+  mixed: { mud: 0.6, earth: 0.4 },
+  bed: { shingle: 0.5, mud: 0.5 },
+};
+const POND_SHORE: ShoreLook = {
+  width: [1, 3],
+  wet: [0.5, 1.2],
+  shore: { mud: 0.6, earth: 0.4 },
+  mixed: { mud: 0.4, earth: 0.3, meadow: 0.3 },
+  bed: { mud: 1 },
+};
+export const SHORE_LOOKS: Readonly<Record<WaterClass, ShoreLook>> = {
+  sea: SAND_SHORE,
+  lake: LAKE_SHORE,
+  reservoir: LAKE_SHORE,
+  river: RIVER_SHORE,
+  canal: RIVER_SHORE,
+  pond: POND_SHORE,
+  basin: POND_SHORE,
+  other: POND_SHORE,
+};
+const SHORE_VECTORS = Object.fromEntries(
+  Object.entries(SHORE_LOOKS).map(([cls, look]) => [
+    cls,
+    { shore: vector(look.shore), mixed: vector(look.mixed), bed: vector(look.bed) },
+  ]),
+) as Record<WaterClass, { shore: Float32Array; mixed: Float32Array; bed: Float32Array }>;
+const ROCKY_SHORE = vector({ rock: 0.65, shingle: 0.35 });
+/** Shores on slopes steeper than this (rise over run) narrow to nothing; steeper still, they are rock. */
+const SHORE_SLOPE = [0.2, 0.55] as const;
+const ROCKY_SLOPE = [0.45, 0.9] as const;
+/** Land cover that keeps a shore narrow: built-up waterfronts, fields, woods. */
+const SHORE_CAP: Partial<Record<LandCoverClass, number>> = {
+  residential: 1.5,
+  commercial: 1,
+  industrial: 1,
+  cemetery: 1.5,
+  farmland: 2,
+  orchard: 2,
+  woodland: 3,
+  treeLine: 2,
+  wetland: 2,
+};
+/** Mapped shores: their own ground, never an inferred one. */
+const MAPPED_SHORE = new Set<LandCoverClass>(['beach', 'shingle', 'bareRock', 'mud']);
+/**
+ * Shores are looked for this far from the waterline, metres: the widest band
+ * (30 m) plus the size of the blocks the search skips by.
+ */
+const SHORE_REACH_M = 48;
+
+/**
+ * Shore bands along levelled water and the beds under it (docs/adr/0040).
+ * Returns the points changed.
+ */
+function shores(
+  terrain: TerrainDataset,
+  grid: RasterGrid,
+  slope: Float32Array,
+  w: Float32Array,
+  p: Float32Array,
+  classOf: (k: number) => LandCoverClass | 'none',
+  classIndex: Uint8Array,
+  noise: Noises,
+): number {
+  const surfaces = terrain.grading?.water;
+  if (!surfaces) return 0;
+  const hf = terrain.heightfield;
+  const query = waterQuery(
+    terrain.features,
+    surfaces,
+    {
+      originX: hf.originX,
+      originY: hf.originY,
+      maxX: hf.originX + (hf.columns - 1) * hf.cellSize,
+      maxY: hf.originY + (hf.rows - 1) * hf.cellSize,
+    },
+    SHORE_REACH_M,
+  );
+  if (!query.any) return 0;
+  const { originX, originY, stepX, stepY, columns, rows } = grid;
+  const shore = new Float32Array(LAYERS);
+  let changed = 0;
+  // Blocks of points whose corners have no water near are skipped, and blocks
+  // deep in water take the bed alone: few points need the full query.
+  const B = 4;
+  for (let r0 = 0; r0 < rows; r0 += B) {
+    for (let c0 = 0; c0 < columns; c0 += B) {
+      const r1 = Math.min(rows - 1, r0 + B);
+      const c1 = Math.min(columns - 1, c0 + B);
+      const corners = [
+        query.at(originX + c0 * stepX, originY + r0 * stepY),
+        query.at(originX + c1 * stepX, originY + r0 * stepY),
+        query.at(originX + c0 * stepX, originY + r1 * stepY),
+        query.at(originX + c1 * stepX, originY + r1 * stepY),
+      ];
+      // Nothing within reach of any corner: nothing within a band's width of any point.
+      if (corners.every((a) => a === null)) continue;
+      const first = corners[0];
+      if (
+        first &&
+        corners.every(
+          (a) => a?.inWater && a.shoreDistance >= query.reach && a.waterClass === first.waterClass,
+        )
+      ) {
+        // Deep in one water: its bed.
+        const bed = SHORE_VECTORS[first.waterClass].bed;
+        for (let r = r0; r < Math.min(rows, r0 + B); r += 1) {
+          for (let c = c0; c < Math.min(columns, c0 + B); c += 1) {
+            const i = r * columns + c;
+            let sum = 0;
+            for (let l = 0; l < LAYERS; l += 1) sum += w[i * LAYERS + l] ?? 0;
+            for (let l = 0; l < LAYERS; l += 1) w[i * LAYERS + l] = sum * (bed[l] ?? 0);
+            p[i * 4] = 1;
+            changed += 1;
+          }
+        }
+        continue;
+      }
+      for (let r = r0; r < Math.min(rows, r0 + B); r += 1) {
+        const y = originY + r * stepY;
+        for (let c = c0; c < Math.min(columns, c0 + B); c += 1) {
+          const x = originX + c * stepX;
+          const at = query.at(x, y);
+          if (!at) continue;
+          const i = r * columns + c;
+          const o = i * LAYERS;
+          const vectors = SHORE_VECTORS[at.waterClass];
+          const look = SHORE_LOOKS[at.waterClass];
+          const mix = smoothstep(-0.25, 0.45, noise.shoreMix.at(x, y));
+          const d = at.shoreDistance;
+          let sum = 0;
+          for (let l = 0; l < LAYERS; l += 1) sum += w[o + l] ?? 0;
+          if (at.inWater) {
+            // The bed, seen through the water.
+            for (let l = 0; l < LAYERS; l += 1) w[o + l] = sum * (vectors.bed[l] ?? 0);
+            p[i * 4] = 1;
+            changed += 1;
+            continue;
+          }
+          const cls = classOf(classIndex[i] ?? 0);
+          // The damp band at the waterline, wider and narrower along the shore.
+          const u = 0.5 + 0.5 * noise.shoreWidth.at(x, y);
+          const wetW = look.wet[0] + u * (look.wet[1] - look.wet[0]);
+          const damp = (1 - smoothstep(0.4 * wetW, wetW, d)) * (0.65 + 0.35 * mix);
+          if (damp > 0) p[i * 4] = Math.max(p[i * 4] ?? 0, damp);
+          if (cls !== 'none' && MAPPED_SHORE.has(cls)) {
+            if (damp > 0) changed += 1;
+            continue;
+          }
+          const s = slope[i] ?? 0;
+          let width = look.width[0] + u * u * (look.width[1] - look.width[0]);
+          width *= 1 - smoothstep(SHORE_SLOPE[0], SHORE_SLOPE[1], s);
+          const cap = cls === 'none' ? undefined : SHORE_CAP[cls];
+          if (cap !== undefined) width = Math.min(width, cap);
+          const rocky = smoothstep(ROCKY_SLOPE[0], ROCKY_SLOPE[1], s);
+          const rockW = 1.5 + 2.5 * rocky;
+          const tShore = width > 0.2 ? 1 - smoothstep(0.55 * width, width, d) : 0;
+          const tRock = rocky * (1 - smoothstep(0.5 * rockW, rockW, d));
+          const t = Math.max(tShore, tRock);
+          if (t <= 0) {
+            if (damp > 0) changed += 1;
+            continue;
+          }
+          changed += 1;
+          for (let l = 0; l < LAYERS; l += 1) {
+            const v =
+              tRock >= tShore
+                ? (ROCKY_SHORE[l] ?? 0)
+                : (vectors.shore[l] ?? 0) * (1 - mix) + (vectors.mixed[l] ?? 0) * mix;
+            shore[l] = v;
+          }
+          for (let l = 0; l < LAYERS; l += 1) {
+            w[o + l] = (w[o + l] ?? 0) * (1 - t) + sum * t * (shore[l] ?? 0);
+          }
+          // Sand on the dry part of a beach is pale and dry.
+          if (tShore > 0) p[i * 4 + 1] = Math.max(p[i * 4 + 1] ?? 0, 0.3 * tShore * (1 - damp));
+        }
+      }
+    }
+  }
+  return changed;
 }

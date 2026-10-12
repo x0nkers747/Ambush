@@ -40,22 +40,25 @@ textures have none stated, so none were used. No GPL asset is included.
 
 ## Ground textures (docs/adr/0038)
 
-Eight ground layers for the terrain material, each a colour map (`ground-*.jpg`, 512 × 512 px)
+Eleven ground layers for the terrain material (the last three, for shores, added by docs/adr/0040), each a colour map (`ground-*.jpg`, 512 × 512 px)
 and an OpenGL-convention normal map (`ground-*-n.jpg`, 256 × 256 px). All CC0 1.0, downloaded at
 1K. The colour maps had their broad brightness and colour gradients flattened (each pixel divided
 by a wrap-around blur of the image, partly), so repeats of the texture are harder to see; the shader
 then brings each layer's average to its own colour (`GROUND_LOOK` in `ground-material.ts`).
 
-| Files                 | Layer         | Source                                       | Licence | Changes                   |
-| --------------------- | ------------- | -------------------------------------------- | ------- | ------------------------- |
-| `ground-grass*.jpg`   | grass         | ambientCG, Grass004                          | CC0 1.0 | resized; colour flattened |
-| `ground-meadow*.jpg`  | rough grass   | Poly Haven, leafy_grass (Charlotte Baglioni) | CC0 1.0 | resized; colour flattened |
-| `ground-leaves*.jpg`  | leaf litter   | Poly Haven, forest_leaves_02 (Rob Tuytel)    | CC0 1.0 | resized; colour flattened |
-| `ground-needles*.jpg` | needle litter | ambientCG, Ground077                         | CC0 1.0 | resized; colour flattened |
-| `ground-soil*.jpg`    | field soil    | Poly Haven, farm_soil (Amal Kumar)           | CC0 1.0 | resized; colour flattened |
-| `ground-earth*.jpg`   | bare earth    | Poly Haven, brown_mud_02 (Rob Tuytel)        | CC0 1.0 | resized; colour flattened |
-| `ground-gravel*.jpg`  | gravel        | Poly Haven, gravel_ground_01 (Rob Tuytel)    | CC0 1.0 | resized; colour flattened |
-| `ground-rock*.jpg`    | rock          | Poly Haven, rock_ground (Rob Tuytel)         | CC0 1.0 | resized; colour flattened |
+| Files                 | Layer         | Source                                        | Licence | Changes                   |
+| --------------------- | ------------- | --------------------------------------------- | ------- | ------------------------- |
+| `ground-grass*.jpg`   | grass         | ambientCG, Grass004                           | CC0 1.0 | resized; colour flattened |
+| `ground-meadow*.jpg`  | rough grass   | Poly Haven, leafy_grass (Charlotte Baglioni)  | CC0 1.0 | resized; colour flattened |
+| `ground-leaves*.jpg`  | leaf litter   | Poly Haven, forest_leaves_02 (Rob Tuytel)     | CC0 1.0 | resized; colour flattened |
+| `ground-needles*.jpg` | needle litter | ambientCG, Ground077                          | CC0 1.0 | resized; colour flattened |
+| `ground-soil*.jpg`    | field soil    | Poly Haven, farm_soil (Amal Kumar)            | CC0 1.0 | resized; colour flattened |
+| `ground-earth*.jpg`   | bare earth    | Poly Haven, brown_mud_02 (Rob Tuytel)         | CC0 1.0 | resized; colour flattened |
+| `ground-gravel*.jpg`  | gravel        | Poly Haven, gravel_ground_01 (Rob Tuytel)     | CC0 1.0 | resized; colour flattened |
+| `ground-rock*.jpg`    | rock          | Poly Haven, rock_ground (Rob Tuytel)          | CC0 1.0 | resized; colour flattened |
+| `ground-sand*.jpg`    | sand          | Poly Haven, sand_01 (Rob Tuytel)              | CC0 1.0 | resized; colour flattened |
+| `ground-shingle*.jpg` | shingle       | Poly Haven, ganges_river_pebbles (Amal Kumar) | CC0 1.0 | resized; colour flattened |
+| `ground-mud*.jpg`     | mud           | Poly Haven, brown_mud_03 (Rob Tuytel)         | CC0 1.0 | resized; colour flattened |
 
 Normal maps are the sources' own (`NormalGL`, `nor_gl`), resized only. The noise texture the
 shader uses against tiling is generated in code (`groundNoisePixels`), not shipped.

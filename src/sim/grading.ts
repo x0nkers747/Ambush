@@ -2,6 +2,17 @@ import type { Road, RoadClass } from './environment';
 import type { Vec2 } from './geometry';
 import { pointInPolygon } from './polygon';
 import { heightAt, type TerrainDataset } from './terrain';
+import {
+  BANK_MAX_RISE,
+  BANK_MIN_RISE,
+  BANK_REACH_M,
+  BED_SLOPE,
+  DECK_M,
+  SHORE_FREEBOARD_M,
+  SHORE_INSET_M,
+  waterLevels,
+  waterQuery,
+} from './water-grading';
 
 // Terrain grading (docs/adr/0032): the authoritative ground is the imported
 // elevation model with its roads and building foundations built into it.
@@ -18,13 +29,18 @@ import { heightAt, type TerrainDataset } from './terrain';
 // from the source and the features alone, and constraints from different
 // features combine by maxima and minima, so the order the features were loaded
 // in does not matter.
+//
+// Open water is levelled too (docs/adr/0040, water-grading.ts): a shallow bed
+// under each levelled water body, its shores at the water's level, and its
+// banks blended into the ground round it. Deep water far from any shore is
+// lowered on the elevation grid itself, without refinement.
 
 /** Bump when the grading rules change: graded terrains of different versions differ. */
-export const GRADING_VERSION = 1;
+export const GRADING_VERSION = 2;
 /**
  * Which model of the ground a terrain is: the DEM cleaning version
  * (docs/adr/0033) and the grading version it went through, e.g.
- * `dem-clean-v1+graded-v1`; `source` for an untouched terrain. Scenarios
+ * `dem-clean-v1+graded-v2`; `source` for an untouched terrain. Scenarios
  * record it, so plans made on an earlier model are noticed (docs/adr/0032).
  */
 export function terrainModelId(terrain: TerrainDataset): string {
@@ -84,6 +100,16 @@ export interface GradingSummary {
   /** Deepest cutting and highest embankment, metres. */
   readonly maxCutM: number;
   readonly maxFillM: number;
+  /** Water (docs/adr/0040): bodies levelled and not, river profiles, and grid cells changed. */
+  readonly water: {
+    readonly levelled: number;
+    readonly notLevelled: number;
+    readonly rivers: number;
+    /** Cells lowered on the elevation grid alone (deep water). */
+    readonly coarseCells: number;
+    /** Cells near shores, graded on the fine lattice. */
+    readonly shoreCells: number;
+  };
 }
 
 /** Constraints on the fine lattice, one block per touched coarse cell. */
@@ -96,7 +122,7 @@ interface Block {
   readonly hi: Float64Array;
   /** Nodes that must not be graded (in or by water). */
   readonly wet: Uint8Array;
-  /** Which feature a node's level belongs to: `ROAD_LEVEL`, `BUILDING_PAD` or 0 (none). */
+  /** Which feature a node's level belongs to: `ROAD_LEVEL`, `BUILDING_PAD`, `WATER` or 0 (none). */
   readonly own: Uint8Array;
 }
 
@@ -111,13 +137,14 @@ interface RoadNode {
 
 const ROAD_LEVEL = 1;
 const BUILDING_PAD = 2;
+const WATER = 3;
 
 const byId = <T extends { id: string }>(a: T, b: T) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-function smoothFade(d: number, reach: number): number {
-  if (d <= reach - FADE_M) return 1;
+function smoothFade(d: number, reach: number, fade = FADE_M): number {
+  if (d <= reach - fade) return 1;
   if (d >= reach) return 0;
-  const t = (reach - d) / FADE_M;
+  const t = (reach - d) / fade;
   return t * t * (3 - 2 * t);
 }
 
@@ -513,11 +540,231 @@ export function gradeWithSummary(source: TerrainDataset): {
   // combine with one another and with the buildings' by max and min.
   for (const e of slopes) if (e.b.own[e.n] === 0) shape(e.b, e.n, e.d, e.z, e.flat);
 
+  // --- Water (docs/adr/0040) -----------------------------------------------------------------
+  const surfaces = waterLevels(source);
+  const wq = waterQuery(source.features, surfaces, { originX, originY, maxX, maxY });
+  /** Coarse samples lowered under deep water, by sample index. */
+  const deep = new Map<number, number>();
+  let shoreCells = 0;
+  let deepCells = 0;
+  if (wq.any) {
+    // Roads and buildings, which water grading works round: roads over water
+    // are decks, ground under buildings standing in water is left alone, and
+    // deep-water cells near either are graded on the fine lattice.
+    const STRUCT_BUCKET = 50;
+    const structures = new Map<number, number[]>();
+    const roadSegs: number[] = [];
+    const addStructure = (minX: number, minY: number, maxX2: number, maxY2: number, s: number) => {
+      for (
+        let gx = Math.floor(minX / STRUCT_BUCKET);
+        gx <= Math.floor(maxX2 / STRUCT_BUCKET);
+        gx += 1
+      ) {
+        for (
+          let gy = Math.floor(minY / STRUCT_BUCKET);
+          gy <= Math.floor(maxY2 / STRUCT_BUCKET);
+          gy += 1
+        ) {
+          const key = gx * 100_003 + gy;
+          const list = structures.get(key);
+          if (list) list.push(s);
+          else structures.set(key, [s]);
+        }
+      }
+    };
+    const reachOf = halfDiagonal + 2;
+    // Decks: roads mapped as bridges, and (on terrain imported before bridges
+    // were kept) built roads; a path or track merely mapped in the water
+    // (along a beach, through a ford) lies on the bed.
+    const keepsBridges = source.features.roads.some((r) => r.bridge);
+    const decked = (road: Road) =>
+      road.bridge === true || (!keepsBridges && ROAD_GRADING[road.roadClass] !== null);
+    for (const road of [...source.features.roads].sort(byId)) {
+      for (let i = 0; i + 1 < road.centerline.length; i += 1) {
+        const a = road.centerline[i];
+        const b = road.centerline[i + 1];
+        if (!a || !b) continue;
+        const h = road.widthMeters / 2 + 1;
+        const s = roadSegs.length / 5;
+        // (A road that is no deck keeps clear of deep-water cells all the same, at no cost.)
+        roadSegs.push(a.x, a.y, b.x, b.y, decked(road) ? h : -Infinity);
+        addStructure(
+          Math.min(a.x, b.x) - h - reachOf,
+          Math.min(a.y, b.y) - h - reachOf,
+          Math.max(a.x, b.x) + h + reachOf,
+          Math.max(a.y, b.y) + h + reachOf,
+          s,
+        );
+      }
+    }
+    const roadCount = roadSegs.length / 5;
+    buildings.forEach((building, i) => {
+      const xs = building.footprint.map((p) => p.x);
+      const ys = building.footprint.map((p) => p.y);
+      addStructure(
+        Math.min(...xs) - reachOf,
+        Math.min(...ys) - reachOf,
+        Math.max(...xs) + reachOf,
+        Math.max(...ys) + reachOf,
+        roadCount + i,
+      );
+    });
+    const near = (x: number, y: number) =>
+      structures.get(Math.floor(x / STRUCT_BUCKET) * 100_003 + Math.floor(y / STRUCT_BUCKET)) ?? [];
+    /** Distance to the nearest road's edge (its half-width plus a metre). */
+    const roadEdge = (x: number, y: number) => {
+      let best = Infinity;
+      for (const s of near(x, y)) {
+        if (s >= roadCount) continue;
+        const o = s * 5;
+        const d =
+          segmentDistance(
+            x,
+            y,
+            roadSegs[o] ?? 0,
+            roadSegs[o + 1] ?? 0,
+            roadSegs[o + 2] ?? 0,
+            roadSegs[o + 3] ?? 0,
+          ) - (roadSegs[o + 4] ?? 0);
+        best = Math.min(best, d);
+      }
+      return best;
+    };
+    const underBuilding = (x: number, y: number) =>
+      near(x, y).some(
+        (s) =>
+          s >= roadCount && pointInPolygon({ x, y }, buildings[s - roadCount]?.footprint ?? []),
+      );
+
+    // Cells water can reach: round each levelled body and channel.
+    const marked = new Uint8Array((columns - 1) * (rows - 1));
+    const mark = (minX: number, minY: number, maxX2: number, maxY2: number) => {
+      const c0 = Math.max(0, Math.floor((minX - wq.reach - originX) / cellSize));
+      const c1 = Math.min(columns - 2, Math.floor((maxX2 + wq.reach - originX) / cellSize));
+      const r0 = Math.max(0, Math.floor((minY - wq.reach - originY) / cellSize));
+      const r1 = Math.min(rows - 2, Math.floor((maxY2 + wq.reach - originY) / cellSize));
+      for (let r = r0; r <= r1; r += 1)
+        marked.fill(1, r * (columns - 1) + c0, r * (columns - 1) + c1 + 1);
+    };
+    const levelled = new Set(surfaces.bodies.filter((b) => b.graded).map((b) => b.id));
+    for (const area of water.filter((w) => w.kind === 'water' && levelled.has(w.id))) {
+      const xs = area.boundary.map((p) => p.x);
+      const ys = area.boundary.map((p) => p.y);
+      mark(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
+    }
+    for (const river of surfaces.rivers) {
+      for (let i = 0; i + 3 < river.xy.length; i += 2) {
+        const h = river.halfWidths[i / 2] ?? 0;
+        if (h <= 0) continue;
+        const ax = river.xy[i] ?? 0;
+        const ay = river.xy[i + 1] ?? 0;
+        const bx = river.xy[i + 2] ?? 0;
+        const by = river.xy[i + 3] ?? 0;
+        mark(
+          Math.min(ax, bx) - h,
+          Math.min(ay, by) - h,
+          Math.max(ax, bx) + h,
+          Math.max(ay, by) + h,
+        );
+      }
+    }
+
+    /** The water's constraint at a node, by the rules of docs/adr/0040. */
+    const shapeWater = (x: number, y: number, b: Block, n: number) => {
+      if (!onMap(x, y)) return;
+      const w = wq.at(x, y);
+      if (!w) return;
+      const d = w.shoreDistance;
+      if (w.inWater) {
+        // A road over the water is a deck above it; the ground under a building in it is left alone.
+        if (roadEdge(x, y) <= 0) {
+          constrain(b, n, w.level + DECK_M, Infinity, 1);
+          b.own[n] = WATER;
+          return;
+        }
+        if (underBuilding(x, y)) return;
+        b.own[n] = WATER;
+        if (d < SHORE_INSET_M) {
+          // At the waterline: the ground at the level (just above it).
+          constrain(b, n, w.level + SHORE_FREEBOARD_M, w.level + SHORE_FREEBOARD_M, 1);
+        } else {
+          // The bed: deeper away from the shore, to the class's depth; deeper ground stays.
+          const depth = Math.min(w.depth, 0.1 + (d - SHORE_INSET_M) * BED_SLOPE);
+          constrain(b, n, -Infinity, w.level - depth, 1);
+        }
+        return;
+      }
+      // A bank: not lower than the water beside it, not a wall above it, fading into the ground.
+      if (d >= BANK_REACH_M || b.own[n] !== 0) return;
+      const alpha = smoothFade(d, BANK_REACH_M);
+      constrain(
+        b,
+        n,
+        w.level + SHORE_FREEBOARD_M + BANK_MIN_RISE * d,
+        w.level + SHORE_FREEBOARD_M + BANK_MAX_RISE * d,
+        alpha,
+      );
+    };
+
+    for (let r = 0; r < rows - 1; r += 1) {
+      for (let c = 0; c < columns - 1; c += 1) {
+        const cell = r * (columns - 1) + c;
+        if (!marked[cell]) continue;
+        const cx = originX + (c + 0.5) * cellSize;
+        const cy = originY + (r + 0.5) * cellSize;
+        const w = wq.at(cx, cy);
+        if (!w) continue;
+        // Deep water, far from any shore, road or building: the grid's own samples, lowered.
+        const deepFrom = SHORE_INSET_M + (w.depth - 0.1) / BED_SLOPE + halfDiagonal;
+        if (
+          w.inWater &&
+          w.shoreDistance >= Math.min(deepFrom, wq.reach) &&
+          deepFrom < wq.reach &&
+          !blocks.has(cell) &&
+          near(cx, cy).length === 0
+        ) {
+          deepCells += 1;
+          for (const [i, j] of [
+            [0, 0],
+            [1, 0],
+            [0, 1],
+            [1, 1],
+          ] as const) {
+            const sample = (r + j) * columns + c + i;
+            if (deep.has(sample)) continue;
+            const x = originX + (c + i) * cellSize;
+            const y = originY + (r + j) * cellSize;
+            const at = wq.at(x, y);
+            const s = elevations[sample] ?? 0;
+            const g = at?.inWater ? Math.min(s, at.level - at.depth) : s;
+            deep.set(sample, Math.abs(g - s) < MIN_CHANGE_M ? s : g);
+          }
+          continue;
+        }
+        shoreCells += 1;
+        const b = block(c, r);
+        for (let j = 0; j <= k; j += 1) {
+          for (let i = 0; i <= k; i += 1) {
+            shapeWater(originX + (c * k + i) * fine, originY + (r * k + j) * fine, b, j * n1 + i);
+          }
+        }
+      }
+    }
+    // A deep cell's corner is in water at least the full depth from any shore, so a
+    // block sharing it constrains it the same way; and a block made later (none
+    // are) would too.
+  }
+
   // --- The graded ground -------------------------------------------------------------------
   const graded = Float64Array.from(elevations);
-  const refinedCells: number[] = [];
-  const refinedSamples: number[] = [];
+  for (const [sample, g] of deep) {
+    const s = elevations[sample] ?? 0;
+    maxCut = Math.max(maxCut, s - g);
+    graded[sample] = g;
+  }
   const sortedBlocks = [...blocks.values()].sort((p, q) => p.cell - q.cell);
+  /** Each changed block's graded values, and whether it needs its fine samples. */
+  const settled = new Map<number, { values: Float64Array; fine: boolean }>();
   for (const b of sortedBlocks) {
     const values = new Float64Array(n1 * n1);
     let changed = false;
@@ -541,7 +788,33 @@ export function gradeWithSummary(source: TerrainDataset): {
     graded[r * columns + c + 1] = values[k] ?? 0;
     graded[(r + 1) * columns + c] = values[k * n1] ?? 0;
     graded[(r + 1) * columns + c + 1] = values[k * n1 + k] ?? 0;
-    refinedCells.push(b.cell);
+    // Refined only where its corners alone cannot hold the graded ground.
+    settled.set(b.cell, { values, fine: k > 1 && !coarseHolds(values, k) });
+  }
+  const refined = (c: number, r: number) =>
+    c >= 0 &&
+    r >= 0 &&
+    c < columns - 1 &&
+    r < rows - 1 &&
+    (settled.get(r * (columns - 1) + c)?.fine ?? false);
+  const refinedCells: number[] = [];
+  const refinedSamples: number[] = [];
+  for (const [cell, { values, fine: isFine }] of [...settled].sort((p, q) => p[0] - q[0])) {
+    if (!isFine) continue;
+    const c = cell % (columns - 1);
+    const r = Math.floor(cell / (columns - 1));
+    // Along an edge with an unrefined cell, the fine samples lie on its straight
+    // edge (they are within the smallest change of it), so the surface is continuous.
+    const straighten = (from: number, to: number, at: (m: number) => number) => {
+      const a = values[from] ?? 0;
+      const z = values[to] ?? 0;
+      for (let m = 1; m < k; m += 1) values[at(m)] = a + (m / k) * (z - a);
+    };
+    if (!refined(c, r - 1)) straighten(0, k, (m) => m);
+    if (!refined(c, r + 1)) straighten(k * n1, k * n1 + k, (m) => k * n1 + m);
+    if (!refined(c - 1, r)) straighten(0, k * n1, (m) => m * n1);
+    if (!refined(c + 1, r)) straighten(k, k * n1 + k, (m) => m * n1 + k);
+    refinedCells.push(cell);
     for (const v of values) refinedSamples.push(v);
   }
 
@@ -551,7 +824,11 @@ export function gradeWithSummary(source: TerrainDataset): {
     ...(k > 1 && refinedCells.length > 0
       ? { refinement: { factor: k, cells: refinedCells, samples: refinedSamples } }
       : {}),
-    grading: { version: GRADING_VERSION, fineSpacingM: fine },
+    grading: {
+      version: GRADING_VERSION,
+      fineSpacingM: fine,
+      ...(surfaces.bodies.length > 0 || surfaces.rivers.length > 0 ? { water: surfaces } : {}),
+    },
   };
   return {
     terrain,
@@ -561,8 +838,34 @@ export function gradeWithSummary(source: TerrainDataset): {
       refinedCells: k > 1 ? refinedCells.length : 0,
       maxCutM: maxCut,
       maxFillM: maxFill,
+      water: {
+        levelled: surfaces.bodies.filter((b) => b.graded).length,
+        notLevelled: surfaces.bodies.filter((b) => !b.graded).length,
+        rivers: surfaces.rivers.length,
+        coarseCells: deepCells,
+        shoreCells,
+      },
     },
   };
+}
+
+/** Whether a block's graded values lie, within the smallest change, on the triangles of its corners. */
+function coarseHolds(values: Float64Array, k: number): boolean {
+  const n1 = k + 1;
+  const sw = values[0] ?? 0;
+  const se = values[k] ?? 0;
+  const nw = values[k * n1] ?? 0;
+  const ne = values[k * n1 + k] ?? 0;
+  for (let j = 0; j <= k; j += 1) {
+    for (let i = 0; i <= k; i += 1) {
+      const u = i / k;
+      const v = j / k;
+      // The cell's two triangles, split south-west to north-east (as `heightAt`).
+      const z = u >= v ? sw + u * (se - sw) + v * (ne - se) : sw + v * (nw - sw) + u * (ne - nw);
+      if (Math.abs((values[j * n1 + i] ?? 0) - z) >= MIN_CHANGE_M) return false;
+    }
+  }
+  return true;
 }
 
 /**

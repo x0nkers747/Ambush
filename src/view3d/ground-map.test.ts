@@ -114,12 +114,18 @@ describe('bakeGroundMap: land cover', () => {
     const n = map.grid.columns * map.grid.rows;
     expect(map.weights0.length).toBe(n * 4);
     expect(map.weights1.length).toBe(n * 4);
+    expect(map.weights2.length).toBe(n * 4);
     expect(map.params.length).toBe(n * 4);
     for (let i = 0; i < n; i += 1) {
       let s = 0;
       for (let k = 0; k < 4; k += 1)
-        s += (map.weights0[i * 4 + k] ?? 0) + (map.weights1[i * 4 + k] ?? 0);
+        s +=
+          (map.weights0[i * 4 + k] ?? 0) +
+          (map.weights1[i * 4 + k] ?? 0) +
+          (map.weights2[i * 4 + k] ?? 0);
       expect(s).toBe(255);
+      // The fourth channel of the third texture is no layer.
+      expect(map.weights2[i * 4 + 3]).toBe(0);
     }
     expect(map.version).toBe(GROUND_MATERIAL_VERSION);
     const total = Object.values(map.stats.layers).reduce((a, b) => a + b, 0);
@@ -226,6 +232,7 @@ describe('bakeGroundMap: land cover', () => {
     const again = bakeGroundMap(shuffled);
     expect(sameBytes(again.weights0, map.weights0)).toBe(true);
     expect(sameBytes(again.weights1, map.weights1)).toBe(true);
+    expect(sameBytes(again.weights2, map.weights2)).toBe(true);
     expect(sameBytes(again.params, map.params)).toBe(true);
     // A wood over a field: the wood's floor.
     const over = bakeGroundMap(
@@ -320,6 +327,7 @@ describe('bakeGroundMap: edges', () => {
     const b = bakeGroundMap(refined);
     expect(sameBytes(a.weights0, b.weights0)).toBe(true);
     expect(sameBytes(a.weights1, b.weights1)).toBe(true);
+    expect(sameBytes(a.weights2, b.weights2)).toBe(true);
   });
 });
 
@@ -402,9 +410,10 @@ describe('bakeGroundMap: stable and display only', () => {
     expect(sameBytes(again.weights0, map.weights0)).toBe(true);
     expect(sameBytes(again.params, map.params)).toBe(true);
     // Transferable buffers, one per array.
-    expect(new Set(groundMapBuffers(map)).size).toBe(3);
+    expect(new Set(groundMapBuffers(map)).size).toBe(4);
     const clone = structuredClone(map);
     expect(sameBytes(clone.weights1, map.weights1)).toBe(true);
+    expect(sameBytes(clone.weights2, map.weights2)).toBe(true);
   });
 
   it('changes nothing the simulation reads: terrain, grading, heights and sight lines', () => {
@@ -427,5 +436,88 @@ describe('bakeGroundMap: stable and display only', () => {
     expect(JSON.stringify(gradeTerrain(demo))).toBe(gradedSnapshot);
     expect(points.map((p) => heightAt(graded, p.x, p.y))).toEqual(heights);
     expect(points.slice(1).map((p, k) => lineOfSight(graded, points[k] ?? p, p))).toEqual(sight);
+  });
+});
+
+describe('bakeGroundMap: shores (docs/adr/0040)', () => {
+  const SHORE = 100;
+  const seaArea = {
+    id: 'osm-sea',
+    kind: 'water' as const,
+    waterClass: 'sea' as const,
+    boundary: [
+      { x: SHORE, y: -200 },
+      { x: 200, y: -200 },
+      { x: 200, y: 200 },
+      { x: SHORE, y: 200 },
+    ],
+  };
+  const shores = gradeTerrain(
+    createSyntheticTerrain(
+      { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
+      // A gentle beach in the south, a cliff in the north; the sea floor offshore.
+      (x, y) =>
+        x >= SHORE
+          ? -0.05 * (x - SHORE)
+          : (y > 60 ? 1.2 : 0.04) *
+            (SHORE - x) *
+            Math.min(1, Math.max(0, (y - 40) / 20) + (y > 60 ? 0 : 1)),
+      {
+        roads: [],
+        buildings: [],
+        vegetation: [],
+        water: [seaArea],
+        waterways: [],
+        landUse: [
+          { id: 'shingle', kind: 'shingle', boundary: rectangle(80, -130, 40, 40) },
+          { id: 'town', kind: 'residential', boundary: rectangle(50, -40, 100, 40) },
+        ],
+      },
+    ),
+  );
+  const m = bakeGroundMap(shores);
+
+  it('puts a sandy beach along a gentle sea shore, damp at the waterline', () => {
+    const w = groundWeightsAt(m, SHORE - 3, -80);
+    expect(w.sand).toBeGreaterThan(0.5);
+    expect(groundParamsAt(m, SHORE - 1, -80).wet).toBeGreaterThan(0.3);
+    // Far inland, no sand.
+    expect(groundWeightsAt(m, SHORE - 70, -80).sand).toBeLessThan(0.02);
+    expect(m.stats.shores).toBeGreaterThan(100);
+  });
+
+  it('varies the beach along the shore, and its damp band', () => {
+    const reach = (y: number) => {
+      let d = 0;
+      while (d < 40 && groundWeightsAt(m, SHORE - d, y).sand > 0.3) d += 1;
+      return d;
+    };
+    const reaches = new Set([-190, -170, -100, -90, -80, -70, 0, 20].map(reach));
+    expect(reaches.size).toBeGreaterThan(2);
+    const wets = new Set(
+      [-190, -170, -100, -80, 0, 20].map((y) => groundParamsAt(m, SHORE - 2, y).wet.toFixed(2)),
+    );
+    expect(wets.size).toBeGreaterThan(1);
+  });
+
+  it('gives a cliff a rocky foot, no broad sand', () => {
+    const w = groundWeightsAt(m, SHORE - 2, 150);
+    expect(w.rock + w.shingle).toBeGreaterThan(0.4);
+    expect(groundWeightsAt(m, SHORE - 8, 150).sand).toBeLessThan(0.1);
+  });
+
+  it('keeps a mapped shingle beach shingle, and a built waterfront narrow', () => {
+    const s = groundWeightsAt(m, 80, -130);
+    expect(s.shingle).toBeGreaterThan(s.sand);
+    expect(groundWeightsAt(m, SHORE - 8, -40).sand).toBeLessThan(0.05);
+  });
+
+  it('shows sand under the sea near the shore, and is deterministic', () => {
+    const bed = groundWeightsAt(m, 150, -80);
+    expect(bed.sand).toBeGreaterThan(0.5);
+    expect(groundParamsAt(m, 150, -80).wet).toBe(1);
+    const again = bakeGroundMap(shores);
+    expect(sameBytes(again.weights2, m.weights2)).toBe(true);
+    expect(sameBytes(again.params, m.params)).toBe(true);
   });
 });

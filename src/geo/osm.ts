@@ -14,6 +14,7 @@ import {
   type Vec2,
   type VegetationArea,
   type WaterArea,
+  type WaterClass,
   type Waterway,
   type WaterwayKind,
 } from '#sim';
@@ -88,8 +89,8 @@ export function overpassQuery(
       ...(buildings
         ? [`way["building"](${bbox});`, `relation["building"]["type"="multipolygon"](${bbox});`]
         : []),
-      `way["natural"~"^(wood|scrub|heath|wetland|water|grassland|tree_row)$"](${bbox});`,
-      `relation["natural"~"^(wood|scrub|heath|wetland|water|grassland)$"]["type"="multipolygon"](${bbox});`,
+      `way["natural"~"^(wood|scrub|heath|wetland|water|grassland|tree_row|beach|sand|shingle|bare_rock|scree|mud)$"](${bbox});`,
+      `relation["natural"~"^(wood|scrub|heath|wetland|water|grassland|beach|sand|shingle|bare_rock|scree|mud)$"]["type"="multipolygon"](${bbox});`,
       `way["landuse"](${bbox});`,
       `relation["landuse"]["type"="multipolygon"](${bbox});`,
       `way["waterway"](${bbox});`,
@@ -266,6 +267,45 @@ function vegetationOf(t: Tags): keyof typeof VEGETATION | null {
   return null;
 }
 
+/** The kind of water body (docs/adr/0040) of an area tagged as water; never by its size. */
+export function waterClassOf(t: Tags): WaterClass {
+  const w = t['water'];
+  if (t['waterway'] === 'riverbank') return 'river';
+  if (t['landuse'] === 'reservoir') return 'reservoir';
+  if (t['landuse'] === 'basin') return 'basin';
+  switch (w) {
+    case 'lake':
+    case 'lagoon':
+    case 'oxbow':
+      return 'lake';
+    case 'reservoir':
+      return 'reservoir';
+    case 'pond':
+    case 'fishpond':
+    case 'reflecting_pool':
+      return 'pond';
+    case 'basin':
+    case 'wastewater':
+    case 'moat':
+    case 'cooling':
+    case 'evaporator':
+    case 'salt_pool':
+      return 'basin';
+    case 'river':
+    case 'stream':
+    case 'stream_pool':
+    case 'rapids':
+      return 'river';
+    case 'canal':
+    case 'lock':
+    case 'ditch':
+    case 'drain':
+      return 'canal';
+    default:
+      return 'other';
+  }
+}
+
 function waterOf(t: Tags): WaterArea['kind'] | null {
   if (t['natural'] === 'wetland') return 'wetland';
   if (
@@ -318,8 +358,38 @@ const LAND_USE: Record<string, LandUseKind> = {
   greenfield: 'other',
   construction: 'other',
 };
+/** Beach surfaces (`surface=*` on `natural=beach`) that make it a shingle or rocky shore. */
+const SHINGLE_SURFACES = new Set([
+  'gravel',
+  'pebblestone',
+  'shingle',
+  'fine_gravel',
+  'stone',
+  'pebbles',
+]);
+const ROCK_SURFACES = new Set(['rock', 'bare_rock', 'stones', 'boulders']);
+const MUD_SURFACES = new Set(['mud', 'dirt', 'earth', 'ground', 'clay']);
+
+/** Bare shores and ground (docs/adr/0040): mapped beaches take precedence over inferred ones. */
+function shoreOf(t: Tags): LandUseKind | null {
+  const n = t['natural'];
+  if (n === 'beach' || n === 'sand') {
+    const surface = t['surface'] ?? t['material'];
+    if (surface !== undefined && SHINGLE_SURFACES.has(surface)) return 'shingle';
+    if (surface !== undefined && ROCK_SURFACES.has(surface)) return 'bareRock';
+    if (surface !== undefined && MUD_SURFACES.has(surface)) return 'mud';
+    return 'beach';
+  }
+  if (n === 'shingle') return 'shingle';
+  if (n === 'bare_rock' || n === 'scree') return 'bareRock';
+  if (n === 'mud') return 'mud';
+  return null;
+}
+
 function landUseOf(t: Tags): LandUseKind | null {
   if (t['natural'] === 'grassland') return 'meadow';
+  const shore = shoreOf(t);
+  if (shore) return shore;
   const l = t['landuse'];
   if (l === undefined || l === 'forest' || l === 'reservoir' || l === 'basin') return null;
   return LAND_USE[l] ?? null;
@@ -510,6 +580,7 @@ export function featuresFromOsm(
         water.push({
           id,
           kind: wet,
+          ...(wet === 'water' ? { waterClass: waterClassOf(tags) } : {}),
           boundary: s.outer,
           ...(s.holes.length > 0 ? { holes: s.holes } : {}),
           source: { ref },
@@ -626,6 +697,9 @@ export function featuresFromOsm(
               // The OSM road type, kept for display (docs/adr/0035): driveways stay driveways.
               ...roadType(tags),
               ...(traffic ? { traffic } : {}),
+              ...(tags['bridge'] !== undefined && tags['bridge'] !== 'no'
+                ? { bridge: true as const }
+                : {}),
             });
           } else if (waterway) {
             waterways.push({
@@ -702,6 +776,7 @@ export function featuresFromOsm(
       water.push({
         id,
         kind: 'water',
+        waterClass: 'sea',
         boundary: area.boundary,
         ...(area.holes.length > 0 ? { holes: area.holes } : {}),
         source: { ref: 'osm:natural=coastline' },

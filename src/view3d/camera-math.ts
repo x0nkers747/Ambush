@@ -1,4 +1,4 @@
-import { heightAt, isOnTerrain, type TerrainDataset } from '#sim';
+import { heightAt, isOnTerrain, terrainWaterQuery, type TerrainDataset } from '#sim';
 import type { ThreePoint } from './axes';
 
 // The tactical camera's geometry (docs/adr/0029), in Three.js axes (x east,
@@ -11,10 +11,18 @@ export type GroundAt = (x: number, z: number) => number | null;
 /**
  * The 3D view's ground query (Three.js axes): the terrain's `heightAt`, the
  * same ground the simulation and the 2D map use (docs/adr/0032), or null off
- * the battlefield.
+ * the battlefield. Over levelled water (docs/adr/0040) it is the water's
+ * surface, not the bed under it: a click on a lake picks the lake where it is
+ * seen, and overlays lie on the water, as on the 2D map.
  */
 export function terrainGround(terrain: TerrainDataset): GroundAt {
-  return (x, z) => (isOnTerrain(terrain, x, -z) ? heightAt(terrain, x, -z) : null);
+  const water = terrainWaterQuery(terrain);
+  return (x, z) => {
+    if (!isOnTerrain(terrain, x, -z)) return null;
+    const ground = heightAt(terrain, x, -z);
+    const level = water?.levelAt(x, -z) ?? null;
+    return level !== null && level > ground ? level : ground;
+  };
 }
 
 export interface BattlefieldExtent {

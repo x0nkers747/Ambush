@@ -43,6 +43,11 @@ export interface Road {
    * display (road markings, docs/adr/0037). The simulation never reads it.
    */
   readonly traffic?: RoadTraffic;
+  /**
+   * Mapped as a bridge (OSM `bridge=*`, docs/adr/0040): over levelled water
+   * it is a deck above the water rather than a road on the bed.
+   */
+  readonly bridge?: true;
 }
 
 /** Mapped traffic attributes of a road (OSM tags), each present only when tagged and valid. */
@@ -170,12 +175,38 @@ export interface VegetationArea {
 export interface WaterArea {
   readonly id: string;
   readonly kind: 'water' | 'wetland';
+  /**
+   * What kind of water body it is, from its tags (docs/adr/0040); absent on
+   * wetland and on terrain imported before it was kept, where water grading
+   * infers it (`classifyWater`).
+   */
+  readonly waterClass?: WaterClass;
   /** A simple polygon, at least three corners. */
   readonly boundary: readonly Vec2[];
   /** Islands: simple polygons inside the boundary. Drawn as land; still impassable (they can only be reached across water). */
   readonly holes?: readonly (readonly Vec2[])[];
   readonly source?: FeatureSource;
 }
+
+/**
+ * Kinds of open water (docs/adr/0040). Standing: `sea` (from coastlines),
+ * `lake` (also lagoons and oxbows), `reservoir`, `pond`, `basin` (artificial
+ * basins, wastewater, moats). Flowing: `river` (river and stream areas),
+ * `canal`. `other`: tagged as water and nothing more.
+ */
+export type WaterClass =
+  'sea' | 'lake' | 'reservoir' | 'pond' | 'basin' | 'river' | 'canal' | 'other';
+
+export const WATER_CLASSES: readonly WaterClass[] = [
+  'sea',
+  'lake',
+  'reservoir',
+  'pond',
+  'basin',
+  'river',
+  'canal',
+  'other',
+];
 
 export type WaterwayKind = 'river' | 'stream' | 'canal' | 'drain' | 'ditch';
 
@@ -200,7 +231,13 @@ export type LandUseKind =
   | 'military'
   | 'cemetery'
   | 'recreation'
-  | 'other';
+  | 'other'
+  // Bare shores and ground (docs/adr/0040): sand beaches and dunes, shingle
+  // and pebble beaches, bare rock and scree, mud flats.
+  | 'beach'
+  | 'shingle'
+  | 'bareRock'
+  | 'mud';
 
 /** How land is used. Display only. */
 export interface LandUseArea {
@@ -349,6 +386,9 @@ export function validateFeatures(
     // Imported data is checked at run time, whatever its static type says.
     const kind: string = area.kind;
     if (kind !== 'water' && kind !== 'wetland') fail(`water "${area.id}" has an unknown kind`);
+    if (area.waterClass !== undefined && !WATER_CLASSES.includes(area.waterClass)) {
+      fail(`water "${area.id}" has an unknown class`);
+    }
     checkArea(`water "${area.id}"`, area.boundary, area.holes);
   }
   for (const way of features.waterways ?? []) {

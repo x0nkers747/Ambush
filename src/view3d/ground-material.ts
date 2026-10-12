@@ -21,7 +21,8 @@ import { srgbToLinear } from './terrain-mesh';
 // extended through `onBeforeCompile` so the sun, sky light, shadows and fog
 // stay exactly as for everything else. Per pixel it reads the ground map
 // (ground-map.ts) at the pixel's map position and blends eight ground
-// textures (CC0, see textures/CREDITS.md) by it:
+// textures (CC0, see textures/CREDITS.md) by it (eleven since docs/adr/0040:
+// sand, shingle and mud for shores):
 //
 // - World space at real scale: each texture repeats every 2–3 m of ground,
 //   whatever the mesh, so refined tiles and their edges show no seams and
@@ -51,6 +52,9 @@ const ALBEDO_URLS: readonly string[] = [
   new URL('./textures/ground-earth.jpg', import.meta.url).href,
   new URL('./textures/ground-gravel.jpg', import.meta.url).href,
   new URL('./textures/ground-rock.jpg', import.meta.url).href,
+  new URL('./textures/ground-sand.jpg', import.meta.url).href,
+  new URL('./textures/ground-shingle.jpg', import.meta.url).href,
+  new URL('./textures/ground-mud.jpg', import.meta.url).href,
 ];
 const NORMAL_URLS: readonly string[] = [
   new URL('./textures/ground-grass-n.jpg', import.meta.url).href,
@@ -61,6 +65,9 @@ const NORMAL_URLS: readonly string[] = [
   new URL('./textures/ground-earth-n.jpg', import.meta.url).href,
   new URL('./textures/ground-gravel-n.jpg', import.meta.url).href,
   new URL('./textures/ground-rock-n.jpg', import.meta.url).href,
+  new URL('./textures/ground-sand-n.jpg', import.meta.url).href,
+  new URL('./textures/ground-shingle-n.jpg', import.meta.url).href,
+  new URL('./textures/ground-mud-n.jpg', import.meta.url).href,
 ];
 
 /** Per layer: colour to show (sRGB), metres per texture repeat, roughness. */
@@ -75,6 +82,9 @@ export const GROUND_LOOK: Readonly<
   earth: { color: 0x6d624d, tile: 2.2, roughness: 0.95 },
   gravel: { color: 0x8f877a, tile: 2.6, roughness: 0.9 },
   rock: { color: 0x7d786f, tile: 2.6, roughness: 0.85 },
+  sand: { color: 0xb3a27e, tile: 2.8, roughness: 0.93 },
+  shingle: { color: 0x8a8379, tile: 1.6, roughness: 0.88 },
+  mud: { color: 0x5b5142, tile: 2.2, roughness: 0.9 },
 };
 
 const ALBEDO_PX = 512;
@@ -283,6 +293,7 @@ uniform highp sampler2DArray groundAlbedo;
 uniform highp sampler2DArray groundNormal;
 uniform sampler2D groundWeights0;
 uniform sampler2D groundWeights1;
+uniform sampler2D groundWeights2;
 uniform sampler2D groundParams;
 uniform sampler2D groundNoise;
 uniform vec4 groundMapXform;
@@ -357,10 +368,11 @@ if (groundOn > 0.5) {
   vec2 muv = p * groundMapXform.xy + groundMapXform.zw;
   vec4 w0 = texture(groundWeights0, muv);
   vec4 w1 = texture(groundWeights1, muv);
+  vec4 w2 = texture(groundWeights2, muv);
   vec4 prm = texture(groundParams, muv);
   vec4 macro = texture(groundNoise, p / 347.0);
   vec4 macro2 = texture(groundNoise, p / 1733.0 + 0.5);
-  float w[${String(LAYERS)}] = float[${String(LAYERS)}](w0.r, w0.g, w0.b, w0.a, w1.r, w1.g, w1.b, w1.a);
+  float w[${String(LAYERS)}] = float[${String(LAYERS)}](w0.r, w0.g, w0.b, w0.a, w1.r, w1.g, w1.b, w1.a, w2.r, w2.g, w2.b);
   vec3 col[${String(LAYERS)}];
   vec2 nrm[${String(LAYERS)}];
   float h[${String(LAYERS)}];
@@ -475,6 +487,7 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
     groundNormal: { value: holders.normal as Texture },
     groundWeights0: { value: empty as Texture },
     groundWeights1: { value: empty as Texture },
+    groundWeights2: { value: empty as Texture },
     groundParams: { value: empty as Texture },
     groundNoise: { value: noise as Texture },
     groundMapXform: { value: [0, 0, 0, 0] as number[] },
@@ -575,14 +588,15 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
     setMap(map) {
       if (disposed) return;
       const { columns, rows, stepX, stepY, originX, originY } = map.grid;
-      const next = [map.weights0, map.weights1, map.params].map((data) =>
+      const next = [map.weights0, map.weights1, map.weights2, map.params].map((data) =>
         dataTexture(data, columns, rows, false),
       );
       for (const t of mapTextures) t.dispose();
       mapTextures = next;
       uniforms.groundWeights0.value = next[0] ?? empty;
       uniforms.groundWeights1.value = next[1] ?? empty;
-      uniforms.groundParams.value = next[2] ?? empty;
+      uniforms.groundWeights2.value = next[2] ?? empty;
+      uniforms.groundParams.value = next[3] ?? empty;
       // Map point (c, r) is at the centre of texel (c, r).
       uniforms.groundMapXform.value = [
         1 / (stepX * columns),
@@ -591,7 +605,7 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
         (0.5 - originY / stepY) / rows,
       ];
       uniforms.groundOn.value = 1;
-      mapBytes = Math.round(3 * columns * rows * 4 * (4 / 3));
+      mapBytes = Math.round(4 * columns * rows * 4 * (4 / 3));
     },
     hasMap() {
       return uniforms.groundOn.value === 1;
