@@ -13,3 +13,11 @@ export type { GroundOverlay } from './ground-material';
 export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projection';
 export type { QualityLevel } from './quality';
 export { terrainGround, type GroundAt } from './camera-math';
+export {
+  diagnoseGeometry,
+  meshIntegrity,
+  type DiagnosticsOptions,
+  type DiagnosticsReport,
+  type GeometryWarning,
+  type WarningKind,
+} from './geometry-diagnostics';

@@ -231,6 +231,9 @@ plus 1 m. This happens at crossroads, side roads and roundabouts.
 - **Service roads and driveways** cut edge lines (at their mouths) but not centre lines or
   separators, so a row of driveways does not riddle a centreline.
 - **Paths and footways** never cut paint.
+- **Levels** (ADR 0044): only roads on the line's own level cut it. A road on a bridge or in a
+  tunnel, or one joined only through a bridge's end node, does not; tunnel roads get no markings
+  (`MARKING_VERSION` 2).
 - **Fragments.** Dash fragments under half a dash, and solid pieces under 2 m, are left out, so no
   isolated scraps remain.
 

@@ -65,7 +65,11 @@ inferred from the kind of water, the slope and the land cover, with a damp band 
 ([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)). Roads crossing rivers, canals and lakes, and every
 road mapped as a bridge, get a bridge in 3D: a deck that continues the road and its markings,
 barriers, abutments and piers. Bridges are decoration only; the simulation and the ground are
-unchanged ([ADR 0041](docs/adr/0041-procedural-road-bridges.md)).
+unchanged ([ADR 0041](docs/adr/0041-procedural-road-bridges.md)). Roads form one surface: a side road
+stops at the edge of the road it joins, junctions are paved by their most important road, roads on
+different levels (bridges, tunnels, `layer`) stay whole, and ways mapped side by side as one bridge
+are drawn as one structure, with barriers only on its outside and gaps where roads join it
+([ADR 0044](docs/adr/0044-road-junction-and-bridge-topology.md)).
 
 ## Requirements
 
@@ -281,3 +285,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 41. [Procedural road bridges](docs/adr/0041-procedural-road-bridges.md)
 42. [Viewsheds limited to the firing arc](docs/adr/0042-viewshed-in-the-firing-arc.md)
 43. [Bridge crossing and OPFOR road following](docs/adr/0043-bridge-and-road-navigation.md)
+44. [Road junctions, grade separation and bridge structures](docs/adr/0044-road-junction-and-bridge-topology.md)

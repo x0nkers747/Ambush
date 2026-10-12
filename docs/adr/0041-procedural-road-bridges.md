@@ -197,7 +197,9 @@ at the same time, so these are upper bounds.
   example.
 - **Roads crossing under a bridge** within its footprint (an underpass next to an abutment) are
   lifted with it.
+  Still so after ADR 0044, which lifts roads onto the one surface of a bridge structure and stops
+  barriers where roads join it, but does not yet keep a road under the deck on the ground.
 - **No movable, arch or suspension designs.** `bridge=movable` and `bridge:structure` are kept but
-  drawn as ordinary beam bridges. `layer` is kept but not used.
+  drawn as ordinary beam bridges. `layer` is kept, and since ADR 0044 decides which roads meet at a junction.
 - **Mapped bridges over dry land** are drawn at their road's height, spanning the straight line
   between their ends. They get piers only where they stand more than 2 m above the ground.

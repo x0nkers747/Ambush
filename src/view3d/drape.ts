@@ -160,8 +160,18 @@ export function createDraper(
       const twice =
         ((piece[2 * i1] ?? 0) - ax) * ((piece[2 * i2 + 1] ?? 0) - ay) -
         ((piece[2 * i2] ?? 0) - ax) * ((piece[2 * i1 + 1] ?? 0) - ay);
-      // Cutting can repeat a corner; such a triangle has no area and is left out.
-      if (twice <= 1e-9) continue;
+      // Cutting can repeat a corner, or leave a sliver thinner than a float32
+      // position can tell apart across a 5 km battlefield (0.5 mm); such a
+      // triangle is left out.
+      const longest = Math.max(
+        Math.hypot((piece[2 * i1] ?? 0) - ax, (piece[2 * i1 + 1] ?? 0) - ay),
+        Math.hypot((piece[2 * i2] ?? 0) - ax, (piece[2 * i2 + 1] ?? 0) - ay),
+        Math.hypot(
+          (piece[2 * i2] ?? 0) - (piece[2 * i1] ?? 0),
+          (piece[2 * i2 + 1] ?? 0) - (piece[2 * i1 + 1] ?? 0),
+        ),
+      );
+      if (twice <= 1e-9 || twice / longest < 5e-4) continue;
       for (const idx of tri) {
         const b = idx * 6;
         out.positions.push(vx[b] ?? 0, vx[b + 1] ?? 0, vx[b + 2] ?? 0);

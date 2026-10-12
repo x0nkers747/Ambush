@@ -3,6 +3,7 @@ import type { Region } from './building-style';
 import { finishMesh, meshBuffers, type Draper, type MeshData, type Rgb } from './drape';
 import { hashInts, hashString, unit } from './hash';
 import { ROAD_STYLE } from './road-geometry';
+import { onSurface, roadLevel } from './road-surface';
 import { srgbToLinear } from './terrain-mesh';
 
 // Painted road markings (docs/adr/0037): centrelines, lane separators and
@@ -27,7 +28,7 @@ import { srgbToLinear } from './terrain-mesh';
 // All markings form one vertex-coloured mesh: one draw call. Pure.
 
 /** Bump when the generated markings change (independent of the terrain and simulation). */
-export const MARKING_VERSION = 1;
+export const MARKING_VERSION = 2;
 
 export type PaintColor = 'white' | 'yellow';
 
@@ -409,7 +410,9 @@ export function roadMarkings(
 export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPlan {
   const style = MARKING_STYLES[region];
   const byId = (a: Road, b: Road) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-  const roads = [...terrain.features.roads].sort(byId);
+  // Roads on the surface: tunnels have no markings to see (docs/adr/0044).
+  const roads = [...terrain.features.roads].filter(onSurface).sort(byId);
+  const levels = roads.map(roadLevel);
 
   // Built-up places, from building density.
   const D = 50;
@@ -546,11 +549,33 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
       }
     }
   });
-  /** Whether (x, y) is on (or within `CLEAR_M` of) a road not in `own`; service roads count only for edges. */
-  const blocked = (x: number, y: number, own: ReadonlySet<number>, edgeLine: boolean) => {
+  // Roads sharing each node, to tell a junction from a road passing over or under (docs/adr/0044).
+  const atNode = new Map<string, number[]>();
+  roads.forEach((r, ri) => {
+    for (const p of r.centerline) {
+      const k = key(p);
+      const list = atNode.get(k);
+      if (list) list.push(ri);
+      else atNode.set(k, [ri]);
+    }
+  });
+  /**
+   * Whether (x, y) is on (or within `CLEAR_M` of) a road not in `own`;
+   * service roads count only for edges. Only roads on the chain's level, or
+   * joined to it at a node, count: a road passing over or under does not.
+   */
+  const blocked = (
+    x: number,
+    y: number,
+    own: ReadonlySet<number>,
+    edgeLine: boolean,
+    level: string,
+    joined: ReadonlySet<number>,
+  ) => {
     for (const s of cells.get(Math.floor(x / CELL) * 100_003 + Math.floor(y / CELL)) ?? []) {
       const ri = segs[s * SEG] ?? 0;
       if (own.has(ri)) continue;
+      if (levels[ri] !== level && !joined.has(ri)) continue;
       const r = roads[ri];
       if (!r || (!edgeLine && isMinorAccess(r))) continue;
       const ax = segs[s * SEG + 1] ?? 0;
@@ -610,6 +635,12 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
   chains.forEach((chain, ci) => {
     const pts = chain.points;
     const own = new Set(chain.roads);
+    const level = levels[chain.roads[0] ?? 0] ?? '';
+    const joined = new Set(
+      chain.roads.flatMap((ri) =>
+        (roads[ri]?.centerline ?? []).flatMap((p) => atNode.get(key(p)) ?? []),
+      ),
+    );
     // Distance along the centreline at each point, and the turn there.
     const along = [0];
     for (let i = 1; i < pts.length; i += 1) {
@@ -668,7 +699,7 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
       let open: number | null = null;
       for (let s = 0; s <= total + 1e-9; s += STEP_M) {
         const p = at(Math.min(s, total));
-        let ok = !blocked(p.x, p.y, own, line.role === 'edge');
+        let ok = !blocked(p.x, p.y, own, line.role === 'edge', level, joined);
         if (ok && Math.abs(line.offset) > 0.3) {
           for (const sharp of sharpAt) {
             if (Math.abs(s - sharp) < 2 + Math.abs(line.offset)) ok = false;

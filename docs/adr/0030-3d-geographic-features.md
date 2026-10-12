@@ -104,6 +104,8 @@ colour and normal, so the overlap cannot show.
 **Layers.** From lowest to highest: verge, path, track, unpaved, paved, major. Each is one mesh with
 its own material, raised by a small offset (4–9 cm) and a growing `polygonOffset`. Where classes
 meet, the higher one is on top at any distance.
+_Superseded by ADR 0044:_ the pieces are cut so that no two classes overlap on one level, and every
+layer is at one offset (6 cm); the `polygonOffset` order remains for roads on different levels.
 
 **Verge.** Paved and major roads have a 0.6 m verge on each side, drawn as a network of its own,
 like the casing on the 2D map.

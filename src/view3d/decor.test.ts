@@ -602,7 +602,7 @@ describe('the roadside details as a whole', () => {
       for (const v of [i.x, i.y, i.yaw, i.scaleW, i.scaleH, ...i.tint])
         expect(Number.isFinite(v)).toBe(true);
     }
-    // Paths lie just above the ground, under the roads.
+    // Paths lie just above the ground, at the roads' height (they are cut by the roads).
     for (const [, m] of built.geometry.paths) {
       for (let k = 0; k < m.positions.length; k += 3) {
         const x = m.positions[k] ?? 0;
@@ -610,7 +610,7 @@ describe('the roadside details as a whole', () => {
         const y = -(m.positions[k + 2] ?? 0);
         const above = z - heightAt(terrain, x, y);
         expect(above).toBeGreaterThan(0.01);
-        expect(above).toBeLessThan(0.04);
+        expect(above).toBeLessThan(0.07);
       }
     }
     expect(built.geometry.stats.decor.pathTriangles).toBeGreaterThan(0);

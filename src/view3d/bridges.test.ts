@@ -26,7 +26,7 @@ import {
 import { terrainGround } from './camera-math';
 import { createDraper } from './drape';
 import { buildFeatureGeometry } from './geo-features';
-import { roadGeometry } from './road-geometry';
+import { ROAD_OFFSET_M, roadGeometry } from './road-geometry';
 import { triangles } from './test-helpers';
 
 // Decorative bridges (docs/adr/0041): where roads cross water, and only
@@ -366,7 +366,8 @@ describe('the deck', () => {
     const far = triangles(lifted).filter(
       (tri) => tri.a.x < -100 && tri.b.x < -100 && tri.c.x < -100,
     );
-    for (const tri of far) expect(tri.a.z).toBeCloseTo(heightAt(t, tri.a.x, tri.a.y) + 0.08, 4);
+    for (const tri of far)
+      expect(tri.a.z).toBeCloseTo(heightAt(t, tri.a.x, tri.a.y) + ROAD_OFFSET_M, 4);
   });
 
   it('is deterministic, whatever order the features come in', () => {

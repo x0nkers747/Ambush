@@ -180,31 +180,38 @@ describe('roadGeometry', () => {
     centerline: pts.map(([x, y]) => ({ x, y })),
   });
 
-  it('draws each class on its own layer, higher classes above lower ones', () => {
-    const layers = roadGeometry(
-      [
-        road('m', 'major', [-200, 0], [0, 0], [200, 0]),
-        road('p', 'paved', [0, 0], [0, 200]),
-        road('t', 'track', [0, 0], [0, -200]),
-        road('f', 'path', [100, 0], [150, -150]),
-      ],
-      draper,
-    );
+  it('draws one surface: each point covered by one class, the most important there', () => {
+    const roads = [
+      road('m', 'major', [-200, 0], [0, 0], [200, 0]),
+      road('p', 'paved', [0, 0], [0, 200]),
+      road('t', 'track', [0, 0], [0, -200]),
+      road('f', 'path', [100, 0], [150, -150]),
+    ];
+    const layers = roadGeometry(roads, draper);
     expect([...layers.keys()]).toEqual(['verge', 'path', 'track', 'paved', 'major']);
-    const offsets = ROAD_LAYERS.map((l) => ROAD_STYLE[l].offset);
-    expect(offsets).toEqual([...offsets].sort((x, y) => x - y));
-    // Where the major road crosses the junction it is on top.
-    const tops = new Map(
-      [...layers].map(([layer, mesh]) => [layer, coverage(mesh).at(1, 0.5)[0] ?? -Infinity]),
-    );
-    expect(tops.get('major')).toBeGreaterThan(tops.get('paved') ?? Infinity);
-    expect(tops.get('paved')).toBeGreaterThan(tops.get('verge') ?? Infinity);
+    // One height for every layer: none is lifted over another (docs/adr/0044).
+    expect(new Set(ROAD_LAYERS.map((l) => ROAD_STYLE[l].offset)).size).toBe(1);
+    const cover = new Map([...layers].map(([layer, mesh]) => [layer, coverage(mesh)]));
+    const classesAt = (x: number, y: number) =>
+      [...cover].filter(([, c]) => c.covered(x, y)).map(([layer]) => layer);
+    // The junction and the major road are the major road's; the side roads stop at its edge.
+    expect(classesAt(1, 0.5)).toEqual(['major']);
+    expect(classesAt(0.5, 3.5)).toEqual(['major']);
+    expect(classesAt(0.5, 5)).toEqual(['paved']);
+    expect(classesAt(0.5, -5)).toEqual(['track']);
+    // Where the path meets the major road it stops at the road's edge.
+    expect(classesAt(100.3, -0.5)).toEqual(['major']);
+    // No point of any road is covered twice by different classes.
+    for (let x = -30; x <= 160; x += 0.7)
+      for (let y = -30; y <= 30; y += 0.7) expect(classesAt(x, y).length).toBeLessThanOrEqual(1);
     // The verge shows beyond the edge of the paved road, the track has none.
-    const vergeMesh = layers.get('verge');
-    if (!vergeMesh) throw new Error('no verge');
-    const verge = coverage(vergeMesh);
-    expect(verge.covered(3 + VERGE_M / 2, 100)).toBe(true);
-    expect(verge.covered(1.5 + VERGE_M / 2, -100)).toBe(false);
+    expect(classesAt(3 + VERGE_M / 2, 100)).toEqual(['verge']);
+    expect(cover.get('verge')?.covered(1.5 + VERGE_M / 2, -100)).toBe(false);
+    // Every surface lies on the ground, at the one height.
+    for (const [, mesh] of layers)
+      for (const tri of triangles(mesh))
+        for (const v of [tri.a, tri.b, tri.c])
+          expect(v.z - heightAt(terrain, v.x, v.y)).toBeCloseTo(ROAD_STYLE.major.offset, 3);
   });
 
   it('draws nothing for no roads', () => {

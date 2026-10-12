@@ -1,12 +1,20 @@
 import { BRIDGE_STYLES, type Bridge, type BridgeIndex } from '#sim';
+import type { CoordinatedBridges } from './bridge-complexes';
 import type { MeshBuffers, MeshData } from './drape';
 import { finishMesh, meshBuffers } from './drape';
+import { Occupancy } from './planar';
 import { srgbToLinear } from './terrain-mesh';
 
 // Bridges in 3D (docs/adr/0041): the simulation plans them (`planBridges`,
 // in #sim, so soldiers cross the bridges drawn); the 3D view draws each as a
 // deck, its sides, barriers and supports, with the road's own draped surface
 // and markings lifted onto it. Decoration: picking never hits a bridge.
+//
+// Decks mapped side by side as one structure (docs/adr/0044,
+// bridge-complexes.ts) are drawn as one: their slab is one surface (pieces
+// cut so none lies on another), and side walls, barriers and abutments stand
+// only on the structure's outside, never inside it. Barriers also stop where
+// another road joins the bridge, and piers are not doubled.
 
 export {
   APPROACH_M,
@@ -138,7 +146,15 @@ export function liftOntoBridges(
         Math.min(y0, y1, y2),
         Math.max(x0, x1, x2),
         Math.max(y0, y1, y2),
-      )
+      ) &&
+      // On a deck: a corner, an edge's middle or the centre (draped triangles are small).
+      (index.at(x0, y0) !== null ||
+        index.at(x1, y1) !== null ||
+        index.at(x2, y2) !== null ||
+        index.at((x0 + x1) / 2, (y0 + y1) / 2) !== null ||
+        index.at((x1 + x2) / 2, (y1 + y2) / 2) !== null ||
+        index.at((x2 + x0) / 2, (y2 + y0) / 2) !== null ||
+        index.at((x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3) !== null)
     ) {
       near[t] = 1;
       touched += 1;
@@ -349,8 +365,18 @@ function column(
   );
 }
 
+/** Where a barrier run stands: its deck, side and centre line (map x, y pairs), for diagnostics. */
+export interface BarrierRun {
+  readonly deck: string;
+  readonly side: 1 | -1;
+  readonly points: readonly number[];
+}
+
 export interface BridgeGeometry {
   readonly mesh: MeshData;
+  /** The barrier runs and piers placed (docs/adr/0044 diagnostics). */
+  readonly barriers: readonly BarrierRun[];
+  readonly pierAt: readonly { readonly deck: string; readonly x: number; readonly y: number }[];
   readonly bridges: number;
   readonly mapped: number;
   readonly inferred: number;
@@ -358,20 +384,44 @@ export interface BridgeGeometry {
   readonly lowClearance: number;
 }
 
-/** The bridges' structure: deck slab, barriers, abutments and piers, one vertex-coloured mesh. */
+/** How the decks of one structure are drawn together (docs/adr/0044). */
+export interface StructureContext {
+  readonly coordinated: CoordinatedBridges;
+  /** Whether a road that is not on deck `deck`'s structure has its surface at (x, y): a road joining the bridge. */
+  readonly roadEntrance: (deck: number, x: number, y: number) => boolean;
+}
+
+/** Piers of one structure closer than this are one pier, metres. */
+const PIER_MERGE_M = 4;
+
+/**
+ * The bridges' structure: deck slab, barriers, abutments and piers, one
+ * vertex-coloured mesh. With a `context`, `bridges` are its coordinated decks,
+ * and structures of several decks are drawn as one.
+ */
 export function bridgeGeometry(
   bridges: readonly Bridge[],
   ground: (x: number, y: number) => number,
+  context?: StructureContext,
 ): BridgeGeometry {
   const out = meshBuffers(true);
+  const coordinated = context?.coordinated;
+  const slabs = new Map<number, Occupancy<number>>();
+  const piersOf = new Map<number, { x: number; y: number }[]>();
+  const barrierRuns: BarrierRun[] = [];
+  const pierAt: { deck: string; x: number; y: number }[] = [];
   const concrete = rgb(COLORS.concrete);
   const underside = rgb(COLORS.underside);
   const metal = rgb(COLORS.metal);
   const post = rgb(COLORS.post);
   const railing = rgb(COLORS.railing);
   let piers = 0;
-  for (const b of bridges) {
+  bridges.forEach((b, bi) => {
     const spec = BRIDGE_STYLES[b.style];
+    const complex = coordinated?.complexOf[bi] ?? -1;
+    const shared = (coordinated?.complexes[complex]?.members.length ?? 1) > 1;
+    const onOther = (x: number, y: number, margin = 0) =>
+      shared && (coordinated?.onOtherDeck(bi, x, y, margin) ?? false);
     const n = b.deck.length - 1;
     // The part that stands clear of the road: where the deck is lifted, or over water.
     let k0 = 0;
@@ -381,50 +431,84 @@ export function bridgeGeometry(
     // A metre or two either side, onto the banks.
     k0 = Math.max(0, k0 - 2);
     k1 = Math.min(n, k1 + 2);
-    if (k1 - k0 < 2) continue;
+    if (k1 - k0 < 2) return;
     const H = b.halfWidth;
     // The deck slab: just under the road's surface (which is lifted onto it).
-    strip(out, b, k0, k1, H, -H, -spec.thickness, 0.02, concrete, { bottom: false });
-    strip(out, b, k0, k1, H - 0.05, -H + 0.05, -spec.thickness, -spec.thickness + 0.01, underside, {
-      top: false,
-      ends: false,
-    });
-    // Barriers along both edges.
+    if (!shared || !coordinated) {
+      strip(out, b, k0, k1, H, -H, -spec.thickness, 0.02, concrete, { bottom: false });
+      strip(
+        out,
+        b,
+        k0,
+        k1,
+        H - 0.05,
+        -H + 0.05,
+        -spec.thickness,
+        -spec.thickness + 0.01,
+        underside,
+        {
+          top: false,
+          ends: false,
+        },
+      );
+    } else {
+      let slab = slabs.get(complex);
+      if (!slab) {
+        slab = new Occupancy<number>(() => true);
+        slabs.set(complex, slab);
+      }
+      sharedSlab(out, b, k0, k1, H, spec.thickness, slab, coordinated, bi, concrete, underside);
+    }
+    // Barriers along both edges: on the structure's outside, and not across a road joining it.
     for (const side of [1, -1] as const) {
-      const outer = side * (H - 0.02);
-      const inner = side * (H - 0.3);
-      const [l, r] = side > 0 ? [outer, inner] : [inner, outer];
-      if (spec.barrier === 'parapet') {
-        strip(out, b, k0, k1, l, r, 0, 0.85, concrete);
-      } else if (spec.barrier === 'guardrail') {
-        const off = side * (H - 0.35);
-        for (let k = k0; k <= k1; k += 2)
-          column(
-            out,
-            b,
-            k,
-            off - side * 0.05,
-            0.06,
-            0.06,
-            (b.deck[k] ?? 0) - 0.1,
-            (b.deck[k] ?? 0) + 0.75,
-            post,
-          );
-        const [rl, rr] = side > 0 ? [off + 0.04, off - 0.04] : [off - 0.04, off + 0.04];
-        strip(out, b, k0, k1, rl, rr, 0.45, 0.75, metal);
-      } else {
-        const off = side * (H - 0.12);
-        for (let k = k0; k <= k1; k += 2)
-          column(out, b, k, off, 0.04, 0.04, b.deck[k] ?? 0, (b.deck[k] ?? 0) + 1.05, railing);
-        const [rl, rr] = side > 0 ? [off + 0.04, off - 0.04] : [off - 0.04, off + 0.04];
-        strip(out, b, k0, k1, rl, rr, 1.0, 1.1, railing);
-        strip(out, b, k0, k1, rl, rr, 0.5, 0.56, railing);
+      const at = (k: number, across: number) => edgePoint(b, k, side * across);
+      const free = (k: number) => {
+        const p = at(k, H - 0.15);
+        return !onOther(p.x, p.y, 0.3) && !(context?.roadEntrance(bi, p.x, p.y) ?? false);
+      };
+      for (const [r0, r1] of runs(k0, k1, free)) {
+        const line: number[] = [];
+        for (let k = r0; k <= r1; k += 1) {
+          const p = at(k, H - 0.15);
+          line.push(p.x, p.y);
+        }
+        barrierRuns.push({ deck: b.id, side, points: line });
+        const outer = side * (H - 0.02);
+        const inner = side * (H - 0.3);
+        const [l, r] = side > 0 ? [outer, inner] : [inner, outer];
+        if (spec.barrier === 'parapet') {
+          strip(out, b, r0, r1, l, r, 0, 0.85, concrete);
+        } else if (spec.barrier === 'guardrail') {
+          const off = side * (H - 0.35);
+          for (let k = r0; k <= r1; k += 2)
+            column(
+              out,
+              b,
+              k,
+              off - side * 0.05,
+              0.06,
+              0.06,
+              (b.deck[k] ?? 0) - 0.1,
+              (b.deck[k] ?? 0) + 0.75,
+              post,
+            );
+          const [rl, rr] = side > 0 ? [off + 0.04, off - 0.04] : [off - 0.04, off + 0.04];
+          strip(out, b, r0, r1, rl, rr, 0.45, 0.75, metal);
+        } else {
+          const off = side * (H - 0.12);
+          for (let k = r0; k <= r1; k += 2)
+            column(out, b, k, off, 0.04, 0.04, b.deck[k] ?? 0, (b.deck[k] ?? 0) + 1.05, railing);
+          const [rl, rr] = side > 0 ? [off + 0.04, off - 0.04] : [off - 0.04, off + 0.04];
+          strip(out, b, r0, r1, rl, rr, 1.0, 1.1, railing);
+          strip(out, b, r0, r1, rl, rr, 0.5, 0.56, railing);
+        }
       }
     }
-    // Abutments: where the deck meets the banks, down into the ground.
+    // Abutments: where the deck meets the banks, down into the ground (not inside the structure).
     for (const k of [k0, k1]) {
       const x = b.xy[2 * k] ?? 0;
       const y = b.xy[2 * k + 1] ?? 0;
+      if (onOther(x, y)) continue;
       const top = (b.deck[k] ?? 0) - spec.thickness;
       const bottom = Math.min(ground(x, y), b.under[k] ?? ground(x, y)) - 1;
       if (top - bottom > 0.2) column(out, b, k, 0, 0.6, H, bottom, top, concrete);
@@ -445,19 +529,187 @@ export function bridgeGeometry(
       const top = (b.deck[k] ?? 0) - spec.thickness;
       const bottom = ground(x, y) - 0.5;
       if (top - bottom < 0.3) continue;
+      // One pier where the decks of a structure would each have one.
+      if (shared) {
+        const placed = piersOf.get(complex) ?? [];
+        if (placed.some((q) => Math.hypot(q.x - x, q.y - y) < PIER_MERGE_M + H)) continue;
+        placed.push({ x, y });
+        piersOf.set(complex, placed);
+      }
       if (b.style === 'major') {
         for (const side of [0.55, -0.55])
           column(out, b, k, side * H, 0.6, 0.6, bottom, top, concrete);
       } else column(out, b, k, 0, 0.5, H * 0.8, bottom, top, concrete);
       piers += 1;
+      pierAt.push({ deck: b.id, x, y });
     }
-  }
+  });
   return {
     mesh: finishMesh(out),
+    barriers: barrierRuns,
+    pierAt,
     bridges: bridges.length,
     mapped: bridges.filter((b) => b.mapped).length,
     inferred: bridges.filter((b) => !b.mapped).length,
     piers,
     lowClearance: bridges.filter((b) => b.lowClearance).length,
   };
+}
+
+/** The point `across` metres left of deck sample `k`'s centreline. */
+function edgePoint(b: Bridge, k: number, across: number): { x: number; y: number } {
+  const n = b.deck.length;
+  const i = Math.max(0, Math.min(n - 1, k));
+  const j0 = Math.max(0, i - 1);
+  const j1 = Math.min(n - 1, i + 1);
+  let dx = (b.xy[2 * j1] ?? 0) - (b.xy[2 * j0] ?? 0);
+  let dy = (b.xy[2 * j1 + 1] ?? 0) - (b.xy[2 * j0 + 1] ?? 0);
+  const l = Math.hypot(dx, dy) || 1;
+  dx /= l;
+  dy /= l;
+  return { x: (b.xy[2 * i] ?? 0) - dy * across, y: (b.xy[2 * i + 1] ?? 0) + dx * across };
+}
+
+/** The runs of consecutive samples from `k0` to `k1` where `free` holds, at least one segment long. */
+function runs(k0: number, k1: number, free: (k: number) => boolean): [number, number][] {
+  const out: [number, number][] = [];
+  let start = -1;
+  for (let k = k0; k <= k1 + 1; k += 1) {
+    const ok = k <= k1 && free(k);
+    if (ok && start < 0) start = k;
+    if (!ok && start >= 0) {
+      if (k - 1 > start) out.push([start, k - 1]);
+      start = -1;
+    }
+  }
+  return out;
+}
+
+/**
+ * A deck's part of a shared slab: the strip under the deck from sample `k0`
+ * to `k1`, cut so that it does not overlap the decks of its structure drawn
+ * before it, at the structure's shared height; side walls only where its
+ * edge is not inside another deck of the structure.
+ */
+function sharedSlab(
+  out: MeshBuffers,
+  b: Bridge,
+  k0: number,
+  k1: number,
+  H: number,
+  thickness: number,
+  slab: Occupancy<number>,
+  coordinated: CoordinatedBridges,
+  bi: number,
+  concrete: [number, number, number],
+  underside: [number, number, number],
+) {
+  const height = (x: number, y: number, k: number) => coordinated.surfaceAt(x, y) ?? b.deck[k] ?? 0;
+  for (let k = k0; k < k1; k += 1) {
+    const l0 = edgePoint(b, k, H);
+    const l1 = edgePoint(b, k + 1, H);
+    const r0 = edgePoint(b, k, -H);
+    const r1 = edgePoint(b, k + 1, -H);
+    for (const piece of slab.place([r0.x, r0.y, r1.x, r1.y, l1.x, l1.y, l0.x, l0.y], bi)) {
+      const m = piece.length / 2;
+      const v = (i: number): [number, number, number] => {
+        const x = piece[2 * i] ?? 0;
+        const y = piece[2 * i + 1] ?? 0;
+        return [x, height(x, y, k), -y];
+      };
+      for (let i = 1; i + 1 < m; i += 1) {
+        const a = v(0);
+        const c = v(i);
+        const d = v(i + 1);
+        // Top (counter-clockwise from above, so its normal points up) and underside.
+        triangle(
+          out,
+          [a[0], a[1] + 0.02, a[2]],
+          [c[0], c[1] + 0.02, c[2]],
+          [d[0], d[1] + 0.02, d[2]],
+          concrete,
+        );
+        triangle(
+          out,
+          [a[0], a[1] - thickness, a[2]],
+          [d[0], d[1] - thickness, d[2]],
+          [c[0], c[1] - thickness, c[2]],
+          underside,
+        );
+      }
+    }
+    // Side walls, outside the structure only.
+    for (const [p, q] of [
+      [l1, l0],
+      [r0, r1],
+    ] as const) {
+      const mx = (p.x + q.x) / 2;
+      const my = (p.y + q.y) / 2;
+      if (coordinated.onOtherDeck(bi, mx, my, -0.05)) continue;
+      const zp = height(p.x, p.y, k);
+      const zq = height(q.x, q.y, k + 1);
+      quad(
+        out,
+        [
+          [p.x, zp - thickness, -p.y],
+          [q.x, zq - thickness, -q.y],
+          [q.x, zq + 0.02, -q.y],
+          [p.x, zp + 0.02, -p.y],
+        ],
+        concrete,
+      );
+    }
+  }
+  // Ends, where they are not inside the structure.
+  for (const [k, sign] of [
+    [k0, 1],
+    [k1, -1],
+  ] as const) {
+    const c = edgePoint(b, k, 0);
+    if (coordinated.onOtherDeck(bi, c.x, c.y, -0.05)) continue;
+    const l = edgePoint(b, k, H);
+    const r = edgePoint(b, k, -H);
+    const [p, q] = sign > 0 ? [l, r] : [r, l];
+    const zp = height(p.x, p.y, k);
+    const zq = height(q.x, q.y, k);
+    quad(
+      out,
+      [
+        [p.x, zp - thickness, -p.y],
+        [q.x, zq - thickness, -q.y],
+        [q.x, zq + 0.02, -q.y],
+        [p.x, zp + 0.02, -p.y],
+      ],
+      concrete,
+    );
+  }
+}
+
+/** One flat-shaded triangle, counter-clockwise seen from its front (Three.js axes). */
+function triangle(
+  out: MeshBuffers,
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  c: readonly [number, number, number],
+  color: [number, number, number],
+) {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const wx = c[0] - a[0];
+  const wy = c[1] - a[1];
+  const wz = c[2] - a[2];
+  let nx = uy * wz - uz * wy;
+  let ny = uz * wx - ux * wz;
+  let nz = ux * wy - uy * wx;
+  const l = Math.hypot(nx, ny, nz);
+  if (!(l > 1e-9)) return;
+  nx /= l;
+  ny /= l;
+  nz /= l;
+  for (const q of [a, b, c]) {
+    out.positions.push(q[0], q[1], q[2]);
+    out.normals.push(nx, ny, nz);
+    out.colors?.push(...color);
+  }
 }

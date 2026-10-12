@@ -6,16 +6,12 @@ import { regionOf } from './building-style';
 import { PATH_COLOR, pathGeometry } from './decor-geometry';
 import type { PathStyle } from './decor-paths';
 import { DECOR_VERSION, planDecor, type DecorStats } from './decor-plan';
-import {
-  BRIDGE_VERSION,
-  bridgeGeometry,
-  bridgeIndex,
-  liftOntoBridges,
-  planBridges,
-} from './bridges';
+import { coordinateBridges, cutUnderDecks, roadEntrances } from './bridge-complexes';
+import { BRIDGE_VERSION, bridgeGeometry, liftOntoBridges, planBridges } from './bridges';
 import { createDraper, type MeshData } from './drape';
 import { MARKING_VERSION, roadMarkings, type MarkingStats } from './road-markings';
-import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-geometry';
+import { ROAD_LAYERS, ROAD_STYLE, roadSurfaces, type RoadLayer } from './road-geometry';
+import type { SurfaceStats } from './road-surface';
 import type { SurfaceMeshData } from './surface-mesh';
 import type { PlacedInstance } from './vegetation-placement';
 import { waterGeometry } from './water-geometry';
@@ -30,7 +26,7 @@ import { createWaterMaterial } from './water-material';
 // features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 4;
+export const GEOMETRY_VERSION = 5;
 /** The roadside details' own version (docs/adr/0036). */
 export { DECOR_VERSION };
 /** The road markings' own version (docs/adr/0037). */
@@ -56,12 +52,23 @@ export interface GeoFeatureStats {
   /** Decorative bridges (docs/adr/0041). */
   readonly bridges: {
     readonly count: number;
+    /** Structures drawn (decks mapped side by side are one, docs/adr/0044), and those of several decks. */
+    readonly structures: number;
+    readonly shared: number;
+    /** Decks too low above the water for a real bridge: the water is cut away beneath them. */
+    readonly lowDecks: number;
     readonly mapped: number;
     readonly inferred: number;
     readonly piers: number;
     readonly lowClearance: number;
     readonly skipped: number;
     readonly triangles: number;
+  };
+  /** The road surface: pieces before and after cutting, junctions and corner fillets (docs/adr/0044). */
+  readonly junctions: SurfaceStats & {
+    readonly vergePieces: number;
+    readonly vergeCutMs: number;
+    readonly vergeDrapeMs: number;
   };
   /** Generation times in milliseconds. */
   readonly ms: {
@@ -114,7 +121,8 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   const draper = createDraper(terrain);
   const clock = () => performance.now();
   let t = clock();
-  const roads = roadGeometry(terrain.features.roads, draper);
+  const surfaces = roadSurfaces(terrain.features.roads, draper);
+  const roads = surfaces.layers;
   const roadMs = clock() - t;
   t = clock();
   const water = waterGeometry(terrain, draper);
@@ -128,24 +136,31 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   });
   t = clock();
   const decor = planDecor(terrain, buildings.designs, buildings.entrances);
-  const paths = pathGeometry(decor.paths, draper);
+  const paths = pathGeometry(decor.paths, draper, surfaces.occupancy);
   const decorMs = clock() - t;
   const markings = roadMarkings(terrain, draper, regionOf(terrain));
   // Bridges (display only): their structure, and the road's own surface,
   // verges, markings and paths lifted onto their decks.
   t = clock();
   const plan = planBridges(terrain);
-  const index = bridgeIndex(plan.bridges);
+  // Decks mapped side by side are one structure (docs/adr/0044).
+  const coordinated = coordinateBridges(plan.bridges);
+  const index = coordinated.index;
   const ground = (x: number, y: number) => heightAt(terrain, x, y);
-  const bridges = bridgeGeometry(plan.bridges, ground);
+  const bridges = bridgeGeometry(coordinated.decks, ground, {
+    coordinated,
+    roadEntrance: roadEntrances(terrain.features.roads, coordinated),
+  });
   const onBridges = (d: MeshData) => liftOntoBridges(d, index, ground);
+  // No water drawn over a deck that stands too low above it (docs/adr/0044).
+  const cut = cutUnderDecks(water.mesh, coordinated.decks);
   const liftedRoads = roadList.map(([layer, d]) => [layer, onBridges(d)] as const);
   const liftedPaths = paths.map(([style, d]) => [style, onBridges(d)] as const);
   const liftedMarkings = onBridges(markings.mesh);
   const bridgeMs = clock() - t;
   const geometry: FeatureGeometry = {
     roads: liftedRoads,
-    water: water.mesh,
+    water: cut.mesh,
     buildings: buildings.surfaces,
     openings: buildings.openings,
     entrances: buildings.entrances,
@@ -154,7 +169,7 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
     bridges: bridges.mesh,
     stats: {
       roadTriangles: liftedRoads.reduce((s, [, d]) => s + d.triangleCount, 0),
-      waterTriangles: water.mesh.triangleCount,
+      waterTriangles: cut.mesh.triangleCount,
       buildingTriangles: buildings.surfaces.triangleCount,
       openingTriangles: buildings.openings.triangleCount,
       buildings: buildings.count,
@@ -167,6 +182,9 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
       markings: markings.stats,
       bridges: {
         count: bridges.bridges,
+        structures: coordinated.complexes.length,
+        shared: coordinated.complexes.filter((c) => c.members.length > 1).length,
+        lowDecks: cut.lowDecks,
         mapped: bridges.mapped,
         inferred: bridges.inferred,
         piers: bridges.piers,
@@ -174,6 +192,7 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
         skipped: plan.skipped.length,
         triangles: bridges.mesh.triangleCount,
       },
+      junctions: surfaces.stats,
       ms: {
         roads: roadMs,
         water: waterMs,

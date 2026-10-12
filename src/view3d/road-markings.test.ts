@@ -584,7 +584,7 @@ describe('the markings mesh', () => {
     expect(b.pieces).toEqual(a.pieces);
     expect(b.quads).toEqual(a.quads);
     expect(planMarkings(world(roads), 'central-european')).toEqual(a);
-    expect(MARKING_VERSION).toBe(1);
+    expect(MARKING_VERSION).toBe(2);
   });
 
   it('differs between regions only where conventions differ', () => {
@@ -597,5 +597,74 @@ describe('the markings mesh', () => {
     expect(us.pieces.filter((x) => x.role === 'separator').every((x) => x.color === 'white')).toBe(
       true,
     );
+  });
+});
+
+describe('markings and grade separation (docs/adr/0044)', () => {
+  const eu = 'central-european' as const;
+  const across: [number, number][] = [
+    [-250, 0],
+    [250, 0],
+  ];
+  const along: [number, number][] = [
+    [0, -250],
+    [0, 250],
+  ];
+
+  it('paints nothing on a road in a tunnel', () => {
+    const plan = planMarkings(
+      world([road('t', across, 'primary', { crossing: { kind: 'tunnel', value: 'yes' } })]),
+      eu,
+    );
+    expect(plan.pieces).toEqual([]);
+  });
+
+  it('does not stop an overpass line for the road under it, but does at a junction', () => {
+    // The continuous edge lines (the centre line is dashed).
+    const covered = (pieces: readonly PaintPiece[]) =>
+      piecesOf(pieces, 'edge', 3.75).some((p) => p.s0 <= 250 && p.s1 >= 250);
+    // The bridge crosses the road below with no shared node: its centre line runs on.
+    const over = planMarkings(
+      world([
+        road('below', along, 'primary'),
+        road('bridge', across, 'primary', { crossing: { kind: 'bridge', value: 'yes', layer: 1 } }),
+      ]),
+      eu,
+    );
+    const bridgeChain = over.chains.findIndex((c) => c.roads.includes('bridge'));
+    expect(covered(over.pieces.filter((p) => p.chain === bridgeChain))).toBe(true);
+    // The same roads on one level, meeting at a node: the line stops at the junction.
+    const level = planMarkings(
+      world([
+        road(
+          'below',
+          [
+            [0, -250],
+            [0, 0],
+            [0, 250],
+          ],
+          'primary',
+        ),
+        road(
+          'cross',
+          [
+            [-250, 0],
+            [0, 0],
+            [250, 0],
+          ],
+          'primary',
+        ),
+      ]),
+      eu,
+    );
+    const crossChain = level.chains.findIndex((c) => c.roads.includes('cross'));
+    const at = (pieces: readonly PaintPiece[], s: number) =>
+      piecesOf(pieces, 'centre').some((p) => p.s0 <= s && p.s1 >= s);
+    expect(
+      at(
+        level.pieces.filter((p) => p.chain === crossChain),
+        250,
+      ),
+    ).toBe(false);
   });
 });
