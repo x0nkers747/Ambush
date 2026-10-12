@@ -87,8 +87,6 @@ export const BANK_FADE_M = 3;
 export const BANK_MIN_RISE = 0.04;
 /** And at most this much per metre: a steep bank comes down to the water, a cliff stays steep. */
 export const BANK_MAX_RISE = 1.5;
-/** A road over levelled water is a deck this far above the level, metres. */
-export const DECK_M = 0.3;
 /** Standing water is not levelled when the ground inside it stands this far above the level, metres. */
 export const MAX_INTERIOR_CUT_M = 3;
 /** …or its shore lies this far below it (banks would have to be raised over a long stretch), metres. */

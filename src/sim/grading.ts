@@ -7,7 +7,6 @@ import {
   BANK_MIN_RISE,
   BANK_REACH_M,
   BED_SLOPE,
-  DECK_M,
   SHORE_FREEBOARD_M,
   SHORE_INSET_M,
   waterLevels,
@@ -36,11 +35,11 @@ import {
 // lowered on the elevation grid itself, without refinement.
 
 /** Bump when the grading rules change: graded terrains of different versions differ. */
-export const GRADING_VERSION = 2;
+export const GRADING_VERSION = 3;
 /**
  * Which model of the ground a terrain is: the DEM cleaning version
  * (docs/adr/0033) and the grading version it went through, e.g.
- * `dem-clean-v1+graded-v2`; `source` for an untouched terrain. Scenarios
+ * `dem-clean-v1+graded-v3`; `source` for an untouched terrain. Scenarios
  * record it, so plans made on an earlier model are noticed (docs/adr/0032).
  */
 export function terrainModelId(terrain: TerrainDataset): string {
@@ -548,12 +547,13 @@ export function gradeWithSummary(source: TerrainDataset): {
   let shoreCells = 0;
   let deepCells = 0;
   if (wq.any) {
-    // Roads and buildings, which water grading works round: roads over water
-    // are decks, ground under buildings standing in water is left alone, and
-    // deep-water cells near either are graded on the fine lattice.
+    // Buildings, which water grading works round: the ground under a building
+    // standing in water is left alone, and deep-water cells near one are graded
+    // on the fine lattice. Roads over water get no ground of their own: the 3D
+    // view draws their bridges (docs/adr/0041), and the ground under them is
+    // the bed like the rest.
     const STRUCT_BUCKET = 50;
     const structures = new Map<number, number[]>();
-    const roadSegs: number[] = [];
     const addStructure = (minX: number, minY: number, maxX2: number, maxY2: number, s: number) => {
       for (
         let gx = Math.floor(minX / STRUCT_BUCKET);
@@ -573,31 +573,6 @@ export function gradeWithSummary(source: TerrainDataset): {
       }
     };
     const reachOf = halfDiagonal + 2;
-    // Decks: roads mapped as bridges, and (on terrain imported before bridges
-    // were kept) built roads; a path or track merely mapped in the water
-    // (along a beach, through a ford) lies on the bed.
-    const keepsBridges = source.features.roads.some((r) => r.bridge);
-    const decked = (road: Road) =>
-      road.bridge === true || (!keepsBridges && ROAD_GRADING[road.roadClass] !== null);
-    for (const road of [...source.features.roads].sort(byId)) {
-      for (let i = 0; i + 1 < road.centerline.length; i += 1) {
-        const a = road.centerline[i];
-        const b = road.centerline[i + 1];
-        if (!a || !b) continue;
-        const h = road.widthMeters / 2 + 1;
-        const s = roadSegs.length / 5;
-        // (A road that is no deck keeps clear of deep-water cells all the same, at no cost.)
-        roadSegs.push(a.x, a.y, b.x, b.y, decked(road) ? h : -Infinity);
-        addStructure(
-          Math.min(a.x, b.x) - h - reachOf,
-          Math.min(a.y, b.y) - h - reachOf,
-          Math.max(a.x, b.x) + h + reachOf,
-          Math.max(a.y, b.y) + h + reachOf,
-          s,
-        );
-      }
-    }
-    const roadCount = roadSegs.length / 5;
     buildings.forEach((building, i) => {
       const xs = building.footprint.map((p) => p.x);
       const ys = building.footprint.map((p) => p.y);
@@ -606,35 +581,13 @@ export function gradeWithSummary(source: TerrainDataset): {
         Math.min(...ys) - reachOf,
         Math.max(...xs) + reachOf,
         Math.max(...ys) + reachOf,
-        roadCount + i,
+        i,
       );
     });
     const near = (x: number, y: number) =>
       structures.get(Math.floor(x / STRUCT_BUCKET) * 100_003 + Math.floor(y / STRUCT_BUCKET)) ?? [];
-    /** Distance to the nearest road's edge (its half-width plus a metre). */
-    const roadEdge = (x: number, y: number) => {
-      let best = Infinity;
-      for (const s of near(x, y)) {
-        if (s >= roadCount) continue;
-        const o = s * 5;
-        const d =
-          segmentDistance(
-            x,
-            y,
-            roadSegs[o] ?? 0,
-            roadSegs[o + 1] ?? 0,
-            roadSegs[o + 2] ?? 0,
-            roadSegs[o + 3] ?? 0,
-          ) - (roadSegs[o + 4] ?? 0);
-        best = Math.min(best, d);
-      }
-      return best;
-    };
     const underBuilding = (x: number, y: number) =>
-      near(x, y).some(
-        (s) =>
-          s >= roadCount && pointInPolygon({ x, y }, buildings[s - roadCount]?.footprint ?? []),
-      );
+      near(x, y).some((s) => pointInPolygon({ x, y }, buildings[s]?.footprint ?? []));
 
     // Cells water can reach: round each levelled body and channel.
     const marked = new Uint8Array((columns - 1) * (rows - 1));
@@ -676,12 +629,7 @@ export function gradeWithSummary(source: TerrainDataset): {
       if (!w) return;
       const d = w.shoreDistance;
       if (w.inWater) {
-        // A road over the water is a deck above it; the ground under a building in it is left alone.
-        if (roadEdge(x, y) <= 0) {
-          constrain(b, n, w.level + DECK_M, Infinity, 1);
-          b.own[n] = WATER;
-          return;
-        }
+        // The ground under a building standing in the water is left alone.
         if (underBuilding(x, y)) return;
         b.own[n] = WATER;
         if (d < SHORE_INSET_M) {

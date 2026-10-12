@@ -529,7 +529,7 @@ function profileY(x: number): number {
   return 0;
 }
 
-describe('roads, buildings, bridges and sight', () => {
+describe('roads, buildings and sight', () => {
   const bridge: Road = {
     id: 'bridge',
     roadClass: 'paved',
@@ -553,8 +553,17 @@ describe('roads, buildings, bridges and sight', () => {
   const t = gradeTerrain(source);
   const level = waterLevelAt(t, -50, -50) ?? NaN;
 
-  it('carries a road over the water as a deck, not buried in it', () => {
-    for (let y = -100; y <= 100; y += 5) expect(heightAt(t, 0, y)).toBeGreaterThan(level);
+  it('gives a road over the water no ground of its own: its bridge is drawn, the bed is the bed', () => {
+    // The same lake with no road, and with the road mapped as a bridge: the ground is identical.
+    const without = gradeTerrain(lakeWorld({ buildings: [boathouse] }));
+    const mapped = gradeTerrain(
+      lakeWorld({ roads: [{ ...bridge, bridge: true }], buildings: [boathouse] }),
+    );
+    for (let y = -100; y <= 100; y += 5) {
+      expect(heightAt(t, 0, y)).toBe(heightAt(without, 0, y));
+      expect(heightAt(mapped, 0, y)).toBe(heightAt(without, 0, y));
+    }
+    expect(heightAt(t, 0, 0)).toBeLessThan(level);
   });
 
   it('leaves the ground under a building standing in the water', () => {
@@ -572,7 +581,7 @@ describe('roads, buildings, bridges and sight', () => {
   });
 
   it('names a new model of the ground', () => {
-    expect(terrainModelId(t)).toBe('graded-v2');
+    expect(terrainModelId(t)).toBe('graded-v3');
     // A terrain graded by the earlier rules is left as it was (its scenarios notice the model).
     const old: TerrainDataset = { ...source, grading: { version: 1, fineSpacingM: 2.5 } };
     expect(gradeTerrain(old)).toBe(old);

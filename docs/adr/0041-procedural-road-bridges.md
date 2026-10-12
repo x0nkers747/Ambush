@@ -9,8 +9,8 @@
 
 Since ADR 0040, water lies at its own level, with a bed below it. Roads are draped on the graded
 ground, so a road crossing a river was drawn on the river's bed, under the water. The exception
-was a road mapped `bridge=*` over levelled water: ADR 0040 grades a deck-high strip of ground under
-it, so it stood just above the water as a causeway.
+was a road mapped `bridge=*` over levelled water: ADR 0040 graded a deck-high strip of ground
+under it, so it stood just above the water as a causeway.
 
 What the data offers:
 
@@ -142,6 +142,17 @@ more than 15 cm), plus 2 m onto each bank, it has:
   not rebuilt when switching between 2D and 3D.
 - **Versions.** `BRIDGE_VERSION` is 1, and `GEOMETRY_VERSION` is 4.
 
+### The ground under bridges (`GRADING_VERSION` 3)
+
+ADR 0040's stand-in deck, a strip of ground at the water's level plus 0.3 m under roads mapped as
+bridges, is removed now that bridges are drawn. It showed as solid ground under the bridge instead of
+open water. The ground under a road over water is the bed, like any other water.
+
+- It is a change to the authoritative ground, so `GRADING_VERSION` is 3. The terrain model becomes
+  `dem-clean-v1+graded-v3`, and scenarios planned on version 2 notice it, as for ADR 0032.
+- The simulation is otherwise unaffected. Soldiers could never stand on that strip (water areas are
+  impassable), and line of sight across water is unchanged (it is flat, below any eye).
+
 ### Simulation isolation
 
 - The simulation never imports the 3D view (enforced by `tools/boundaries.test.ts`).
@@ -176,11 +187,6 @@ at the same time, so these are upper bounds.
 - **Units on bridges are drawn on the ground.** The simulation has no bridges: soldiers cannot enter
   water areas, and where a levelled channel is crossable (a river mapped only as a line), a soldier
   walks through it on the ground. Their markers are not lifted onto the deck.
-- **The ADR 0040 stand-in deck.** A road mapped `bridge=*` over levelled water is graded as a
-  causeway at the water's level plus 0.3 m (as are built roads on terrain imported before bridges
-  were kept). It shows as a strip of ground under the deck instead of open water directly beneath
-  it, at the deck's own width. Removing it would change the authoritative ground, which this
-  milestone may not do. A later grading version should drop it now that bridges are drawn.
 - **Low clearance.** Where the banks are lower than the water's level plus the clearance, or the
   10 m DEM rises above the deck in a narrow creek valley, the deck can sit close to the water or
   dip into the ground. These are counted as `lowClearance`: Woolgoolga's mangrove footbridges, for

@@ -6,6 +6,8 @@
   ADR 0032 (one authoritative, graded terrain), ADR 0033 (DEM quality validation) and ADR 0038
   (terrain materials). Amends ADR 0030 (water is no longer always draped) and ADR 0032 (grading now
   levels water; `GRADING_VERSION` 2).
+- Amended by ADR 0041: since `GRADING_VERSION` 3 roads over water get no deck of ground; the 3D
+  view draws their bridges instead.
 
 ## Context
 
@@ -160,7 +162,7 @@ the distance `d` to the nearest shore:
 | In water, `d` < 3.54 m (a lattice diagonal) | ground = level + 0.05 m (the waterline)                                                               |
 | In water, beyond                            | ground ≤ level − min(depth, 0.1 + 0.25 (d − 3.54)): a bed shelving at 1 in 4; deeper bathymetry stays |
 | On land, `d` < 8 m                          | level + 0.05 + 0.04 d ≤ ground ≤ level + 0.05 + 1.5 d, fading out over the last 3 m                   |
-| Under a bridge over levelled water          | ground ≥ level + 0.3 m: a deck                                                                        |
+| Under a bridge over levelled water          | nothing of its own: the bed, as anywhere (deck removed in `GRADING_VERSION` 3, ADR 0041)              |
 | Under a building standing in the water      | nothing: the ground is left as it is                                                                  |
 
 What the rules guarantee:
@@ -191,9 +193,10 @@ What the rules guarantee:
 - A road's level part and a building's pad keep their level. No bank constraint applies there, so a
   waterfront road or foundation is never cut down or buried.
 - Bank constraints combine with road and building side slopes by max and min.
-- Decks are only for roads mapped as bridges. On terrain imported before bridges were kept, they
-  are for built roads (major, paved, unpaved). A footpath mapped along a beach inside the sea (as at
-  Woolgoolga) lies on the bed instead of standing out of the sea as a causeway.
+- Roads over water get no ground of their own. Version 2 graded a deck of ground at the level plus
+  0.3 m under roads mapped as bridges (and under built roads on terrain imported before bridges were
+  kept). Now that the 3D view draws bridges (ADR 0041), `GRADING_VERSION` 3 drops it: it showed as a
+  strip of ground under the bridge instead of open water.
 
 **Deep water is not refined.**
 
@@ -220,7 +223,7 @@ What the rules guarantee:
 **Versioning.**
 
 - `GRADING_VERSION` is 2 and `WATER_GRADING_VERSION` is 1. The terrain model is now
-  `dem-clean-v1+graded-v2`, so the in-memory authoritative-terrain cache (keyed by battlefield and
+  `dem-clean-v1+graded-v2` (`graded-v3` since ADR 0041), so the in-memory authoritative-terrain cache (keyed by battlefield and
   terrain model) prepares the ground again.
 - Scenarios record the model they were planned on (ADR 0032). One planned on `graded-v1` is noticed
   and updated on opening, as before. Its positions still stand, because soldiers cannot be in open

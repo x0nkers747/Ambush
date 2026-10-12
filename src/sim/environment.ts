@@ -44,8 +44,9 @@ export interface Road {
    */
   readonly traffic?: RoadTraffic;
   /**
-   * Mapped as a bridge (OSM `bridge=*`, docs/adr/0040): over levelled water
-   * it is a deck above the water rather than a road on the bed.
+   * Mapped as a bridge (OSM `bridge=*`): display only, as `crossing`. The 3D
+   * view draws a bridge for it (docs/adr/0041); the ground under it is graded
+   * like any other (since `GRADING_VERSION` 3, no deck of ground over water).
    */
   readonly bridge?: true;
   /**
