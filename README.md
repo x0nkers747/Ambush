@@ -140,9 +140,10 @@ sources, their resolution and accuracy, and the credits their licences require. 
    roster or on the map and click the map to give them a destination; drag the yellow handle to
    set their facing. Marines you leave alone stay in the ORP. Press **K** to switch to the kill
    zone and draw it across the expected enemy route (the dark-red dashed line).
-   Press **V** (Visibility) to shade light purple everything the selected Marine can see from their
-   destination, with the share of the kill zone that is visible; drag the destination to compare
-   positions. The selected Marine also shows a faint blue 35° wedge around the way he faces now,
+   Press **V** (Visibility) to shade light purple everything the selected Marine can see in their
+   firing arc (the wedge in front of them) from their destination, with the share of the kill zone
+   visible in it; drag the destination or turn them to compare positions
+   ([ADR 0042](docs/adr/0042-viewshed-in-the-firing-arc.md)). The selected Marine also shows a faint blue 35° wedge around the way he faces now,
    out to his weapon's maximum engagement range (rifle 550 m, SAW 600 m; a planning aid, see
    [ADR 0018](docs/adr/0018-weapon-engagement-wedge.md); it does not limit where he can fire). Paths bend around buildings automatically; destinations cannot be placed in or
    against a building.
@@ -273,3 +274,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 39. [Complete 2D/3D functional parity](docs/adr/0039-2d-3d-functional-parity.md)
 40. [Water surface flattening, shorelines and beaches](docs/adr/0040-water-grading-and-shorelines.md)
 41. [Procedural road bridges](docs/adr/0041-procedural-road-bridges.md)
+42. [Viewsheds limited to the firing arc](docs/adr/0042-viewshed-in-the-firing-arc.md)

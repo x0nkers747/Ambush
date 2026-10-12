@@ -1,4 +1,4 @@
-import type { Vec2, Viewshed, ViewshedGrid } from '#sim';
+import type { Vec2, ViewSector, Viewshed, ViewshedGrid } from '#sim';
 import type { ViewshedService } from './viewshed-service';
 
 // A fire team's visible area (docs/adr/0022): the union of its Marines'
@@ -59,11 +59,15 @@ export interface TeamVisibility {
  * new one is half-way, `previous` (the team's last union, never another
  * team's or a single Marine's) is shown, marked pending.
  */
-export function createTeamVisibility(
-  service: Pick<ViewshedService, 'requestUnion'>,
-): (observers: readonly Vec2[], cellSize: number, previous: Viewshed | null) => TeamVisibility {
-  return (observers, cellSize, previous) => {
-    const request = service.requestUnion(observers, cellSize);
+export function createTeamVisibility(service: Pick<ViewshedService, 'requestUnion'>): (
+  observers: readonly Vec2[],
+  cellSize: number,
+  previous: Viewshed | null,
+  /** Each Marine's firing arc, or `null` for the whole battlefield. */
+  sectors?: readonly (ViewSector | null)[],
+) => TeamVisibility {
+  return (observers, cellSize, previous, sectors = []) => {
+    const request = service.requestUnion(observers, cellSize, sectors);
     if (request.failed) return { viewshed: previous, pending: false, preview: false, failed: true };
     if (!request.pending)
       return { viewshed: request.viewshed, pending: false, preview: false, failed: false };

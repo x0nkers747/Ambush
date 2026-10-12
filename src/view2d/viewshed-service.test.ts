@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cellCentre,
   computeViewshed,
+  inSector,
   computeUnionRows,
   createSyntheticTerrain,
   rectangle,
@@ -75,6 +77,8 @@ function fakes() {
         message.rowEnd,
         message.rowStep,
         message.known ?? null,
+        {},
+        message.sectors ?? [],
       );
       const reply: WorkerReply = {
         type: 'rows',
@@ -294,5 +298,57 @@ describe('the viewshed service', () => {
     expect(service.cached).toBe(32);
     // The most recent are kept.
     expect(service.request({ x: 39, y: 0 }, 4).pending).toBe(false);
+  });
+
+  it('limits a viewshed to a firing arc: only the rows it reaches, exactly the full one inside it', () => {
+    const f = fakes();
+    const service = createViewshedService(TERRAIN, {
+      workerCount: 2,
+      createWorker: f.createWorker,
+    });
+    const a = { x: -60, y: -80 };
+    // 35° north-east, out to 60 m.
+    const sector = { azimuth: Math.PI / 4, halfWidth: (17.5 * Math.PI) / 180, rangeM: 60 };
+    expect(service.request(a, CELL, sector).pending).toBe(true);
+    f.drain();
+    const done = service.request(a, CELL, sector);
+    expect(done.pending).toBe(false);
+    const full = expected(a);
+    const grid = viewshedGrid(TERRAIN, CELL);
+    let inside = 0;
+    done.viewshed?.visible.forEach((v, i) => {
+      const p = cellCentre(grid, i % grid.columns, Math.floor(i / grid.columns));
+      if (inSector(sector, a, p.x, p.y)) {
+        inside += 1;
+        expect(v).toBe(full[i]);
+      } else expect(v).toBe(0);
+    });
+    expect(inside).toBeGreaterThan(400);
+    expect(done.viewshed?.sector).toEqual(sector);
+    // Only the bands of rows the arc reaches: 60 of 200 rows, not all seven bands per pass.
+    expect(service.lastTimings?.bands).toBeLessThan(2 * Math.ceil(200 / 64));
+    // Another arc, or none, is another viewshed.
+    expect(viewshedKey(a, CELL, sector)).not.toBe(viewshedKey(a, CELL));
+    expect(service.has(a, CELL)).toBe(false);
+    expect(service.has(a, CELL, sector)).toBe(true);
+  });
+
+  it('unions a fire team’s arcs: each Marine sees only in his own', () => {
+    const service = createViewshedService(TERRAIN, { workerCount: 0 });
+    const a = { x: -60, y: -80 };
+    const b = { x: 60, y: -80 };
+    const north = { azimuth: 0, halfWidth: 0.3, rangeM: 80 };
+    const union = service.requestUnion([a, b], CELL, [north, north]);
+    const grid = viewshedGrid(TERRAIN, CELL);
+    union.viewshed?.visible.forEach((v, i) => {
+      const p = cellCentre(grid, i % grid.columns, Math.floor(i / grid.columns));
+      if (!inSector(north, a, p.x, p.y) && !inSector(north, b, p.x, p.y)) expect(v).toBe(0);
+    });
+    const each = [a, b].map(
+      (o) => service.request(o, CELL, north).viewshed?.visible ?? new Uint8Array(),
+    );
+    union.viewshed?.visible.forEach((v, i) => {
+      expect(v).toBe((each[0]?.[i] ?? 0) | (each[1]?.[i] ?? 0));
+    });
   });
 });

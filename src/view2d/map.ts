@@ -1,6 +1,6 @@
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
-import type { Vec2 } from '#sim';
+import type { SoldierId, Vec2, ViewSector } from '#sim';
 import {
   fitBounds,
   type Bounds,
@@ -25,6 +25,7 @@ import {
 } from './render';
 import { elevationAt } from './terrain-layer';
 import { buildScene, type MapProjection, type MapScene, type VisibilityView } from './scene';
+import { engagementWedge } from './engagement';
 import { createTeamVisibility } from './group-viewshed';
 import { createViewshedService } from './viewshed-service';
 
@@ -230,10 +231,24 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
    * as a preview; until then the latest finished viewshed.
    */
   const teamVisibility = createTeamVisibility(viewsheds);
+  /**
+   * A Marine's firing arc (his engagement wedge): the viewshed shows only the
+   * ground in it. `null` (the whole battlefield) when he has no wedge.
+   */
+  const arcOf = (id: SoldierId): ViewSector | null => {
+    const wedge = engagementWedge(current, current.simulation.state.soldiers, id);
+    return wedge
+      ? { azimuth: wedge.azimuth, halfWidth: wedge.halfWidth, rangeM: wedge.rangeM }
+      : null;
+  };
   /** A selected fire team's visible area: the union of its Marines' viewsheds (`createTeamVisibility`). */
   const updateTeamVisibility = (unitId: string): VisibilityView | null => {
     const team = current.formationGroups.find((t) => t.unitId === unitId);
-    const observers = team?.memberIds.flatMap((id) => current.observer(id) ?? []) ?? [];
+    const members = (team?.memberIds ?? []).flatMap((id) => {
+      const observer = current.observer(id);
+      return observer ? [{ observer, arc: arcOf(id) }] : [];
+    });
+    const observers = members.map((m) => m.observer);
     const first = observers[0];
     if (!first) return null;
     const cellSize = dragging() ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
@@ -243,6 +258,7 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
       observers.map((o) => o.point),
       cellSize,
       previous,
+      members.map((m) => m.arc),
     );
     return {
       observer: first.point,
@@ -273,7 +289,11 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
       return;
     }
     const cellSize = dragging() ? VIEWSHED_PREVIEW_CELL_M : VIEWSHED_CELL_M;
-    const { viewshed, pending, failed, preview } = viewsheds.request(observer.point, cellSize);
+    const { viewshed, pending, failed, preview } = viewsheds.request(
+      observer.point,
+      cellSize,
+      arcOf(id),
+    );
     visibility = {
       observer: observer.point,
       planned: observer.planned,

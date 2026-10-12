@@ -4,11 +4,12 @@ import { worldToScreen, type Camera, type Viewport } from './camera';
 
 // The selected Marine's weapon engagement wedge: a sector centred on where he
 // faces, out to his primary weapon's maximum engagement range (`primaryWeapon`).
-// A planning aid drawn over the map, not a combat calculation: it ignores the
-// terrain and line of sight (the visibility overlay shows those). Its radius
-// is the range out to which combat lets the weapon fire, but its 35° sector is
-// not a firing restriction: in combat a soldier fires at any valid target,
-// whichever way he faces, and turns to face it (docs/adr/0019).
+// A planning aid drawn over the map, not a combat calculation. The visibility
+// overlay is limited to it (docs/adr/0042): it shows the ground in the wedge
+// the Marine can see. Its radius is the range out to which combat lets the
+// weapon fire, but its 35° sector is not a firing restriction: in combat a
+// soldier fires at any valid target, whichever way he faces, and turns to
+// face it (docs/adr/0019).
 
 /** Total angular width of the wedge, in degrees: half on each side of the facing. */
 export const ENGAGEMENT_WEDGE_WIDTH_DEG = 35;

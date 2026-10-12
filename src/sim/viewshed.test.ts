@@ -13,6 +13,8 @@ import {
   computeUnionRows,
   computeViewshed,
   computeViewshedRows,
+  inSector,
+  sectorRows,
   viewshedGrid,
   visibleCellsIn,
   type Viewshed,
@@ -280,5 +282,55 @@ describe('visibleCellsIn', () => {
     expect(first.visible).toBeGreaterThan(0);
     expect(first.visible).toBeLessThan(first.cells);
     expect(visibleCellsIn(v, zone)).toEqual(first);
+  });
+});
+
+describe('viewsheds limited to a sector (a firing arc)', () => {
+  const t = terrain(ridgeElevation({ base: 100, height: 6, crestY: -20, halfWidth: 25 }));
+  const grid = viewshedGrid(t, 4);
+  const full = computeViewshed(t, OBSERVER, grid);
+
+  it('decides cells in the sector exactly as the full viewshed, and none outside it', () => {
+    const sector = { azimuth: 0.2, halfWidth: 0.3, rangeM: 120 };
+    const arc = computeViewshed(t, OBSERVER, grid, {}, sector);
+    let inside = 0;
+    arc.visible.forEach((v, i) => {
+      const p = cellCentre(grid, i % grid.columns, Math.floor(i / grid.columns));
+      if (inSector(sector, OBSERVER, p.x, p.y)) {
+        inside += 1;
+        expect(v).toBe(full.visible[i]);
+      } else expect(v).toBe(0);
+    });
+    expect(inside).toBeGreaterThan(50);
+    expect(arc.sector).toEqual(sector);
+  });
+
+  it('tells the sector across north, and its range', () => {
+    const north = { azimuth: 0, halfWidth: 0.2, rangeM: 50 };
+    expect(inSector(north, { x: 0, y: 0 }, 1, 40)).toBe(true);
+    expect(inSector(north, { x: 0, y: 0 }, -1, 40)).toBe(true);
+    expect(inSector(north, { x: 0, y: 0 }, 0, 60)).toBe(false);
+    expect(inSector(north, { x: 0, y: 0 }, 40, 1)).toBe(false);
+    // An azimuth given as 2π − ε is the same arc.
+    const wrapped = { ...north, azimuth: 2 * Math.PI - 0.05 };
+    expect(inSector(wrapped, { x: 0, y: 0 }, -3, 40)).toBe(true);
+    expect(inSector(wrapped, { x: 0, y: 0 }, 3, 40)).toBe(true);
+    expect(inSector(north, { x: 0, y: 0 }, 0, 0)).toBe(true);
+    const rows = sectorRows(north, { x: 0, y: -80 }, grid);
+    expect(rows.first).toBe(0);
+    expect(rows.last).toBeLessThan(grid.rows / 2);
+  });
+
+  it('unions arcs, each observer only in his own', () => {
+    const a = { x: -50, y: -80 };
+    const b = { x: 50, y: -80 };
+    const sa = { azimuth: 0, halfWidth: 0.25, rangeM: 150 };
+    const sb = { azimuth: Math.PI / 2, halfWidth: 0.25, rangeM: 150 };
+    const union = computeUnionRows(t, [a, b], grid, 0, grid.rows, 1, null, {}, [sa, sb]);
+    const one = computeViewshed(t, a, grid, {}, sa).visible;
+    const two = computeViewshed(t, b, grid, {}, sb).visible;
+    union.forEach((v, i) => {
+      expect(v).toBe((one[i] ?? 0) | (two[i] ?? 0));
+    });
   });
 });

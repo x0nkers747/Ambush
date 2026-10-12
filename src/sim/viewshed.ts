@@ -29,9 +29,51 @@ export interface ViewshedGrid {
   readonly rows: number;
 }
 
+/**
+ * A sector the viewshed is limited to (a firing arc): ground within `rangeM`
+ * of the observer, within `halfWidth` either side of `azimuth`. Cells outside
+ * it are reported not visible without being decided.
+ */
+export interface ViewSector {
+  /** Radians clockwise from grid north (docs/adr/0002). */
+  readonly azimuth: number;
+  /** Half the sector's angular width, radians. */
+  readonly halfWidth: number;
+  readonly rangeM: number;
+}
+
+/** Whether map point (x, y) lies in `sector` from `observer` (the observer's own point does). */
+export function inSector(sector: ViewSector, observer: Vec2, x: number, y: number): boolean {
+  const dx = x - observer.x;
+  const dy = y - observer.y;
+  const d2 = dx * dx + dy * dy;
+  if (d2 > sector.rangeM * sector.rangeM) return false;
+  if (d2 === 0) return true;
+  // Bearing of the point, clockwise from north, against the sector's centre line.
+  let off = Math.atan2(dx, dy) - sector.azimuth;
+  off -= 2 * Math.PI * Math.round(off / (2 * Math.PI));
+  return Math.abs(off) <= sector.halfWidth;
+}
+
+/** The grid rows a sector can reach (inclusive), clamped to the grid. */
+export function sectorRows(
+  sector: ViewSector,
+  observer: Vec2,
+  grid: ViewshedGrid,
+): { readonly first: number; readonly last: number } {
+  const lo = (observer.y - sector.rangeM - grid.originY) / grid.cellSize - 0.5;
+  const hi = (observer.y + sector.rangeM - grid.originY) / grid.cellSize - 0.5;
+  return {
+    first: Math.max(0, Math.floor(lo)),
+    last: Math.min(grid.rows - 1, Math.ceil(hi)),
+  };
+}
+
 export interface Viewshed {
   readonly grid: ViewshedGrid;
   readonly observer: Vec2;
+  /** The sector it was limited to, if any (cells outside it are not visible). */
+  readonly sector?: ViewSector;
   /** One byte per cell, row-major from the south-west: 1 visible, 0 not. */
   readonly visible: Uint8Array;
 }
@@ -80,6 +122,10 @@ export function cellCentre(grid: ViewshedGrid, column: number, row: number): Vec
  * decided exactly as without it. (A skipped cell records no obstruction for
  * its neighbours' proofs; proofs only ever show a cell hidden, so this can
  * cost time but never change a result.)
+ *
+ * With `sector`, only cells in it are decided; the rest are reported not
+ * visible (or as `alreadyVisible` has them). Cells in it are decided exactly
+ * as without it.
  */
 export function computeViewshedRows(
   terrain: TerrainDataset,
@@ -90,6 +136,7 @@ export function computeViewshedRows(
   options: LosOptions = {},
   rowStep = 1,
   alreadyVisible?: Uint8Array,
+  sector?: ViewSector,
 ): Uint8Array {
   const eye = {
     x: observer.x,
@@ -138,6 +185,12 @@ export function computeViewshedRows(
       // `cellCentre`, without the allocation.
       const x = grid.originX + (c + 0.5) * grid.cellSize;
       const y = grid.originY + (r + 0.5) * grid.cellSize;
+      if (sector && !inSector(sector, observer, x, y)) {
+        // Outside the sector: not decided (and no obstruction for the neighbours' proofs).
+        here.kind = 0;
+        left = here;
+        continue;
+      }
       target.x = x;
       target.y = y;
       target.z = heightAt(terrain, x, y) + aim;
@@ -186,11 +239,23 @@ export function computeUnionRows(
   rowStep = 1,
   known: Uint8Array | null = null,
   options: LosOptions = {},
+  /** Each observer's sector (`computeViewshedRows`), or `null` for the whole grid. */
+  sectors: readonly (ViewSector | null)[] = [],
 ): Uint8Array {
   let out: Uint8Array | undefined = known ? known.slice() : undefined;
-  for (const observer of observers) {
-    out = computeViewshedRows(terrain, observer, grid, rowStart, rowEnd, options, rowStep, out);
-  }
+  observers.forEach((observer, i) => {
+    out = computeViewshedRows(
+      terrain,
+      observer,
+      grid,
+      rowStart,
+      rowEnd,
+      options,
+      rowStep,
+      out,
+      sectors[i] ?? undefined,
+    );
+  });
   return out ?? new Uint8Array(Math.ceil((rowEnd - rowStart) / rowStep) * grid.columns);
 }
 
@@ -231,11 +296,23 @@ export function computeViewshed(
   observer: Vec2,
   grid: ViewshedGrid,
   options: LosOptions = {},
+  sector?: ViewSector,
 ): Viewshed {
   return {
     grid,
     observer: { x: observer.x, y: observer.y },
-    visible: computeViewshedRows(terrain, observer, grid, 0, grid.rows, options),
+    ...(sector ? { sector } : {}),
+    visible: computeViewshedRows(
+      terrain,
+      observer,
+      grid,
+      0,
+      grid.rows,
+      options,
+      1,
+      undefined,
+      sector,
+    ),
   };
 }
 

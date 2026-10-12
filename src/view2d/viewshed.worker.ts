@@ -5,6 +5,7 @@ import {
   viewshedGrid,
   type TerrainDataset,
   type Vec2,
+  type ViewSector,
   type ViewshedGrid,
 } from '#sim';
 
@@ -25,6 +26,8 @@ export type WorkerRequest =
       readonly rowEnd: number;
       /** Every `rowStep`th row from `rowStart`. */
       readonly rowStep: number;
+      /** Each observer's sector (its firing arc), or `null` for the whole grid. */
+      readonly sectors?: readonly (ViewSector | null)[];
     };
 
 export type WorkerReply =
@@ -84,6 +87,8 @@ scope.onmessage = (event) => {
     message.rowEnd,
     message.rowStep,
     message.known ?? null,
+    {},
+    message.sectors ?? [],
   );
   scope.postMessage(
     {

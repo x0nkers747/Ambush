@@ -228,6 +228,9 @@ export {
   prepareViewsheds,
   viewshedGrid,
   visibleCellsIn,
+  inSector,
+  sectorRows,
+  type ViewSector,
   type Viewshed,
   type ViewshedGrid,
 } from './viewshed';

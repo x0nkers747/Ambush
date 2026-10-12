@@ -300,7 +300,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     const view = o.map.visibility;
     const team = e.formationGroups.find((t) => t.unitId === session.selectedFireTeamId);
     if ((id === null && !team) || !view)
-      return '<p class="muted">Select a Marine, a fire team or the squad to see the visible area.</p>';
+      return '<p class="muted">Select a Marine, a fire team or the squad to see the visible area in their firing arcs.</p>';
     if (view.failed) {
       return '<p class="alert">Visibility cannot be calculated in this browser (its background workers failed).</p>';
     }
@@ -314,7 +314,9 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     const coverage =
       e.killZone && current && !view.preview ? e.killZoneCoverage(current) : undefined;
     return `${view.pending ? '<p class="muted">Calculating…</p>' : ''}${
-      coverage ? `<p><b>Kill zone visible: ${coverage.percent.toFixed(0)}%</b></p>` : ''
+      coverage
+        ? `<p><b>Kill zone visible in the firing arcs: ${coverage.percent.toFixed(0)}%</b></p>`
+        : ''
     }`;
   };
 
