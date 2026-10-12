@@ -1,4 +1,4 @@
-import { BRIDGE_STYLES, type Bridge, type BridgeIndex } from '#sim';
+import { BRIDGE_STYLES, type Bridge, type BridgeIndex, type Vec2 } from '#sim';
 import type { CoordinatedBridges } from './bridge-complexes';
 import type { MeshBuffers, MeshData } from './drape';
 import { finishMesh, meshBuffers } from './drape';
@@ -97,7 +97,13 @@ export function liftOntoBridges(
       const offset = v.z - ground(v.x, v.y);
       const followed = v.z + (at.deck - at.centreGround);
       z = followed + at.blend * (at.deck + offset - followed);
-      if (at.blend > 0.5) n = [0, 1, 0];
+      // Never below where it was draped: the terrain would cover it there.
+      // A deck is flat across at its centre line's ground, so near a deck's
+      // end on a sloping bank, or where a structure's decks were lowered to
+      // meet their roads (docs/adr/0044), the deck can be lower than the
+      // ground beside it.
+      if (z < v.z) z = v.z;
+      else if (at.blend > 0.5) n = [0, 1, 0];
     }
     out.positions.push(v.x, z, -v.y);
     out.normals.push(...n);
@@ -391,6 +397,9 @@ export interface StructureContext {
   readonly roadEntrance: (deck: number, x: number, y: number) => boolean;
 }
 
+/** A shared slab's triangle is split where the structure's surface strays this far from it, metres. */
+const SLAB_FLAT_M = 0.02;
+
 /** Piers of one structure closer than this are one pier, metres. */
 const PIER_MERGE_M = 4;
 
@@ -604,39 +613,79 @@ function sharedSlab(
   concrete: [number, number, number],
   underside: [number, number, number],
 ) {
-  const height = (x: number, y: number, k: number) => coordinated.surfaceAt(x, y) ?? b.deck[k] ?? 0;
+  // The height the road is lifted to (`liftOntoBridges`), so the slab stays just under it.
+  const height = (x: number, y: number, k: number) =>
+    coordinated.index.at(x, y)?.deck ?? b.deck[k] ?? 0;
   for (let k = k0; k < k1; k += 1) {
     const l0 = edgePoint(b, k, H);
     const l1 = edgePoint(b, k + 1, H);
     const r0 = edgePoint(b, k, -H);
     const r1 = edgePoint(b, k + 1, -H);
+    // Top (counter-clockwise from above, so its normal points up) and
+    // underside. They take the structure's height at each vertex, so they
+    // follow the same surface the road is lifted onto: where that surface is
+    // not flat across a triangle (decks of different heights meet in it), the
+    // triangle is split, down to edges of `MAX_EDGE_M` as the road's are.
+    const flatWithin = (a: Vec2, c: Vec2, d: Vec2) => {
+      const za = height(a.x, a.y, k);
+      const zc = height(c.x, c.y, k);
+      const zd = height(d.x, d.y, k);
+      const off = (x: number, y: number, z: number) => Math.abs(height(x, y, k) - z) > SLAB_FLAT_M;
+      return !(
+        off((a.x + c.x) / 2, (a.y + c.y) / 2, (za + zc) / 2) ||
+        off((c.x + d.x) / 2, (c.y + d.y) / 2, (zc + zd) / 2) ||
+        off((d.x + a.x) / 2, (d.y + a.y) / 2, (zd + za) / 2) ||
+        off((a.x + c.x + d.x) / 3, (a.y + c.y + d.y) / 3, (za + zc + zd) / 3)
+      );
+    };
+    const emit = (a: Vec2, c: Vec2, d: Vec2, depth: number) => {
+      const ac = Math.hypot(a.x - c.x, a.y - c.y);
+      const cd = Math.hypot(c.x - d.x, c.y - d.y);
+      const da = Math.hypot(d.x - a.x, d.y - a.y);
+      const longest = Math.max(ac, cd, da);
+      if (longest > MAX_EDGE_M && depth < 12 && !flatWithin(a, c, d)) {
+        const mid = (p: Vec2, q: Vec2) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+        if (longest === ac) {
+          const m = mid(a, c);
+          emit(a, m, d, depth + 1);
+          emit(m, c, d, depth + 1);
+        } else if (longest === cd) {
+          const m = mid(c, d);
+          emit(a, c, m, depth + 1);
+          emit(a, m, d, depth + 1);
+        } else {
+          const m = mid(d, a);
+          emit(a, c, m, depth + 1);
+          emit(m, c, d, depth + 1);
+        }
+        return;
+      }
+      // A sliver left by cutting, thinner than float32 positions can tell
+      // apart (0.5 mm, as the draper drops them): nothing to draw.
+      const twice = Math.abs((c.x - a.x) * (d.y - a.y) - (d.x - a.x) * (c.y - a.y));
+      if (twice <= 1e-9 || twice / longest < 5e-4) return;
+      const za = height(a.x, a.y, k);
+      const zc = height(c.x, c.y, k);
+      const zd = height(d.x, d.y, k);
+      triangle(
+        out,
+        [a.x, za + 0.02, -a.y],
+        [c.x, zc + 0.02, -c.y],
+        [d.x, zd + 0.02, -d.y],
+        concrete,
+      );
+      triangle(
+        out,
+        [a.x, za - thickness, -a.y],
+        [d.x, zd - thickness, -d.y],
+        [c.x, zc - thickness, -c.y],
+        underside,
+      );
+    };
     for (const piece of slab.place([r0.x, r0.y, r1.x, r1.y, l1.x, l1.y, l0.x, l0.y], bi)) {
       const m = piece.length / 2;
-      const v = (i: number): [number, number, number] => {
-        const x = piece[2 * i] ?? 0;
-        const y = piece[2 * i + 1] ?? 0;
-        return [x, height(x, y, k), -y];
-      };
-      for (let i = 1; i + 1 < m; i += 1) {
-        const a = v(0);
-        const c = v(i);
-        const d = v(i + 1);
-        // Top (counter-clockwise from above, so its normal points up) and underside.
-        triangle(
-          out,
-          [a[0], a[1] + 0.02, a[2]],
-          [c[0], c[1] + 0.02, c[2]],
-          [d[0], d[1] + 0.02, d[2]],
-          concrete,
-        );
-        triangle(
-          out,
-          [a[0], a[1] - thickness, a[2]],
-          [d[0], d[1] - thickness, d[2]],
-          [c[0], c[1] - thickness, c[2]],
-          underside,
-        );
-      }
+      const v = (i: number): Vec2 => ({ x: piece[2 * i] ?? 0, y: piece[2 * i + 1] ?? 0 });
+      for (let i = 1; i + 1 < m; i += 1) emit(v(0), v(i), v(i + 1), 0);
     }
     // Side walls, outside the structure only.
     for (const [p, q] of [

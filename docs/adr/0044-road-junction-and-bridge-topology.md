@@ -14,14 +14,14 @@ central Amsterdam was imported through the normal pipeline and recorded for regr
 
 ### The Amsterdam battlefield
 
-| Setting        | Value                                                          |
-| -------------- | -------------------------------------------------------------- |
-| Centre         | 52.3702, 4.8952 (Dam / Grachtengordel)                         |
-| Size           | 5 km × 5 km, the app's default request (`battlefieldRequest`)  |
-| Elevation      | Terrarium tiles (AWS open data), as the app downloads them     |
-| Features       | One Overpass query, as the app makes it (`planBattlefield`)    |
-| Buildings      | From OpenStreetMap (Overture was not used for the recording)   |
-| Import         | `buildBattlefield`, then `authoritativeGround`, as the app      |
+| Setting   | Value                                                         |
+| --------- | ------------------------------------------------------------- |
+| Centre    | 52.3702, 4.8952 (Dam / Grachtengordel)                        |
+| Size      | 5 km × 5 km, the app's default request (`battlefieldRequest`) |
+| Elevation | Terrarium tiles (AWS open data), as the app downloads them    |
+| Features  | One Overpass query, as the app makes it (`planBattlefield`)   |
+| Buildings | From OpenStreetMap (Overture was not used for the recording)  |
+| Import    | `buildBattlefield`, then `authoritativeGround`, as the app    |
 
 It is reproducible with
 
@@ -33,7 +33,7 @@ The tool downloads the elevation tiles and the Overpass response once, then buil
 package with the app's importer. The raw inputs are about 90 MB of Overpass JSON plus the tiles,
 so they are not committed. Only the recorder is (`RECORDED_SITES.amsterdam`).
 
-The recording contains:
+The first recording contained:
 
 - 16,598 roads, 991 of them mapped as bridges;
 - 53,568 buildings, 541 water areas and 935 waterways.
@@ -41,10 +41,32 @@ The recording contains:
 Grading takes 62 s in Node. In the browser (SwiftShader, low quality), opening the battlefield
 takes 59 s, and the first 3D frame appears after 81 s.
 
+OpenStreetMap changes, and Overpass mirrors lag one another, so a recording is a snapshot. The
+validation below used a second recording, made on 2026-10-12 (served by
+`overpass.private.coffee`): 15,646 roads (954 mapped as bridges), 53,377 buildings, 528 water areas
+and 931 waterways. Both the "before" (main) and "after" screenshots were taken from it, so each pair
+differs only in the code.
+
 ### Defects observed (before)
 
 The screenshots were taken in the browser from ten fixed cameras. They are kept in
-[`docs/research/road-junctions-bridges`](../research/road-junctions-bridges/).
+[`docs/research/road-junctions-bridges`](../research/road-junctions-bridges/), with the "after"
+screenshots from the same cameras. The cameras (`ambushSetView` on the 3D canvas: target x and y
+in map metres, distance in metres, pitch below the horizon and heading clockwise from north, in
+degrees) are:
+
+| View                | Target     | Distance | Pitch | Heading |
+| ------------------- | ---------- | -------- | ----- | ------- |
+| v1-dense-junction   | 29, 15     | 110      | 55    | 20      |
+| v2-minor-major      | 662, −133  | 90       | 55    | 0       |
+| v3-acute            | −188, −46  | 90       | 55    | 0       |
+| v4-five-way         | −463, 330  | 100      | 55    | 0       |
+| v5-bridge-cluster   | 722, 477   | 220      | 55    | 0       |
+| v6-parallel-bridges | 636, 926   | 140      | 50    | 0       |
+| v7-bridge-cycleway  | 1290, 92   | 110      | 50    | 30      |
+| v8-canal-road       | 505, 706   | 160      | 40    | 0       |
+| v9-barrier-low      | 634, −1258 | 45       | 18    | 90      |
+| v10-overview        | 0, 0       | 2600     | 62    | 0       |
 
 1. **Junction overlap and z-fighting.** At every junction, each way drew its own rectangles,
    bend fans and junction disc. The overlapping pieces of different classes were separated only by
@@ -111,6 +133,7 @@ battlefield gets its own fixes: everything is generic and driven by OSM topology
   road stops at the edge of the road it joins. A junction is one surface, whatever the angles, widths
   or number of arms. This covers T and four-way junctions, five-way junctions, offset junctions,
   acute angles, split ways and changes of width.
+
 - **Same class, no cut.** Pieces of the same class are in one mesh at one height, so they need no
   cutting. Leaving them uncut keeps the triangle count close to before: cutting everything added 25%.
 - **Fillets.** Where vehicle roads meet at 35°–150°, each corner gets a small fillet in the lesser
@@ -164,6 +187,7 @@ battlefield gets its own fixes: everything is generic and driven by OSM topology
 
   So the structure is flat across, continuous, and every deck still meets its road at its ends.
   A point's height is that of the earliest-ranked deck containing it (`index.at`, allocation-free).
+
 - **Structure drawn once.**
   - A multi-deck structure gets one shared slab.
   - Barriers run only on its outside: never along an edge that lies on another deck of the
@@ -179,8 +203,36 @@ battlefield gets its own fixes: everything is generic and driven by OSM topology
   (corners, edge midpoints and the centroid), which also made lifting faster.
 - **Water under low decks.** Under a deck less than `LOW_DECK_M` (0.1 m) above the water, the water
   surface is cut away (`cutUnderDecks`), so the deck is never drawn beneath a sheet of water. The
-  decks keep their authoritative heights: the defect is in the elevation data (R4), and it is
-  reported as a limitation.
+  test is against the water as drawn under the deck's edges and centre (`waterIndex`), not only
+  the level under its centre line: near a bank the water surface rises (ADR 0040). The decks keep
+  their authoritative heights: the defect is in the elevation data (R4), and it is reported as a
+  limitation.
+
+### Fixes from validation on Amsterdam
+
+The first browser screenshots of this design showed defects the diagnostics did not catch. They
+were found with a probe of the drawn meshes around each spot and fixed generically:
+
+- **Roads under the terrain at deck ends (v9, v6).** A deck is flat across, at the ground under its
+  centre line. Near its end on a sloping bank, or where a structure's decks were lowered to meet
+  their roads, the deck is lower than the ground beside it, and lifting blended the road below the
+  terrain: grass showed through the road (v9) and the bank poked through a bridge junction as dark
+  spikes (v6). Main hid part of this under its 9 cm offset for major roads. Lifting now never puts
+  a vertex below where it was draped (`liftOntoBridges`): it can only raise a road onto a deck.
+- **Shared slabs following the road (v6).** A structure's slab took heights only at the corners of
+  its cut pieces, so a piece spanning decks at different heights became a spike. Its triangles are
+  now split where the structure's surface strays more than `SLAB_FLAT_M` (2 cm) from them, down to
+  2 m edges like the road on it, and take their heights from the same index the road is lifted
+  with, so the slab stays just under the road.
+- **Water over a road on a low bank (v6).** Where the elevation data puts a road on a bank below the
+  water level beside it (between two bridges' ends, in v6), the water sheet was drawn over the road.
+  The water is now cut away under road surface on the ground (`groundRoadHoles`): not on a bridge
+  level, not on a deck, not a ford, and only where the water there is at most `BANK_DEPTH_M` (1 m)
+  over the road. Deeper water over a road (a way through water with no bridge mapped) stays, as
+  before.
+- **Hidden roads in the diagnostics.** Two new checks report a road surface drawn below the ground
+  (`roadBuried`) or below the water drawn over it (`roadUnderWater`), so this class of defect is
+  found on any recorded battlefield.
 
 ### Mesh hygiene
 
@@ -194,16 +246,18 @@ battlefield gets its own fixes: everything is generic and driven by OSM topology
 that name the features, where they are (map metres and, with a georeference, degrees), the kind
 and the reason. Each warning is classified as unexpected (a defect) or a limitation of the data:
 
-| Kind                 | Severity    | What it is                                                         |
-| -------------------- | ----------- | ------------------------------------------------------------------ |
-| `roadOverlap`        | unexpected  | two road layers covering a spot at the same height                 |
-| `duplicateDeck`      | unexpected  | overlapping decks at similar heights drawn as separate structures  |
-| `barrierOnRoad`      | unexpected  | a barrier on another road's surface or on another deck of its own  |
-| `pierOnRoad`         | unexpected  | a pier standing on a road surface                                  |
-| `deckStep`           | unexpected  | a deck end more than 15 cm from the road it meets                  |
-| `invalidVertex`      | unexpected  | a non-finite position                                              |
-| `degenerateTriangle` | unexpected  | a zero-area triangle                                               |
-| `lowDeck`            | limitation  | a deck less than 10 cm above the water under it                    |
+| Kind                 | Severity   | What it is                                                         |
+| -------------------- | ---------- | ------------------------------------------------------------------ |
+| `roadOverlap`        | unexpected | two road layers covering a spot at the same height                 |
+| `roadBuried`         | unexpected | a road surface drawn below the ground                              |
+| `roadUnderWater`     | unexpected | water drawn over a road surface (a limitation where over 1 m deep) |
+| `duplicateDeck`      | unexpected | overlapping decks at similar heights drawn as separate structures  |
+| `barrierOnRoad`      | unexpected | a barrier on another road's surface or on another deck of its own  |
+| `pierOnRoad`         | unexpected | a pier standing on a road surface                                  |
+| `deckStep`           | unexpected | a deck end more than 15 cm from the road it meets                  |
+| `invalidVertex`      | unexpected | a non-finite position                                              |
+| `degenerateTriangle` | unexpected | a zero-area triangle                                               |
+| `lowDeck`            | limitation | a deck less than 10 cm above the water under it                    |
 
 Intended contacts are counted in `expected`, not reported. These are a road meeting a bridge at its
 end, the decks of one structure, and a road under a bridge.
@@ -222,7 +276,7 @@ Without `AMBUSH_DIAGNOSE` this test is skipped.
 
 - Everything is pure and deterministic. Roads are ordered by priority, then by id; decks by id.
   Tests check that reversing the input gives identical meshes and structures.
-- `GEOMETRY_VERSION` 5 and `MARKING_VERSION` 2 invalidate cached feature geometry.
+- `GEOMETRY_VERSION` 6 and `MARKING_VERSION` 2 invalidate cached feature geometry.
 - `GRADING_VERSION` and the scenario versions are unchanged, because the simulation's inputs are.
 
 ### Simulation isolation
@@ -234,7 +288,63 @@ Coordination only reads the plan.
 
 ## Measurements
 
-<!-- MEASUREMENTS -->
+All on the second Amsterdam recording and on recordings of Quantico and Grafenwöhr made the same day
+(`tools/record-battlefield.ts quantico|grafenwoehr`), on one machine (AMD Radeon 880M integrated
+graphics, Windows 11).
+
+**Diagnostics** (warnings by kind; limitations in brackets):
+
+| Kind             | Amsterdam | Quantico | Grafenwöhr |
+| ---------------- | --------- | -------- | ---------- |
+| `roadOverlap`    | 453       | 0        | 8          |
+| `roadBuried`     | 0         | 0        | 0          |
+| `roadUnderWater` | 16 (89)   | 0        | 0          |
+| `duplicateDeck`  | 0         | 0        | 0          |
+| `barrierOnRoad`  | 0         | 0        | 0          |
+| `pierOnRoad`     | 1         | 0        | 0          |
+| `deckStep`       | 37        | 0        | 0          |
+| mesh integrity   | 0         | 0        | 0          |
+| `lowDeck`        | (373)     | (2)      | (1)        |
+
+On Amsterdam, 129 structures of several decks (453 decks) are drawn as one. Of the 453 overlaps, 452
+are within 30 m of a mapped bridge (388 within 15 m of a bridge end), as described under
+Limitations. The 37 deck steps have a median of 0.25 m, 30 are under 0.5 m, and the largest is 1.0 m.
+Grafenwöhr's 8 overlaps are paths meeting a road 5–15 m from a bridge end. An earlier build had
+measured roadOverlap 467, lowDeck 272, pierOnRoad 1 and deckStep 264 (then 41), on the first
+recording.
+
+**Feature generation in Node** (`buildFeatures`; median of 5 runs, 2 on Amsterdam; seconds):
+
+| Battlefield | Roads, main → this | Bridges, main → this | All features, main → this |
+| ----------- | ------------------ | -------------------- | ------------------------- |
+| Quantico    | 0.4 → 0.8          | 0.1 → 0.4            | 1.7 → 2.4                 |
+| Grafenwöhr  | 0.5 → 1.0          | 0.2 → 0.2            | 1.4 → 2.1                 |
+| Amsterdam   | 2.6 → 5.0          | 5.2 → 7.7            | 21.5 → 27.3               |
+
+The bridge step includes lifting the roads, markings and paths onto the decks and cutting the water.
+
+**Triangles** (millions, main → this):
+
+| Battlefield | Roads       | Paths       | Markings    | Bridges     | Water       | Total         |
+| ----------- | ----------- | ----------- | ----------- | ----------- | ----------- | ------------- |
+| Quantico    | 1.02 → 1.09 | 0.04 → 0.03 | 0.04 → 0.04 | 0.01 → 0.01 | 0.46 → 0.46 | 1.70 → 1.76   |
+| Grafenwöhr  | 1.31 → 1.49 | 0.07 → 0.06 | 0.05 → 0.05 | 0.01 → 0.01 | 0.02 → 0.02 | 1.75 → 1.92   |
+| Amsterdam   | 7.03 → 6.55 | 0.51 → 0.34 | 0.23 → 0.22 | 0.96 → 0.79 | 1.33 → 1.34 | 15.09 → 14.26 |
+
+Buildings (unchanged) are included in the totals: 0.14 M, 0.29 M and 5.02 M.
+
+**In the browser** (Chromium, GPU, high quality; the feature worker's time):
+
+| Battlefield | Feature worker, main → this | Roads       | Bridges     | 3D view ready, from page load |
+| ----------- | --------------------------- | ----------- | ----------- | ----------------------------- |
+| Quantico    | 1.8 → 2.5 s                 | 0.4 → 0.8 s | 0.1 → 0.4 s | 10.4 → 10.5 s                 |
+| Grafenwöhr  | 1.5 → 2.1 s                 | 0.5 → 1.1 s | 0.2 → 0.2 s | 10.5 → 10.6 s                 |
+| Amsterdam   | 24.8 → 29.0 s               | 3.1 → 5.1 s | 5.8 → 8.6 s | 55 → 58 s                     |
+
+The 3D view shows the terrain while the worker runs; the feature worker is off the main thread.
+Opening Amsterdam needs about 5.7 GB in the page's process on main and on this branch alike. In
+Google Chrome (rather than Playwright's Chromium) the page's process sometimes crashed opening it,
+on main as well.
 
 ## Limitations
 
@@ -248,6 +358,14 @@ Coordination only reads the plan.
 - **Remaining overlaps.** The remaining `roadOverlap` warnings are between surfaces on different
   levels that share a node at a bridge's end, where the bridge's road continues past the deck
   edge. Most are paths and driveways meeting a road at a bridge.
+- **Junctions on a bridge of decks at different heights.** Where ways mapped as bridges meet over
+  water at clearly different heights (v6), the structure has steps between its decks, small slab
+  fragments show at those steps, and a traffic island the ways enclose shows the water through it
+  (nothing is mapped there).
+- **Ways through water with no bridge mapped.** Footways, steps and service roads mapped through
+  water (jetties, pontoons, quays the elevation data puts below the water) stay under water deeper
+  than `BANK_DEPTH_M`, as on main: reported as `roadUnderWater` limitations (89 on Amsterdam). Where
+  one road piece spans shallow and deep water it is not cut either (the 16 unexpected ones).
 - **Remaining deck steps.** The remaining `deckStep` warnings are where several decks of a structure
   end at different places along a sloping bank, so that one height across cannot meet every road.
   They are mostly under 0.5 m.
@@ -256,5 +374,6 @@ Coordination only reads the plan.
   barriers know the levels; the lifting does not yet.
 - **No lane-level geometry.** Junctions have no turn lanes, islands or kerbs, and roundabout centres
   are bare ground. Markings stop at junctions rather than being drawn through them as guide lines.
-- **Cost.** Building the road surface costs more than before: about 2–3 s more on Quantico and
-  Grafenwöhr, in the feature worker, off the main thread.
+- **Cost.** Building the features costs more than before: about 0.7 s more on Quantico and
+  Grafenwöhr and 6 s more on Amsterdam in Node (see Measurements), in the feature worker, off the
+  main thread.

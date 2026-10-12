@@ -307,4 +307,9 @@ export class Occupancy<O> {
   get size(): number {
     return this.placed.length;
   }
+
+  /** Every placed piece (counter-clockwise) and its owner, in the order placed. */
+  forEach(fn: (poly: readonly number[], owner: O) => void): void {
+    for (const p of this.placed) fn(p.poly, p.owner);
+  }
 }

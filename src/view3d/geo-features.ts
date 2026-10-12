@@ -6,7 +6,13 @@ import { regionOf } from './building-style';
 import { PATH_COLOR, pathGeometry } from './decor-geometry';
 import type { PathStyle } from './decor-paths';
 import { DECOR_VERSION, planDecor, type DecorStats } from './decor-plan';
-import { coordinateBridges, cutUnderDecks, roadEntrances } from './bridge-complexes';
+import {
+  coordinateBridges,
+  cutUnderDecks,
+  groundRoadHoles,
+  waterIndex,
+  roadEntrances,
+} from './bridge-complexes';
 import { BRIDGE_VERSION, bridgeGeometry, liftOntoBridges, planBridges } from './bridges';
 import { createDraper, type MeshData } from './drape';
 import { MARKING_VERSION, roadMarkings, type MarkingStats } from './road-markings';
@@ -26,7 +32,7 @@ import { createWaterMaterial } from './water-material';
 // features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 5;
+export const GEOMETRY_VERSION = 6;
 /** The roadside details' own version (docs/adr/0036). */
 export { DECOR_VERSION };
 /** The road markings' own version (docs/adr/0037). */
@@ -152,8 +158,15 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
     roadEntrance: roadEntrances(terrain.features.roads, coordinated),
   });
   const onBridges = (d: MeshData) => liftOntoBridges(d, index, ground);
-  // No water drawn over a deck that stands too low above it (docs/adr/0044).
-  const cut = cutUnderDecks(water.mesh, coordinated.decks);
+  // No water drawn over a deck that stands too low above it, or over a road
+  // on a bank below the water level (docs/adr/0044).
+  const wet = waterIndex(water.mesh);
+  const cut = cutUnderDecks(
+    water.mesh,
+    coordinated.decks,
+    groundRoadHoles(surfaces.occupancy, terrain.features.roads, wet, coordinated.decks, terrain),
+    wet,
+  );
   const liftedRoads = roadList.map(([layer, d]) => [layer, onBridges(d)] as const);
   const liftedPaths = paths.map(([style, d]) => [style, onBridges(d)] as const);
   const liftedMarkings = onBridges(markings.mesh);

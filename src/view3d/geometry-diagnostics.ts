@@ -1,6 +1,10 @@
-import { heightAt, planBridges, type Road, type TerrainDataset } from '#sim';
+import { heightAt, isOnTerrain, planBridges, type Road, type TerrainDataset } from '#sim';
 import {
   coordinateBridges,
+  BANK_DEPTH_M,
+  cutUnderDecks,
+  groundRoadHoles,
+  waterIndex,
   LOW_DECK_M,
   roadEntrances,
   type CoordinatedBridges,
@@ -9,6 +13,7 @@ import { bridgeGeometry, liftOntoBridges, type BridgeGeometry } from './bridges'
 import { createDraper, type MeshData } from './drape';
 import { roadSurfaces, type RoadLayer } from './road-geometry';
 import { onSurface, roadLevel } from './road-surface';
+import { waterGeometry } from './water-geometry';
 
 // Geometry diagnostics (docs/adr/0044): automated checks for the defects
 // complex battlefields used to show, reusable on any battlefield (see
@@ -19,6 +24,10 @@ import { onSurface, roadLevel } from './road-surface';
 //
 // - `roadOverlap`: two road surface layers covering the same spot at the same
 //   height (unexpected; at different heights it is a grade separation);
+// - `roadBuried` / `roadUnderWater`: a road surface drawn below the ground
+//   (the terrain hides it) or below the water drawn over it (unexpected; under
+//   water deeper than `BANK_DEPTH_M`, a way with no bridge mapped, a limitation;
+//   fords are meant to be in the water);
 // - `duplicateDeck`: decks that overlap at similar heights but are drawn as
 //   separate structures (unexpected; in one structure they are expected);
 // - `barrierOnRoad`: a bridge barrier standing on another road's surface, or
@@ -32,6 +41,8 @@ import { onSurface, roadLevel } from './road-surface';
 
 export type WarningKind =
   | 'roadOverlap'
+  | 'roadBuried'
+  | 'roadUnderWater'
   | 'duplicateDeck'
   | 'barrierOnRoad'
   | 'pierOnRoad'
@@ -100,10 +111,28 @@ export function diagnoseGeometry(
     ]),
   );
   const run = (check: 'roads' | 'bridges' | 'meshes') => options.checks?.includes(check) ?? true;
+  // The water as drawn, cut under low decks and roads on low banks.
+  const water = run('roads') ? waterGeometry(terrain, draper).mesh : null;
+  const drawnWater =
+    water &&
+    cutUnderDecks(
+      water,
+      coordinated.decks,
+      groundRoadHoles(
+        roads.occupancy,
+        terrain.features.roads,
+        waterIndex(water),
+        coordinated.decks,
+        terrain,
+      ),
+    ).mesh;
   return report(
     [
       ...(run('roads')
-        ? roadOverlaps(terrain.features.roads, lifted, options.sampleStepM ?? 2)
+        ? [
+            ...roadOverlaps(terrain.features.roads, lifted, options.sampleStepM ?? 2),
+            ...hiddenRoads(terrain, lifted, drawnWater, options.sampleStepM ?? 2),
+          ]
         : []),
       ...(run('bridges') ? bridgeChecks(terrain, coordinated, structure) : []),
       ...(run('meshes')
@@ -298,6 +327,78 @@ export function roadOverlaps(
                 reason: `${p.layer} and ${q.layer} surfaces both cover this point of ${road.id} at the same height`,
               });
             }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** A road surface this far below the ground, or under the water drawn there, is hidden, metres. */
+const HIDDEN_M = 0.01;
+
+/**
+ * Road surfaces that cannot be seen (docs/adr/0044): sampled along every road
+ * drawn, across its width, every `step` metres. Reported where the highest
+ * road surface is below the ground (the terrain covers it), or below the
+ * water drawn there (except fords). Spots with no road surface are not
+ * checked here (a road's square end, the edge between two pieces).
+ */
+export function hiddenRoads(
+  terrain: TerrainDataset,
+  layers: ReadonlyMap<RoadLayer, MeshData>,
+  water: MeshData | null,
+  step: number,
+): GeometryWarning[] {
+  const surfaces = [...layers]
+    .filter(([layer]) => layer !== 'verge')
+    .map(([, mesh]) => triangleIndex(mesh));
+  const waterAt = water ? triangleIndex(water) : () => [];
+  const out: GeometryWarning[] = [];
+  const seen = new Set<string>();
+  const roads = terrain.features.roads
+    .filter((r) => onSurface(r) && r.crossing?.kind !== 'ford')
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  for (const road of roads) {
+    const h = road.widthMeters / 2;
+    for (let i = 0; i + 1 < road.centerline.length; i += 1) {
+      const a = road.centerline[i];
+      const b = road.centerline[i + 1];
+      if (!a || !b) continue;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len === 0) continue;
+      const nx = -(b.y - a.y) / len;
+      const ny = (b.x - a.x) / len;
+      for (let s = step / 2; s < len; s += step) {
+        for (const f of [-0.8, 0, 0.8]) {
+          const x = a.x + ((b.x - a.x) * s) / len + nx * h * f;
+          const y = a.y + ((b.y - a.y) * s) / len + ny * h * f;
+          const zs = surfaces.flatMap((at) => at(x, y));
+          if (zs.length === 0) continue;
+          const top = Math.max(...zs);
+          if (!isOnTerrain(terrain, x, y)) continue;
+          const ground = heightAt(terrain, x, y);
+          const wet = Math.max(-Infinity, ...waterAt(x, y));
+          const kind: WarningKind | null =
+            top < ground - HIDDEN_M ? 'roadBuried' : wet > top + HIDDEN_M ? 'roadUnderWater' : null;
+          if (!kind) continue;
+          const k = `${kind}:${road.id}:${String(Math.round(x / 10))},${String(Math.round(y / 10))}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          // Deeper than a bank set too low: a way through water with no bridge
+          // mapped (a jetty, a pontoon, a crossing too short to bridge).
+          const deep = kind === 'roadUnderWater' && ground + BANK_DEPTH_M < wet;
+          out.push({
+            kind,
+            severity: deep ? 'limitation' : 'unexpected',
+            ids: [road.id],
+            x,
+            y,
+            reason:
+              kind === 'roadBuried'
+                ? `${road.id}'s surface is ${(ground - top).toFixed(2)} m below the ground`
+                : `water is drawn ${(wet - top).toFixed(2)} m above ${road.id}'s surface${deep ? ' (deep water: no bridge is mapped there)' : ''}`,
+          });
         }
       }
     }

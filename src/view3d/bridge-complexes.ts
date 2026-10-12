@@ -1,7 +1,16 @@
-import { END_BLEND_M, MAX_GRADE, type Bridge, type BridgeIndex, type Road } from '#sim';
+import {
+  END_BLEND_M,
+  heightAt,
+  isOnTerrain,
+  MAX_GRADE,
+  type Bridge,
+  type BridgeIndex,
+  type Road,
+  type TerrainDataset,
+} from '#sim';
 import { finishMesh, meshBuffers, type MeshData } from './drape';
-import { Occupancy, signedArea2 } from './planar';
-import { onSurface, roadLevel } from './road-surface';
+import { boxOf, Occupancy, signedArea2 } from './planar';
+import { onSurface, roadLevel, type SurfaceOwner } from './road-surface';
 
 // Bridge complexes (docs/adr/0044). OpenStreetMap often maps one physical
 // bridge as several ways side by side, each a bridge: the carriageway, a
@@ -420,6 +429,66 @@ function stepLength(b: Bridge): number {
   return l / Math.max(1, b.deck.length - 1);
 }
 
+/** The water surface as drawn, for point queries (built once, shared by the cuts below). */
+export interface WaterIndex {
+  /** The highest water surface drawn at a map point (−∞ where there is none). */
+  at(x: number, y: number): number;
+  /** Whether any water may be drawn in a box (map metres). */
+  near(minX: number, minY: number, maxX: number, maxY: number): boolean;
+}
+
+/** Indexes a water mesh in 8 m buckets of its triangles' bounds. */
+export function waterIndex(water: MeshData): WaterIndex {
+  const B = 8;
+  const buckets = new Map<number, number[]>();
+  const p = water.positions;
+  for (let t = 0; t < water.triangleCount; t += 1) {
+    const o = 9 * t;
+    const xs = [p[o] ?? 0, p[o + 3] ?? 0, p[o + 6] ?? 0];
+    const ys = [-(p[o + 2] ?? 0), -(p[o + 5] ?? 0), -(p[o + 8] ?? 0)];
+    for (let gx = Math.floor(Math.min(...xs) / B); gx <= Math.floor(Math.max(...xs) / B); gx += 1)
+      for (
+        let gy = Math.floor(Math.min(...ys) / B);
+        gy <= Math.floor(Math.max(...ys) / B);
+        gy += 1
+      ) {
+        const k = gx * 100_003 + gy;
+        const list = buckets.get(k);
+        if (list) list.push(t);
+        else buckets.set(k, [t]);
+      }
+  }
+  const at = (x: number, y: number) => {
+    let top = -Infinity;
+    for (const t of buckets.get(Math.floor(x / B) * 100_003 + Math.floor(y / B)) ?? []) {
+      const o = 9 * t;
+      const ax = p[o] ?? 0;
+      const ay = -(p[o + 2] ?? 0);
+      const bx = p[o + 3] ?? 0;
+      const by = -(p[o + 5] ?? 0);
+      const cx = p[o + 6] ?? 0;
+      const cy = -(p[o + 8] ?? 0);
+      const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d;
+      const l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
+      const l3 = 1 - l1 - l2;
+      if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+      top = Math.max(top, l1 * (p[o + 1] ?? 0) + l2 * (p[o + 4] ?? 0) + l3 * (p[o + 7] ?? 0));
+    }
+    return top;
+  };
+  return {
+    at,
+    near(minX, minY, maxX, maxY) {
+      for (let gx = Math.floor(minX / B); gx <= Math.floor(maxX / B); gx += 1)
+        for (let gy = Math.floor(minY / B); gy <= Math.floor(maxY / B); gy += 1)
+          if (buckets.has(gx * 100_003 + gy)) return true;
+      return false;
+    },
+  };
+}
+
 /** A deck closer than this to the water under it (or below it) has the water cut away beneath it, metres. */
 export const LOW_DECK_M = 0.1;
 
@@ -427,25 +496,29 @@ export const LOW_DECK_M = 0.1;
  * The water surface with holes under low decks (docs/adr/0044): where a deck
  * is lower than `LOW_DECK_M` above the water (the DEM and the water level
  * leave no room for a proper bridge), the water under it is cut away, so the
- * deck is never drawn under a sheet of water. Water elsewhere is unchanged.
- * Returns the mesh and how many decks were low.
+ * deck is never drawn under a sheet of water. Also cut away: `roads`, convex
+ * pieces of road surface on the ground (see `groundRoadHoles`). Water
+ * elsewhere is unchanged. Returns the mesh and how many decks were low.
  */
 export function cutUnderDecks(
   water: MeshData,
   decks: readonly Bridge[],
+  roads: readonly (readonly number[])[] = [],
+  index: WaterIndex = waterIndex(water),
 ): { mesh: MeshData; lowDecks: number } {
   const holes = new Occupancy<number>(() => true);
+  for (const poly of roads) holes.add(poly, -1);
+  const waterAt = (x: number, y: number) => index.at(x, y);
   let lowDecks = 0;
   decks.forEach((b, bi) => {
     let low = false;
     for (let k = 0; k + 1 < b.deck.length; k += 1) {
       const wet = b.wet[k] === true || b.wet[k + 1] === true;
+      const deckLow = Math.min(b.deck[k] ?? 0, b.deck[k + 1] ?? 0);
       const clear = Math.min(
         (b.deck[k] ?? 0) - (b.under[k] ?? 0),
         (b.deck[k + 1] ?? 0) - (b.under[k + 1] ?? 0),
       );
-      if (!wet || clear >= LOW_DECK_M) continue;
-      low = true;
       const corner = (i: number, side: number) => {
         const n = b.deck.length;
         const j0 = Math.max(0, i - 1);
@@ -458,7 +531,25 @@ export function cutUnderDecks(
         return [(b.xy[2 * i] ?? 0) - dy * side, (b.xy[2 * i + 1] ?? 0) + dx * side] as const;
       };
       const h = b.halfWidth;
-      holes.add([...corner(k, -h), ...corner(k + 1, -h), ...corner(k + 1, h), ...corner(k, h)], bi);
+      const quad = [...corner(k, -h), ...corner(k + 1, -h), ...corner(k + 1, h), ...corner(k, h)];
+      // The water drawn under the deck, at its corners, edges and centre: near
+      // a bank the water surface can rise above the level under the centre line.
+      let top = -Infinity;
+      for (let i = 0; i < 4; i += 1) {
+        const j = (i + 1) % 4;
+        const x = quad[2 * i] ?? 0;
+        const y = quad[2 * i + 1] ?? 0;
+        const mx = (x + (quad[2 * j] ?? 0)) / 2;
+        const my = (y + (quad[2 * j + 1] ?? 0)) / 2;
+        top = Math.max(top, waterAt(x, y), waterAt(mx, my));
+      }
+      top = Math.max(
+        top,
+        waterAt(((quad[0] ?? 0) + (quad[4] ?? 0)) / 2, ((quad[1] ?? 0) + (quad[5] ?? 0)) / 2),
+      );
+      if (!(wet && clear < LOW_DECK_M) && !(deckLow - top < LOW_DECK_M)) continue;
+      low = true;
+      holes.add(quad, bi);
     }
     if (low) lowDecks += 1;
   });
@@ -517,6 +608,74 @@ export function cutUnderDecks(
     }
   }
   return { mesh: finishMesh(out), lowDecks };
+}
+
+/** Water at most this deep over a road on the ground is cut away from it (a bank set too low), metres. */
+export const BANK_DEPTH_M = 1;
+
+/**
+ * The road surface pieces on the ground that water may cover (docs/adr/0044),
+ * for cutting the water away there: where the elevation data puts a road on a
+ * bank below the water level beside it (often between a bridge's ends), the
+ * water sheet would otherwise be drawn over the road. Where the road is above
+ * the water, the cut is hidden under the road anyway. Left out: roads on a
+ * bridge level, the parts on a deck (the water stays under a bridge; low
+ * decks have their own cut), fords, which are meant to be in the water, and
+ * water deeper than `BANK_DEPTH_M` over the road (a road through a channel
+ * with no bridge stays under its water, as before).
+ */
+export function groundRoadHoles(
+  occupancy: Occupancy<SurfaceOwner>,
+  roads: readonly Road[],
+  water: WaterIndex,
+  decks: readonly Bridge[],
+  terrain: TerrainDataset,
+): number[][] {
+  const fords = new Set(roads.filter((r) => r.crossing?.kind === 'ford').map((r) => r.id));
+  // The decks' footprints (as far as the lifting reaches past their edges): the water stays there.
+  const onDecks = new Occupancy<number>(() => true);
+  decks.forEach((b, bi) => {
+    const h = b.halfWidth + 0.3;
+    for (let k = 0; k + 1 < b.deck.length; k += 1) {
+      const ax = b.xy[2 * k] ?? 0;
+      const ay = b.xy[2 * k + 1] ?? 0;
+      const bx = b.xy[2 * k + 2] ?? 0;
+      const by = b.xy[2 * k + 3] ?? 0;
+      const l = Math.hypot(bx - ax, by - ay);
+      if (l === 0) continue;
+      const nx = (-(by - ay) / l) * h;
+      const ny = ((bx - ax) / l) * h;
+      onDecks.add([ax - nx, ay - ny, bx - nx, by - ny, bx + nx, by + ny, ax + nx, ay + ny], bi);
+    }
+  });
+  const out: number[][] = [];
+  occupancy.forEach((poly, owner) => {
+    if (owner.level.startsWith('bridge') || fords.has(owner.id.replace(/^verge:/, ''))) return;
+    const box = boxOf(poly);
+    if (!water.near(box.minX, box.minY, box.maxX, box.maxY)) return;
+    // The part off every deck, where water is drawn over it, but not deeply.
+    const deep = (x: number, y: number) => {
+      const w = water.at(x, y);
+      if (w === -Infinity || !isOnTerrain(terrain, x, y)) return -Infinity;
+      return w - heightAt(terrain, x, y);
+    };
+    for (const piece of onDecks.free(poly, -1)) {
+      let depth = -Infinity;
+      const n = piece.length / 2;
+      let cx = 0;
+      let cy = 0;
+      for (let i = 0; i < n; i += 1) {
+        const x = piece[2 * i] ?? 0;
+        const y = piece[2 * i + 1] ?? 0;
+        depth = Math.max(depth, deep(x, y));
+        cx += x / n;
+        cy += y / n;
+      }
+      depth = Math.max(depth, deep(cx, cy));
+      if (depth > 0 && depth <= BANK_DEPTH_M) out.push(piece);
+    }
+  });
+  return out;
 }
 
 /**

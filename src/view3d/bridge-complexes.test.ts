@@ -10,17 +10,29 @@ import {
   roadNetwork,
   surfaceHeightAt,
   type Bridge,
+  type BridgeIndex,
   type EnvironmentFeatures,
   type Road,
   type TerrainDataset,
   type WaterArea,
 } from '#sim';
-import { coordinateBridges, cutUnderDecks, LOW_DECK_M, roadEntrances } from './bridge-complexes';
-import { bridgeGeometry } from './bridges';
-import { finishMesh, meshBuffers } from './drape';
+import {
+  BANK_DEPTH_M,
+  coordinateBridges,
+  cutUnderDecks,
+  groundRoadHoles,
+  waterIndex,
+  LOW_DECK_M,
+  roadEntrances,
+} from './bridge-complexes';
+import { bridgeGeometry, liftOntoBridges } from './bridges';
+import { finishMesh, meshBuffers, type MeshData } from './drape';
 import { buildFeatureGeometry } from './geo-features';
-import { diagnoseGeometry, meshIntegrity } from './geometry-diagnostics';
-import { coverage } from './test-helpers';
+import { diagnoseGeometry, hiddenRoads, meshIntegrity } from './geometry-diagnostics';
+import { Occupancy } from './planar';
+import type { RoadLayer } from './road-geometry';
+import { interacts, type SurfaceOwner } from './road-surface';
+import { coverage, triangles } from './test-helpers';
 
 // Bridges drawn as structures (docs/adr/0044): decks mapped side by side are
 // one structure with one surface and barriers only on its outside; separate
@@ -301,6 +313,205 @@ describe('water under a low deck', () => {
     // A deck well above the water leaves it as it was.
     const high = { ...deck, deck: deck.deck.map(() => 11) };
     expect(cutUnderDecks(water, [high]).mesh).toBe(water);
+  });
+});
+
+/**
+ * A sheet over x, y ∈ [−50, 50] (offset by `shift`) at height `z(x, y)`, in 1 m squares.
+ * Shifted, its edges stay clear of sample points on whole metres.
+ */
+const sheet = (z: (x: number, y: number) => number, shift = 0) => {
+  const b = meshBuffers(true);
+  for (let x0 = -50 + shift; x0 < 50 + shift; x0 += 1)
+    for (let y0 = -50 + shift; y0 < 50 + shift; y0 += 1)
+      for (const tri of [
+        [
+          [x0, y0],
+          [x0 + 1, y0],
+          [x0 + 1, y0 + 1],
+        ],
+        [
+          [x0, y0],
+          [x0 + 1, y0 + 1],
+          [x0, y0 + 1],
+        ],
+      ] as const)
+        for (const [x, y] of tri) {
+          b.positions.push(x, z(x, y), -y);
+          b.normals.push(0, 1, 0);
+          b.colors?.push(0.1, 0.2, 0.3);
+        }
+  return finishMesh(b);
+};
+/** A flat battlefield at `z`, with the roads given. */
+const flat = (z: number, roads: Road[] = []) =>
+  createSyntheticTerrain(GRID, () => z, {
+    roads,
+    buildings: [],
+    vegetation: [],
+    water: [],
+    waterways: [],
+    landUse: [],
+  });
+
+describe('water under a deck, rising towards a bank', () => {
+  it('is cut away where the water drawn under the deck comes within LOW_DECK_M of it', () => {
+    // The water level under the centre line leaves 0.5 m, but the sheet rises
+    // 0.3 m per metre from y = 0: at the deck's edges (y = ±2) it is 10.6 m.
+    const water = sheet((_, y) => 10 + 0.3 * Math.abs(y));
+    const n = 101;
+    const deck: Bridge = {
+      id: 'quay',
+      roadIds: ['r'],
+      style: 'rural',
+      mapped: true,
+      xy: Array.from({ length: n }, (_, k) => [-50 + k, 0]).flat(),
+      deck: Array.from({ length: n }, () => 10.5),
+      lift: Array.from({ length: n }, () => 0.5),
+      wet: Array.from({ length: n }, () => true),
+      under: Array.from({ length: n }, () => 10),
+      halfWidth: 2,
+      roadHalfWidth: 1.5,
+      lowClearance: false,
+    };
+    const { mesh, lowDecks } = cutUnderDecks(water, [deck]);
+    expect(lowDecks).toBe(1);
+    expect(coverage(mesh).covered(0, 0.5)).toBe(false);
+    expect(coverage(mesh).covered(0, 10)).toBe(true);
+    // Level water 0.5 m under the same deck stays.
+    expect(
+      cutUnderDecks(
+        sheet(() => 10),
+        [deck],
+      ).mesh.triangleCount,
+    ).toBe(20_000);
+  });
+});
+
+describe('water over a road on a low bank', () => {
+  const owner = (level = ':0', id = 'r'): SurfaceOwner => ({
+    id,
+    style: 'paved',
+    level,
+    joined: new Set(),
+    yields: false,
+  });
+  const occupancyWith = (o: SurfaceOwner) => {
+    const occupancy = new Occupancy<SurfaceOwner>(interacts);
+    occupancy.add([-10, -2, 10, -2, 10, 2, -10, 2], o);
+    return occupancy;
+  };
+  const water = sheet(() => 10);
+  const wet = waterIndex(water);
+
+  it('is cut away where it lies at most BANK_DEPTH_M over a road on the ground', () => {
+    const terrain = flat(10 - BANK_DEPTH_M / 2);
+    const holes = groundRoadHoles(occupancyWith(owner()), [], wet, [], terrain);
+    expect(holes.length).toBeGreaterThan(0);
+    const cut = coverage(cutUnderDecks(water, [], holes).mesh);
+    expect(cut.covered(0, 0)).toBe(false);
+    expect(cut.covered(0, 10)).toBe(true);
+  });
+
+  it('stays over deep water, fords, roads on a bridge level, and decks', () => {
+    // Deep: a road through a channel with no bridge mapped.
+    expect(
+      groundRoadHoles(occupancyWith(owner()), [], wet, [], flat(10 - 2 * BANK_DEPTH_M)),
+    ).toEqual([]);
+    const shallow = flat(10 - BANK_DEPTH_M / 2);
+    const ford = road(
+      'r',
+      [
+        [-10, 0],
+        [10, 0],
+      ],
+      { crossing: { kind: 'ford', value: 'yes' } },
+    );
+    expect(groundRoadHoles(occupancyWith(owner()), [ford], wet, [], shallow)).toEqual([]);
+    expect(groundRoadHoles(occupancyWith(owner('bridge:1')), [], wet, [], shallow)).toEqual([]);
+    // A deck over x < 0: only the part of the road off it is cut.
+    const n = 41;
+    const deck: Bridge = {
+      id: 'over',
+      roadIds: ['other'],
+      style: 'rural',
+      mapped: true,
+      xy: Array.from({ length: n }, (_, k) => [-40 + k, 0]).flat(),
+      deck: Array.from({ length: n }, () => 12),
+      lift: Array.from({ length: n }, () => 2.5),
+      wet: Array.from({ length: n }, () => true),
+      under: Array.from({ length: n }, () => 10),
+      halfWidth: 3,
+      roadHalfWidth: 2.5,
+      lowClearance: false,
+    };
+    const holes = groundRoadHoles(occupancyWith(owner()), [], wet, [deck], shallow);
+    const cut = coverage(cutUnderDecks(water, [], holes).mesh);
+    expect(cut.covered(-5, 0)).toBe(true);
+    expect(cut.covered(5, 0)).toBe(false);
+  });
+});
+
+describe('roads lifted onto a deck', () => {
+  it('are raised onto it, but never put below where they were draped', () => {
+    // One road triangle draped 6 cm above ground at 5.39 m.
+    const b = meshBuffers();
+    for (const [x, y] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ] as const) {
+      b.positions.push(x, 5.45, -y);
+      b.normals.push(0, 1, 0);
+    }
+    const road = finishMesh(b);
+    const index = (deck: number, blend: number): BridgeIndex => ({
+      count: 1,
+      touches: () => true,
+      at: () => ({ deck, blend, centreGround: deck }),
+    });
+    const heights = (m: MeshData) => triangles(m).flatMap((t) => [t.a.z, t.b.z, t.c.z]);
+    // Near the end of a deck lower than the bank beside it.
+    for (const z of heights(liftOntoBridges(road, index(5.21, 0.48), () => 5.39)))
+      expect(z).toBeCloseTo(5.45, 5);
+    // A deck above the road: raised onto it, the same 6 cm above it.
+    for (const z of heights(liftOntoBridges(road, index(7, 1), () => 5.39)))
+      expect(z).toBeCloseTo(7.06, 5);
+  });
+});
+
+describe('road diagnostics: hidden surfaces', () => {
+  const terrain = flat(10, [
+    road('r', [
+      [-20, 0],
+      [20, 0],
+    ]),
+  ]);
+  const roadAt = (z: number) => new Map<RoadLayer, MeshData>([['paved', sheet(() => z, 0.37)]]);
+
+  it('reports a road drawn below the ground, or under the water drawn over it', () => {
+    expect(hiddenRoads(terrain, roadAt(10.06), null, 2)).toEqual([]);
+    const buried = hiddenRoads(terrain, roadAt(9.9), null, 2);
+    expect(buried.length).toBeGreaterThan(0);
+    expect(buried.every((w) => w.kind === 'roadBuried' && w.severity === 'unexpected')).toBe(true);
+    const wet = hiddenRoads(
+      terrain,
+      roadAt(10.06),
+      sheet(() => 10.5, 0.37),
+      2,
+    );
+    expect(wet.length).toBeGreaterThan(0);
+    expect(wet.every((w) => w.kind === 'roadUnderWater' && w.severity === 'unexpected')).toBe(true);
+    // Under deep water (a way through water with no bridge mapped): a limitation of the data.
+    const deep = hiddenRoads(
+      terrain,
+      roadAt(10.06),
+      sheet(() => 10 + 2 * BANK_DEPTH_M, 0.37),
+      2,
+    );
+    expect(deep.every((w) => w.kind === 'roadUnderWater' && w.severity === 'limitation')).toBe(
+      true,
+    );
   });
 });
 
