@@ -242,7 +242,7 @@ describe('battlefield packages', () => {
         bySource: { OpenStreetMap: 2, 'Microsoft ML Buildings': 1 },
         datasets: ['Microsoft ML Buildings', 'OpenStreetMap'],
         merged: 0,
-        heights: { data: 2, floors: 0, defaulted: 1 },
+        heights: { data: 2, raised: 0, floors: 0, defaulted: 1 },
       },
     });
     expect(pkg.attribution.slice(0, 3)).toEqual([

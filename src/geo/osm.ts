@@ -227,6 +227,30 @@ export function roadTraffic(t: Tags): RoadTraffic | null {
 /** Default storey height when only `building:levels` is known. */
 export const STOREY_M = 3;
 export const DEFAULT_BUILDING_M = 6;
+/**
+ * The lowest building height kept: one storey. Lower values in the data are
+ * not real buildings' heights: machine-estimated heights (e.g. Overture's
+ * Microsoft ML footprints) are often a few centimetres, which would make
+ * the building a flat slab that neither shows nor blocks sight.
+ */
+export const MIN_BUILDING_M = STOREY_M;
+
+/**
+ * A building's height from what the source gives: its tagged height, else
+ * its storeys times `STOREY_M`, else `DEFAULT_BUILDING_M`; never below one
+ * storey. `estimated` unless a tagged height of at least one storey was used.
+ */
+export function buildingHeight(
+  tagged: number | null,
+  levels: number | null,
+): { readonly heightMeters: number; readonly estimated: boolean } {
+  if (tagged !== null && tagged >= MIN_BUILDING_M)
+    return { heightMeters: tagged, estimated: false };
+  const fromLevels = levels !== null ? levels * STOREY_M : null;
+  // A tagged height too low to be real gives way to the storeys, then to the default.
+  const height = fromLevels ?? (tagged !== null ? MIN_BUILDING_M : DEFAULT_BUILDING_M);
+  return { heightMeters: Math.max(MIN_BUILDING_M, height), estimated: true };
+}
 
 /** Vegetation kinds with defaults for values OSM rarely records. */
 const VEGETATION = {
@@ -444,10 +468,10 @@ export function featuresFromOsm(
       estimated.length > 0 ? { ref, estimated } : { ref };
     if (isBuilding) {
       // A height from the number of storeys assumes a storey height, so it is estimated too.
-      const tagged = parseMetres(tags['height']);
-      const levels = parseMetres(tags['building:levels']);
-      const height =
-        tagged ?? (levels !== null ? Math.max(2, levels * STOREY_M) : DEFAULT_BUILDING_M);
+      const { heightMeters: height, estimated } = buildingHeight(
+        parseMetres(tags['height']),
+        parseMetres(tags['building:levels']),
+      );
       // Display only (docs/adr/0035): kept as tagged, never used for the height above.
       const appearance = buildingAppearance(osmBuildingAttributes(tags));
       ids(base, clipped.length).forEach((id, i) => {
@@ -458,7 +482,7 @@ export function featuresFromOsm(
           id,
           footprint: s.outer,
           heightMeters: height,
-          source: source(tagged !== null ? [] : ['heightMeters']),
+          source: source(estimated ? ['heightMeters'] : []),
           ...(appearance ? { appearance } : {}),
         });
       });

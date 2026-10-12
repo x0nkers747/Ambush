@@ -3,7 +3,7 @@ import { buildingAppearance } from './building-tags';
 import { clipPolygon, dedupe, type Rect } from './clip';
 import { geographicBounds, toLocal, type BattlefieldFrame } from './frame';
 import { decodeMvt, ringArea, type MvtValue } from './mvt';
-import { DEFAULT_BUILDING_M, STOREY_M } from './osm';
+import { buildingHeight } from './osm';
 import { normalizeLon, type LatLon } from './utm';
 
 // Buildings from Overture Maps (docs/adr/0023): the `building` layer of
@@ -46,8 +46,17 @@ export interface OvertureImportReport {
   readonly datasets: readonly string[];
   /** Buildings cut by tile edges and joined again. */
   readonly merged: number;
-  /** How each building's height was found. */
-  readonly heights: { readonly data: number; readonly floors: number; readonly defaulted: number };
+  /**
+   * How each building's height was found: the data's height; not the
+   * data's, because it was lower than one storey (`MIN_BUILDING_M`: then
+   * from its floors, or one storey); from its floors; or the default.
+   */
+  readonly heights: {
+    readonly data: number;
+    readonly raised: number;
+    readonly floors: number;
+    readonly defaulted: number;
+  };
   readonly dropped: readonly { readonly ref: string; readonly reason: string }[];
   readonly warnings: readonly string[];
 }
@@ -322,7 +331,7 @@ export function buildingsFromOverture(
   const buildings: Building[] = [];
   const bySource: Record<string, number> = {};
   const datasets = new Set<string>();
-  const heights = { data: 0, floors: 0, defaulted: 0 };
+  const heights = { data: 0, raised: 0, floors: 0, defaulted: 0 };
   let merged = 0;
   const ids = [...gathered.keys()].sort();
   for (const id of ids) {
@@ -354,12 +363,12 @@ export function buildingsFromOverture(
     const p = g.properties;
     const tagged = positive(p['height']);
     const floors = positive(p['num_floors']);
-    const height =
-      tagged ?? (floors !== null ? Math.max(2, floors * STOREY_M) : DEFAULT_BUILDING_M);
-    if (tagged !== null) heights.data += 1;
+    const { heightMeters: height, estimated } = buildingHeight(tagged, floors);
+    if (!estimated) heights.data += 1;
+    else if (tagged !== null) heights.raised += 1;
     else if (floors !== null) heights.floors += 1;
     else heights.defaulted += 1;
-    const source: FeatureSource = tagged !== null ? { ref } : { ref, estimated: ['heightMeters'] };
+    const source: FeatureSource = estimated ? { ref, estimated: ['heightMeters'] } : { ref };
     const geometrySource = p['@geometry_source'];
     const outlineSource = typeof geometrySource === 'string' ? geometrySource : 'unknown';
     bySource[outlineSource] = (bySource[outlineSource] ?? 0) + 1;

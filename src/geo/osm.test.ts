@@ -163,6 +163,26 @@ describe('OSM import rules', () => {
     expect(new Set(all.map((f) => f.id)).size).toBe(all.length);
   });
 
+  it('never makes a building lower than one storey', () => {
+    const data: OverpassResponse = {
+      elements: [
+        way(30, { building: 'yes', height: '0.5' }, sq(0, 100, 5)),
+        way(31, { building: 'shed', 'building:levels': '0.5' }, sq(0, 150, 5)),
+        way(32, { building: 'yes', height: '2', 'building:levels': '1' }, sq(0, 200, 5)),
+        way(33, { building: 'yes', height: '3' }, sq(0, 250, 5)),
+      ],
+    };
+    const { features } = featuresFromOsm(data, QUANTICO);
+    expect(
+      features.buildings.map((b) => [b.id, b.heightMeters, b.source?.estimated ?? []]),
+    ).toEqual([
+      ['osm-w30', 3, ['heightMeters']],
+      ['osm-w31', 3, ['heightMeters']],
+      ['osm-w32', 3, ['heightMeters']],
+      ['osm-w33', 3, []],
+    ]);
+  });
+
   it('drops broken geometry with a reason instead of failing', () => {
     const bowtie = [
       { x: 0, y: 0 },

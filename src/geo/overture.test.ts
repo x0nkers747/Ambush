@@ -213,6 +213,10 @@ describe('buildingsFromOverture', () => {
           building('b', [at(2)], { num_floors: 4 }),
           building('c', [at(3)], {}),
           building('d', [at(4)], { height: 0 }),
+          // Machine-estimated heights too low to be real (as Microsoft ML footprints often have):
+          // one storey, or the floors when given.
+          building('e', [at(5)], { height: 0.11 }),
+          building('f', [at(6)], { height: 0.5, num_floors: 2 }),
         ]),
       ],
       frame,
@@ -222,8 +226,10 @@ describe('buildingsFromOverture', () => {
       ['ovt-b', 12, ['heightMeters']],
       ['ovt-c', 6, ['heightMeters']],
       ['ovt-d', 6, ['heightMeters']],
+      ['ovt-e', 3, ['heightMeters']],
+      ['ovt-f', 6, ['heightMeters']],
     ]);
-    expect(report.heights).toEqual({ data: 1, floors: 1, defaulted: 2 });
+    expect(report.heights).toEqual({ data: 1, raised: 2, floors: 1, defaulted: 2 });
     expect(buildings[0]?.source?.ref).toBe('overture:building/a');
   });
 
