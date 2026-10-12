@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
+import { MOUSE, PerspectiveCamera, Raycaster, TOUCH, Vector2, Vector3 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   clampToExtent,
@@ -13,8 +13,9 @@ import {
 } from './camera-math';
 
 // The overhead tactical camera (docs/adr/0029): Three.js's OrbitControls with
-// left-drag to orbit, right-drag to pan along the ground, the wheel to zoom
-// (towards the cursor), and a double-click to focus on the ground clicked.
+// left-drag to pan along the ground (as the 2D map drags), right-drag to orbit,
+// the wheel to zoom (towards the cursor), and a double-click to focus on the
+// ground clicked. On touch screens one finger pans and two zoom and rotate.
 // The focus stays on the ground and on the battlefield; the camera never goes
 // below the ground or past straight down. Later camera modes (follow a
 // soldier, ground level, free flight, AAR) implement `CameraMode` alongside.
@@ -55,8 +56,11 @@ export function createTacticalCamera(
 ): TacticalCamera {
   const camera = new PerspectiveCamera(FOV_DEG, 1, 1, 10_000);
   const controls = new OrbitControls(camera, canvas);
-  // Left: orbit; right: pan; wheel: zoom. Panning moves along the ground
-  // rather than the screen, so dragging the map moves across the battlefield.
+  // Left: pan, as on the 2D map; right: orbit; wheel: zoom. Panning moves
+  // along the ground rather than the screen, so dragging the map moves across
+  // the battlefield.
+  controls.mouseButtons = { LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE };
+  controls.touches = { ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE };
   controls.screenSpacePanning = false;
   controls.zoomToCursor = true;
   controls.enableDamping = true;

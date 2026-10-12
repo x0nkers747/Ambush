@@ -1496,7 +1496,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       viewMode === '3d'
         ? (view3d?.status() ??
             (readout ||
-              'Click: select or place · Drag: orbit · Right-drag: pan · Wheel: zoom · Double-click: focus'))
+              'Click: select or place · Drag: pan · Right-drag: orbit · Wheel: zoom · Double-click: focus'))
         : readout,
     );
   };

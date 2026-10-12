@@ -109,9 +109,9 @@ The 3D view listens in the capture phase, before OrbitControls:
 | Left click on a soldier                                               | select (cycle a cluster)                 | the same                         |
 | Left click on the ground                                              | destination, formation, kill-zone corner | the same                         |
 | Left drag on a handle (destination, arrow, formation, corner, editor) | drag it                                  | the same; the camera stays still |
-| Left drag elsewhere                                                   | pan                                      | orbit (the 3D camera)            |
+| Left drag elsewhere                                                   | pan                                      | pan along the ground             |
 | Right click on a handle                                               | delete it                                | the same                         |
-| Right drag                                                            | —                                        | pan along the ground             |
+| Right drag                                                            | —                                        | orbit (the 3D camera)            |
 | Wheel                                                                 | zoom                                     | zoom toward the cursor           |
 | Double-click                                                          | —                                        | focus the camera there           |
 
@@ -266,8 +266,8 @@ per viewshed.
 
 ## Consequences and limitations
 
-- **Left drag on empty ground.** It orbits in 3D but pans in 2D, because each view keeps its camera
-  convention. Right drag pans in 3D. Everything else is the same gesture with the same meaning.
+- **Left drag on empty ground** pans in both views (changed after this ADR: it first orbited in
+  3D). Right drag orbits the 3D camera. Everything else is the same gesture with the same meaning.
 - **Overlays are never hidden.** The tactical overlay is drawn on top of the 3D scene, so a route
   behind a hill or through a wood stays visible. This is deliberate: symbology must not disappear.
   The viewshed, painted by the terrain shader, is occluded correctly.

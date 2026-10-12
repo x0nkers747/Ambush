@@ -616,7 +616,7 @@ Select a fire team to see what any of its Marines can see; drag a destination to
 positions.</p>
 <h3>3D view</h3>
 <p class="muted">Every click and drag above works on the 3D ground too, with the same results.
-Drag empty ground to orbit, right-drag to pan, use the wheel to zoom and double-click to focus.</p>`;
+Drag empty ground to pan, right-drag to orbit, use the wheel to zoom and double-click to focus.</p>`;
 
 export const TIME_HELP = `<h3>Map and time</h3>
 <dl class="help">

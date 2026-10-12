@@ -22,8 +22,8 @@ battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario e
 [ADR 0030](docs/adr/0030-3d-geographic-features.md),
 [ADR 0031](docs/adr/0031-3d-procedural-vegetation.md)) shows the same battlefield and soldiers
 on the simulated terrain, with its roads, buildings, water, forests, tree lines and scrub, and
-the ground coloured by land cover: switch with **2D | 3D** under the map; drag to orbit,
-right-drag to pan, use the wheel to zoom and double-click to focus. Soldiers hidden by trees or
+the ground coloured by land cover: switch with **2D | 3D** under the map; drag to pan, as in
+2D, right-drag to orbit, use the wheel to zoom and double-click to focus. Soldiers hidden by trees or
 buildings show through as dim silhouettes. Roads and buildings are graded into the ground
 (cuttings, embankments and level pads, on 2.5 m refinement tiles), and that one graded terrain is
 used by everything: the 2D map, the 3D view, movement, line of sight and replay

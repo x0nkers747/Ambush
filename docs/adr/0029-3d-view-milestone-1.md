@@ -93,7 +93,8 @@ ground the simulation knows.
 
 `OrbitControls`:
 
-- left-drag orbits;
+- left-drag orbits (since changed: left-drag pans along the ground, as on the 2D map, and
+  right-drag orbits; see ADR 0039);
 - right-drag pans along the ground;
 - the wheel zooms towards the cursor, with damping;
 - double-click focuses on the ground clicked. The click is found by marching the camera ray against
