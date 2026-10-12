@@ -113,18 +113,34 @@ is linked, the formation is gone.
 Every slot the operation would change is checked as an individual destination is:
 
 - on the map;
-- not in or against a building;
+- not in or against a building, and not in water;
 - reachable from where the Marine stands.
 
 **A slot in or against a building is moved clear of it** (changed 2026-10-10), rather than
 refusing the whole placement: the Marine goes to the nearest spot outside the building that it can
-reach, no closer than 2 m to another slot (`nearestPointClearOfBuildings`: just outside the
-nearest wall, else the nearest acceptable point on rings round the slot, up to 40 m). The
-formation keeps that spot as the slot's destination, so the Marine stays linked; the placement
-message names those moved. Placing, moving and turning all do this. A single Marine's destination
-in or against a building is still refused with the error.
+reach, no closer than 2 m to another slot (`nearestClearPoint`: just outside the nearest wall, else
+the nearest acceptable point on rings round the slot, up to 40 m). The formation keeps that spot as
+the slot's destination, so the Marine stays linked; the placement message names those moved.
+Placing, moving and turning all do this. A single Marine's destination in or against a building is
+still refused with the error.
 
-If any slot still fails (off the map, unreachable, or no spot clear of the building), nothing
+**A slot in water is moved onto the bank** (changed 2026-10-12), in the same way, so a line can be
+placed along a river or a lake shore:
+
+- The Marine goes 1 m past the nearest edge of the water (`ASHORE_MARGIN_M`).
+- Where that lands in other water (a river mapped as several pieces) or against a building on the
+  bank, it steps out of that too, up to four times. Failing that, the rings round the slot are
+  searched as for buildings.
+- The bank must be reachable, so a Marine is not put on the far bank of a river they cannot cross.
+- The formation lists them apart (`movedAshore`), and the message says they were moved out of the
+  water onto the bank.
+- A single Marine's destination in water is still refused.
+- On the recorded battlefields, of the sampled points in water within 40 m of a bank, 66 of 73
+  (Bled) and 44 of 49 (Woolgoolga) were placed on a reachable bank. The rest had no reachable
+  spot within 40 m, such as a point nearer the far bank of a river. Moving a point ashore takes about 1 ms; the path that checks it
+  is reachable costs the same as for any destination.
+
+If any slot still fails (off the map, unreachable, or no spot clear of the building or water), nothing
 changes, and the refusal names each failing slot. The line is otherwise never squeezed to fit, so
 a drag simply stops at the last position that fits.
 Placing, moving, turning and deleting are each one operation on the drafts, so they cannot be

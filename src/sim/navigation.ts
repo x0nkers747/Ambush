@@ -58,16 +58,23 @@ export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | n
   return null;
 }
 
+/** How far past the water's edge a point moved out of water stands, in metres. */
+export const ASHORE_MARGIN_M = 1;
+
 /**
- * For a point in or against a building: the nearest point clear of it where
- * `accept` agrees (e.g. a soldier can stand there and reach it), or `null`
- * when there is none within `maxDistanceM`. First the point just outside the
- * building's outline nearest `p` (at the clearance, plus a small margin);
- * failing that (another building, water, refused), the nearest acceptable
- * point on rings round `p`, 1 m apart. A point not in or against a building
- * is returned as it is when acceptable. Deterministic.
+ * For a point in or against a building, or in water: the nearest point clear
+ * of it where `accept` agrees (e.g. a soldier can stand there and reach it),
+ * or `null` when there is none within `maxDistanceM`.
+ *
+ * First the point just outside the obstacle's outline nearest `p` (a
+ * building's clearance plus a small margin, or `ASHORE_MARGIN_M` onto the
+ * bank); where that lands in or against another obstacle (water mapped as
+ * several polygons, a building on the bank), it steps out of that one too, a
+ * few times. Failing that (refused, or nowhere clear), the nearest acceptable
+ * point on rings round `p`, 1 m apart. A point with no problem is returned as
+ * it is when acceptable; one off the map gives `null`. Deterministic.
  */
-export function nearestPointClearOfBuildings(
+export function nearestClearPoint(
   terrain: TerrainDataset,
   p: Vec2,
   accept: (q: Vec2) => boolean = () => true,
@@ -76,49 +83,75 @@ export function nearestPointClearOfBuildings(
   const ok = (q: Vec2) => pointProblem(terrain, q) === null && accept(q);
   const problem = pointProblem(terrain, p);
   if (problem === null) return accept(p) ? p : null;
-  if (problem.kind !== 'insideBuilding' && problem.kind !== 'tooCloseToBuilding') return null;
-  const footprint = terrain.features.buildings.find((b) => b.id === problem.buildingId)?.footprint;
-  if (footprint) {
-    // The nearest point of the outline, then outwards from the building to the clearance.
-    let best: { point: Vec2; distance: number; outward: Vec2 } | null = null;
-    const n = footprint.length;
-    const ccw = signedArea(footprint) > 0;
-    for (let i = 0; i < n; i += 1) {
-      const a = footprint[i];
-      const b = footprint[(i + 1) % n];
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const lengthSq = dx * dx + dy * dy;
-      if (lengthSq === 0) continue;
-      const t = Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq, 0), 1);
-      const point = { x: a.x + t * dx, y: a.y + t * dy };
-      const distance = Math.hypot(p.x - point.x, p.y - point.y);
-      // The edge's outward normal: right of the edge for a counter-clockwise outline.
-      const length = Math.sqrt(lengthSq);
-      const outward = ccw
-        ? { x: dy / length, y: -dx / length }
-        : { x: -dy / length, y: dx / length };
-      if (!best || distance < best.distance) best = { point, distance, outward };
-    }
-    if (best) {
-      const reach = OBSTACLE_CLEARANCE_M + 0.5;
-      const candidate = {
-        x: best.point.x + best.outward.x * reach,
-        y: best.point.y + best.outward.y * reach,
-      };
-      if (ok(candidate)) return candidate;
-    }
+  if (problem.kind === 'offTerrain') return null;
+  let q: Vec2 = p;
+  let current: PointProblem | null = problem;
+  for (let step = 0; step < MAX_STEPS_OUT && current; step += 1) {
+    const next = stepOut(terrain, q, current);
+    if (!next) break;
+    q = next;
+    current = pointProblem(terrain, q);
   }
+  if (current === null && Math.hypot(q.x - p.x, q.y - p.y) <= maxDistanceM && accept(q)) return q;
   for (let r = 1; r <= maxDistanceM; r += 1) {
     const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 1.5));
     for (let k = 0; k < steps; k += 1) {
       const angle = (2 * Math.PI * k) / steps;
-      const q = { x: p.x + r * Math.sin(angle), y: p.y + r * Math.cos(angle) };
-      if (ok(q)) return q;
+      const c = { x: p.x + r * Math.sin(angle), y: p.y + r * Math.cos(angle) };
+      if (ok(c)) return c;
     }
   }
   return null;
+}
+
+/** How many obstacles in a row `nearestClearPoint` steps out of before searching round the point. */
+const MAX_STEPS_OUT = 4;
+
+/** The point just outside the obstacle of `problem` nearest `p`, or `null` when there is none. */
+function stepOut(terrain: TerrainDataset, p: Vec2, problem: PointProblem): Vec2 | null {
+  switch (problem.kind) {
+    case 'insideBuilding':
+    case 'tooCloseToBuilding': {
+      const footprint = terrain.features.buildings.find(
+        (b) => b.id === problem.buildingId,
+      )?.footprint;
+      return footprint ? outsideRing(footprint, p, OBSTACLE_CLEARANCE_M + 0.5) : null;
+    }
+    case 'inWater': {
+      const boundary = impassableWater(terrain.features).find(
+        (w) => w.id === problem.waterId,
+      )?.boundary;
+      return boundary ? outsideRing(boundary, p, ASHORE_MARGIN_M) : null;
+    }
+    case 'offTerrain':
+      return null;
+  }
+}
+
+/** The point `reach` metres outside a ring's nearest edge to `p`, along the edge's outward normal. */
+function outsideRing(ring: readonly Vec2[], p: Vec2, reach: number): Vec2 | null {
+  let best: { point: Vec2; distance: number; outward: Vec2 } | null = null;
+  const n = ring.length;
+  const ccw = signedArea(ring) > 0;
+  for (let i = 0; i < n; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    if (!a || !b) continue;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSq = dx * dx + dy * dy;
+    if (lengthSq === 0) continue;
+    const t = Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq, 0), 1);
+    const point = { x: a.x + t * dx, y: a.y + t * dy };
+    const distance = Math.hypot(p.x - point.x, p.y - point.y);
+    // The edge's outward normal: right of the edge for a counter-clockwise outline.
+    const length = Math.sqrt(lengthSq);
+    const outward = ccw ? { x: dy / length, y: -dx / length } : { x: -dy / length, y: dx / length };
+    if (!best || distance < best.distance) best = { point, distance, outward };
+  }
+  return best
+    ? { x: best.point.x + best.outward.x * reach, y: best.point.y + best.outward.y * reach }
+    : null;
 }
 
 /** Twice-the-sign of a ring's area: positive when counter-clockwise (x east, y north). */

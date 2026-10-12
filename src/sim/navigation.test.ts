@@ -3,7 +3,8 @@ import { NO_FEATURES, rectangle, validateFeatures, type EnvironmentFeatures } fr
 import type { Vec2 } from './geometry';
 import {
   isSegmentWalkable,
-  nearestPointClearOfBuildings,
+  ASHORE_MARGIN_M,
+  nearestClearPoint,
   OBSTACLE_CLEARANCE_M,
   planPath,
   pointProblem,
@@ -339,15 +340,15 @@ describe('movement around buildings', () => {
   });
 });
 
-describe('the nearest point clear of buildings', () => {
+describe('the nearest point clear of buildings and water', () => {
   // WALL spans x −20..20, y −10..10.
   const reach = OBSTACLE_CLEARANCE_M + 0.5;
 
   it('is just outside the nearest wall, for a point inside or too close', () => {
     const t = terrainWith({ buildings: [WALL] });
-    expect(nearestPointClearOfBuildings(t, { x: 0, y: 8 })).toEqual({ x: 0, y: 10 + reach });
-    expect(nearestPointClearOfBuildings(t, { x: 15, y: 0 })).toEqual({ x: 20 + reach, y: 0 });
-    const close = nearestPointClearOfBuildings(t, { x: 0, y: 10.3 });
+    expect(nearestClearPoint(t, { x: 0, y: 8 })).toEqual({ x: 0, y: 10 + reach });
+    expect(nearestClearPoint(t, { x: 15, y: 0 })).toEqual({ x: 20 + reach, y: 0 });
+    const close = nearestClearPoint(t, { x: 0, y: 10.3 });
     expect(close?.x).toBeCloseTo(0);
     expect(close?.y).toBeCloseTo(10 + reach);
   });
@@ -357,22 +358,47 @@ describe('the nearest point clear of buildings', () => {
     const north = { id: 'B-2', footprint: rectangle(0, 13, 40, 2), heightMeters: 6 };
     const t = terrainWith({ buildings: [WALL, north] });
     const p = { x: 0, y: 8 };
-    const q = nearestPointClearOfBuildings(t, p);
+    const q = nearestClearPoint(t, p);
     expect(q).not.toBeNull();
     expect(q && pointProblem(t, q)).toBeNull();
     expect(q && Math.hypot(q.x - p.x, q.y - p.y)).toBeLessThan(25);
     // A refusing `accept` is honoured too.
-    const notNorth = nearestPointClearOfBuildings(
-      terrainWith({ buildings: [WALL] }),
-      p,
-      (c) => c.y < 0,
-    );
+    const notNorth = nearestClearPoint(terrainWith({ buildings: [WALL] }), p, (c) => c.y < 0);
     expect(notNorth && notNorth.y < 0 && pointProblem(t, notNorth) === null).toBe(true);
   });
 
-  it('leaves a good point as it is, and does nothing for problems other than buildings', () => {
+  it('leaves a good point as it is, and gives null off the map', () => {
     const t = terrainWith({ buildings: [WALL] });
-    expect(nearestPointClearOfBuildings(t, { x: 50, y: 50 })).toEqual({ x: 50, y: 50 });
-    expect(nearestPointClearOfBuildings(t, { x: 500, y: 0 })).toBeNull();
+    expect(nearestClearPoint(t, { x: 50, y: 50 })).toEqual({ x: 50, y: 50 });
+    expect(nearestClearPoint(t, { x: 500, y: 0 })).toBeNull();
+  });
+
+  it('moves a point in water out onto the nearest bank', () => {
+    // A pond spanning x −30..30, y −20..20.
+    const pond = { id: 'W-1', kind: 'water' as const, boundary: rectangle(0, 0, 60, 40) };
+    const t = terrainWith({ water: [pond] });
+    expect(nearestClearPoint(t, { x: 0, y: 15 })).toEqual({ x: 0, y: 20 + ASHORE_MARGIN_M });
+    expect(nearestClearPoint(t, { x: -25, y: 0 })).toEqual({
+      x: -30 - ASHORE_MARGIN_M,
+      y: 0,
+    });
+    // Wetland is walkable: nothing to move.
+    const marsh = terrainWith({ water: [{ ...pond, kind: 'wetland' }] });
+    expect(nearestClearPoint(marsh, { x: 0, y: 15 })).toEqual({ x: 0, y: 15 });
+  });
+
+  it('steps out of water mapped as several pieces, and past a building on the bank', () => {
+    // Two touching river pieces (x −30..0 and 0..30, y −10..10); a building on the
+    // north bank right where the first step out lands.
+    const west = { id: 'W-1', kind: 'water' as const, boundary: rectangle(-15, 0, 30, 20) };
+    const east = { id: 'W-2', kind: 'water' as const, boundary: rectangle(15, 0, 30, 20) };
+    const shed = { id: 'B-9', footprint: rectangle(-2, 14, 6, 6), heightMeters: 3 };
+    const t = terrainWith({ water: [west, east], buildings: [shed] });
+    // Nearest edge of W-1 for (−1, 2) is its east side, inside W-2; then north, into the shed.
+    const p = { x: -1, y: 2 };
+    const q = nearestClearPoint(t, p);
+    expect(q).not.toBeNull();
+    expect(q && pointProblem(t, q)).toBeNull();
+    expect(q && Math.hypot(q.x - p.x, q.y - p.y)).toBeLessThan(20);
   });
 });

@@ -8,7 +8,7 @@ import {
   lineOfSight,
   normalizeAzimuth,
   pointInPolygon,
-  nearestPointClearOfBuildings,
+  nearestClearPoint,
   pointProblem,
   visibleCellsIn,
   soldierId,
@@ -335,11 +335,14 @@ export interface FireTeamFormation {
   /**
    * Every slot in member order, with the destination it generates: its place
    * on the line, or the nearest spot clear of a building when the line falls
-   * in or against one (see `movedClear`).
+   * in or against one (see `movedClear`), or on the bank when it falls in
+   * water (see `movedAshore`).
    */
   readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
   /** The Marines whose slot fell in or against a building and were moved clear of it. */
   readonly movedClear: readonly SoldierId[];
+  /** The Marines whose slot fell in water and were moved to the nearest bank. */
+  readonly movedAshore: readonly SoldierId[];
   /**
    * The Marines whose plans are still exactly the generated ones, in slot
    * order. Only they follow moves and turns of the formation; a Marine whose
@@ -874,6 +877,7 @@ export function createExercise({
     readonly slots: readonly { readonly soldierId: SoldierId; readonly point: Vec2 }[];
     readonly linked: Set<SoldierId>;
     readonly movedClear: readonly SoldierId[];
+    readonly movedAshore: readonly SoldierId[];
   }
   const formations = new Map<string, Formation>();
 
@@ -933,6 +937,7 @@ export function createExercise({
       slots: f.slots.map((slot) => ({ soldierId: slot.soldierId, point: { ...slot.point } })),
       linked: f.slots.filter((slot) => f.linked.has(slot.soldierId)).map((slot) => slot.soldierId),
       movedClear: [...f.movedClear],
+      movedAshore: [...f.movedAshore],
     });
   /**
    * Lays the team out on a line and gives every Marine in `follow` its slot's
@@ -957,6 +962,7 @@ export function createExercise({
     const points = lineFormationPoints(centre, azimuth, team.memberIds.length, formationSpacingM);
     const slots: { soldierId: SoldierId; point: Vec2 }[] = [];
     const movedClear: SoldierId[] = [];
+    const movedAshore: SoldierId[] = [];
     const problems: string[] = [];
     team.memberIds.forEach((soldierId, i) => {
       const onLine = points[i] ?? centre;
@@ -965,9 +971,9 @@ export function createExercise({
         return;
       }
       const kind = pointProblem(terrain, onLine)?.kind;
-      if (kind === 'insideBuilding' || kind === 'tooCloseToBuilding') {
+      if (kind === 'insideBuilding' || kind === 'tooCloseToBuilding' || kind === 'inWater') {
         const others = [...slots.map((s) => s.point), ...points.slice(i + 1)];
-        const clear = nearestPointClearOfBuildings(
+        const clear = nearestClearPoint(
           terrain,
           onLine,
           (q) =>
@@ -976,7 +982,8 @@ export function createExercise({
         );
         if (clear) {
           slots.push({ soldierId, point: clear });
-          movedClear.push(soldierId);
+          if (kind === 'inWater') movedAshore.push(soldierId);
+          else movedClear.push(soldierId);
           return;
         }
       }
@@ -997,6 +1004,7 @@ export function createExercise({
       slots,
       linked: new Set(follow),
       movedClear,
+      movedAshore,
     };
     // Re-inserted, so `formations` stays in the order of the latest placements.
     formations.delete(team.unitId);

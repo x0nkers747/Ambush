@@ -113,7 +113,10 @@ describe('line formation geometry', () => {
 
 // ---------------------------------------------------------------------------
 
-/** A 1 km flat battlefield with a building east of centre (x 140–160, y −10–10). */
+/**
+ * A 1 km flat battlefield with a building east of centre (x 140–160, y −10–10)
+ * and a pond west of it (x −260 to −200, y −60 to 60).
+ */
 function terrain(): TerrainDataset {
   const base = createSyntheticTerrain(
     { originX: -500, originY: -500, cellSize: 10, columns: 101, rows: 101 },
@@ -126,7 +129,7 @@ function terrain(): TerrainDataset {
       roads: [],
       buildings: [{ id: 'B1', footprint: rectangle(150, 0, 20, 20, 0), heightMeters: 6 }],
       vegetation: [],
-      water: [],
+      water: [{ id: 'W1', kind: 'water', boundary: rectangle(-230, 0, 60, 120, 0) }],
       waterways: [],
       landUse: [],
     },
@@ -236,6 +239,7 @@ describe('placing a fire-team formation', () => {
       })),
       linked: team.memberIds,
       movedClear: [],
+      movedAshore: [],
     });
     expect(exercise.formation('FT1')).toEqual(formation);
     // Nobody else's plan changes.
@@ -305,6 +309,36 @@ describe('placing a fire-team formation', () => {
     exercise.placeFormation('FT1', { x: 110, y: 0 }, deg(0));
     expect(destinations(exercise, team.memberIds).map((p) => p?.x)).toEqual([95, 105, 115, 125]);
     expect(exercise.formation('FT1')?.movedClear).toEqual([]);
+  });
+
+  it('moves slots in water out onto the nearest bank', () => {
+    const exercise = setup();
+    const team = team1(exercise);
+    // The line runs east–west at y = 0 from x −212 to −182: the west two are in the
+    // pond (x −260 to −200) and go to its east bank; the east two keep their places.
+    const formation = exercise.placeFormation('FT1', { x: -197, y: 0 }, deg(0));
+    expect(formation.movedClear).toEqual([]);
+    expect(formation.movedAshore).toEqual(team.memberIds.slice(0, 2));
+    const placed = destinations(exercise, team.memberIds);
+    expect(placed.slice(2).map((p) => p?.x)).toEqual([-192, -182]);
+    for (const p of placed.slice(0, 2)) {
+      expect(p && pointProblem(T, p)).toBeNull();
+      // On the bank, a little past the water's edge.
+      expect(p?.x).toBeGreaterThan(-200);
+      expect(p?.x).toBeLessThan(-194);
+    }
+    // No two Marines closer than 2 m.
+    for (let i = 0; i < placed.length; i += 1)
+      for (let j = i + 1; j < placed.length; j += 1) {
+        const a = placed[i];
+        const b = placed[j];
+        expect(a && b && Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(2);
+      }
+    expect(formation.linked).toEqual(team.memberIds);
+    // A single Marine is still refused in the water.
+    expect(() => {
+      exercise.setDestination(team.memberIds[0] ?? soldierId('x'), { x: -230, y: 0 });
+    }).toThrow(/water/);
   });
 
   it('honours a configured spacing', () => {
