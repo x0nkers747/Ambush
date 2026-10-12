@@ -116,6 +116,8 @@ export interface MapSurface {
   hover(screen: Vec2): string;
   /** Draws the tactical overlays and the scenario editor's, over that view. */
   draw(ctx: CanvasRenderingContext2D): void;
+  /** Stops using the surface (its view is gone): the map forgets its gesture state. */
+  detach(): void;
 }
 
 export interface TacticalMap {
@@ -555,6 +557,10 @@ export function createTacticalMap({ canvas, ...initial }: TacticalMapOptions): T
         drawOverlays(ctx, s, layer);
         const editor = activeEditor();
         if (editor?.draw) editor.draw(ctx, (p) => s.projection.toScreen(p));
+      },
+      detach() {
+        if (made) surfaceControllers.delete(made.controller);
+        made = null;
       },
     };
   };

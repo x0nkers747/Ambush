@@ -179,6 +179,10 @@ under Help.
   map is disposed when the selection changes. Opening the battlefield hands this map to the
   workspace and leaving hands it back (see Pages and addresses), so the view and the drawn terrain
   never change between the two.
+  - The preview's **2D | 3D** buttons show the battlefield in the 3D view (ADR 0029), with the
+    same overlays and controls as in the workspace. It loads on first use and follows the
+    selection. It belongs to the preview: it is disposed when the preview is hidden or when its map
+    goes to the workspace, which opens its own 3D view.
 - A reload in stages 3–5 restarts the exercise. Storing plans (`deploymentPlans` already serializes
   them) would remove that and is a candidate for later.
 - The After Action Review replays the engagement (ADR 0026); scoring and analysis can be added

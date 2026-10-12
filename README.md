@@ -97,7 +97,8 @@ button.
    Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
    network needed; double-click to open it; the bin beside it deletes it, on a second click): it is previewed on the
-   map, with its saved scenario, and opens with **Open battlefield**. The synthetic demo is not
+   map, with its saved scenario, and opens with **Open battlefield**. **3D** on the preview's map bar
+   shows the terrain in 3D (drag to pan, right-drag to orbit); **2D** returns to the map. The synthetic demo is not
    listed; it opens at the address `#demo`.
 2. **Edit Scenario.** On the tactical map, with the tools in the side panel:
    - **Place ORP**: click where the squad assembles (or drag the ORP). A new battlefield has no
