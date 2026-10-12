@@ -34,7 +34,7 @@ const FRAGMENT_NORMAL = /* glsl */ `
   float waterDist = length(vViewPosition);
   float waterFade = 1.0 - smoothstep(40.0, 260.0, waterDist);
   if (waterFade > 0.0) {
-    vec2 sl = waterSlope(vWaterXY) * 0.06 * waterFade;
+    vec2 sl = waterSlope(vWaterXY) * 0.03 * waterFade;
     // World up, tilted by the ripple slopes (map x east is three x; three z is south).
     vec3 world = normalize(vec3(-sl.x, 1.0, -sl.y));
     normal = normalize((viewMatrix * vec4(world, 0.0)).xyz);

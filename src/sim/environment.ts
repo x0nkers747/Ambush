@@ -48,6 +48,24 @@ export interface Road {
    * it is a deck above the water rather than a road on the bed.
    */
   readonly bridge?: true;
+  /**
+   * How the road crosses what lies under it, as mapped (OSM `bridge`,
+   * `tunnel`, `ford`, `layer`, `bridge:structure`), kept for display: the 3D
+   * view draws bridges (docs/adr/0041) and none where a road is mapped
+   * through a tunnel or a ford. The simulation never reads it.
+   */
+  readonly crossing?: RoadCrossing;
+}
+
+/** A road's mapped crossing structure (display only, docs/adr/0041). */
+export interface RoadCrossing {
+  readonly kind: 'bridge' | 'tunnel' | 'ford';
+  /** The OSM value, e.g. "yes", "viaduct", "movable", "culvert". */
+  readonly value?: string;
+  /** OSM `layer`, when tagged and an integer from −5 to 5. */
+  readonly layer?: number;
+  /** OSM `bridge:structure` (e.g. "beam", "arch", "suspension"). */
+  readonly structure?: string;
 }
 
 /** Mapped traffic attributes of a road (OSM tags), each present only when tagged and valid. */

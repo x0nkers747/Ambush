@@ -11,6 +11,7 @@ import {
   type Road,
   type RoadClass,
   type RoadTraffic,
+  type RoadCrossing,
   type Vec2,
   type VegetationArea,
   type WaterArea,
@@ -163,6 +164,33 @@ function roadType(t: Tags): { highway?: string; service?: string } {
   const highway = plain(t['highway']);
   const service = highway === 'service' ? plain(t['service']) : undefined;
   return { ...(highway ? { highway } : {}), ...(service ? { service } : {}) };
+}
+
+/** Plain tag values (lower-case words): anything else is not kept. */
+const word = (v: string | undefined) =>
+  v !== undefined && /^[a-z_:]{1,32}$/.test(v) ? v : undefined;
+
+/**
+ * How a road crosses what is under it (docs/adr/0041): `bridge=*` (not
+ * `no`), else `tunnel=*` (`culvert` is a pipe under the road, not a tunnel
+ * for it), else `ford=yes`; with `layer` and `bridge:structure`.
+ */
+export function roadCrossing(t: Tags): RoadCrossing | null {
+  const bridge = word(t['bridge']);
+  const tunnel = word(t['tunnel']);
+  const layerTag = t['layer']?.trim();
+  const layer = layerTag !== undefined && /^-?\d$/.test(layerTag) ? Number(layerTag) : undefined;
+  const extra = layer !== undefined && layer >= -5 && layer <= 5 ? { layer } : {};
+  if (bridge && bridge !== 'no') {
+    const structure = word(t['bridge:structure']);
+    return { kind: 'bridge', value: bridge, ...extra, ...(structure ? { structure } : {}) };
+  }
+  if (tunnel && tunnel !== 'no' && tunnel !== 'culvert') {
+    return { kind: 'tunnel', value: tunnel, ...extra };
+  }
+  if (t['ford'] === 'yes' || t['ford'] === 'stepping_stones')
+    return { kind: 'ford', value: t['ford'] };
+  return null;
 }
 
 /** A lane count: a whole number from 1 to 12, or null. */
@@ -684,6 +712,7 @@ export function featuresFromOsm(
         );
         const tagged = parseMetres(tags['width']);
         const traffic = roadClass ? roadTraffic(tags) : null;
+        const crossing = roadClass ? roadCrossing(tags) : null;
         ids(base, pieces.length).forEach((id, i) => {
           const centerline = pieces[i];
           if (!centerline) return;
@@ -697,9 +726,8 @@ export function featuresFromOsm(
               // The OSM road type, kept for display (docs/adr/0035): driveways stay driveways.
               ...roadType(tags),
               ...(traffic ? { traffic } : {}),
-              ...(tags['bridge'] !== undefined && tags['bridge'] !== 'no'
-                ? { bridge: true as const }
-                : {}),
+              ...(crossing?.kind === 'bridge' ? { bridge: true as const } : {}),
+              ...(crossing ? { crossing } : {}),
             });
           } else if (waterway) {
             waterways.push({

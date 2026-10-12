@@ -62,7 +62,10 @@ The ground under the water is a shallow bed, the shores meet the water, and the 
 the land within a few metres. Every system uses that one graded ground. Shores get sand, shingle,
 mud or rock, as mapped (`natural=beach` and its `surface`, `shingle`, `bare_rock`, `mud`) or
 inferred from the kind of water, the slope and the land cover, with a damp band at the waterline
-([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)).
+([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)). Roads crossing rivers, canals and lakes, and every
+road mapped as a bridge, get a bridge in 3D: a deck that continues the road and its markings,
+barriers, abutments and piers. Bridges are decoration only; the simulation and the ground are
+unchanged ([ADR 0041](docs/adr/0041-procedural-road-bridges.md)).
 
 ## Requirements
 
@@ -269,3 +272,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 38. [Terrain materials and surface realism](docs/adr/0038-terrain-materials.md)
 39. [Complete 2D/3D functional parity](docs/adr/0039-2d-3d-functional-parity.md)
 40. [Water surface flattening, shorelines and beaches](docs/adr/0040-water-grading-and-shorelines.md)
+41. [Procedural road bridges](docs/adr/0041-procedural-road-bridges.md)

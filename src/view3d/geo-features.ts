@@ -1,11 +1,18 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
-import type { TerrainDataset } from '#sim';
+import { heightAt, type TerrainDataset } from '#sim';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
 import { regionOf } from './building-style';
 import { PATH_COLOR, pathGeometry } from './decor-geometry';
 import type { PathStyle } from './decor-paths';
 import { DECOR_VERSION, planDecor, type DecorStats } from './decor-plan';
+import {
+  BRIDGE_VERSION,
+  bridgeGeometry,
+  bridgeIndex,
+  liftOntoBridges,
+  planBridges,
+} from './bridges';
 import { createDraper, type MeshData } from './drape';
 import { MARKING_VERSION, roadMarkings, type MarkingStats } from './road-markings';
 import { ROAD_LAYERS, ROAD_STYLE, roadGeometry, type RoadLayer } from './road-geometry';
@@ -23,11 +30,13 @@ import { createWaterMaterial } from './water-material';
 // features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 3;
+export const GEOMETRY_VERSION = 4;
 /** The roadside details' own version (docs/adr/0036). */
 export { DECOR_VERSION };
 /** The road markings' own version (docs/adr/0037). */
 export { MARKING_VERSION };
+/** The bridges' own version (docs/adr/0041). */
+export { BRIDGE_VERSION };
 
 export interface GeoFeatureStats {
   readonly roadTriangles: number;
@@ -44,12 +53,23 @@ export interface GeoFeatureStats {
   readonly decor: DecorStats & { readonly pathTriangles: number };
   /** Painted road markings (docs/adr/0037). */
   readonly markings: MarkingStats;
+  /** Decorative bridges (docs/adr/0041). */
+  readonly bridges: {
+    readonly count: number;
+    readonly mapped: number;
+    readonly inferred: number;
+    readonly piers: number;
+    readonly lowClearance: number;
+    readonly skipped: number;
+    readonly triangles: number;
+  };
   /** Generation times in milliseconds. */
   readonly ms: {
     readonly roads: number;
     readonly water: number;
     readonly buildings: number;
     readonly decor: number;
+    readonly bridges: number;
   };
 }
 
@@ -65,6 +85,8 @@ export interface FeatureGeometry {
   readonly paths: readonly (readonly [PathStyle, MeshData])[];
   /** Road markings: one vertex-coloured mesh (docs/adr/0037). */
   readonly markings: MeshData;
+  /** Bridge decks, barriers and supports: one vertex-coloured mesh (docs/adr/0041). */
+  readonly bridges: MeshData;
   readonly stats: GeoFeatureStats;
 }
 
@@ -109,16 +131,29 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   const paths = pathGeometry(decor.paths, draper);
   const decorMs = clock() - t;
   const markings = roadMarkings(terrain, draper, regionOf(terrain));
+  // Bridges (display only): their structure, and the road's own surface,
+  // verges, markings and paths lifted onto their decks.
+  t = clock();
+  const plan = planBridges(terrain);
+  const index = bridgeIndex(plan.bridges);
+  const ground = (x: number, y: number) => heightAt(terrain, x, y);
+  const bridges = bridgeGeometry(plan.bridges, ground);
+  const onBridges = (d: MeshData) => liftOntoBridges(d, index, ground);
+  const liftedRoads = roadList.map(([layer, d]) => [layer, onBridges(d)] as const);
+  const liftedPaths = paths.map(([style, d]) => [style, onBridges(d)] as const);
+  const liftedMarkings = onBridges(markings.mesh);
+  const bridgeMs = clock() - t;
   const geometry: FeatureGeometry = {
-    roads: roadList,
+    roads: liftedRoads,
     water: water.mesh,
     buildings: buildings.surfaces,
     openings: buildings.openings,
     entrances: buildings.entrances,
-    paths,
-    markings: markings.mesh,
+    paths: liftedPaths,
+    markings: liftedMarkings,
+    bridges: bridges.mesh,
     stats: {
-      roadTriangles: roadList.reduce((s, [, d]) => s + d.triangleCount, 0),
+      roadTriangles: liftedRoads.reduce((s, [, d]) => s + d.triangleCount, 0),
       waterTriangles: water.mesh.triangleCount,
       buildingTriangles: buildings.surfaces.triangleCount,
       openingTriangles: buildings.openings.triangleCount,
@@ -127,10 +162,25 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
       buriedBuildings: buildings.buried,
       decor: {
         ...decor.stats,
-        pathTriangles: paths.reduce((sum, [, d]) => sum + d.triangleCount, 0),
+        pathTriangles: liftedPaths.reduce((sum, [, d]) => sum + d.triangleCount, 0),
       },
       markings: markings.stats,
-      ms: { roads: roadMs, water: waterMs, buildings: buildingMs, decor: decorMs },
+      bridges: {
+        count: bridges.bridges,
+        mapped: bridges.mapped,
+        inferred: bridges.inferred,
+        piers: bridges.piers,
+        lowClearance: bridges.lowClearance,
+        skipped: plan.skipped.length,
+        triangles: bridges.mesh.triangleCount,
+      },
+      ms: {
+        roads: roadMs,
+        water: waterMs,
+        buildings: buildingMs,
+        decor: decorMs,
+        bridges: bridgeMs,
+      },
     },
   };
   return { geometry, decorInstances: decor.instances };
@@ -142,6 +192,7 @@ export function featureBuffers(f: FeatureGeometry): ArrayBuffer[] {
     ...f.roads.map(([, d]) => d),
     ...f.paths.map(([, d]) => d),
     f.water,
+    f.bridges,
     f.buildings,
     f.openings,
   ].flatMap((d) =>
@@ -232,6 +283,18 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
     }),
   );
   if (markingMesh) markingMesh.receiveShadow = true;
+
+  // Bridges (docs/adr/0041): concrete and steel, one draw call. Decoration
+  // only: picking and the simulation go by the ground, never these meshes.
+  const bridgeMesh = add(
+    'bridges',
+    features.bridges,
+    new MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
+  );
+  if (bridgeMesh) {
+    bridgeMesh.castShadow = true;
+    bridgeMesh.receiveShadow = true;
+  }
 
   // Water (docs/adr/0040): its own material, colours from the mesh.
   add('water', features.water, createWaterMaterial());

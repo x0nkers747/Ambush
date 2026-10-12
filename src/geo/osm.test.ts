@@ -6,6 +6,7 @@ import {
   featuresFromOsm,
   overpassQuery,
   parseMetres,
+  roadCrossing,
   waterClassOf,
   type OverpassResponse,
 } from './osm';
@@ -131,6 +132,45 @@ describe('OSM import rules', () => {
       ['osm-w39', undefined],
     ]);
     expect(waterClassOf({ natural: 'water', water: 'lagoon' })).toBe('lake');
+  });
+
+  it('keeps how a road crosses what is under it: bridge, tunnel or ford (docs/adr/0041)', () => {
+    expect(
+      roadCrossing({ highway: 'primary', bridge: 'yes', layer: '1', 'bridge:structure': 'beam' }),
+    ).toEqual({
+      kind: 'bridge',
+      value: 'yes',
+      layer: 1,
+      structure: 'beam',
+    });
+    expect(roadCrossing({ highway: 'primary', bridge: 'viaduct' })).toEqual({
+      kind: 'bridge',
+      value: 'viaduct',
+    });
+    expect(roadCrossing({ highway: 'primary', bridge: 'no' })).toBeNull();
+    expect(roadCrossing({ highway: 'primary', tunnel: 'yes', layer: '-1' })).toEqual({
+      kind: 'tunnel',
+      value: 'yes',
+      layer: -1,
+    });
+    // A culvert is a pipe under the road: the road is on the ground.
+    expect(roadCrossing({ highway: 'track', tunnel: 'culvert' })).toBeNull();
+    expect(roadCrossing({ highway: 'track', ford: 'yes' })).toEqual({ kind: 'ford', value: 'yes' });
+    expect(roadCrossing({ highway: 'primary', layer: 'twelve', bridge: 'yes' })).toEqual({
+      kind: 'bridge',
+      value: 'yes',
+    });
+    const data: OverpassResponse = {
+      elements: [
+        way(50, { highway: 'secondary', bridge: 'movable' }, [
+          { x: 0, y: 0 },
+          { x: 30, y: 0 },
+        ]),
+      ],
+    };
+    const [r] = featuresFromOsm(data, QUANTICO).features.roads;
+    expect(r?.bridge).toBe(true);
+    expect(r?.crossing).toEqual({ kind: 'bridge', value: 'movable' });
   });
 
   it('imports mapped beaches and bare shores, by their surface (docs/adr/0040)', () => {
