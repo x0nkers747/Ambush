@@ -227,7 +227,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   });
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.6;
+  renderer.toneMappingExposure = 0.8;
   // Quality: from the GPU unless given.
   const gl = renderer.getContext();
   const info = gl.getExtension('WEBGL_debug_renderer_info');

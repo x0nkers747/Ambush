@@ -529,7 +529,7 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
   const size = spec.card * L.size;
   // Card colour: darker into the crown and towards the ground; a little variety.
   const leafColour = (inner: number, t: number): V3 => {
-    const ao = 0.64 + 0.36 * Math.min(1, 0.55 * inner + 0.45 * t);
+    const ao = 0.42 + 0.58 * Math.min(1, 0.55 * inner + 0.45 * t) ** 1.3;
     const v = 0.9 + 0.2 * r();
     return mul(
       [leafTint[0] * (0.96 + 0.08 * r()), leafTint[1], leafTint[2] * (0.94 + 0.1 * r())],

@@ -10,6 +10,7 @@ import {
   InstancedMesh,
   Matrix4,
   MeshStandardMaterial,
+  ShaderChunk,
   Vector3,
   type PerspectiveCamera,
 } from 'three';
@@ -38,6 +39,38 @@ const NEAR_CAPACITY = 12_000;
 const MEDIUM_CAPACITY = 60_000;
 /** Instance buffers start this big and double as needed. */
 const INITIAL_CAPACITY = 256;
+
+/** How much of each card's own facing shows through the crown's (0: the crown is one smooth mass). */
+const CARD_NORMAL_SHARE = 0.45;
+/**
+ * Sunlight through leaves (linear, × the leaf's colour): looking towards the
+ * sun through them, and lighting the crown's shaded side. Shadowed leaves get none.
+ */
+const TRANSLUCENCY = { through: 2.6, back: 0.5, tint: [1.1, 1.25, 0.45] } as const;
+
+/**
+ * The standard light loop with sunlight through the leaves added after each
+ * directional light (with its shadow already applied).
+ */
+function foliageLights(): string {
+  const chunk = ShaderChunk.lights_fragment_begin;
+  const dir = chunk.indexOf('NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )');
+  const call =
+    'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const at = chunk.indexOf(call, dir);
+  if (dir < 0 || at < 0)
+    throw new Error('three.js light loop changed: foliage translucency needs updating');
+  const t = TRANSLUCENCY;
+  const added = `${call}
+		{
+			float vegThrough = pow( saturate( dot( -geometryViewDir, directLight.direction ) ), 3.0 );
+			float vegBack = saturate( dot( -geometryNormal, directLight.direction ) );
+			reflectedLight.directDiffuse += directLight.color * diffuseColor.rgb
+				* vec3( ${t.tint.map((v) => v.toFixed(2)).join(', ')} )
+				* ( ${t.through.toFixed(2)} * vegThrough + ${t.back.toFixed(2)} * vegBack );
+		}`;
+  return chunk.slice(0, at) + added + chunk.slice(at + call.length);
+}
 const RESELECT_MS = 150;
 /** Understorey: round the camera, grown cell by cell for at most this long per frame, milliseconds. */
 const UNDER_RADIUS_M = 80;
@@ -202,7 +235,8 @@ export function createForest(o: ForestOptions): VegetationLayer & {
     alphaTest: ALPHA_CUT,
     alphaToCoverage: true,
     side: DoubleSide,
-    roughness: 0.85,
+    // Leaves are a little waxy: a soft sheen where the sun catches them.
+    roughness: 0.74,
     metalness: 0,
   });
   foliage.onBeforeCompile = (shader) => {
@@ -226,12 +260,19 @@ uniform float vegTime;`,
   transformed.x += sway * 0.05 * (sin(vegPhase) + 0.4 * sin(vegPhase * 2.7 + position.y));
   transformed.z += sway * 0.04 * sin(vegPhase * 1.3 + position.x);`,
       );
-    // Lit by the crown's outward normals on both faces (no flipped back faces).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <normal_fragment_begin>',
-      `#include <normal_fragment_begin>
-  normal = normalize(vNormal);`,
-    );
+    // Lit by the crown's outward normals on both faces (no flipped back faces),
+    // with some of each card's own facing (turned to the crown's side), so
+    // clusters catch the light one by one.
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+  vec3 vegCrown = normalize(vNormal);
+  vec3 vegCard = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+  if (dot(vegCard, vegCrown) < 0.0) vegCard = -vegCard;
+  normal = normalize(mix(vegCrown, vegCard, ${CARD_NORMAL_SHARE.toFixed(2)}));`,
+      )
+      .replace('#include <lights_fragment_begin>', foliageLights());
   };
   foliage.customProgramCacheKey = () => 'forest';
   const propMaterial = new MeshStandardMaterial({

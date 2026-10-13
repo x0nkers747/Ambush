@@ -299,3 +299,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 48. [Paved ground and parks from OpenStreetMap](docs/adr/0048-paved-ground-and-parks-from-osm.md)
 49. [The terrain field is the game's ground and its 3D terrain](docs/adr/0049-terrain-field-ground-and-renderer.md)
 50. [Tree cover from canopy heights](docs/adr/0050-tree-cover-from-canopy-heights.md)
+51. [Realistic trees](docs/adr/0051-realistic-trees.md)

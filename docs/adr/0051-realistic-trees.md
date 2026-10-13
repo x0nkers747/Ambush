@@ -1,0 +1,79 @@
+# ADR 0051: Realistic trees
+
+- Status: Accepted (phase 1, shading; phase 2, photographic textures, in progress)
+- Date: 2026-10-13
+- Builds on: [ADR 0049](0049-terrain-field-ground-and-renderer.md) (the procedural trees and
+  their foliage atlas)
+
+## Context
+
+The 3D view's trees (`view3d/tree-models.ts`, `forest.ts`, `foliage-atlas.ts`) looked flat and
+plain at close range. Captures of Quantico showed three causes:
+
+1. **Shading.** No light passed through the leaves, so a wood seen towards the sun was nearly
+   black. Each crown was lit as one smooth ball (every card took the crown's outward normal).
+   Crowns were barely darker inside, and the exposure crushed the shadows.
+2. **Art.** The leaf clusters and barks are drawn in the browser at start-up: flat-coloured
+   vector leaves with hard cut-out edges, no surface detail, one dark bark.
+3. **Structure.** Sparse crowns of cards on thin limbs, an open canopy from above, straight
+   uniform trunks.
+
+They are taken in that order: shading first (no assets), then photographic textures, then
+structure (denser crowns, impostors for distant trees).
+
+## Decision: phase 1, shading
+
+All in the foliage material (`forest.ts`) and the leaf colours (`tree-models.ts`), so the
+cost is a few shader instructions per leaf pixel.
+
+1. **Card normals.** Each leaf pixel's normal mixes the crown's outward normal with its card's
+   own facing (from screen-space derivatives, turned to the crown's side):
+   `CARD_NORMAL_SHARE` = 0.45. At 0 the crown is one smooth mass; much above 0.5 the cards'
+   facets show.
+2. **Sunlight through leaves.** Added after the sun's light in Three.js's light loop
+   (`foliageLights()`), with the sun's shadow already applied, so shadowed leaves get none:
+   `through` (looking towards the sun, a cubed lobe) 2.6, `back` (the crown's shaded side)
+   0.5, `tint` (linear, × the leaf's colour) (1.1, 1.25, 0.45), yellow-green. At 1.1 / 0.35 it
+   was too faint.
+3. **Sheen.** Foliage roughness 0.74 (was 0.85). At 0.62 the pale sky's reflection turned
+   distant crowns milky grey.
+4. **Darker crowns.** A card's colour is scaled by
+   `0.42 + 0.58 × min(1, 0.55 × inner + 0.45 × t)^1.3` (`leafColour`; was `0.64 + 0.36 × …`),
+   darker into the crown and towards its foot.
+5. **Exposure.** `renderer.toneMappingExposure` 0.8 (was 0.6), ACES filmic, in `view.ts`. This
+   affects the whole 3D view. 0.85 made towns and fields slightly bright from the air. AgX
+   tone mapping at 1.0 washed everything grey.
+
+### Not done
+
+- **Ambient occlusion** (`GTAOPass`, `SSAOPass`). Both redraw the scene with an override
+  material for depth and normals: leaf cards would lose their alpha cut (dark squares), and
+  the terrain's vertex shader (CDLOD morphing) would not run, so its depth would not match.
+  It needs our own depth/normal prepass.
+- **Image-based lighting** (an environment map of the sky). The hemisphere light stays.
+
+### Tuning later
+
+The constants above are the knobs; before/after captures used `scratchpad/pw/shoot.mjs` with
+cameras at Quantico (local metres: name x y distance pitch azimuth):
+
+```
+t1-edge-eye     188 420  25  6  90
+t2-edge-near    250 934  45 18   0
+t3-inside-eye  -784   0  15  5   0
+t4-edge-mid     188 420  80 25  90
+t5-canopy-above -784 50 150 45   0
+t6-backlit      188 420  25  6 270
+q2-river        230 -416 600 45  0   (exposure check on the town)
+```
+
+Ideas not yet tried: a per-species translucency (thin leaves such as maple and beech glow more
+than oak; needles little), a wrap term on the sunlit side, and a slight blue shift for
+shadowed leaves (sky fill).
+
+## Consequences
+
+- Woods seen towards the sun glow where the sun reaches; crowns show their clusters and depth.
+- The brighter exposure changes every 3D picture a little (ground, water, buildings).
+- A change in Three.js's light loop chunk makes `foliageLights()` throw at shader compile,
+  rather than silently dropping the translucency.
