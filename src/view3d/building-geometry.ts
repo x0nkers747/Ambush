@@ -200,7 +200,23 @@ function roadIndex(terrain: TerrainDataset): SegmentGrid {
   );
 }
 
-export function buildingGeometry(terrain: TerrainDataset): BuildingGeometry {
+/** Display context for the buildings. */
+export interface BuildingContext {
+  /**
+   * The level of levelled water at or just beside (x, y), or null: walls
+   * standing in water reach below it (docs/adr/0046), where the 3D view cuts
+   * away ground the grading left above the water.
+   */
+  readonly waterLevelNear?: (x: number, y: number) => number | null;
+}
+
+/** Walls standing in water reach this far below its level, metres. */
+export const WATER_FOOTING_M = 0.6;
+
+export function buildingGeometry(
+  terrain: TerrainDataset,
+  context: BuildingContext = {},
+): BuildingGeometry {
   const roofs = buildingRoofElevations(terrain);
   const designs = designBuildings(terrain);
   const roads = roadIndex(terrain);
@@ -226,7 +242,16 @@ export function buildingGeometry(terrain: TerrainDataset): BuildingGeometry {
     const design = designs.get(building.id);
     if (reference === undefined || !design) continue;
     count += 1;
-    const result = emitBuilding(terrain, building, reference, design, roads, surfaces, openings);
+    const result = emitBuilding(
+      terrain,
+      building,
+      reference,
+      design,
+      roads,
+      surfaces,
+      openings,
+      context,
+    );
     if (result.buried) buried += 1;
     roofCounts[result.roof] += 1;
     shapeCounts[design.shape?.kind ?? 'irregular'] += 1;
@@ -267,6 +292,7 @@ function emitBuilding(
   roads: SegmentGrid,
   surfaces: SurfaceBuilder,
   openings: SurfaceBuilder,
+  context: BuildingContext,
 ): BuildingResult {
   const { shape, style } = design;
   const ring = shape ? shape.ring : counterClockwise(building.footprint);
@@ -281,15 +307,25 @@ function emitBuilding(
   const buried = Math.max(...corners) > reference;
   // The lowest ground anywhere along the edges, so no wall stops short of it.
   let lowest = Math.min(lowestCorner, ...ring.map((p) => ground(p.x, p.y)));
+  // And below any water the walls stand in.
+  let water = Infinity;
+  const inWater = (x: number, y: number) => {
+    const level = context.waterLevelNear?.(x, y) ?? null;
+    if (level !== null) water = Math.min(water, level - WATER_FOOTING_M);
+  };
   ring.forEach((a, i) => {
+    inWater(a.x, a.y);
     const b = ring[(i + 1) % ring.length] ?? a;
     const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / EDGE_SAMPLE_M);
     for (let k = 1; k < steps; k += 1) {
       const t = k / steps;
-      lowest = Math.min(lowest, ground(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)));
+      const x = a.x + t * (b.x - a.x);
+      const y = a.y + t * (b.y - a.y);
+      lowest = Math.min(lowest, ground(x, y));
+      inWater(x, y);
     }
   });
-  const bottom = lowest - FOOTING_M;
+  const bottom = Math.min(lowest - FOOTING_M, water);
   const id = hashString(building.id);
   const chance = unit(Math.imul(id, 0x9e3779b1) >>> 0);
 

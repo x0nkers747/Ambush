@@ -3,6 +3,8 @@ import { NoColorSpace, ShaderLib, SRGBColorSpace, type Texture } from 'three';
 import { createSyntheticTerrain } from '#sim';
 import { bakeGroundMap, GROUND_LAYERS } from './ground-map';
 import { createGroundMaterial, GROUND_LOOK, groundNoisePixels } from './ground-material';
+import { createShoreTexture } from './shore-material';
+import { maskLevel, SHORE_CUT_M, type ShoreMask } from './shoreline';
 
 /** Whether two byte arrays hold the same bytes. */
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -263,6 +265,59 @@ describe('the visibility overlay on the ground (docs/adr/0039)', () => {
     ground.setOverlay(null);
     expect(uniforms['groundOverlayOn']?.value).toBe(0);
     expect(freed).toBe(true);
+    ground.dispose();
+  });
+});
+
+describe('the shore cut (docs/adr/0046)', () => {
+  // A 3 × 2 mask: sample (c, r) at (−10 + 2c, 20 + 2r); levels 1.5 m and 2.25 m.
+  const pixels = new Uint8Array(3 * 2 * 4);
+  const mask: ShoreMask = {
+    grid: { originX: -10, originY: 20, step: 2, columns: 3, rows: 2 },
+    levelBase: 1,
+    pixels,
+  };
+  for (let i = 0; i < 6; i += 1) {
+    const q = i < 3 ? 50 : 125;
+    pixels[i * 4] = 40;
+    pixels[i * 4 + 1] = q >> 8;
+    pixels[i * 4 + 2] = q & 255;
+  }
+
+  it('discards ground above the water inside it, first thing in the fragment shader', () => {
+    const ground = createGroundMaterial();
+    const { fragmentShader, vertexShader } = compiled(ground.material);
+    expect(vertexShader).toContain('vGroundZ = (modelMatrix');
+    const at = (s: string) => fragmentShader.indexOf(s);
+    expect(at('discard;')).toBeGreaterThan(at('#include <clipping_planes_fragment>'));
+    expect(at('discard;')).toBeLessThan(at('#include <color_fragment>'));
+    expect(fragmentShader).toContain(`level + ${SHORE_CUT_M.toFixed(2)}`);
+    ground.dispose();
+  });
+
+  it('reads the mask at its samples, off until given one', () => {
+    const ground = createGroundMaterial();
+    expect(compiled(ground.material).uniforms['groundShoreLevel']?.value).toEqual([0, 0]);
+    const shore = createShoreTexture(mask);
+    ground.setShore(shore);
+    const { uniforms } = compiled(ground.material);
+    expect(uniforms['groundShoreLevel']?.value).toEqual([1, 1]);
+    expect(uniforms['groundShore']?.value).toBe(shore.texture);
+    expect(shore.texture.colorSpace).toBe(NoColorSpace);
+    const [sx, sy, ox, oy] = uniforms['groundShoreXform']?.value as number[];
+    for (const [c, r] of [
+      [0, 0],
+      [2, 1],
+    ] as const) {
+      expect((-10 + 2 * c) * (sx ?? 0) + (ox ?? 0)).toBeCloseTo((c + 0.5) / 3, 9);
+      expect((20 + 2 * r) * (sy ?? 0) + (oy ?? 0)).toBeCloseTo((r + 0.5) / 2, 9);
+    }
+    // The level as the shader decodes it.
+    expect(maskLevel(mask, 1, 0)).toBeCloseTo(1.5, 9);
+    expect(maskLevel(mask, 1, 1)).toBeCloseTo(2.25, 9);
+    ground.setShore(null);
+    expect(compiled(ground.material).uniforms['groundShoreLevel']?.value).toEqual([0, 0]);
+    shore.dispose();
     ground.dispose();
   });
 });

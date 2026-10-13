@@ -15,6 +15,8 @@ import {
 } from 'three';
 import { GROUND_LAYERS, type GroundLayer, type GroundMap } from './ground-map';
 import { hashInts, unit } from './hash';
+import type { ShoreTexture } from './shore-material';
+import { SHORE_CUT_M, SHORE_INSET_M, SHORE_RANGE_M } from './shoreline';
 import { srgbToLinear } from './terrain-mesh';
 
 // The terrain's material (docs/adr/0038): three's MeshStandardMaterial,
@@ -132,6 +134,11 @@ export interface GroundMaterial {
    * `null` for none. The same array again changes nothing.
    */
   setOverlay(overlay: GroundOverlay | null): void;
+  /**
+   * Cuts the ground standing above levelled water inside it (docs/adr/0046),
+   * by the shore mask, or stops cutting (`null`). The texture stays its owner's.
+   */
+  setShore(shore: ShoreTexture | null): void;
   /** Resolves when the textures are in use (false: they could not load; the layers' colours stay). */
   readonly ready: Promise<boolean>;
   /** Whether the ground textures are in use (else the layers' plain colours). */
@@ -283,10 +290,12 @@ function dataTexture(
 }
 
 const VERTEX_HEAD = /* glsl */ `
-varying vec2 vGroundXY;`;
+varying vec2 vGroundXY;
+varying float vGroundZ;`;
 const VERTEX_BODY = /* glsl */ `
 // The point in battlefield metres (x east, y north): Three.js (x, z) is (x, −y).
-vGroundXY = (modelMatrix * vec4(transformed, 1.0)).xz * vec2(1.0, -1.0);`;
+vGroundXY = (modelMatrix * vec4(transformed, 1.0)).xz * vec2(1.0, -1.0);
+vGroundZ = (modelMatrix * vec4(transformed, 1.0)).y;`;
 
 const FRAGMENT_HEAD = /* glsl */ `
 uniform highp sampler2DArray groundAlbedo;
@@ -306,7 +315,11 @@ uniform float groundOn;
 uniform sampler2D groundOverlay;
 uniform vec4 groundOverlayXform;
 uniform float groundOverlayOn;
+uniform sampler2D groundShore;
+uniform vec4 groundShoreXform;
+uniform vec2 groundShoreLevel;
 varying vec2 vGroundXY;
+varying float vGroundZ;
 
 float groundLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 mat2 groundRot(float a) { float c = cos(a); float s = sin(a); return mat2(c, s, -s, c); }
@@ -450,6 +463,24 @@ if (groundOverlayOn > 0.5) {
 }
 `;
 
+// The shore (docs/adr/0046): inside levelled water, ground standing above the
+// water is not drawn (the water covers what is left; the shore's walls close
+// the cut). R: signed distance to the shore, filtered; G, B: the level, exact.
+const FRAGMENT_SHORE = /* glsl */ `
+if (groundShoreLevel.y > 0.5) {
+  vec2 su = vGroundXY * groundShoreXform.xy + groundShoreXform.zw;
+  if (all(greaterThan(su, vec2(0.0))) && all(lessThan(su, vec2(1.0)))) {
+    float sd = (texture(groundShore, su).r - 0.5) * ${(2 * SHORE_RANGE_M).toFixed(1)};
+    if (sd < ${(-SHORE_INSET_M).toFixed(2)}) {
+      ivec2 size = textureSize(groundShore, 0);
+      vec4 l = texelFetch(groundShore, clamp(ivec2(su * vec2(size)), ivec2(0), size - 1), 0);
+      float level = groundShoreLevel.x + (floor(l.g * 255.0 + 0.5) * 256.0 + floor(l.b * 255.0 + 0.5)) * 0.01;
+      if (vGroundZ > level + ${SHORE_CUT_M.toFixed(2)}) discard;
+    }
+  }
+}
+`;
+
 const FRAGMENT_ROUGHNESS = /* glsl */ `
 if (groundOn > 0.5) roughnessFactor = groundRoughness;
 `;
@@ -510,6 +541,9 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
     groundOverlay: { value: empty as Texture },
     groundOverlayXform: { value: [0, 0, 0, 0] as number[] },
     groundOverlayOn: { value: 0 },
+    groundShore: { value: empty as Texture },
+    groundShoreXform: { value: [0, 0, 0, 0] as number[] },
+    groundShoreLevel: { value: [0, 0] as number[] },
   };
   let path: GroundPath = options.path ?? 'full';
   const material = new MeshStandardMaterial({
@@ -526,6 +560,10 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
       .replace('#include <begin_vertex>', `#include <begin_vertex>${VERTEX_BODY}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>${FRAGMENT_HEAD}`)
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>${FRAGMENT_SHORE}`,
+      )
       .replace('#include <color_fragment>', `#include <color_fragment>${FRAGMENT_ALBEDO}`)
       .replace(
         '#include <roughnessmap_fragment>',
@@ -649,6 +687,12 @@ export function createGroundMaterial(options: { path?: GroundPath } = {}): Groun
       ];
       uniforms.groundOverlay.value = t;
       uniforms.groundOverlayOn.value = 1;
+    },
+    setShore(shore) {
+      if (disposed) return;
+      uniforms.groundShore.value = shore?.texture ?? empty;
+      uniforms.groundShoreXform.value = shore ? [...shore.xform] : [0, 0, 0, 0];
+      uniforms.groundShoreLevel.value = [shore?.levelBase ?? 0, shore ? 1 : 0];
     },
     setPath(next) {
       if (next === path) return;

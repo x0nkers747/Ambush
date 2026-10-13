@@ -10,7 +10,8 @@ import {
 import { terrainGround } from './camera-math';
 import { createDraper } from './drape';
 import { coverage, triangles } from './test-helpers';
-import { WATER_COLORS, waterGeometry } from './water-geometry';
+import { waterGeometry } from './water-geometry';
+import { WATER_PROFILES } from './water-profiles';
 
 // The 3D water (docs/adr/0040): levelled standing water one exactly level
 // sheet, rivers on their profile, both on the ground the grading made for
@@ -113,8 +114,8 @@ describe('waterGeometry on levelled water', () => {
 
   it('colours each kind of water its own way', () => {
     expect(water.mesh.colors?.length).toBe(water.mesh.positions.length);
-    expect(WATER_COLORS.sea).not.toBe(WATER_COLORS.river);
-    expect(WATER_COLORS.lake).not.toBe(WATER_COLORS.river);
+    expect(WATER_PROFILES.ocean.color).not.toBe(WATER_PROFILES.river.color);
+    expect(WATER_PROFILES.lake.color).not.toBe(WATER_PROFILES.river.color);
   });
 
   it('picks the water where it is seen, not the bed under it', () => {

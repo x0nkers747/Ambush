@@ -69,7 +69,12 @@ unchanged ([ADR 0041](docs/adr/0041-procedural-road-bridges.md)). Roads form one
 stops at the edge of the road it joins, junctions are paved by their most important road, roads on
 different levels (bridges, tunnels, `layer`) stay whole, and ways mapped side by side as one bridge
 are drawn as one structure, with barriers only on its outside and gaps where roads join it
-([ADR 0044](docs/adr/0044-road-junction-and-bridge-topology.md)).
+([ADR 0044](docs/adr/0044-road-junction-and-bridge-topology.md)). In 3D the water is opaque and dark, coloured by
+a visual profile (urban canal, river, lake, reservoir, ocean, pond) with a restrained sky
+reflection; ground the grading left above the water inside it is cut away at the mapped shore,
+and the cut is closed by straight brick quays on built-up shores and short earth banks elsewhere.
+Buildings standing in water reach down into it. Display only: the ground and the simulation are
+unchanged ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
 
 ## Requirements
 
@@ -287,3 +292,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 43. [Bridge crossing and OPFOR road following](docs/adr/0043-bridge-and-road-navigation.md)
 44. [Road junctions, grade separation and bridge structures](docs/adr/0044-road-junction-and-bridge-topology.md)
 45. [Memory on large battlefields](docs/adr/0045-memory-on-large-battlefields.md)
+46. [Water visuals and shoreline smoothing](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)

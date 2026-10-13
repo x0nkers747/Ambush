@@ -8,6 +8,18 @@ import {
   Vector3,
 } from 'three';
 import { heightAt, type TerrainDataset } from '#sim';
+import {
+  carveShoreField,
+  groundCut,
+  SHORE_CUT_M,
+  shoreField,
+  shoreline,
+  waterLevelNear,
+  type ShoreMask,
+  type ShorelineStats,
+  type WallMesh,
+} from './shoreline';
+import { createShoreMaterials, createShoreTexture, type ShoreTexture } from './shore-material';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
 import { regionOf } from './building-style';
@@ -40,7 +52,7 @@ import { createWaterMaterial } from './water-material';
 // features it has (buildings: two, docs/adr/0035).
 
 /** Bump when the generated geometry changes, e.g. to key a geometry cache. */
-export const GEOMETRY_VERSION = 6;
+export const GEOMETRY_VERSION = 7;
 /** The roadside details' own version (docs/adr/0036). */
 export { DECOR_VERSION };
 /** The road markings' own version (docs/adr/0037). */
@@ -84,6 +96,8 @@ export interface GeoFeatureStats {
     readonly vergeCutMs: number;
     readonly vergeDrapeMs: number;
   };
+  /** The shoreline (docs/adr/0046): mask, cut and walls; null without levelled water. */
+  readonly shoreline: (ShorelineStats & { readonly wallTriangles: number }) | null;
   /** Generation times in milliseconds. */
   readonly ms: {
     readonly roads: number;
@@ -108,6 +122,12 @@ export interface FeatureGeometry {
   readonly markings: MeshData;
   /** Bridge decks, barriers and supports: one vertex-coloured mesh (docs/adr/0041). */
   readonly bridges: MeshData;
+  /** The shore mask and walls (docs/adr/0046), or null without levelled water. */
+  readonly shore: {
+    readonly mask: ShoreMask;
+    readonly quay: WallMesh;
+    readonly bank: WallMesh;
+  } | null;
   readonly stats: GeoFeatureStats;
 }
 
@@ -122,6 +142,8 @@ export interface GeoFeatureLayer {
   readonly stats: GeoFeatureStats;
   /** Resolves when the building textures are in use (false if they could not load). */
   readonly ready: Promise<boolean>;
+  /** The shore mask for the terrain's material (docs/adr/0046), or null. Disposed with the layer. */
+  readonly shore: ShoreTexture | null;
   dispose(): void;
 }
 
@@ -140,9 +162,15 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   const roadMs = clock() - t;
   t = clock();
   const water = waterGeometry(terrain, draper);
+  // Where levelled water is, on a fine grid (docs/adr/0046): buildings and
+  // piers standing in it reach down into it.
+  const field = shoreField(terrain);
   const waterMs = clock() - t;
   t = clock();
-  const buildings = buildingGeometry(terrain);
+  const buildings = buildingGeometry(
+    terrain,
+    field ? { waterLevelNear: (x, y) => waterLevelNear(field, x, y) } : {},
+  );
   const buildingMs = clock() - t;
   const roadList = ROAD_LAYERS.flatMap((layer) => {
     const data = roads.get(layer);
@@ -161,7 +189,14 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   const coordinated = coordinateBridges(plan.bridges);
   const index = coordinated.index;
   const ground = (x: number, y: number) => heightAt(terrain, x, y);
-  const bridges = bridgeGeometry(coordinated.decks, ground, {
+  // Supports go down to the ground, or into the water where the 3D view cuts
+  // the ground away above it (docs/adr/0046).
+  const supportGround = (x: number, y: number) => {
+    const z = ground(x, y);
+    const level = field ? waterLevelNear(field, x, y, 0) : null;
+    return level !== null && z > level + SHORE_CUT_M ? level : z;
+  };
+  const bridges = bridgeGeometry(coordinated.decks, supportGround, {
     coordinated,
     roadEntrance: roadEntrances(terrain.features.roads, coordinated),
   });
@@ -169,16 +204,21 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
   // No water drawn over a deck that stands too low above it, or over a road
   // on a bank below the water level (docs/adr/0044).
   const wet = waterIndex(water.mesh);
-  const cut = cutUnderDecks(
-    water.mesh,
-    coordinated.decks,
-    groundRoadHoles(surfaces.occupancy, terrain.features.roads, wet, coordinated.decks, terrain),
+  const roadHoles = groundRoadHoles(
+    surfaces.occupancy,
+    terrain.features.roads,
     wet,
+    coordinated.decks,
+    terrain,
   );
+  const cut = cutUnderDecks(water.mesh, coordinated.decks, roadHoles, wet);
   const liftedRoads = roadList.map(([layer, d]) => [layer, onBridges(d)] as const);
   const liftedPaths = paths.map(([style, d]) => [style, onBridges(d)] as const);
   const liftedMarkings = onBridges(markings.mesh);
   const bridgeMs = clock() - t;
+  // The shoreline: where the water sheet is cut away, the ground is never cut either.
+  if (field) carveShoreField(field, [...roadHoles, ...cut.holes]);
+  const shore = shoreline(terrain, field);
   const geometry: FeatureGeometry = {
     roads: liftedRoads,
     water: cut.mesh,
@@ -188,6 +228,7 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
     paths: liftedPaths,
     markings: liftedMarkings,
     bridges: bridges.mesh,
+    shore: shore && { mask: shore.mask, quay: shore.quay, bank: shore.bank },
     stats: {
       roadTriangles: liftedRoads.reduce((s, [, d]) => s + d.triangleCount, 0),
       waterTriangles: cut.mesh.triangleCount,
@@ -214,6 +255,10 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
         triangles: bridges.mesh.triangleCount,
       },
       junctions: surfaces.stats,
+      shoreline: shore && {
+        ...shore.stats,
+        wallTriangles: shore.quay.triangleCount + shore.bank.triangleCount,
+      },
       ms: {
         roads: roadMs,
         water: waterMs,
@@ -223,7 +268,11 @@ export function buildFeatures(terrain: TerrainDataset): BuiltFeatures {
       },
     },
   };
-  return { geometry, decorInstances: decor.instances };
+  // No roadside props on ground the 3D view cuts away in the water (docs/adr/0046).
+  const decorInstances = field
+    ? decor.instances.filter((i) => !groundCut(terrain, field, i.x, i.y))
+    : decor.instances;
+  return { geometry, decorInstances };
 }
 
 /** The typed arrays of a feature geometry, for transferring them to another thread. */
@@ -235,15 +284,18 @@ export function featureBuffers(f: FeatureGeometry): ArrayBuffer[] {
     f.bridges,
     f.buildings,
     f.openings,
-  ].flatMap((d) =>
-    [
-      d.positions,
-      d.normals,
-      d.colors,
-      'uvs' in d ? (d as SurfaceMeshData).uvs : null,
-      'layers' in d ? (d as SurfaceMeshData).layers : null,
-    ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
-  );
+    ...(f.shore ? [f.shore.quay, f.shore.bank] : []),
+  ]
+    .flatMap((d) =>
+      [
+        d.positions,
+        d.normals,
+        d.colors,
+        'uvs' in d ? (d as SurfaceMeshData).uvs : null,
+        'layers' in d ? (d as SurfaceMeshData).layers : null,
+      ].flatMap((a) => (a ? [a.buffer as ArrayBuffer] : [])),
+    )
+    .concat(f.shore ? [f.shore.mask.pixels.buffer as ArrayBuffer] : []);
 }
 
 function geometryOf(data: MeshData): BufferGeometry {
@@ -376,8 +428,23 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
     bridgeMesh.receiveShadow = true;
   }
 
-  // Water (docs/adr/0040): its own material, colours from the mesh.
-  add('water', features.water, createWaterMaterial());
+  // Water (docs/adr/0040, 0046): its own material, colours from the mesh,
+  // shallows from the shore mask; the shore's quays and banks.
+  const shore = features.shore ? createShoreTexture(features.shore.mask) : null;
+  add('water', features.water, createWaterMaterial(shore));
+  const shoreMaterials = features.shore ? createShoreMaterials() : null;
+  if (features.shore && shoreMaterials) {
+    for (const [name, data, material] of [
+      ['shore: quays', features.shore.quay, shoreMaterials.quay],
+      ['shore: banks', features.shore.bank, shoreMaterials.bank],
+    ] as const) {
+      const mesh = add(name, data, material);
+      if (mesh) {
+        mesh.geometry.setAttribute('uv', new BufferAttribute(data.uvs, 2));
+        mesh.receiveShadow = true;
+      }
+    }
+  }
 
   // Buildings: walls, roofs and trim from a texture array; windows and doors
   // from an atlas, shown once it has loaded.
@@ -407,8 +474,11 @@ export function createGeoFeatures(features: FeatureGeometry): GeoFeatureLayer {
     group,
     stats: features.stats,
     ready: materials.ready,
+    shore,
     dispose() {
       disposed = true;
+      shore?.dispose();
+      shoreMaterials?.dispose();
       for (const m of meshes) {
         m.geometry.dispose();
         m.material.dispose();

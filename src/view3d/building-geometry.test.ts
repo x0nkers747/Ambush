@@ -18,6 +18,7 @@ import {
   designBuildings,
   ROOF_LAYER_BASE,
   TRIM_LAYER,
+  WATER_FOOTING_M,
   type BuildingGeometry,
 } from './building-geometry';
 import { WALL_LAYERS, WALL_TILE_M } from './building-style';
@@ -475,5 +476,31 @@ describe('determinism and variety', () => {
     expect(layers(us).has('shingles')).toBe(true);
     expect(layers(de).has('shingles')).toBe(false);
     expect([...layers(de)].some((l) => l === 'clay' || l === 'tiles')).toBe(true);
+  });
+});
+
+describe('buildings standing in water (docs/adr/0046)', () => {
+  const b = house('canal-house', [
+    { x: 0, y: 0 },
+    { x: 12, y: 0 },
+    { x: 12, y: 10 },
+    { x: 0, y: 10 },
+  ]);
+  const lowest = (g: BuildingGeometry) => Math.min(...vertices(g.surfaces).map((v) => v.z));
+
+  it('reach below the water where they stand in it, and nowhere else', () => {
+    const terrain = flat([b]);
+    const dry = buildingGeometry(terrain);
+    // The front wall (y = 0) stands at the edge of water 2 m below the ground.
+    const level = GROUND - 2;
+    const wet = buildingGeometry(terrain, {
+      waterLevelNear: (_x, y) => (y < 1 ? level : null),
+    });
+    expect(lowest(wet)).toBeCloseTo(level - WATER_FOOTING_M, 5);
+    expect(lowest(dry)).toBeGreaterThan(level);
+    // Nothing else about the building moves.
+    const top = (g: BuildingGeometry) => Math.max(...vertices(g.surfaces).map((v) => v.z));
+    expect(top(wet)).toBe(top(dry));
+    expect(wet.surfaces.triangleCount).toBe(dry.surfaces.triangleCount);
   });
 });

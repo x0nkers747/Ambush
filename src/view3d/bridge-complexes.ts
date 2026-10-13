@@ -498,15 +498,17 @@ export const LOW_DECK_M = 0.1;
  * leave no room for a proper bridge), the water under it is cut away, so the
  * deck is never drawn under a sheet of water. Also cut away: `roads`, convex
  * pieces of road surface on the ground (see `groundRoadHoles`). Water
- * elsewhere is unchanged. Returns the mesh and how many decks were low.
+ * elsewhere is unchanged. Returns the mesh, how many decks were low, and the
+ * pieces cut away under them (convex, flat [x0, y0, …]).
  */
 export function cutUnderDecks(
   water: MeshData,
   decks: readonly Bridge[],
   roads: readonly (readonly number[])[] = [],
   index: WaterIndex = waterIndex(water),
-): { mesh: MeshData; lowDecks: number } {
+): { mesh: MeshData; lowDecks: number; holes: number[][] } {
   const holes = new Occupancy<number>(() => true);
+  const deckHoles: number[][] = [];
   for (const poly of roads) holes.add(poly, -1);
   const waterAt = (x: number, y: number) => index.at(x, y);
   let lowDecks = 0;
@@ -550,10 +552,13 @@ export function cutUnderDecks(
       if (!(wet && clear < LOW_DECK_M) && !(deckLow - top < LOW_DECK_M)) continue;
       low = true;
       holes.add(quad, bi);
+      deckHoles.push(quad);
     }
     if (low) lowDecks += 1;
   });
-  if (holes.size === 0 || water.triangleCount === 0) return { mesh: water, lowDecks };
+  if (holes.size === 0 || water.triangleCount === 0) {
+    return { mesh: water, lowDecks, holes: deckHoles };
+  }
   const out = meshBuffers(water.colors !== null);
   const p = water.positions;
   const n = water.normals;
@@ -607,7 +612,7 @@ export function cutUnderDecks(
       }
     }
   }
-  return { mesh: finishMesh(out), lowDecks };
+  return { mesh: finishMesh(out), lowDecks, holes: deckHoles };
 }
 
 /** Water at most this deep over a road on the ground is cut away from it (a bank set too low), metres. */

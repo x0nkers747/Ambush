@@ -384,6 +384,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
             () => {
               entry.features = features;
               scene.add(features.group);
+              // The ground ends at the shore as the water and its walls arrive (docs/adr/0046).
+              entry.ground.setShore(features.shore);
             },
             () => {
               entry.vegetation = vegetation;

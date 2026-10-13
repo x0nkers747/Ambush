@@ -9,6 +9,7 @@ import {
 import { hashString, NoiseField, unit } from './hash';
 import { rasterizeLandCover, type LandCoverClass, type RasterGrid } from './landcover';
 import { CONIFER_NOISE, coniferShare } from './vegetation-placement';
+import { urbanGrid } from './water-profiles';
 
 // What the ground is made of, for the terrain material (docs/adr/0038): a
 // map in battlefield metres giving, at every point, the weights of eleven
@@ -36,14 +37,15 @@ import { CONIFER_NOISE, coniferShare } from './vegetation-placement';
 //   mud or rock, as mapped (`natural=beach`, `shingle`, `bare_rock`, `mud`)
 //   or else from the kind of water, the slope and the land cover, varying
 //   in width along the shore, with a damp band at the waterline; the bed
-//   under the water is sand, shingle or mud likewise.
+//   under the water is sand, shingle or mud likewise. Built-up shores have
+//   none (docs/adr/0046): they end in a quay wall, not a beach.
 //
 // Pure and deterministic: hashes of positions and feature ids, no random
 // numbers, no dependence on load order. Display only: the simulation never
 // reads it, and no vertex moves.
 
 /** Bump when the map's rules change: it changes how the ground looks, nothing else. */
-export const GROUND_MATERIAL_VERSION = 2;
+export const GROUND_MATERIAL_VERSION = 3;
 
 /** The ground layers, in texture-array order. */
 export const GROUND_LAYERS = [
@@ -861,6 +863,7 @@ function shores(
     SHORE_REACH_M,
   );
   if (!query.any) return 0;
+  const urban = urbanGrid(terrain);
   const { originX, originY, stepX, stepY, columns, rows } = grid;
   const shore = new Float32Array(LAYERS);
   let changed = 0;
@@ -921,6 +924,8 @@ function shores(
             changed += 1;
             continue;
           }
+          // A built-up shore is a quay (docs/adr/0046): the ground keeps its own look.
+          if (urban.at(x, y)) continue;
           const cls = classOf(classIndex[i] ?? 0);
           // The damp band at the waterline, wider and narrower along the shore.
           const u = 0.5 + 0.5 * noise.shoreWidth.at(x, y);
