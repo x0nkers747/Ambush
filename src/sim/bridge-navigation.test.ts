@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { bridgeSurfaces, surfaceHeightAt, type PathPoint } from './bridge-navigation';
 import type { Building, EnvironmentFeatures, Road, WaterArea } from './environment';
 import type { Vec2 } from './geometry';
-import { gradeTerrain } from './grading';
+import { gradeTerrain } from './ground';
 import {
   bridgeCrossings,
   isSegmentWalkable,
@@ -43,11 +43,28 @@ const road = (id: string, pts: [number, number][], extra: Partial<Road> = {}): R
   centerline: pts.map(([x, y]) => ({ x, y })),
   ...extra,
 });
-/** The road across the river at y = 0. */
-const across = road('across', [
-  [-150, 0],
-  [150, 0],
-]);
+/** The road across the river at y = 0, mapped as a bridge over it. */
+const approaches = [
+  road('west', [
+    [-150, 0],
+    [-30, 0],
+  ]),
+  road('east', [
+    [30, 0],
+    [150, 0],
+  ]),
+];
+const across = [
+  ...approaches,
+  road(
+    'across',
+    [
+      [-30, 0],
+      [30, 0],
+    ],
+    { bridge: true, crossing: { kind: 'bridge' } },
+  ),
+];
 const world = (f: Partial<EnvironmentFeatures> = {}): TerrainDataset =>
   gradeTerrain(
     createSyntheticTerrain(GRID, valley, {
@@ -60,7 +77,7 @@ const world = (f: Partial<EnvironmentFeatures> = {}): TerrainDataset =>
       ...f,
     }),
   );
-const WITH_BRIDGE = world({ roads: [across] });
+const WITH_BRIDGE = world({ roads: across });
 const NO_BRIDGE = world();
 
 const inRiver = (p: Vec2) => pointInPolygon(p, river.boundary);
@@ -224,7 +241,7 @@ describe('bridges soldiers can cross', () => {
       ],
       heightMeters: 4,
     };
-    const blocked = world({ roads: [across], buildings: [shed] });
+    const blocked = world({ roads: across, buildings: [shed] });
     expect(bridgeCrossings(blocked).crossable).toEqual([]);
     expect(bridgeCrossings(blocked).rejected[0]?.reason).toMatch(/Building/);
     expect(planPath(blocked, { x: -100, y: -40 }, { x: 100, y: -40 }).ok).toBe(false);

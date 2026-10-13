@@ -36,9 +36,7 @@ import {
 } from '#sim';
 import {
   createTacticalMap,
-  elevationTints,
   formatBearing,
-  typicalElevationRange,
   viewshedPixels,
   type MapBinding,
   type MapEditor,
@@ -898,10 +896,6 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           exercise: shown,
           session: () => session,
           hideTrainee: squadHidden,
-          tints: (terrain) => ({
-            data: elevationTints(terrain, typicalElevationRange(terrain)),
-            channels: 3,
-          }),
         });
         ui('attribution').before(view3d.canvas, view3d.overlay);
         connect3d(view3d);

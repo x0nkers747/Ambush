@@ -310,9 +310,9 @@ describe('the terrain model a scenario was planned on (docs/adr/0032, docs/adr/0
   it('is recorded, kept through edits and saving, and absent from older scenarios', () => {
     const d = defaultScenarioDefinition(DEMO_SCENARIO.terrain, 'demo');
     expect(d.terrainModel).toBe(terrainModelId(DEMO_SCENARIO.terrain));
-    // The DEM cleaning and grading versions the ground went through.
+    // The DEM cleaning and terrain field versions the ground went through.
     expect(d.terrainModel).toBe(TERRAIN_MODEL);
-    expect(d.terrainModel).toMatch(/^dem-clean-v\d+\+graded-v\d+$/);
+    expect(d.terrainModel).toMatch(/^dem-clean-v\d+\+field-v\d+$/);
     expect(parseScenarioDefinition(JSON.parse(JSON.stringify(d)))).toEqual(d);
     const older: Record<string, unknown> = { ...d };
     delete older['terrainModel'];

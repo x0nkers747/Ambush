@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEMO_SCENARIO } from '#exercise';
-import { bakeGroundMap } from './ground-map';
 import {
-  bakeGround,
   battlefieldBuffers,
   createGenerator,
   generateBattlefield,
@@ -11,11 +9,6 @@ import {
   type GenerationRequest,
   type GenerationWorker,
 } from './generation';
-
-/** Whether two byte arrays hold the same bytes. */
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
 
 // Generating features and vegetation off the main thread (docs/adr/0031):
 // the latest job wins, cancelled jobs end, stale replies are ignored.
@@ -121,32 +114,5 @@ describe('createGenerator', () => {
     // The result survives structured cloning (what postMessage does).
     const clone = structuredClone(result);
     expect(clone.vegetation.instances.count).toBe(result.vegetation.instances.count);
-  });
-
-  it('bakes the ground map in its own worker, alongside the features', async () => {
-    const { workers, generator } = fakes();
-    const job = generator.start(terrain);
-    const ground = generator.ground(terrain);
-    // Two workers: starting the bake does not cancel the features, nor the reverse.
-    expect(workers).toHaveLength(2);
-    expect(workers[1]?.sent[0]).toMatchObject({ type: 'ground', jobId: ground.id, terrain });
-    const baked = bakeGround(terrain);
-    workers[1]?.reply({ type: 'ground', jobId: ground.id, result: baked });
-    await expect(ground.result).resolves.toBe(baked);
-    workers[0]?.reply({ type: 'done', jobId: job.id, result });
-    await expect(job.result).resolves.toBe(result);
-    // A new bake cancels the previous one only.
-    const next = generator.ground(terrain);
-    const again = generator.ground(terrain);
-    await expect(next.result).rejects.toBeInstanceOf(GenerationCancelled);
-    generator.dispose();
-    await expect(again.result).rejects.toBeInstanceOf(GenerationCancelled);
-  });
-
-  it('bakes the same map on this thread', async () => {
-    const generator = createGenerator({ createWorker: () => null });
-    const baked = await generator.ground(terrain).result;
-    expect(sameBytes(baked.map.weights0, bakeGroundMap(terrain).weights0)).toBe(true);
-    expect(baked.ms).toBeGreaterThanOrEqual(0);
   });
 });

@@ -6,7 +6,7 @@ import { DecorSpace } from './decor-space';
 import { hashInts, hashString, unit, valueNoise } from './hash';
 import { PLANTS, propIndex } from './plant-models';
 import type { PropName } from './prop-models';
-import { srgbToLinear } from './terrain-mesh';
+import { srgbToLinear } from './srgb';
 import type { PlacedInstance } from './vegetation-placement';
 
 // The roadside and settlement details of a battlefield (docs/adr/0036):

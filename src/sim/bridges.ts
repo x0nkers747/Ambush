@@ -21,6 +21,10 @@ import { polygonTest, terrainWaterQuery } from './water-grading';
 //   exactly; over water at least `CLEARANCE_M` above it, rising and falling no
 //   steeper than `MAX_GRADE`. Where the ends are too low for that, the deck is
 //   as high as the grade allows (a low bridge), and the crossing is reported.
+// - On the terrain field's ground (docs/adr/0049) the deck is the field's:
+//   a mapped bridge's deck is the one the field lays (`grading.decks`), and
+//   an inferred crossing is the road the field builds across the water, so
+//   soldiers walk on what is drawn.
 // - Pure and deterministic: roads and water in order of id, no randomness.
 
 /** Bump when the bridge rules change: it changes how bridges look and where soldiers cross. */
@@ -303,6 +307,7 @@ export function planBridges(terrain: TerrainDataset): BridgePlan {
   const water = waterTest(terrain);
   const levels = terrainWaterQuery(terrain);
   const builtUp = builtUpTest(terrain);
+  const fieldDeck = terrain.grading?.baseElevations ? terrainDeckTop(terrain) : null;
   const ground = (x: number, y: number) =>
     isOnTerrain(terrain, x, y) ? heightAt(terrain, x, y) : null;
   const roads = terrain.features.roads
@@ -378,7 +383,7 @@ export function planBridges(terrain: TerrainDataset): BridgePlan {
       );
     };
     for (const [s0, s1, mapped] of merged) {
-      let built = deck(chain, s0, s1, mapped, water, levels, ground, builtUp, onEdge);
+      let built = deck(chain, s0, s1, mapped, water, levels, ground, builtUp, onEdge, fieldDeck);
       // Banks too low for the clearance: longer approach ramps, onto the land.
       if (typeof built !== 'string' && built.lowClearance) {
         const longer = deck(
@@ -391,6 +396,7 @@ export function planBridges(terrain: TerrainDataset): BridgePlan {
           ground,
           builtUp,
           onEdge,
+          fieldDeck,
         );
         if (typeof longer !== 'string') built = longer;
       }
@@ -413,6 +419,7 @@ function deck(
   ground: (x: number, y: number) => number | null,
   builtUp: (x: number, y: number) => boolean,
   onEdge: (s: number) => boolean,
+  fieldDeck: ((x: number, y: number) => number | null) | null,
 ): Bridge | string {
   const len = s1 - s0;
   if (len < 2) return 'too short';
@@ -443,7 +450,8 @@ function deck(
         const b = r.centerline[j];
         if (a && b) l += Math.hypot(b.x - a.x, b.y - a.y);
       }
-      if (s >= acc - 1e-6 && s <= acc + l + 1e-6) roadsAt.add(r.id);
+      // (Strictly inside: a way that only meets the deck at its end is not carried.)
+      if (s > acc + 1e-6 && s < acc + l - 1e-6) roadsAt.add(r.id);
       acc += l;
     }
   }
@@ -473,14 +481,17 @@ function deck(
     return Math.max(g[k] ?? 0, Math.min(m, fromStart, fromEnd));
   });
   // Smoothed lightly (ends kept).
-  const top = env.map((z, k) =>
-    k === 0 || k === n ? z : ((env[k - 1] ?? z) + 2 * z + (env[k + 1] ?? z)) / 4,
-  );
+  const top = fieldDeck
+    ? // The field's deck, or (an inferred crossing) the road it builds.
+      g.map((z, k) => (mapped ? (fieldDeck(xy[2 * k] ?? 0, xy[2 * k + 1] ?? 0) ?? z) : z))
+    : env.map((z, k) =>
+        k === 0 || k === n ? z : ((env[k - 1] ?? z) + 2 * z + (env[k + 1] ?? z)) / 4,
+      );
   let low = false;
   top.forEach((z, k) => {
     // (Within a few metres of its ends a deck meets the road, whatever the water there.)
     const fromEnd = Math.min(k, n - k) * stepLen;
-    if (wetAt[k] && fromEnd > 3 && z < (under[k] ?? 0) + clearance - 0.05) low = true;
+    if (!fieldDeck && wetAt[k] && fromEnd > 3 && z < (under[k] ?? 0) + clearance - 0.05) low = true;
   });
   const mid = along(chain, (s0 + s1) / 2);
   const firstRoad = chain.roads.find((r) => roadsAt.has(r.id)) ?? chain.roads[0];
@@ -501,6 +512,42 @@ function deck(
     halfWidth: roadHalf + Math.max(verge, BRIDGE_STYLES[style].margin),
     roadHalfWidth: roadHalf,
     lowClearance: low,
+  };
+}
+
+/** The top of the terrain field's deck (`grading.decks`) nearest (x, y) and within its width, or null. */
+export function terrainDeckTop(terrain: TerrainDataset): (x: number, y: number) => number | null {
+  const decks = (terrain.grading?.decks ?? []).map((d) => {
+    const xs = d.xy.filter((_, i) => i % 2 === 0);
+    const ys = d.xy.filter((_, i) => i % 2 === 1);
+    return {
+      d,
+      minX: Math.min(...xs) - d.halfWidth,
+      maxX: Math.max(...xs) + d.halfWidth,
+      minY: Math.min(...ys) - d.halfWidth,
+      maxY: Math.max(...ys) + d.halfWidth,
+    };
+  });
+  return (x, y) => {
+    let best = Infinity;
+    let top: number | null = null;
+    for (const { d, minX, maxX, minY, maxY } of decks) {
+      if (x < minX || x > maxX || y < minY || y > maxY) continue;
+      for (let i = 0; i + 3 < d.xy.length; i += 2) {
+        const ax = d.xy[i] ?? 0;
+        const ay = d.xy[i + 1] ?? 0;
+        const dx = (d.xy[i + 2] ?? 0) - ax;
+        const dy = (d.xy[i + 3] ?? 0) - ay;
+        const l2 = dx * dx + dy * dy;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+        const dist = Math.hypot(ax + t * dx - x, ay + t * dy - y);
+        if (dist > d.halfWidth || dist >= best) continue;
+        best = dist;
+        const a = d.top[i / 2] ?? 0;
+        top = a + t * ((d.top[i / 2 + 1] ?? a) - a);
+      }
+    }
+    return top;
   };
 }
 

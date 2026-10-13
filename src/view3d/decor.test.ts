@@ -594,26 +594,12 @@ describe('the roadside details as a whole', () => {
     expect(DECOR_VERSION).toBe(2);
   });
 
-  it('produce only finite, grounded geometry', () => {
+  it('produce only finite placements', () => {
     const built = buildFeatures(terrain);
-    for (const [, m] of built.geometry.paths)
-      for (const v of m.positions) expect(Number.isFinite(v)).toBe(true);
     for (const i of built.decorInstances) {
       for (const v of [i.x, i.y, i.yaw, i.scaleW, i.scaleH, ...i.tint])
         expect(Number.isFinite(v)).toBe(true);
     }
-    // Paths lie just above the ground, at the roads' height (they are cut by the roads).
-    for (const [, m] of built.geometry.paths) {
-      for (let k = 0; k < m.positions.length; k += 3) {
-        const x = m.positions[k] ?? 0;
-        const z = m.positions[k + 1] ?? 0;
-        const y = -(m.positions[k + 2] ?? 0);
-        const above = z - heightAt(terrain, x, y);
-        expect(above).toBeGreaterThan(0.01);
-        expect(above).toBeLessThan(0.07);
-      }
-    }
-    expect(built.geometry.stats.decor.pathTriangles).toBeGreaterThan(0);
   });
 
   it('add give-way signs where minor roads join main roads', () => {
@@ -641,12 +627,10 @@ describe('the roadside details as a whole', () => {
   it('dispose of the scene meshes they add', () => {
     const built = buildFeatures(terrain);
     const layer = createGeoFeatures(built.geometry);
-    const paths = layer.group.children.filter((c) => c.name.startsWith('paths: '));
-    const markings = layer.group.children.find((c) => c.name === 'road markings');
-    expect(paths.length).toBeGreaterThan(0);
-    expect(markings).toBeDefined();
+    const meshes = [...layer.group.children];
+    expect(meshes.find((c) => c.name === 'road markings')).toBeDefined();
     let disposed = 0;
-    for (const o of [markings, ...paths]) {
+    for (const o of meshes) {
       const g = (
         o as { geometry?: { addEventListener: (t: string, f: () => void) => void } } | undefined
       )?.geometry;
@@ -655,7 +639,7 @@ describe('the roadside details as a whole', () => {
       });
     }
     layer.dispose();
-    expect(disposed).toBe(paths.length + 1);
+    expect(disposed).toBe(meshes.length);
     expect(layer.group.children).toHaveLength(0);
   });
 

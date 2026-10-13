@@ -1,7 +1,7 @@
 import type { MeshData } from './drape';
 import { meshExtent, propLods, type PropName } from './prop-models';
 import { hashInts, unit } from './hash';
-import { srgbToLinear } from './terrain-mesh';
+import { srgbToLinear } from './srgb';
 
 // Procedural plant models (docs/adr/0031): a small library of trees and
 // shrubs, each built once in three levels of detail and shared by every

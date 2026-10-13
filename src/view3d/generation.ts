@@ -1,6 +1,5 @@
 import type { TerrainDataset } from '#sim';
 import { buildFeatures, featureBuffers, type FeatureGeometry } from './geo-features';
-import { bakeGroundMap, type GroundMap } from './ground-map';
 import {
   placeVegetation,
   type PlacementStats,
@@ -8,17 +7,13 @@ import {
 } from './vegetation-placement';
 
 // Generating a battlefield's 3D content off the main thread (docs/adr/0031):
-// the feature geometry (roads, water, buildings) and the vegetation
+// the feature geometry (buildings, road markings) and the vegetation
 // placement, both pure and deterministic, run in a Web Worker. The terrain is
 // sent once per job; the results come back as typed arrays whose buffers are
 // transferred, not copied. Starting a new job cancels the previous one (its
 // worker is terminated), and replies from a cancelled job are ignored, so a
 // stale result can never reach a newer battlefield. Where workers are not
 // available (tests), the same work runs on this thread, asynchronously.
-//
-// The ground map for the terrain material (docs/adr/0038) is baked by a
-// second worker at the same time, so it neither waits for nor delays the
-// features and vegetation.
 
 export type GenerationStage = 'features' | 'vegetation';
 
@@ -65,28 +60,14 @@ export function battlefieldBuffers(g: GeneratedBattlefield): ArrayBuffer[] {
 }
 
 export interface GenerationRequest {
-  readonly type: 'generate' | 'ground';
+  readonly type: 'generate';
   readonly jobId: number;
   readonly terrain: TerrainDataset;
-}
-
-/** The ground map and how long it took, ms. */
-export interface BakedGround {
-  readonly map: GroundMap;
-  readonly ms: number;
-}
-
-/** The ground map of a terrain. Pure. */
-export function bakeGround(terrain: TerrainDataset): BakedGround {
-  const t = performance.now();
-  const map = bakeGroundMap(terrain);
-  return { map, ms: performance.now() - t };
 }
 
 export type GenerationReply =
   | { readonly type: 'progress'; readonly jobId: number; readonly stage: GenerationStage }
   | { readonly type: 'done'; readonly jobId: number; readonly result: GeneratedBattlefield }
-  | { readonly type: 'ground'; readonly jobId: number; readonly result: BakedGround }
   | { readonly type: 'error'; readonly jobId: number; readonly message: string };
 
 /** What the generator needs of a worker: a Web Worker running generation.worker.ts. */
@@ -115,8 +96,6 @@ export class GenerationCancelled extends Error {
 export interface Generator {
   /** Starts generating for a terrain, cancelling any job still running. */
   start(terrain: TerrainDataset, progress?: (stage: GenerationStage) => void): GenerationJob;
-  /** Starts baking a terrain's ground map, cancelling any bake still running. */
-  ground(terrain: TerrainDataset): GenerationJob<BakedGround>;
   dispose(): void;
 }
 
@@ -129,10 +108,7 @@ export function createGenerator({
   createWorker = defaultWorker,
 }: GeneratorOptions = {}): Generator {
   let nextId = 1;
-  const current: {
-    generate: GenerationJob<unknown> | null;
-    ground: GenerationJob<unknown> | null;
-  } = { generate: null, ground: null };
+  const current: { generate: GenerationJob<unknown> | null } = { generate: null };
 
   /** Runs one job of a kind in a fresh worker (or on this thread), cancelling the kind's previous job. */
   const run = <T>(
@@ -228,17 +204,8 @@ export function createGenerator({
     start(terrain, progress = () => undefined) {
       return run('generate', terrain, () => generateBattlefield(terrain, progress), progress);
     },
-    ground(terrain) {
-      return run(
-        'ground',
-        terrain,
-        () => bakeGround(terrain),
-        () => undefined,
-      );
-    },
     dispose() {
       current.generate?.cancel();
-      current.ground?.cancel();
     },
   };
 }

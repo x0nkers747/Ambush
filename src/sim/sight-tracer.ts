@@ -1,7 +1,7 @@
 import type { Vec2, Vec3 } from './geometry';
 import { queryFeatures, type PreparedBuilding, type PreparedVegetation } from './los';
 import type { TerrainDataset } from './terrain';
-import { isRefinedAt, refinementIndex, sampleSurface } from './terrain-surface';
+import { isRefinedAt, refinementIndex, sampleSurface, typedSamples } from './terrain-surface';
 
 // A fast sight-line tracer for viewsheds (docs/adr/0020). It decides exactly
 // what `traceSightLine` decides (obstructed or not) for every sight line: every
@@ -311,7 +311,7 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   // ground there is the fine surface.
   const refinementSource = refinementIndex(terrain);
   const refinement = refinementSource
-    ? { ...refinementSource, samples: Float64Array.from(refinementSource.samples) }
+    ? { ...refinementSource, samples: typedSamples(refinementSource.samples) }
     : null;
   const fineFactor = refinement?.factor ?? 1;
   /** Terrain cut sequences: coarse x, y, diagonal, then the fine ones where refined. */

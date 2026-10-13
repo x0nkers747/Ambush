@@ -1,17 +1,14 @@
 import {
   ACESFilmicToneMapping,
-  BufferAttribute,
-  BufferGeometry,
-  CircleGeometry,
+  type BufferGeometry,
   Color,
   DirectionalLight,
-  DoubleSide,
   Fog,
   Group,
   HemisphereLight,
   InstancedMesh,
   Mesh,
-  MeshStandardMaterial,
+  type MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
@@ -21,31 +18,35 @@ import {
 import { Sky } from 'three/addons/objects/Sky.js';
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
-import type { TerrainDataset } from '#sim';
+import { groundFieldInput, type TerrainDataset } from '#sim';
+import {
+  compileField,
+  createSurface,
+  deckIndex,
+  DEFAULT_FIELD_SPEC,
+  type DeckIndex,
+  type TerrainField,
+  type TerrainSurface,
+} from '#sim/terrain-field';
+import { createBridgeDecks, type BridgeDecks } from './bridge-decks';
 import { terrainGround, type BattlefieldExtent, type GroundAt } from './camera-math';
-import { boundingSphereOf, createGeoFeatures, type GeoFeatureLayer } from './geo-features';
+import { createClutter, type Clutter } from './clutter';
+import { createForest } from './forest';
+import { createGeoFeatures, type GeoFeatureLayer } from './geo-features';
 import {
   createGenerator,
   GenerationCancelled,
   type GenerationJob,
   type GenerationStage,
 } from './generation';
-import { GROUND_MATERIAL_VERSION } from './ground-map';
-import {
-  createGroundMaterial,
-  type GroundMaterial,
-  type GroundOverlay,
-  type GroundPath,
-} from './ground-material';
+import { loadGroundTextures, placeholderTextures, type GroundTextures } from './ground-textures';
 import {
   groundProjection,
   type GroundProjection,
   type MapPoint,
   type ScreenPoint,
 } from './ground-projection';
-import { landCoverTints } from './landcover';
 import { createMarkerLayer } from './markers';
-import { plantModels, type PlantModel } from './plant-models';
 import {
   detectQuality,
   isSoftwareRenderer,
@@ -53,24 +54,28 @@ import {
   type QualityLevel,
   type QualityPreset,
 } from './quality';
+import { apronElevation, surroundings } from './surroundings';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
-import { apronElevation, skirtMesh, terrainMesh, type TerrainMeshData } from './terrain-mesh';
+import {
+  createTerrainRenderer,
+  type GroundOverlay,
+  type TerrainRenderer,
+} from './terrain-renderer';
+import { createTilePool, type TilePool } from './tile-pool';
 import { destinationMarkers, unitMarkers } from './unit-markers';
-import { createVegetationLayer, type VegetationLayer } from './vegetation-layer';
+import type { VegetationLayer } from './vegetation-layer';
+import { createWaterSurface, type WaterSurface } from './water-surface';
 
-// The 3D battlefield view (docs/adr/0029, 0030, 0031, 0038): the simulated
-// terrain with ground materials from its land cover, the roads, water, buildings and vegetation on it,
-// daylight, shadows, sky and fog, the tactical camera, and the soldiers. The
-// terrain is drawn at once; roads, water, buildings and vegetation are
-// generated in a worker and appear when ready. Like the 2D
-// map it renders whatever exercise it is given (live, the scenario preview, or
-// an After Action Review frame) and owns no game state: it reads, never writes.
-
-/** Elevation tints for the terrain: sRGB bytes per sample, in heightfield order. */
-export type TerrainTints = (terrain: TerrainDataset) => {
-  readonly data: ArrayLike<number>;
-  readonly channels: 3 | 4;
-};
+// The 3D battlefield view (docs/adr/0029, 0030, 0031, 0049): the ground drawn
+// from the terrain field the simulation's ground is sampled from (tiles made
+// by workers, CDLOD, materials from the field: roads, shores, land cover), its
+// water, bridge decks and grass; the buildings, road markings and vegetation
+// on it; daylight, shadows, sky and fog, the tactical camera, and the
+// soldiers. The ground appears once the tile workers have compiled the field;
+// buildings and vegetation are generated in a worker and appear when ready.
+// Like the 2D map it renders whatever exercise it is given (live, the scenario
+// preview, or an After Action Review frame) and owns no game state: it reads,
+// never writes.
 
 export interface BattlefieldView3dOptions {
   /** The exercise to show now: the same one the 2D map shows. */
@@ -78,8 +83,6 @@ export interface BattlefieldView3dOptions {
   readonly session: () => Session;
   /** Whether the trainee's squad is hidden (no ORP yet), as on the 2D map. */
   readonly hideTrainee: () => boolean;
-  /** Colours for ground with no land cover (e.g. the 2D map's elevation tints). */
-  readonly tints?: TerrainTints;
   /** Rendering quality; by default chosen from the GPU. */
   readonly quality?: QualityLevel | 'auto';
 }
@@ -129,27 +132,30 @@ export interface BattlefieldView3d {
   dispose(): void;
 }
 
-/** What the view knows about one terrain: its mesh, built once. */
+/** What the view knows about one terrain, built once. */
 interface TerrainEntry {
   readonly terrain: TerrainDataset;
-  readonly data: TerrainMeshData;
-  readonly mesh: Mesh<BufferGeometry, MeshStandardMaterial>;
-  /** The terrain's material: vertex colours until its ground map is baked (docs/adr/0038). */
-  readonly ground: GroundMaterial;
-  readonly groundJob: GenerationJob<unknown>;
-  readonly groundBake: {
-    /** Worker time to bake the map, and from starting the bake to using it, ms. */
-    bakeMs: number | null;
-    waitMs: number | null;
-    error: string | null;
-  };
-  /** Roads, water and buildings, and vegetation, once generated. */
+  /** The terrain field (docs/adr/0049), compiled here from the terrain's cleaned elevations. */
+  readonly field: TerrainField;
+  /** Tiles of the field made on this thread, and those adopted from the workers. */
+  readonly surface: TerrainSurface;
+  /** The workers making the ground's tiles. */
+  readonly pool: TilePool;
+  /** The ground, once the workers have compiled the field. */
+  ground: TerrainRenderer | null;
+  readonly water: WaterSurface;
+  readonly bridges: BridgeDecks;
+  readonly decks: DeckIndex;
+  readonly clutter: Clutter;
+  /** The ground, its water, bridge decks and grass. */
+  readonly group: Group;
+  /** Buildings and road markings, and vegetation, once generated. */
   features: GeoFeatureLayer | null;
   vegetation: VegetationLayer | null;
   /** The generation of features and vegetation for this terrain. */
   readonly job: GenerationJob;
   readonly generation: {
-    stage: GenerationStage | 'done' | 'failed';
+    stage: 'ground' | GenerationStage | 'done' | 'failed';
     /** Worker times per stage, ms. */
     workerMs: { features: number; vegetation: number } | null;
     /** From starting the job to its result arriving, ms. */
@@ -162,15 +168,17 @@ interface TerrainEntry {
     revealFrameMs: number[];
     error: string | null;
   };
-  /** Time taken to build the terrain mesh (with its land cover), in ms. */
-  readonly buildMs: { readonly terrain: number };
+  /** Compiling the field on this thread, and in the slowest tile worker, ms. */
+  readonly buildMs: { readonly field: number; workers: number | null };
   /** The edge walls and the plain around the battlefield (decoration, not simulated ground). */
-  readonly surround: Mesh<BufferGeometry, MeshStandardMaterial>[];
+  readonly surround: readonly Mesh[];
   readonly extent: BattlefieldExtent;
   readonly groundAt: GroundAt;
   /** The elevation of the plain round the battlefield. */
   readonly apronZ: number;
   readonly camera: TacticalCamera;
+  /** When grass was last placed although the finest tiles were still coming, ms. */
+  clutterForcedAt: number;
 }
 
 /** The sun: from the south-west, 38° above the horizon. */
@@ -178,10 +186,20 @@ const SUN_AZIMUTH_DEG = 225;
 const SUN_ELEVATION_DEG = 38;
 /** Haze on the horizon, matched by the fog. */
 const HAZE = new Color(0xc9d4dc);
+/** Spacing of the ground's finest lattice, metres (the field is sampled there exactly). */
+const GROUND_SPACING_M = 0.5;
+/** Grass waits this long for the ground's finest tiles before it is placed anyway, ms. */
+const CLUTTER_PATIENCE_MS = 1000;
 
-/** Which vegetation meshes cast and receive shadows at a quality level. */
+/** Which vegetation meshes cast and receive shadows: trees shade one another wherever there are shadows. */
 function vegetationShadows(q: QualityPreset): { cast: boolean; receive: boolean } {
-  return { cast: q.shadows !== null, receive: q.shadows?.treesReceive ?? false };
+  return { cast: q.shadows !== null, receive: q.shadows !== null };
+}
+
+/** Workers making the ground's tiles: fewer for a dense city, whose field is large to copy. */
+function tileWorkers(terrain: TerrainDataset): number {
+  const heavy = terrain.features.buildings.length > 20_000;
+  return Math.max(1, Math.min(heavy ? 2 : 4, (navigator.hardwareConcurrency || 4) - 1));
 }
 
 export function createBattlefieldView3d(o: BattlefieldView3dOptions): BattlefieldView3d {
@@ -202,7 +220,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     canvas,
     antialias: true,
     powerPreference: 'high-performance',
-    // For water, which takes each pixel once (geo-features.ts).
+    // For water, which takes each pixel once.
     stencil: true,
   });
   renderer.outputColorSpace = SRGBColorSpace;
@@ -217,9 +235,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
   renderer.shadowMap.enabled = quality.shadows !== null;
 
-  /** The terrain shader's path: plain layer colours on software renderers at low quality. */
-  const groundPath = (): GroundPath =>
-    quality.level !== 'low' ? 'full' : isSoftwareRenderer(gpu) ? 'flat' : 'simple';
+  /** The ground's materials: simple on software renderers. */
+  const advancedGround = () => quality.ground.advanced && !isSoftwareRenderer(gpu);
+  /** Grass and clutter: none on software renderers. */
+  const clutterSettings = () => (isSoftwareRenderer(gpu) ? null : quality.ground.clutter);
 
   const scene = new Scene();
   scene.background = HAZE;
@@ -251,7 +270,6 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = 0.4;
   const generator = createGenerator();
-  let models: PlantModel[] | null = null;
   const ambient = new HemisphereLight(0xd6e4f0, 0x6f7062, 1.0);
   scene.add(ambient);
 
@@ -259,68 +277,98 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   scene.add(markers.group);
 
   let current: TerrainEntry | null = null;
-  /** How many times a terrain's meshes have been built (for checks: once per terrain). */
+  /** How many times a terrain's ground has been built (for checks: once per terrain). */
   let terrainBuilds = 0;
   let width = 0;
   let height = 0;
+  let disposed = false;
 
-  /** The terrain's mesh and camera, built the first time it is shown and kept. */
+  // The ground's material textures: plain colours until they have loaded.
+  let textures: GroundTextures = placeholderTextures();
+  let texturesReady = false;
+  void loadGroundTextures().then(
+    (loaded) => {
+      if (disposed) {
+        loaded.dispose();
+        return;
+      }
+      textures.dispose();
+      textures = loaded;
+      texturesReady = true;
+      current?.ground?.setTextures(loaded);
+      current?.bridges.setTints(loaded.tints);
+    },
+    (error: unknown) => {
+      console.error('The ground textures could not be loaded', error);
+    },
+  );
+
+  /** Sets the ground's distances and materials, and the grass, from the quality. */
+  const applyGroundQuality = (entry: TerrainEntry) => {
+    const g = quality.ground;
+    if (entry.ground) {
+      entry.ground.setLodRange(g.lodRangeM);
+      entry.ground.setDetailDistance(g.detailM);
+      entry.ground.setAdvanced(advancedGround());
+    }
+    const clutter = clutterSettings();
+    entry.clutter.setVisible(clutter !== null);
+    if (clutter) entry.clutter.setSettings(clutter);
+  };
+
+  /** The terrain's ground, water, bridges and camera, built the first time it is shown and kept. */
   const terrainEntry = (terrain: TerrainDataset): TerrainEntry => {
     if (current?.terrain === terrain) return current;
     if (current) dropTerrain(current);
     terrainBuilds += 1;
     const started = performance.now();
-    const data = terrainMesh(terrain, landCoverTints(terrain, o.tints?.(terrain)));
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
-    geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
-    if (data.colors) geometry.setAttribute('color', new BufferAttribute(data.colors, 3));
-    geometry.setIndex(new BufferAttribute(data.indices, 1));
-    geometry.boundingSphere = boundingSphereOf(data.positions);
-    const ground = createGroundMaterial({ path: groundPath() });
-    const mesh = new Mesh(geometry, ground.material);
-    mesh.name = 'terrain';
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-    const buildMs = { terrain: performance.now() - started };
+    // The field from the terrain's cleaned elevations, features and water
+    // levels: the one its simulated ground was sampled from.
+    const input = groundFieldInput(terrain);
+    const field = compileField(input, DEFAULT_FIELD_SPEC);
+    const buildMs: TerrainEntry['buildMs'] = { field: performance.now() - started, workers: null };
+    const surface = createSurface(field, {
+      spacing: GROUND_SPACING_M,
+      capacity: 384,
+      clock: () => performance.now(),
+    });
+    const pool = createTilePool(input, DEFAULT_FIELD_SPEC, GROUND_SPACING_M, tileWorkers(terrain));
+    const group = new Group();
+    group.name = 'ground';
+    const water = createWaterSurface(field, terrain.features, input.water);
+    group.add(water.mesh);
+    const bridges = createBridgeDecks(field);
+    if (texturesReady) bridges.setTints(textures.tints);
+    group.add(bridges.group);
+    const decks = deckIndex(field.roads);
+    const clutter = createClutter(surface, group);
+    // Nothing grows through a bridge deck that is close over the ground.
+    clutter.setCovered((x, y, z) => {
+      const deck = decks.topAt(x, y);
+      return deck !== null && deck - z < 2;
+    });
+    scene.add(group);
 
-    const b = data.bounds;
+    const b = field.bounds;
     const extent = { minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY };
     const span = Math.max(b.maxX - b.minX, b.maxY - b.minY);
-
-    // The surroundings: walls down from the edge, and a plain beyond it.
     const apronZ = apronElevation(terrain);
-    const skirt = skirtMesh(terrain, apronZ);
-    const skirtGeometry = new BufferGeometry();
-    skirtGeometry.setAttribute('position', new BufferAttribute(skirt.positions, 3));
-    skirtGeometry.setAttribute('normal', new BufferAttribute(skirt.normals, 3));
-    skirtGeometry.setIndex(new BufferAttribute(skirt.indices, 1));
-    const walls = new Mesh(
-      skirtGeometry,
-      new MeshStandardMaterial({ color: 0x6b6252, roughness: 1, metalness: 0, side: DoubleSide }),
-    );
-    walls.name = 'terrain edge';
-    const apron = new Mesh(
-      new CircleGeometry(12 * span, 64).rotateX(-Math.PI / 2),
-      new MeshStandardMaterial({ color: 0x59604f, roughness: 1, metalness: 0 }),
-    );
-    apron.name = 'surroundings';
-    apron.position.set((b.minX + b.maxX) / 2, apronZ - 0.05, -(b.minY + b.maxY) / 2);
-    scene.add(walls, apron);
+    const surround = surroundings(field, apronZ);
+    scene.add(...surround);
     const groundAt: GroundAt = terrainGround(terrain);
     // Subtle haze: the far side of a battlefield seen from the default view is just touched.
     scene.fog = new Fog(HAZE, 1.4 * span, 6 * span);
     // The sun lights the whole battlefield from far away.
     const cx = (b.minX + b.maxX) / 2;
     const cz = -(b.minY + b.maxY) / 2;
-    sun.position.set(cx, (b.minZ + b.maxZ) / 2, cz).addScaledVector(sunDirection, 4 * span);
-    sun.target.position.set(cx, b.minZ, cz);
+    sun.position.set(cx, apronZ, cz).addScaledVector(sunDirection, 4 * span);
+    sun.target.position.set(cx, apronZ, cz);
 
     const camera = createTacticalCamera(canvas, extent, groundAt, apronZ);
     if (width > 0) camera.resize(width, height);
-    // Roads, water, buildings and vegetation, off the main thread.
+    // Buildings, road markings and vegetation, off the main thread.
     const generation: TerrainEntry['generation'] = {
-      stage: 'features',
+      stage: 'ground',
       workerMs: null,
       waitMs: null,
       applyMs: null,
@@ -328,42 +376,66 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       revealFrameMs: [],
       error: null,
     };
-    // The ground map, in its own worker: the terrain's textures appear when it arrives.
-    const groundBake: TerrainEntry['groundBake'] = { bakeMs: null, waitMs: null, error: null };
-    const groundStarted = performance.now();
-    const groundJob = generator.ground(terrain);
-    groundJob.result.then(
-      (baked) => {
-        if (disposed || current?.groundJob !== groundJob) return;
-        groundBake.bakeMs = baked.ms;
-        groundBake.waitMs = performance.now() - groundStarted;
-        ground.setMap(baked.map);
-      },
-      (error: unknown) => {
-        if (error instanceof GenerationCancelled) return;
-        // The vertex colours stay: the terrain still shows its land cover.
-        groundBake.error = error instanceof Error ? error.message : String(error);
-      },
-    );
     const jobStarted = performance.now();
     const job = generator.start(terrain, (stage) => {
-      generation.stage = stage;
+      if (generation.stage !== 'ground') generation.stage = stage;
     });
+    const entry: TerrainEntry = {
+      terrain,
+      field,
+      surface,
+      pool,
+      ground: null,
+      water,
+      bridges,
+      decks,
+      clutter,
+      group,
+      features: null,
+      vegetation: null,
+      job,
+      generation,
+      buildMs,
+      surround,
+      extent,
+      groundAt,
+      apronZ,
+      camera,
+      clutterForcedAt: performance.now(),
+    };
+    current = entry;
+    applyGroundQuality(entry);
+    // The ground, once every worker has compiled the field.
+    pool.ready.then(
+      (ms) => {
+        if (disposed || current !== entry) return;
+        buildMs.workers = ms;
+        const ground = createTerrainRenderer(surface, pool, textures);
+        entry.ground = ground;
+        applyGroundQuality(entry);
+        group.add(ground.mesh);
+        if (generation.stage === 'ground') generation.stage = entry.features ? 'done' : 'features';
+      },
+      (error: unknown) => {
+        if (disposed || current !== entry) return;
+        generation.stage = 'failed';
+        generation.error = error instanceof Error ? error.message : String(error);
+      },
+    );
     job.result.then(
       (result) => {
-        if (disposed || current?.job !== job) return;
-        const entry = current;
+        if (disposed || current !== entry) return;
         generation.waitMs = performance.now() - jobStarted;
         generation.workerMs = result.ms;
         const applying = performance.now();
         const features = createGeoFeatures(result.features);
-        models ??= plantModels();
-        const vegetation = createVegetationLayer(
-          models,
-          result.vegetation.instances,
-          quality.vegetation,
-          vegetationShadows(quality),
-        );
+        const vegetation = createForest({
+          instances: result.vegetation.instances,
+          field,
+          surface,
+          settings: quality.vegetation,
+          shadows: vegetationShadows(quality),
+        });
         generation.applyMs = performance.now() - applying;
         // Compile their shaders without blocking (where the browser can),
         // then show them.
@@ -384,13 +456,11 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
             () => {
               entry.features = features;
               scene.add(features.group);
-              // The ground ends at the shore as the water and its walls arrive (docs/adr/0046).
-              entry.ground.setShore(features.shore);
             },
             () => {
               entry.vegetation = vegetation;
               scene.add(vegetation.group);
-              generation.stage = 'done';
+              if (generation.stage !== 'ground') generation.stage = 'done';
             },
           );
           revealEntry = entry;
@@ -407,36 +477,21 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         generation.error = error instanceof Error ? error.message : String(error);
       },
     );
-
-    current = {
-      terrain,
-      data,
-      mesh,
-      ground,
-      groundJob,
-      groundBake,
-      features: null,
-      vegetation: null,
-      job,
-      generation,
-      buildMs,
-      surround: [walls, apron],
-      extent,
-      groundAt,
-      apronZ,
-      camera,
-    };
-    return current;
+    return entry;
   };
 
   const dropTerrain = (entry: TerrainEntry) => {
-    for (const m of [entry.mesh, ...entry.surround]) {
+    for (const m of entry.surround) {
       scene.remove(m);
       m.geometry.dispose();
-      m.material.dispose();
+      (m.material as MeshStandardMaterial).dispose();
     }
-    entry.ground.dispose();
-    entry.groundJob.cancel();
+    scene.remove(entry.group);
+    entry.pool.dispose();
+    entry.ground?.dispose();
+    entry.water.dispose();
+    entry.bridges.dispose();
+    entry.clutter.dispose();
     entry.job.cancel();
     if (revealEntry === entry) {
       // Layers still waiting to be shown are not in the scene: free them here.
@@ -513,7 +568,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       if (obj instanceof Mesh) (obj.material as MeshStandardMaterial).needsUpdate = true;
     });
     current?.vegetation?.setSettings(quality.vegetation, vegetationShadows(quality));
-    current?.ground.setPath(groundPath());
+    if (current) applyGroundQuality(current);
   };
   if (quality.shadows) sun.shadow.mapSize.set(quality.shadows.mapSize, quality.shadows.mapSize);
 
@@ -521,7 +576,6 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   let reveal: (() => void)[] = [];
   let revealEntry: TerrainEntry | null = null;
   let pendingLayers: { dispose(): void }[] = [];
-  let disposed = false;
   // --- Pointer input for gameplay (docs/adr/0039) ---------------------------
   // Listened to in the capture phase, before the camera's own listeners: a
   // left press the handler claims (a handle) is stopped there, so the camera
@@ -640,19 +694,29 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       if (reveal.length === 0) pendingLayers = [];
       const revealing = step !== undefined;
       entry.camera.update();
-      entry.vegetation?.update(entry.camera.camera);
+      const eye = entry.camera.camera;
+      entry.ground?.update(eye);
+      if (entry.ground && clutterSettings()) {
+        // Grass waits for the ground's finest tiles near it, but not for long.
+        const now = performance.now();
+        const force =
+          now - entry.clutterForcedAt > CLUTTER_PATIENCE_MS && entry.ground.stats.waiting > 0;
+        if (force) entry.clutterForcedAt = now;
+        entry.clutter.update(eye.position.x, -eye.position.z, now / 1000, force);
+      }
+      entry.vegetation?.update(eye);
       followWithShadows(entry);
       const session = o.session();
       const hide = o.hideTrainee();
       markers.update(
         unitMarkers(exercise, session, hide),
         destinationMarkers(exercise, session, hide),
-        entry.camera.camera,
+        eye,
         height,
       );
       const drawing = performance.now();
-      entry.ground.setOverlay(groundOverlay);
-      renderer.render(scene, entry.camera.camera);
+      entry.ground?.setOverlay(groundOverlay);
+      renderer.render(scene, eye);
       if (overlayContext) {
         const ratio = overlay.width / Math.max(width, 1);
         overlayContext.setTransform(1, 0, 0, 1, 0, 0);
@@ -669,12 +733,14 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     },
     status() {
       switch (current?.generation.stage) {
+        case 'ground':
+          return 'Building the ground…';
         case 'features':
-          return 'Building roads, water and buildings…';
+          return 'Building the buildings…';
         case 'vegetation':
           return 'Growing vegetation…';
         case 'failed':
-          return 'Roads, buildings and vegetation could not be built.';
+          return 'The ground, buildings or vegetation could not be built.';
         default:
           return null;
       }
@@ -693,6 +759,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       current = null;
 
       generator.dispose();
+      textures.dispose();
       sun.shadow.dispose();
       markers.dispose();
       sky.geometry.dispose();
@@ -740,16 +807,16 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         triangles: renderer.info.render.triangles,
         geometries: renderer.info.memory.geometries,
         textures: renderer.info.memory.textures,
-        terrainVertices: current?.data.vertexCount ?? 0,
         terrainBuilds,
         ground: current
           ? {
-              version: GROUND_MATERIAL_VERSION,
-              map: current.ground.hasMap(),
-              textures: current.ground.texturesReady(),
-              path: groundPath(),
-              ...current.groundBake,
-              textureBytes: current.ground.textureBytes(),
+              ready: current.ground !== null,
+              textures: texturesReady,
+              advanced: advancedGround(),
+              stats: current.ground?.stats ?? null,
+              clutter: current.clutter.stats,
+              field: current.field.stats,
+              buildMs: current.buildMs,
             }
           : null,
         features: current?.features?.stats ?? null,
@@ -760,19 +827,19 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         // Vertex and index buffers in the scene, in bytes.
         geometryBytes: (() => {
           let bytes = 0;
-          scene.traverse((o) => {
-            if (!(o instanceof Mesh)) return;
-            const g = o.geometry as BufferGeometry;
+          scene.traverse((obj) => {
+            if (!(obj instanceof Mesh)) return;
+            const g = obj.geometry as BufferGeometry;
             for (const a of Object.values(g.attributes)) bytes += a.array.byteLength;
             bytes += g.index?.array.byteLength ?? 0;
-            if (o instanceof InstancedMesh) {
-              bytes += o.instanceMatrix.array.byteLength + (o.instanceColor?.array.byteLength ?? 0);
+            if (obj instanceof InstancedMesh) {
+              bytes +=
+                obj.instanceMatrix.array.byteLength + (obj.instanceColor?.array.byteLength ?? 0);
             }
           });
           return bytes;
         })(),
-        buildMs: current?.buildMs ?? null,
-        bounds: current?.data.bounds ?? null,
+        bounds: current?.extent ?? null,
         markers: markers.group.children.length,
         clearance:
           pose && current

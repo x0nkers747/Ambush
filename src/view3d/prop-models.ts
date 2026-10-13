@@ -1,5 +1,5 @@
 import type { MeshData } from './drape';
-import { srgbToLinear } from './terrain-mesh';
+import { srgbToLinear } from './srgb';
 
 // Procedural models of roadside and settlement details (docs/adr/0036):
 // street lamps, utility poles and pylons, fence, wall and hedge segments,

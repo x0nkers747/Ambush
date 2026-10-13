@@ -144,19 +144,26 @@ export {
   type TerrainCleaning,
 } from './dem-quality';
 export {
-  BUILDING_APRON_M,
-  CUT_SLOPE,
-  FILL_SLOPE,
+  assembleGround,
   FINE_SPACING_M,
-  GRADING_VERSION,
   gradeTerrain,
-  gradeWithSummary,
-  MAX_CENTRE_DEPTH_M,
-  MIN_CHANGE_M,
-  ROAD_GRADING,
+  groundBand,
+  groundBands,
+  groundDecks,
+  groundFactor,
+  groundField,
+  groundFieldInput,
+  REFINE_TOLERANCE_M,
   terrainModelId,
-  type GradingSummary,
-} from './grading';
+  type GroundBand,
+} from './ground';
+export {
+  compileField,
+  DEFAULT_FIELD_SPEC,
+  TERRAIN_FIELD_VERSION,
+  type FieldInput,
+  type TerrainField,
+} from './terrain-field/field';
 export {
   isRefinedAt,
   refinementIndex,
@@ -220,6 +227,7 @@ export {
   type GeoReference,
   type Heightfield,
   type TerrainDataset,
+  type TerrainDeck,
   type TerrainGrading,
   type TerrainRefinement,
   type TerrainMetadata,
@@ -274,6 +282,7 @@ export {
   MERGE_GAP_M,
   MIN_CROSSING_M,
   planBridges,
+  terrainDeckTop,
   type Bridge,
   type BridgeIndex,
   type BridgePlan,

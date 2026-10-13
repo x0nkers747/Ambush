@@ -2,9 +2,22 @@ import type { DecorPoint, Road, TerrainDataset, Vec2 } from '#sim';
 import type { Region } from './building-style';
 import { finishMesh, meshBuffers, type Draper, type MeshData, type Rgb } from './drape';
 import { hashInts, hashString, unit } from './hash';
-import { ROAD_STYLE } from './road-geometry';
-import { onSurface, roadLevel } from './road-surface';
-import { srgbToLinear } from './terrain-mesh';
+import { srgbToLinear } from './srgb';
+
+/** Height of the road surface the markings are laid on above the ground, metres. */
+export const ROAD_OFFSET_M = 0.06;
+
+/** The level a road is on: bridge or tunnel, and its mapped `layer`. */
+export function roadLevel(road: Road): string {
+  const c = road.crossing ?? (road.bridge ? { kind: 'bridge' as const } : undefined);
+  const kind = c?.kind === 'bridge' || c?.kind === 'tunnel' ? c.kind : '';
+  return `${kind}:${String(c?.layer ?? 0)}`;
+}
+
+/** Whether a road is on the surface: everything but tunnels (a culvert is a pipe under the road). */
+export function onSurface(road: Road): boolean {
+  return !(road.crossing?.kind === 'tunnel' && road.crossing.value !== 'culvert');
+}
 
 // Painted road markings (docs/adr/0037): centrelines, lane separators and
 // edge lines, stop lines at mapped stop signs and mapped pedestrian
@@ -490,8 +503,7 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
         const along = forward ? next.atStart : !next.atStart;
         const theirs = along ? ns.lines : reversed(ns.lines);
         if (signature(theirs) !== sig) return;
-        if (Math.abs(ROAD_STYLE[nr.roadClass].offset - ROAD_STYLE[r.roadClass].offset) > 1e-9)
-          return;
+        if (Math.abs(ROAD_OFFSET_M - ROAD_OFFSET_M) > 1e-9) return;
         used.add(next.road);
         members.push(next.road);
         const pts = along ? [...nr.centerline] : [...nr.centerline].reverse();
@@ -510,7 +522,7 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
         roads: members,
         points: clean,
         lines,
-        layerOffset: ROAD_STYLE[r.roadClass].offset,
+        layerOffset: ROAD_OFFSET_M,
       });
     }
   });
@@ -793,7 +805,7 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
     const across = r.road.widthMeters / 2 - 0.2;
     const nx = -r.dy;
     const ny = r.dx;
-    const z = ROAD_STYLE[r.road.roadClass].offset + 0.014;
+    const z = ROAD_OFFSET_M + 0.014;
     if (c.crossing === 'zebra') {
       // Bars along the road, side by side across it, 3 m long.
       const bar = style.zebraBar;
@@ -876,7 +888,7 @@ export function planMarkings(terrain: TerrainDataset, region: Region): MarkingPl
     const ty = r.dy * sgn;
     const half = r.road.widthMeters / 2 - 0.2;
     // The right of travel is (ty, −tx).
-    const z = ROAD_STYLE[r.road.roadClass].offset + 0.014;
+    const z = ROAD_OFFSET_M + 0.014;
     quad(
       { x: r.x, y: r.y },
       { x: r.x + ty * half, y: r.y - tx * half },

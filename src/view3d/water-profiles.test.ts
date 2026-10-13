@@ -1,18 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ShaderLib } from 'three';
-import {
-  createSyntheticTerrain,
-  gradeTerrain,
-  type EnvironmentFeatures,
-  type Vec2,
-  type WaterClass,
-} from '#sim';
-import { createShoreTexture } from './shore-material';
-import { shoreField, shoreMask } from './shoreline';
-import { srgbToLinear } from './terrain-mesh';
-import { createDraper } from './drape';
-import { triangles } from './test-helpers';
-import { waterGeometry } from './water-geometry';
+import { createSyntheticTerrain, type Vec2, type WaterClass } from '#sim';
+import { srgbToLinear } from './srgb';
 import { createWaterMaterial, WATER_FRESNEL } from './water-material';
 import {
   URBAN_REACH_M,
@@ -99,91 +88,16 @@ describe('water profiles', () => {
   });
 });
 
-describe('the water mesh (docs/adr/0046)', () => {
-  // Houses along both sides of the canals.
-  const houses = Array.from({ length: 16 }, (_, k) => ({
-    id: `h${String(k)}`,
-    footprint:
-      k < 8
-        ? rect(-105 + 28 * k, 12, -85 + 28 * k, 26)
-        : rect(-105 + 28 * (k - 8), -26, -85 + 28 * (k - 8), -12),
-    heightMeters: 10,
-  }));
-  const features: EnvironmentFeatures = {
-    roads: [],
-    buildings: houses,
-    vegetation: [],
-    water: [
-      // Two joined canals, mapped as plain water, lined with houses.
-      { id: 'canal-a', kind: 'water', waterClass: 'other', boundary: rect(-110, -10, 0, 10) },
-      { id: 'canal-b', kind: 'water', waterClass: 'other', boundary: rect(0, -10, 110, 10) },
-      // A lake in open country.
-      { id: 'lake', kind: 'water', waterClass: 'lake', boundary: rect(-150, -180, -40, -90) },
-    ],
-    waterways: [],
-    landUse: [],
-  };
-  const terrain = gradeTerrain(
-    createSyntheticTerrain(
-      { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
-      () => 4,
-      features,
-    ),
-  );
-  const water = waterGeometry(terrain, createDraper(terrain));
-
-  it('colours each water by its profile, joined canals alike', () => {
-    expect(water.profiles.get('canal-a')).toBe('urbanCanal');
-    expect(water.profiles.get('canal-b')).toBe('urbanCanal');
-    expect(water.profiles.get('lake')).toBe('lake');
-    const colours = (inside: (x: number, y: number) => boolean) => {
-      const out = new Set<string>();
-      const p = water.mesh.positions;
-      const c = water.mesh.colors ?? new Float32Array();
-      for (let i = 0; i < p.length; i += 3) {
-        if (inside(p[i] ?? 0, -(p[i + 2] ?? 0)))
-          out.add([c[i], c[i + 1], c[i + 2]].map((v) => (v ?? 0).toFixed(4)).join());
-      }
-      return out;
-    };
-    const canals = colours((x, y) => Math.abs(y) <= 10 && Math.abs(x) <= 110);
-    expect(canals.size).toBe(1);
-    const lake = colours((x, y) => x < -40 && y < -90);
-    expect(lake.size).toBe(1);
-    expect([...lake][0]).not.toBe([...canals][0]);
-    expect(triangles(water.mesh).length).toBeGreaterThan(0);
-  });
-});
-
 describe('the water material (docs/adr/0046)', () => {
-  const compiled = (shore = false) => {
-    let mask = null;
-    if (shore) {
-      const terrain = gradeTerrain(
-        createSyntheticTerrain(
-          { originX: -100, originY: -100, cellSize: 10, columns: 21, rows: 21 },
-          () => 4,
-          {
-            roads: [],
-            buildings: [],
-            vegetation: [],
-            water: [
-              { id: 'l', kind: 'water', waterClass: 'lake', boundary: rect(-50, -50, 50, 50) },
-            ],
-          },
-        ),
-      );
-      const field = shoreField(terrain);
-      if (field) mask = createShoreTexture(shoreMask(field, { at: () => false }));
-    }
-    const material = createWaterMaterial(mask);
+  const compiled = () => {
+    const material = createWaterMaterial();
     const shader = {
       uniforms: {} as Record<string, { value: unknown }>,
       vertexShader: ShaderLib.standard.vertexShader,
       fragmentShader: ShaderLib.standard.fragmentShader,
     };
     material.onBeforeCompile(shader as never, undefined as never);
-    return { material, shader, mask };
+    return { material, shader };
   };
 
   it('is opaque, rough enough to keep the sun’s glint small, and one program for every battlefield', () => {
@@ -194,20 +108,15 @@ describe('the water material (docs/adr/0046)', () => {
     expect(a.material.roughness).toBeGreaterThanOrEqual(0.4);
     expect(a.material.metalness).toBe(0);
     expect(a.material.customProgramCacheKey()).toBe(b.material.customProgramCacheKey());
-    expect(a.shader.uniforms['waterShoreOn']?.value).toBe(0);
     expect(a.shader.uniforms['waterFresnel']?.value).toBe(WATER_FRESNEL);
   });
 
-  it('reflects the sky by a Fresnel term before three writes its colour, and reads the shallows', () => {
-    const { shader, mask } = compiled(true);
+  it('reflects the sky by a Fresnel term before three writes its colour', () => {
+    const { shader } = compiled();
     const f = shader.fragmentShader;
     expect(f.indexOf('outgoingLight = mix(outgoingLight, waterSky')).toBeGreaterThan(0);
     expect(f.indexOf('outgoingLight = mix(outgoingLight, waterSky')).toBeLessThan(
       f.indexOf('#include <opaque_fragment>'),
     );
-    expect(f.indexOf('texture(waterShore')).toBeGreaterThan(f.indexOf('#include <color_fragment>'));
-    expect(shader.uniforms['waterShoreOn']?.value).toBe(1);
-    expect(mask).not.toBeNull();
-    mask?.dispose();
   });
 });

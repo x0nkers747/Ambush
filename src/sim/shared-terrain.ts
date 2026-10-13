@@ -28,7 +28,8 @@ export function isSharedTerrain(terrain: TerrainDataset): boolean {
 }
 
 export function deepFreeze<T>(value: T): T {
-  if (typeof value === 'object' && value !== null) {
+  // A typed array cannot be frozen: its contents stay unchanged by convention.
+  if (typeof value === 'object' && value !== null && !ArrayBuffer.isView(value)) {
     // Numbers need no freezing; skipping them keeps large arrays cheap.
     if (Array.isArray(value)) {
       for (const child of value as unknown[]) {

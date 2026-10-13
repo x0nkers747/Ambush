@@ -45,7 +45,7 @@ import {
   type SurfaceMeshData,
   type SurfaceVertex,
 } from './surface-mesh';
-import { srgbToLinear } from './terrain-mesh';
+import { srgbToLinear } from './srgb';
 
 // Buildings in 3D (docs/adr/0030, procedural since docs/adr/0035).
 //

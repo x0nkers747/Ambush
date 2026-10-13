@@ -21,7 +21,7 @@ import { heightAt, type TerrainDataset } from './terrain';
 //   Profiles meet the lakes they run into or out of, and tributaries meet
 //   the river they join, at the same level.
 //
-// Grading (grading.ts) then cuts a shallow bed under the water and makes the
+// The terrain field (terrain-field/) then cuts a shallow bed under the water and makes the
 // shores meet the level, and the levels are kept with the graded terrain, so
 // the 3D water, the shore materials and everything else use the same ones.
 // Pure and deterministic: the levels depend on the source ground and the

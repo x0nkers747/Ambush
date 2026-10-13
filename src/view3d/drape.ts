@@ -1,6 +1,5 @@
 import { ShapeUtils, Vector2 } from 'three';
 import { refinementIndex, type TerrainDataset, type Vec2 } from '#sim';
-import { terrainNormals } from './terrain-mesh';
 
 // Draping flat map shapes on the simulated ground (docs/adr/0030). A shape is
 // cut along the terrain's own triangles (the 10 m cells, each split along its
@@ -93,6 +92,36 @@ function signedArea(poly: readonly number[]): number {
       (poly[2 * i] ?? 0) * (poly[2 * j + 1] ?? 0) - (poly[2 * j] ?? 0) * (poly[2 * i + 1] ?? 0);
   }
   return area / 2;
+}
+
+/**
+ * Smooth unit normals for shading, one per sample in heightfield order, in
+ * Three.js axes: central differences (one-sided at the edges) give the surface
+ * normal (−dz/dx, −dz/dy, 1), normalised, then turned into Three.js axes.
+ */
+export function terrainNormals(terrain: TerrainDataset): Float32Array {
+  const { cellSize, columns, rows, elevations } = terrain.heightfield;
+  const normals = new Float32Array(columns * rows * 3);
+  const at = (c: number, r: number) =>
+    elevations[
+      Math.min(Math.max(r, 0), rows - 1) * columns + Math.min(Math.max(c, 0), columns - 1)
+    ] ?? 0;
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const i = r * columns + c;
+      const dzdx =
+        (at(c + 1, r) - at(c - 1, r)) /
+        ((Math.min(c + 1, columns - 1) - Math.max(c - 1, 0)) * cellSize);
+      const dzdy =
+        (at(c, r + 1) - at(c, r - 1)) /
+        ((Math.min(r + 1, rows - 1) - Math.max(r - 1, 0)) * cellSize);
+      const length = Math.hypot(dzdx, dzdy, 1);
+      normals[i * 3] = -dzdx / length;
+      normals[i * 3 + 1] = 1 / length;
+      normals[i * 3 + 2] = dzdy / length;
+    }
+  }
+  return normals;
 }
 
 /** Pieces smaller than this (m²) are dropped: slivers left by cutting along cell edges. */

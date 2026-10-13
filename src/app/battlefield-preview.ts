@@ -1,13 +1,7 @@
 import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
 import { createSession, setTool, type Session } from '#session';
 import { DEFAULT_TICK_RATE_HZ } from '#sim';
-import {
-  createTacticalMap,
-  elevationTints,
-  typicalElevationRange,
-  type MapSurface,
-  type TacticalMap,
-} from '#view2d';
+import { createTacticalMap, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d } from '#view3d';
 
 // The terrain-selection preview (docs/adr/0025): the selected battlefield on
@@ -200,10 +194,6 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
           },
           session: () => session,
           hideTrainee: () => hideTrainee,
-          tints: (terrain) => ({
-            data: elevationTints(terrain, typicalElevationRange(terrain)),
-            channels: 3,
-          }),
         });
         place3d(view3d);
         showViewMode();

@@ -122,7 +122,8 @@ describe('contourLines', () => {
         const x = s[i] ?? Number.NaN;
         const y = s[i + 1] ?? Number.NaN;
         expect(isOnTerrain(terrain, x, y)).toBe(true);
-        expect(heightAt(terrain, x, y)).toBeCloseTo(level, 6);
+        // Refined samples are Float32: within their precision.
+        expect(heightAt(terrain, x, y)).toBeCloseTo(level, 5);
       }
       segments += s.length / 4;
     }

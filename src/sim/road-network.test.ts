@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { surfaceHeightAt, type PathPoint } from './bridge-navigation';
 import { NO_FEATURES, type EnvironmentFeatures, type Road, type WaterArea } from './environment';
 import type { Vec2 } from './geometry';
-import { gradeTerrain } from './grading';
+import { gradeTerrain } from './ground';
 import { pathLength, planOffRoad, planPath } from './navigation';
 import { roadNetwork, roadPointAt } from './road-network';
 import type { Scenario } from './scenario';

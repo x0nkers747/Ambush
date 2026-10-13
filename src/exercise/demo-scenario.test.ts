@@ -193,7 +193,7 @@ describe('DEMO_SCENARIO', () => {
       ['inside the western woods sees none of it', { x: -130, y: 10 }, { 'V-1': 9 }],
       ['behind the barn sees little of it', { x: -60, y: -58 }, { 'B-2': 7, clear: 2 }],
       ['behind the south ridge sees none of it', { x: 10, y: -160 }, { terrain: 9 }],
-      ['behind the tree line sees none of it', { x: 130, y: 10 }, { 'V-2': 5, terrain: 4 }],
+      ['behind the tree line sees none of it', { x: 130, y: 10 }, { 'V-2': 6, terrain: 3 }],
       ['beside the farmhouse sees part of it', { x: 60, y: 22 }, { 'B-1': 4, clear: 5 }],
     ])('from %s', (_label, from, expected) => {
       expect(pointProblem(terrain, from)).toBeNull();

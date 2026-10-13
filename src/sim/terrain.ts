@@ -80,12 +80,12 @@ export interface TerrainRefinement {
    * `(factor + 1)²` samples per refined cell, in `cells` order, each row-major
    * from the cell's south-west corner.
    */
-  readonly samples: readonly number[];
+  readonly samples: readonly number[] | Float32Array;
 }
 
-/** How a graded terrain was made from its source (docs/adr/0032). */
+/** How a graded terrain was made from its source (docs/adr/0032, docs/adr/0049). */
 export interface TerrainGrading {
-  /** `GRADING_VERSION` of the rules that made it. */
+  /** `TERRAIN_FIELD_VERSION` of the field it was sampled from. */
   readonly version: number;
   /** Spacing of the refined samples, in metres. */
   readonly fineSpacingM: number;
@@ -95,6 +95,24 @@ export interface TerrainGrading {
    * before water was levelled.
    */
   readonly water?: WaterSurfaces;
+  /**
+   * The cleaned elevations it was made from (same grid as the heightfield):
+   * the 3D view compiles the terrain field from them.
+   */
+  readonly baseElevations?: readonly number[];
+  /** The decks of the bridges mapped as such, as the terrain field lays them. */
+  readonly decks?: readonly TerrainDeck[];
+}
+
+/** A mapped bridge's deck (docs/adr/0049): its road's centre line and the deck's top along it. */
+export interface TerrainDeck {
+  readonly roadId: string;
+  /** Half the deck's width, metres. */
+  readonly halfWidth: number;
+  /** Centre line points every metre, as x, y pairs. */
+  readonly xy: readonly number[];
+  /** The deck's top at each point, metres. */
+  readonly top: readonly number[];
 }
 
 /** Elevation plus the environment features standing on it. */
@@ -225,8 +243,12 @@ function validateRefinement(terrain: TerrainDataset): void {
   if (samples.length !== cells.length * n1 * n1) {
     throw new RangeError('terrain refinement has the wrong number of samples');
   }
-  if (!samples.every(Number.isFinite))
-    throw new RangeError('terrain refinement samples must be finite');
+  for (const v of samples) {
+    if (!Number.isFinite(v)) throw new RangeError('terrain refinement samples must be finite');
+  }
+  // Float32 samples meet their corners and straight edges to within their precision.
+  const tolerance = (v: number) =>
+    1e-6 + (samples instanceof Float32Array ? Math.abs(v) * 2 ** -22 : 0);
   const cellCount = (columns - 1) * (rows - 1);
   cells.forEach((cell, k) => {
     if (!Number.isInteger(cell) || cell < 0 || cell >= cellCount) {
@@ -246,7 +268,8 @@ function validateRefinement(terrain: TerrainDataset): void {
       [o + factor * n1 + factor, (r + 1) * columns + c + 1],
     ];
     for (const [fine, coarse] of corners) {
-      if (Math.abs((samples[fine] ?? NaN) - (elevations[coarse] ?? NaN)) > 1e-6) {
+      const e = elevations[coarse] ?? NaN;
+      if (Math.abs((samples[fine] ?? NaN) - e) > tolerance(e)) {
         throw new RangeError(`terrain refinement cell ${String(cell)} does not meet its corners`);
       }
     }
@@ -267,7 +290,7 @@ function validateRefinement(terrain: TerrainDataset): void {
       for (let m = 1; m < factor; m += 1) {
         const expected =
           (samples[from] ?? NaN) + (m / factor) * ((samples[to] ?? NaN) - (samples[from] ?? NaN));
-        if (Math.abs((samples[at(m)] ?? NaN) - expected) > 1e-6) {
+        if (Math.abs((samples[at(m)] ?? NaN) - expected) > tolerance(expected)) {
           throw new RangeError(
             `terrain refinement cell ${String(cell)} does not meet its unrefined neighbour`,
           );

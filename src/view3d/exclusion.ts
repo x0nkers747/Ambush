@@ -1,6 +1,8 @@
 import { pointInPolygon, type EnvironmentFeatures } from '#sim';
 import { polygonIndex, polylineSegments, segmentGrid, type PolygonIndex } from './spatial-index';
-import { VERGE_M } from './road-geometry';
+
+/** Width of the verge on each side of a paved road, metres. */
+const VERGE_M = 0.6;
 
 // Where plants may not grow (docs/adr/0031), from the battlefield's own
 // features: on roads and their verges, in and against buildings, in open

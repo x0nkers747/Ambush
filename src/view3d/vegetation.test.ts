@@ -18,10 +18,8 @@ import {
 } from './exclusion';
 import { LOD_LEVELS, PLANTS, PLANTS_BY_KIND, plantModels } from './plant-models';
 import { detectQuality, isSoftwareRenderer, QUALITY_PRESETS } from './quality';
-import { VERGE_M } from './road-geometry';
 import { distanceToLine, roughGround } from './test-helpers';
-import { createVegetationLayer } from './vegetation-layer';
-import { keepFraction, lodBand, selectVegetation, type LodTarget } from './vegetation-lod';
+import { keepFraction, lodBand } from './vegetation-lod';
 import { placeVegetation, type VegetationInstances } from './vegetation-placement';
 
 // Procedural vegetation (docs/adr/0031): where plants stand, how they look,
@@ -194,7 +192,7 @@ describe('placeVegetation', () => {
   it('keeps plants off roads and verges, away from buildings, and out of water', () => {
     for (const p of all) {
       for (const road of features.roads) {
-        const half = road.widthMeters / 2 + (road.roadClass === 'paved' ? VERGE_M : 0);
+        const half = road.widthMeters / 2 + (road.roadClass === 'paved' ? 0.6 : 0);
         expect(distanceToLine(p.x, p.y, road.centerline)).toBeGreaterThanOrEqual(
           half + ROAD_CLEARANCE_M - 1e-6,
         );
@@ -422,77 +420,6 @@ describe('vegetation levels of detail', () => {
       last = f;
     }
   });
-
-  const targets = (capacity = 1e9): LodTarget[][] =>
-    PLANTS.map((_, p) =>
-      Array.from({ length: LOD_LEVELS }, () => {
-        const n = Math.min(capacity, placed.stats.byPlant[p] ?? 0);
-        return {
-          matrices: new Float32Array(n * 16),
-          colors: new Float32Array(n * 3),
-          capacity: n,
-          count: 0,
-        };
-      }),
-    );
-  const total = (t: LodTarget[][]) => t.flat().reduce((sum, x) => sum + x.count, 0);
-
-  it('draws every plant near the camera, at its own position, size and colour', () => {
-    const t = targets();
-    selectVegetation(
-      inst,
-      { x: 0, y: 0, z: 1300 },
-      { ...s, near: 1e5, medium: 2e5, far: 3e5, thinStart: 3e5 },
-      () => true,
-      t,
-    );
-    expect(total(t)).toBe(inst.count);
-    // Every written matrix is a plant's: translation (x, z, −y), scale (crown, height).
-    const seen = new Set<string>();
-    for (let p = 0; p < PLANTS.length; p += 1) {
-      const target = t[p]?.[0];
-      if (!target) continue;
-      for (let k = 0; k < target.count; k += 1) {
-        const m = target.matrices;
-        seen.add(`${String(m[k * 16 + 12])},${String(-(m[k * 16 + 14] ?? 0))}`);
-        expect(Math.hypot(m[k * 16] ?? 0, m[k * 16 + 2] ?? 0)).toBeGreaterThan(0);
-        expect(m[k * 16 + 5]).toBeGreaterThan(0);
-      }
-    }
-    for (const p of all.slice(0, 50)) {
-      expect(seen.has(`${String(Math.fround(p.x))},${String(Math.fround(p.y))}`)).toBe(true);
-    }
-  });
-
-  it('skips tiles out of view or out of range, thins the far band and respects capacity', () => {
-    const none = targets();
-    selectVegetation(inst, { x: 0, y: 0, z: 1300 }, s, () => false, none);
-    expect(total(none)).toBe(0);
-    const far = targets();
-    // Far away above the battlefield: everything in the thinned band.
-    const r = selectVegetation(inst, { x: 0, y: 0, z: 1200 + s.far * 0.9 }, s, () => true, far);
-    expect(r.tilesDrawn).toBeGreaterThan(0);
-    expect(total(far)).toBeGreaterThan(0);
-    expect(total(far)).toBeLessThan(inst.count * 0.5);
-    expect(
-      far
-        .flat()
-        .filter((_, i) => i % LOD_LEVELS !== 2)
-        .every((x) => x.count === 0),
-    ).toBe(true);
-    const gone = targets();
-    selectVegetation(inst, { x: 0, y: 0, z: 1200 + s.far * 3 }, s, () => true, gone);
-    expect(total(gone)).toBe(0);
-    const small = targets(3);
-    selectVegetation(
-      inst,
-      { x: 0, y: 0, z: 1300 },
-      { ...s, near: 1e5, medium: 2e5, far: 3e5, thinStart: 3e5 },
-      () => true,
-      small,
-    );
-    for (const x of small.flat()) expect(x.count).toBeLessThanOrEqual(3);
-  });
 });
 
 describe('quality presets', () => {
@@ -521,30 +448,5 @@ describe('quality presets', () => {
     expect(low.vegetation.far).toBeLessThan(medium.vegetation.far);
     expect(medium.vegetation.far).toBeLessThan(high.vegetation.far);
     expect(low.shadows).toBeNull();
-  });
-});
-
-describe('createVegetationLayer', () => {
-  it('shares geometry per model and level, and frees everything on dispose', () => {
-    const models = plantModels();
-    const layer = createVegetationLayer(models, inst, QUALITY_PRESETS.medium.vegetation, {
-      cast: true,
-      receive: false,
-    });
-    const meshes = layer.group.children;
-    expect(meshes).toHaveLength(PLANTS.length * LOD_LEVELS);
-    let disposed = 0;
-    for (const mesh of meshes) {
-      const m = mesh as unknown as {
-        geometry: { addEventListener: (e: string, f: () => void) => void };
-      };
-      m.geometry.addEventListener('dispose', () => {
-        disposed += 1;
-      });
-    }
-    layer.dispose();
-    expect(disposed).toBe(PLANTS.length * LOD_LEVELS);
-    expect(layer.group.children).toHaveLength(0);
-    expect(PLANTS_BY_KIND.shrub.length).toBeGreaterThan(0);
   });
 });

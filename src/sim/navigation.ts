@@ -364,7 +364,8 @@ function planGridPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult
       const exit = deck[deck.length - 1];
       if (entrance) run.push(entrance);
       endRun();
-      all.push(...deck.slice(1, -1));
+      // The exit too: the run after the bridge starts there (and leaves its first point out).
+      all.push(...deck.slice(1));
       run = exit ? [exit] : [];
     }
     run.push(cellCentre(grid, cell));

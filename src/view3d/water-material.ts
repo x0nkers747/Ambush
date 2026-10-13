@@ -1,28 +1,16 @@
-import {
-  Color,
-  MeshStandardMaterial,
-  NotEqualStencilFunc,
-  ReplaceStencilOp,
-  type Texture,
-} from 'three';
-import type { ShoreTexture } from './shore-material';
-import { SHORE_RANGE_M } from './shoreline';
+import { Color, MeshStandardMaterial, NotEqualStencilFunc, ReplaceStencilOp } from 'three';
 
 // The water's material (docs/adr/0040, docs/adr/0046): three's
 // MeshStandardMaterial, so the sun, sky light, fog and tone mapping are as for
 // everything else, with colours per visual profile from the mesh
 // (water-profiles.ts) and
 //
-// - opaque: the water's own colour, not the bed seen through it (the bed
-//   under levelled water is never shown, and ground the grading left above the
-//   water is cut away by the terrain's material);
+// - opaque: the water's own colour, not the bed seen through it;
 // - small static ripples in the shading normal, which break up the sun's glint
 //   near the camera and fade out with distance (where they would only
 //   shimmer);
 // - the sky reflected by a Fresnel term: dark looking down, the haze's colour
-//   at grazing angles;
-// - lighter shallows along natural shores (the shore mask's alpha), none along
-//   quays.
+//   at grazing angles.
 //
 // No real reflections or refraction: they would cost a render of the scene
 // each frame.
@@ -33,9 +21,6 @@ export const WATER_SKY = 0xaebcc6;
 export const WATER_FRESNEL = 0.75;
 /** The ripples' slope: subtle, for canals as for lakes. */
 export const WATER_RIPPLE = 0.018;
-/** Shallows along natural shores: how far out, metres, and how much lighter. */
-const SHALLOW_M = 3;
-const SHALLOW_LIFT = 0.3;
 
 const VERTEX_HEAD = /* glsl */ `
 varying vec2 vWaterXY;`;
@@ -44,9 +29,6 @@ vWaterXY = (modelMatrix * vec4(transformed, 1.0)).xz;`;
 
 const FRAGMENT_HEAD = /* glsl */ `
 varying vec2 vWaterXY;
-uniform sampler2D waterShore;
-uniform vec4 waterShoreXform;
-uniform float waterShoreOn;
 uniform vec3 waterSky;
 uniform float waterFresnel;
 uniform float waterRipple;
@@ -71,16 +53,6 @@ vec2 waterSlope(vec2 p) {
   return s;
 }`;
 
-// Shallows: lighter towards a natural shore (map y is −z).
-const FRAGMENT_COLOR = /* glsl */ `
-if (waterShoreOn > 0.5) {
-  vec2 su = vec2(vWaterXY.x, -vWaterXY.y) * waterShoreXform.xy + waterShoreXform.zw;
-  vec4 s = texture(waterShore, su);
-  float sd = (s.r - 0.5) * ${(2 * SHORE_RANGE_M).toFixed(1)};
-  float shallow = s.a * (1.0 - smoothstep(0.0, ${SHALLOW_M.toFixed(1)}, -sd));
-  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.5 + vec3(0.010, 0.009, 0.004), shallow * ${SHALLOW_LIFT.toFixed(2)});
-}`;
-
 const FRAGMENT_NORMAL = /* glsl */ `
 {
   float waterDist = length(vViewPosition);
@@ -101,8 +73,8 @@ const FRAGMENT_SKY = /* glsl */ `
   outgoingLight = mix(outgoingLight, waterSky, fresnel * waterFresnel);
 }`;
 
-/** The water's material: opaque, each pixel taking water once; shallows from the shore mask when given. */
-export function createWaterMaterial(shore: ShoreTexture | null = null): MeshStandardMaterial {
+/** The water's material: opaque, each pixel taking water once. */
+export function createWaterMaterial(): MeshStandardMaterial {
   const material = new MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
@@ -124,9 +96,6 @@ export function createWaterMaterial(shore: ShoreTexture | null = null): MeshStan
     stencilZPass: ReplaceStencilOp,
   });
   const uniforms = {
-    waterShore: { value: (shore?.texture ?? null) as Texture | null },
-    waterShoreXform: { value: shore ? [...shore.xform] : [0, 0, 0, 0] },
-    waterShoreOn: { value: shore ? 1 : 0 },
     waterSky: { value: new Color(WATER_SKY) },
     waterFresnel: { value: WATER_FRESNEL },
     waterRipple: { value: WATER_RIPPLE },
@@ -138,7 +107,6 @@ export function createWaterMaterial(shore: ShoreTexture | null = null): MeshStan
       .replace('#include <begin_vertex>', `#include <begin_vertex>${VERTEX_BODY}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>${FRAGMENT_HEAD}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>${FRAGMENT_COLOR}`)
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>${FRAGMENT_NORMAL}`,
@@ -149,6 +117,6 @@ export function createWaterMaterial(shore: ShoreTexture | null = null): MeshStan
 #include <opaque_fragment>`,
       );
   };
-  material.customProgramCacheKey = () => 'ambush-water-2';
+  material.customProgramCacheKey = () => 'ambush-water-3';
   return material;
 }

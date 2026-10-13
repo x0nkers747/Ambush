@@ -12,8 +12,8 @@
 // 5 km battlefield); keep them outside the repository.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { inflateSync } from 'node:zlib';
 import { battlefieldRequest, buildBattlefield, decodeTerrarium, planBattlefield } from '#geo';
+import { decodePng } from './png';
 
 /** The recorded battlefields: centres and names. */
 export const RECORDED_SITES = {
@@ -31,63 +31,6 @@ const OVERPASS = [
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ];
-
-/** Decodes an 8-bit RGB or RGBA PNG (Terrarium tiles) to RGBA pixels. */
-function decodePng(buf: Buffer): { data: Uint8ClampedArray; width: number; height: number } {
-  let p = 8;
-  let width = 0;
-  let height = 0;
-  let colourType = 0;
-  const idat: Buffer[] = [];
-  while (p < buf.length) {
-    const len = buf.readUInt32BE(p);
-    const type = buf.toString('ascii', p + 4, p + 8);
-    const d = buf.subarray(p + 8, p + 8 + len);
-    if (type === 'IHDR') {
-      width = d.readUInt32BE(0);
-      height = d.readUInt32BE(4);
-      colourType = d[9] ?? 0;
-      if (d[8] !== 8) throw new Error('unsupported PNG bit depth');
-    }
-    if (type === 'IDAT') idat.push(d);
-    p += 12 + len;
-  }
-  const bpp = colourType === 6 ? 4 : colourType === 2 ? 3 : 0;
-  if (bpp === 0) throw new Error(`unsupported PNG colour type ${String(colourType)}`);
-  const raw = inflateSync(Buffer.concat(idat));
-  const stride = width * bpp;
-  const out = new Uint8ClampedArray(width * height * 4);
-  const prev = new Uint8Array(stride);
-  const cur = new Uint8Array(stride);
-  for (let y = 0; y < height; y += 1) {
-    const filter = raw[y * (stride + 1)] ?? 0;
-    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
-    for (let i = 0; i < stride; i += 1) {
-      const a = i >= bpp ? (cur[i - bpp] ?? 0) : 0;
-      const b = prev[i] ?? 0;
-      const c = i >= bpp ? (prev[i - bpp] ?? 0) : 0;
-      const x = line[i] ?? 0;
-      let v = x;
-      if (filter === 1) v = x + a;
-      else if (filter === 2) v = x + b;
-      else if (filter === 3) v = x + ((a + b) >> 1);
-      else if (filter === 4) {
-        const pp = a + b - c;
-        const pa = Math.abs(pp - a);
-        const pb = Math.abs(pp - b);
-        const pc = Math.abs(pp - c);
-        v = x + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
-      }
-      cur[i] = v & 255;
-    }
-    for (let xx = 0; xx < width; xx += 1) {
-      for (let k = 0; k < 3; k += 1) out[(y * width + xx) * 4 + k] = cur[xx * bpp + k] ?? 0;
-      out[(y * width + xx) * 4 + 3] = 255;
-    }
-    prev.set(cur);
-  }
-  return { data: out, width, height };
-}
 
 async function overpass(query: string): Promise<string> {
   for (let attempt = 0; attempt < 9; attempt += 1) {

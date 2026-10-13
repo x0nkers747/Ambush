@@ -108,8 +108,15 @@ export function surfaceSampler(terrain: TerrainDataset): (x: number, y: number) 
   const h = terrain.heightfield;
   const elevations = Float64Array.from(h.elevations);
   const index = refinementIndex(terrain);
-  const ref = index ? { ...index, samples: Float64Array.from(index.samples) } : null;
+  const ref = index ? { ...index, samples: typedSamples(index.samples) } : null;
   return (x, y) => sampleSurface(h, elevations, ref, x, y);
+}
+
+/** Samples as a typed array: a Float32Array as it is (refinements hold millions), else copied. */
+export function typedSamples(samples: ArrayLike<number>): Float32Array | Float64Array {
+  return samples instanceof Float32Array || samples instanceof Float64Array
+    ? samples
+    : Float64Array.from(samples);
 }
 
 /** The terrain surface as a triangle mesh, in battlefield coordinates. */

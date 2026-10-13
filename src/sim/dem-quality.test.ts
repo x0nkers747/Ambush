@@ -9,7 +9,7 @@ import {
   demQualitySummary,
   type SourceCorrections,
 } from './dem-quality';
-import { gradeTerrain, terrainModelId } from './grading';
+import { gradeTerrain, terrainModelId } from './ground';
 import { fingerprintPlainData } from './hash';
 import { createSyntheticTerrain } from './synthetic-terrain';
 import { heightAt } from './terrain';
@@ -437,9 +437,9 @@ describe('the authoritative ground', () => {
     expect(heightAt(source, 200, 150)).toBeLessThan(-700);
     // The road runs level over the repaired sample: no pit graded into it.
     expect(Math.abs(heightAt(terrain, 200, 150) - plane(20, 15))).toBeLessThan(1);
-    expect(terrain.refinement?.factor).toBe(4);
+    expect(terrain.refinement?.factor).toBe(10);
     expect(terrainModelId(terrain)).toBe(TERRAIN_MODEL);
-    expect(TERRAIN_MODEL).toBe('dem-clean-v1+graded-v3');
+    expect(TERRAIN_MODEL).toBe('dem-clean-v1+field-v5');
     // Grading the raw DEM gives another model, and other ground.
     const uncleaned = gradeTerrain(source);
     expect(terrainModelId(uncleaned)).not.toBe(TERRAIN_MODEL);

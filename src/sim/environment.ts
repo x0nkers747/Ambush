@@ -45,8 +45,8 @@ export interface Road {
   readonly traffic?: RoadTraffic;
   /**
    * Mapped as a bridge (OSM `bridge=*`): display only, as `crossing`. The 3D
-   * view draws a bridge for it (docs/adr/0041); the ground under it is graded
-   * like any other (since `GRADING_VERSION` 3, no deck of ground over water).
+   * view draws a bridge for it, and the terrain field lays its deck and holds
+   * the ground under it below the deck (docs/adr/0049).
    */
   readonly bridge?: true;
   /**

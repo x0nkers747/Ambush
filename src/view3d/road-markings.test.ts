@@ -15,11 +15,11 @@ import {
   MARKING_STYLES,
   MARKING_VERSION,
   markingSpec,
+  ROAD_OFFSET_M,
   planMarkings,
   roadMarkings,
   type PaintPiece,
 } from './road-markings';
-import { ROAD_STYLE } from './road-geometry';
 
 // Road markings (docs/adr/0037).
 
@@ -573,8 +573,8 @@ describe('the markings mesh', () => {
       expect(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)).toBe(true);
       // Just above its road's surface, which is just above the ground.
       const above = z - heightAt(terrain, x, y);
-      expect(above).toBeGreaterThan(ROAD_STYLE.paved.offset);
-      expect(above).toBeLessThan(ROAD_STYLE.major.offset + 0.02);
+      expect(above).toBeGreaterThan(ROAD_OFFSET_M);
+      expect(above).toBeLessThan(ROAD_OFFSET_M + 0.02);
     }
   });
 
