@@ -192,6 +192,23 @@ describe('woods from canopy heights', () => {
     expect(Math.min(...(small?.boundary ?? []).map((p) => p.x))).toBeCloseTo(106, 0);
   });
 
+  it('uses the map as published where the mapped woods do not match it (felled, or mapped wrongly)', () => {
+    const { report } = treeCoverFromCanopy(heights, grid, {
+      ...features,
+      vegetation: [{ ...mappedWood, boundary: rect(50, -250, 250, -50) }],
+    });
+    expect(report.aligned).toBe(false);
+    expect(report.shiftM).toEqual([0, 0]);
+    expect(report.agreement).toBeLessThan(0.1);
+  });
+
+  it('uses the map as published where the mapped woods are surrounded by trees (every shift matches)', () => {
+    const forest = heightsFor([{ box: [-300, -300, 300, 300], m: 20 }]);
+    const { report } = treeCoverFromCanopy(forest, grid, features);
+    expect(report.aligned).toBe(false);
+    expect(report.shiftM).toEqual([0, 0]);
+  });
+
   it('is deterministic', () => {
     const a = treeCoverFromCanopy(heights, grid, features);
     const b = treeCoverFromCanopy(heights, grid, features);

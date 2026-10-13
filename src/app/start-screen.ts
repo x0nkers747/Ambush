@@ -135,7 +135,7 @@ function treeCoverLine(t: NonNullable<BattlefieldPackage['treeCover']>): string 
   const [dx, dy] = t.shiftM;
   const lined = t.aligned
     ? `lined up with the mapped woods (moved ${String(Math.abs(dx))} m ${dx < 0 ? 'west' : 'east'}, ${String(Math.abs(dy))} m ${dy < 0 ? 'south' : 'north'}; it has trees in ${String(Math.round(t.mappedWoodsFound * 100))}% of them)`
-    : 'not lined up (too few mapped woods)';
+    : 'used as published (too few mapped woods, or no clear match to line it up with)';
   return `${String(t.woods)} woods (${ha} ha) OpenStreetMap does not map, from the Meta / WRI canopy height map: trees ${String(t.thresholdM)} m or taller, ${lined}.`;
 }
 

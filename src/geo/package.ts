@@ -155,7 +155,7 @@ export interface BattlefieldPackage {
     readonly thresholdM: number;
     /** The shift that lined the canopy map up with the mapped woods (east, north), metres. */
     readonly shiftM: readonly [number, number];
-    /** Whether it was lined up (false: too few mapped woods to line it up with). */
+    /** Whether it was lined up (false: too few mapped woods, or no clear match; used as published). */
     readonly aligned: boolean;
     /** Overlap of its trees and the mapped woods once lined up (0–1). */
     readonly agreement: number;
@@ -390,7 +390,7 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
     );
   } else if (treeCover && !treeCover.report.aligned) {
     warnings.push(
-      'The canopy map could not be lined up with mapped woods (there are too few): the woods added from it may be a few metres out.',
+      'The canopy map could not be lined up with mapped woods (too few, or they do not match it clearly): the woods added from it may be a few metres out.',
     );
   }
   const missingTiles = inputs.tiles.filter((t) => t.elevations === null).length;

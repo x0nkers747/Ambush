@@ -1,6 +1,6 @@
 import type { EnvironmentFeatures, VegetationArea } from '#sim';
 import { localBounds, toGeo, type BattlefieldFrame } from './frame';
-import { dilate, erode, mappedMasks, traceWoods, type WoodGrid } from './woods';
+import { dilate, erode, fillPolygon, mappedMasks, traceWoods, type WoodGrid } from './woods';
 
 // Tree cover from canopy heights (docs/adr/0050): the woods OpenStreetMap
 // does not map, found in the Meta / World Resources Institute global canopy
@@ -18,6 +18,20 @@ export const CANOPY_TREE_M = 4;
 export const CANOPY_MAX_SHIFT_M = 16;
 /** Mapped woods needed to line the canopy map up with them, m² (else it is used as published). */
 export const CANOPY_ALIGN_MIN_M2 = 20_000;
+/** Lining up compares the map with the mapped woods within this far of them, metres. */
+export const CANOPY_ALIGN_BAND_M = 24;
+/**
+ * A shift is used only when the map then overlaps the mapped woods at least
+ * this well near them (0–1), and the shift is not at the edge of the search:
+ * otherwise the mapped woods do not match the map well enough to line it up
+ * with (they may be scrub, wrongly mapped, or felled), and it is used as published.
+ */
+export const CANOPY_ALIGN_MIN_AGREEMENT = 0.4;
+/**
+ * …and only when it overlaps them this much better than the worst shift searched (0–1): where
+ * the mapped woods are surrounded by unmapped trees, every shift overlaps them about as well.
+ */
+export const CANOPY_ALIGN_MIN_CONTRAST = 0.04;
 /** How far a sight line sees into the woods added, metres: as a mixed broadleaf wood. */
 export const CANOPY_SEE_THROUGH_M = 25;
 /** The licence's credit, shown with the map. */
@@ -305,9 +319,9 @@ export function canopyOnGrid(
 export interface CanopyReport {
   /** The shift that lines the canopy map up with the mapped woods (a height is read dx east, dy north), metres. */
   readonly shiftM: readonly [number, number];
-  /** Whether the shift was measured (false: too few mapped woods; the map is used as published). */
+  /** Whether the map was lined up (false: too few mapped woods, or they do not match it well; it is used as published). */
   readonly aligned: boolean;
-  /** Overlap of the canopy map's trees and the mapped woods, at that shift (0–1). */
+  /** Overlap of the canopy map’s trees and the mapped woods near them, at that shift (0–1). */
   readonly agreement: number;
   /** Mapped woods with canopy at least `CANOPY_TREE_M` tall there (0–1). */
   readonly mappedWoodsFound: number;
@@ -334,12 +348,17 @@ export function treeCoverFromCanopy(
   const masks = mappedMasks(grid, features);
   const tall = new Uint8Array(W * H);
   for (let k = 0; k < W * H; k += 1) tall[k] = (heights[k] ?? 0) >= CANOPY_TREE_M ? 1 : 0;
-  // What lining up compares: mapped woods 1, other open ground 0, ruled out 2.
+  // What lining up compares, near the mapped woods (not scrub: it is often under
+  // the trees' height): woods 1, other ground 0; elsewhere and ruled out 2.
+  const mappedWoods = new Uint8Array(W * H);
+  for (const v of features.vegetation)
+    if (v.kind === 'woodland') fillPolygon(grid, [v.boundary, ...(v.holes ?? [])], mappedWoods, 1);
+  const near = dilate(grid, mappedWoods, CANOPY_ALIGN_BAND_M);
   const reference = new Uint8Array(W * H);
   for (let k = 0; k < W * H; k += 1)
-    reference[k] = masks.blocked[k] ? 2 : masks.vegetation[k] ? 1 : 0;
+    reference[k] = masks.blocked[k] || !near[k] ? 2 : mappedWoods[k] ? 1 : 0;
 
-  // Lining up: the shift with the best overlap of trees and mapped woods.
+  // Lining up: the shift with the best overlap of trees and mapped woods near them.
   let refCells = 0;
   for (let k = 0; k < W * H; k += 1) if (reference[k] === 1) refCells += 1;
   const overlap = (dx: number, dy: number, step: number) => {
@@ -358,12 +377,14 @@ export function treeCoverFromCanopy(
     return either > 0 ? both / either : 0;
   };
   let shift: [number, number] = [0, 0];
-  const aligned = refCells >= CANOPY_ALIGN_MIN_M2;
+  let aligned = refCells >= CANOPY_ALIGN_MIN_M2;
   if (aligned) {
     let best = -1;
+    let worst = 1;
     for (let dy = -CANOPY_MAX_SHIFT_M; dy <= CANOPY_MAX_SHIFT_M; dy += 2)
       for (let dx = -CANOPY_MAX_SHIFT_M; dx <= CANOPY_MAX_SHIFT_M; dx += 2) {
         const s = overlap(dx, dy, 5);
+        worst = Math.min(worst, s);
         if (s > best || (s === best && dx * dx + dy * dy < shift[0] ** 2 + shift[1] ** 2)) {
           best = s;
           shift = [dx, dy];
@@ -386,6 +407,12 @@ export function treeCoverFromCanopy(
             shift = [dx, dy];
           }
         }
+    }
+    // A poor match, one no better than any other, or one at the edge of the search, is no match.
+    const atEdge = Math.max(Math.abs(shift[0]), Math.abs(shift[1])) >= CANOPY_MAX_SHIFT_M;
+    if (best < CANOPY_ALIGN_MIN_AGREEMENT || best - worst < CANOPY_ALIGN_MIN_CONTRAST || atEdge) {
+      aligned = false;
+      shift = [0, 0];
     }
   }
   const [sx, sy] = shift;
@@ -431,7 +458,7 @@ export function treeCoverFromCanopy(
     report: {
       shiftM: shift,
       aligned,
-      agreement: aligned ? +overlap(sx, sy, 1).toFixed(3) : 0,
+      agreement: refCells > 0 ? +overlap(sx, sy, 1).toFixed(3) : 0,
       mappedWoodsFound: refCells > 0 ? +(found / refCells).toFixed(3) : 0,
       woods: areas.length,
       areaM2: woods.reduce((s, w) => s + w.areaM2, 0),

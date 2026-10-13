@@ -31,8 +31,12 @@ imagery.
    leaves the woods out, with a warning.
 2. **How** (`geo/canopy.ts`, pure and deterministic).
    - The heights are put on the battlefield's 1 m grid.
-   - They are lined up with the mapped woods: the shift up to 16 m that best overlaps them.
-     Without 2 ha of mapped woods, the map is used as published.
+   - They are lined up with the mapped woods (woodland, not scrub): the shift up to 16 m that
+     best overlaps them, compared within 24 m of them. The map is used as published, with a
+     warning, when there are under 2 ha of mapped woods, or the best shift overlaps them by less
+     than 0.4, or by less than 0.04 more than the worst shift, or is at the edge of the search.
+     Compared over the whole battlefield, unmapped trees swamped the few mapped woods of a
+     small town; where mapped woods sit inside unmapped bush, every shift overlaps about as well.
    - Cells 4 m or taller are trees. Lines one or two cells wide (masts, wires) are removed.
    - Trees within 4 m of mapped vegetation, or on buildings, roads, water or paved ground, are
      left out.
@@ -46,6 +50,20 @@ imagery.
    the battlefield's sources for reprocessing. Importer 1.10.
 4. **Where it is shown.** Battlefield Information gives a line saying how many woods were added,
    how far the map was moved and how much of the mapped woods it found.
+
+## Trials
+
+Four battlefields, 5 km square, each checked against an open aerial photo service (NSW, PDOK and
+ČÚZK imagery, for review only):
+
+| Battlefield       | Shift          | Overlap | Mapped woods found | Woods added    | Notes                                               |
+| ----------------- | -------------- | ------- | ------------------ | -------------- | --------------------------------------------------- |
+| Quantico, US      | 5 m W, 8 m S   | 0.92    | 97%                | 1,543 (130 ha) | mixed woods and fields                              |
+| Český Krumlov, CZ | 1 m E, 2 m N   | 0.80    | 85%                | 2,484 (55 ha)  | OSM maps nearly every wood; parks and gardens added |
+| Amsterdam, NL     | 4 m E, 1 m N   | 0.47    | 89%                | 7,301 (186 ha) | courtyard, garden and canal trees                   |
+| Woolgoolga, AU    | none (no peak) | 0.76    | 97%                | 1,542 (484 ha) | unmapped coastal bush; fits as published            |
+
+In Amsterdam a few thin strips along tall buildings' fronts are taken for trees.
 
 ## Consequences
 
