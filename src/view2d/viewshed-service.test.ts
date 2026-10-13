@@ -10,7 +10,14 @@ import {
   type TerrainDataset,
   type Vec2,
 } from '#sim';
-import { createViewshedService, viewshedKey, type ViewshedWorker } from './viewshed-service';
+import {
+  createViewshedService,
+  defaultWorkerCount,
+  featurePoints,
+  HEAVY_TERRAIN_POINTS,
+  viewshedKey,
+  type ViewshedWorker,
+} from './viewshed-service';
 import type { WorkerReply, WorkerRequest } from './viewshed.worker';
 
 // The viewshed service (docs/adr/0020) with fake workers whose replies the
@@ -105,17 +112,16 @@ const expected = (observer: Vec2) =>
   computeViewshed(TERRAIN, observer, viewshedGrid(TERRAIN, CELL)).visible;
 
 describe('the viewshed service', () => {
-  it('sends every worker the terrain once, and computes a viewshed in bands', () => {
+  it('starts its workers on the first request, sends each the terrain once, and computes in bands', () => {
     const f = fakes();
     const service = createViewshedService(TERRAIN, {
       workerCount: 3,
       createWorker: f.createWorker,
     });
-    expect(f.workers.map((w) => w.inbox.map((m) => m.type))).toEqual([
-      ['terrain'],
-      ['terrain'],
-      ['terrain'],
-    ]);
+    // No worker (and no copy of the terrain) until a viewshed is needed (docs/adr/0045).
+    expect(f.workers).toEqual([]);
+    expect(service.has({ x: 0, y: -60 }, CELL)).toBe(false);
+    expect(f.workers).toEqual([]);
     const a = { x: 0, y: -60 };
     expect(service.request(a, CELL)).toEqual({
       viewshed: null,
@@ -123,6 +129,7 @@ describe('the viewshed service', () => {
       failed: false,
       preview: false,
     });
+    expect(f.workers.map((w) => w.inbox[0]?.type)).toEqual(['terrain', 'terrain', 'terrain']);
     expect(f.posted()).toBe(3); // one band per worker at a time
     f.drain();
     const done = service.request(a, CELL);
@@ -280,9 +287,9 @@ describe('the viewshed service', () => {
       workerCount: 1,
       createWorker: f.createWorker,
     });
+    service.request({ x: 0, y: 0 }, CELL);
     const only = f.workers[0];
     if (only) only.failNext = true;
-    service.request({ x: 0, y: 0 }, CELL);
     f.drain();
     expect(service.request({ x: 0, y: 0 }, CELL)).toEqual({
       viewshed: null,
@@ -290,6 +297,40 @@ describe('the viewshed service', () => {
       failed: true,
       preview: false,
     });
+  });
+
+  it('starts fewer workers on a heavy battlefield (docs/adr/0045)', () => {
+    // One per spare core, at most 4, on an ordinary battlefield.
+    expect(defaultWorkerCount(8, 30_000)).toBe(4);
+    expect(defaultWorkerCount(2, 30_000)).toBe(1);
+    // Each worker holds the terrain: fewer of them as it grows.
+    expect(defaultWorkerCount(8, HEAVY_TERRAIN_POINTS.two + 1)).toBe(2);
+    expect(defaultWorkerCount(2, HEAVY_TERRAIN_POINTS.two + 1)).toBe(1);
+    expect(defaultWorkerCount(8, HEAVY_TERRAIN_POINTS.one + 1)).toBe(1);
+    // A terrain's size as workers hold it: its features' map points.
+    const small = {
+      ...TERRAIN,
+      features: {
+        ...TERRAIN.features,
+        roads: [
+          {
+            id: 'r',
+            roadClass: 'paved',
+            widthMeters: 6,
+            centerline: [
+              { x: 0, y: 0 },
+              { x: 9, y: 0 },
+            ],
+          },
+        ],
+        buildings: [],
+        vegetation: [],
+        water: [],
+        waterways: [],
+        landUse: [],
+      },
+    } as TerrainDataset;
+    expect(featurePoints(small)).toBe(2);
   });
 
   it('keeps a bounded number of viewsheds', () => {

@@ -1,4 +1,12 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  Sphere,
+  Vector3,
+} from 'three';
 import { heightAt, type TerrainDataset } from '#sim';
 import { buildingGeometry, type BuildingEntrance, type BuildingStats } from './building-geometry';
 import { createBuildingMaterials } from './building-materials';
@@ -243,8 +251,48 @@ function geometryOf(data: MeshData): BufferGeometry {
   g.setAttribute('position', new BufferAttribute(data.positions, 3));
   g.setAttribute('normal', new BufferAttribute(data.normals, 3));
   if (data.colors) g.setAttribute('color', new BufferAttribute(data.colors, 3));
-  g.computeBoundingSphere();
+  g.boundingSphere = boundingSphereOf(data.positions);
   return g;
+}
+
+/**
+ * The bounding sphere Three.js's `computeBoundingSphere` gives (centred on the
+ * bounding box, out to the farthest vertex), in one pass over the typed array:
+ * on a large city that call made hundreds of megabytes of short-lived garbage
+ * on the main thread (docs/adr/0045).
+ */
+export function boundingSphereOf(positions: Float32Array): Sphere {
+  const n = positions.length;
+  if (n < 3) return new Sphere();
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < n; i += 3) {
+    const x = positions[i] ?? 0;
+    const y = positions[i + 1] ?? 0;
+    const z = positions[i + 2] ?? 0;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  let r2 = 0;
+  for (let i = 0; i < n; i += 3) {
+    const dx = (positions[i] ?? 0) - cx;
+    const dy = (positions[i + 1] ?? 0) - cy;
+    const dz = (positions[i + 2] ?? 0) - cz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > r2) r2 = d2;
+  }
+  return new Sphere(new Vector3(cx, cy, cz), Math.sqrt(r2));
 }
 
 /** Scene meshes for generated feature geometry. */

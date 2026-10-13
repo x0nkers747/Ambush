@@ -75,11 +75,11 @@ export function sampleSurface(
       return uu >= vv ? sw + uu * (se - sw) + vv * (ne - se) : sw + vv * (nw - sw) + uu * (ne - nw);
     }
   }
-  const at = (col: number, row: number): number => elevations[row * columns + col] ?? Number.NaN;
-  const sw = at(c, r);
-  const se = at(c + 1, r);
-  const nw = at(c, r + 1);
-  const ne = at(c + 1, r + 1);
+  const o = r * columns + c;
+  const sw = elevations[o] ?? Number.NaN;
+  const se = elevations[o + 1] ?? Number.NaN;
+  const nw = elevations[o + columns] ?? Number.NaN;
+  const ne = elevations[o + columns + 1] ?? Number.NaN;
   return u >= v
     ? sw + u * (se - sw) + v * (ne - se) // south-east triangle: SW, SE, NE
     : sw + v * (nw - sw) + u * (ne - nw); // north-west triangle: SW, NE, NW
@@ -124,23 +124,81 @@ export interface SurfaceMesh {
 }
 
 /**
+ * A growable typed array: values appended without a JavaScript array behind
+ * them (on a large refined battlefield, millions of values: docs/adr/0045).
+ */
+class Growable<T extends Float64Array | Uint32Array> {
+  length = 0;
+  private data: T;
+  private readonly make: (n: number) => T;
+  constructor(initial: T, make: (n: number) => T) {
+    this.data = initial;
+    this.make = make;
+  }
+  private room(n: number): void {
+    if (this.length + n <= this.data.length) return;
+    const next = this.make(Math.max(this.data.length * 2, this.length + n));
+    next.set(this.data);
+    this.data = next;
+  }
+  push(a: number): void {
+    this.room(1);
+    this.data[this.length] = a;
+    this.length += 1;
+  }
+  push3(a: number, b: number, c: number): void {
+    this.room(3);
+    const d = this.data;
+    const i = this.length;
+    d[i] = a;
+    d[i + 1] = b;
+    d[i + 2] = c;
+    this.length = i + 3;
+  }
+  at(i: number): number | undefined {
+    return i < this.length ? this.data[i] : undefined;
+  }
+  /** The values, in a typed array of their own length. */
+  done(): T {
+    return this.data.slice(0, this.length) as T;
+  }
+}
+
+const meshes = new WeakMap<TerrainDataset, SurfaceMesh>();
+
+/**
  * The exact triangulation of the surface: the coarse cells' two triangles,
  * and in refined cells the fine cells' two triangles each. An unrefined cell
  * next to a refined one has the fine samples along their shared edge as
  * vertices too (its triangle is fanned from its centre), so the mesh has no
  * cracks or T-junctions. Interpolating this mesh linearly gives `heightAt`.
+ * Built once per terrain (the 2D map, the 3D mesh and its edge all use it;
+ * on a large refined battlefield it has millions of vertices, docs/adr/0045).
  */
 export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
+  let mesh = meshes.get(terrain);
+  if (!mesh) {
+    mesh = buildSurfaceMesh(terrain);
+    meshes.set(terrain, mesh);
+  }
+  return mesh;
+}
+
+function buildSurfaceMesh(terrain: TerrainDataset): SurfaceMesh {
   const { originX, originY, cellSize, columns, rows, elevations } = terrain.heightfield;
   const ref = refinementIndex(terrain);
   const k = ref?.factor ?? 1;
   const n1 = k + 1;
   const fine = cellSize / k;
   const fineColumns = (columns - 1) * k + 1;
-  const positions: number[] = [];
+  const base = columns * rows;
+  const positions = new Growable(
+    new Float64Array(base * 3 * (ref ? 2 : 1)),
+    (n) => new Float64Array(n),
+  );
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < columns; c += 1) {
-      positions.push(
+      positions.push3(
         originX + c * cellSize,
         originY + r * cellSize,
         elevations[r * columns + c] ?? 0,
@@ -158,7 +216,7 @@ export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
     if (known > 0) return known - 1;
     const v = count;
     count += 1;
-    positions.push(originX + fi * fine, originY + fj * fine, z);
+    positions.push3(originX + fi * fine, originY + fj * fine, z);
     fineVertices[key] = v + 1;
     return v;
   };
@@ -169,19 +227,21 @@ export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
   const sample = (slot: number, i: number, j: number) =>
     ref?.samples[slot * n1 * n1 + j * n1 + i] ?? 0;
 
-  const indices: number[] = [];
+  const indices = new Growable(new Uint32Array(base * 6), (n) => new Uint32Array(n));
   /** Fans a convex outline (counter-clockwise) from a new vertex at its triangle's centroid. */
   const fan = (outline: number[], a: number, b: number, c: number) => {
     const v = count;
     count += 1;
     for (let d = 0; d < 3; d += 1) {
       positions.push(
-        ((positions[a * 3 + d] ?? 0) + (positions[b * 3 + d] ?? 0) + (positions[c * 3 + d] ?? 0)) /
+        ((positions.at(a * 3 + d) ?? 0) +
+          (positions.at(b * 3 + d) ?? 0) +
+          (positions.at(c * 3 + d) ?? 0)) /
           3,
       );
     }
     for (let e = 0; e < outline.length; e += 1) {
-      indices.push(v, outline[e] ?? 0, outline[(e + 1) % outline.length] ?? 0);
+      indices.push3(v, outline[e] ?? 0, outline[(e + 1) % outline.length] ?? 0);
     }
   };
 
@@ -197,7 +257,8 @@ export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
             const se = vertex(fi + 1, fj, sample(slot, i + 1, j));
             const nw = vertex(fi, fj + 1, sample(slot, i, j + 1));
             const ne = vertex(fi + 1, fj + 1, sample(slot, i + 1, j + 1));
-            indices.push(sw, se, ne, sw, ne, nw);
+            indices.push3(sw, se, ne);
+            indices.push3(sw, ne, nw);
           }
         }
         continue;
@@ -220,9 +281,9 @@ export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
       const east = edge(slotOf(c + 1, r), (m) => [(c + 1) * k, r * k + m, 0, m]);
       const north = edge(slotOf(c, r + 1), (m) => [c * k + k - m, (r + 1) * k, k - m, 0]);
       const west = edge(slotOf(c - 1, r), (m) => [c * k, r * k + k - m, k, k - m]);
-      if (south.length + east.length === 0) indices.push(sw, se, ne);
+      if (south.length + east.length === 0) indices.push3(sw, se, ne);
       else fan([sw, ...south, se, ...east, ne], sw, se, ne);
-      if (north.length + west.length === 0) indices.push(sw, ne, nw);
+      if (north.length + west.length === 0) indices.push3(sw, ne, nw);
       else fan([sw, ne, ...north, nw, ...west], sw, ne, nw);
     }
   }
@@ -266,8 +327,8 @@ export function surfaceMesh(terrain: TerrainDataset): SurfaceMesh {
   );
 
   return {
-    positions: Float64Array.from(positions),
-    indices: Uint32Array.from(indices),
+    positions: positions.done(),
+    indices: indices.done(),
     vertexCount: count,
     boundary: Uint32Array.from(boundary),
   };

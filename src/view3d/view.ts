@@ -23,7 +23,7 @@ import type { Exercise } from '#exercise';
 import type { Session } from '#session';
 import type { TerrainDataset } from '#sim';
 import { terrainGround, type BattlefieldExtent, type GroundAt } from './camera-math';
-import { createGeoFeatures, type GeoFeatureLayer } from './geo-features';
+import { boundingSphereOf, createGeoFeatures, type GeoFeatureLayer } from './geo-features';
 import {
   createGenerator,
   GenerationCancelled,
@@ -276,7 +276,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
     if (data.colors) geometry.setAttribute('color', new BufferAttribute(data.colors, 3));
     geometry.setIndex(new BufferAttribute(data.indices, 1));
-    geometry.computeBoundingSphere();
+    geometry.boundingSphere = boundingSphereOf(data.positions);
     const ground = createGroundMaterial({ path: groundPath() });
     const mesh = new Mesh(geometry, ground.material);
     mesh.name = 'terrain';

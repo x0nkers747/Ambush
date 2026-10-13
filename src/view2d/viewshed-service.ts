@@ -14,6 +14,10 @@ import type { WorkerReply, WorkerRequest } from './viewshed.worker';
 // Computes viewsheds for the planning display without blocking the UI
 // (docs/adr/0020): rows are split into bands and handed to a small pool of
 // persistent Web Workers, which run the simulation's own visibility code.
+// Each worker holds its own copy of the terrain and its visibility index, so
+// the pool is started only when the first viewshed is needed, and is smaller
+// on a heavy battlefield (docs/adr/0045): a page's workers share one memory
+// limit with it.
 // A fire team's visible area, the union of its Marines' viewsheds, is
 // computed the same way as one job (docs/adr/0022): each band of rows is
 // computed for one Marine after another, each skipping cells an earlier one
@@ -53,7 +57,10 @@ export interface ViewshedWorker {
 }
 
 export interface ViewshedServiceOptions {
-  /** Workers to start; 0 computes synchronously (tests, or no Worker support). */
+  /**
+   * Workers to start (when the first viewshed is requested); 0 computes
+   * synchronously (tests, or no Worker support). Defaults to `defaultWorkerCount`.
+   */
   readonly workerCount?: number;
   /** Starts one worker; defaults to a module Web Worker. */
   readonly createWorker?: () => ViewshedWorker;
@@ -208,7 +215,13 @@ export function createViewshedService(
   options: ViewshedServiceOptions = {},
 ): ViewshedService {
   const canUseWorkers = typeof Worker !== 'undefined' || options.createWorker !== undefined;
-  const workerCount = canUseWorkers ? (options.workerCount ?? defaultWorkerCount()) : 0;
+  const workerCount = canUseWorkers
+    ? (options.workerCount ??
+      defaultWorkerCount(
+        typeof navigator === 'undefined' ? 2 : navigator.hardwareConcurrency,
+        featurePoints(terrain),
+      ))
+    : 0;
   const createWorker = options.createWorker ?? defaultWorker;
   const cache = new Map<string, Viewshed>();
   let cachedCells = 0;
@@ -394,24 +407,32 @@ export function createViewshedService(
     dispatch();
   };
 
-  for (let i = 0; i < workerCount; i += 1) {
-    let worker: ViewshedWorker;
-    try {
-      worker = createWorker();
-    } catch {
-      continue;
+  /** Starts the pool, once: when the first viewshed must be computed. Whether any worker runs. */
+  let started = false;
+  let disposed = false;
+  const startWorkers = (): boolean => {
+    if (started || disposed) return workers.length > 0;
+    started = true;
+    for (let i = 0; i < workerCount; i += 1) {
+      let worker: ViewshedWorker;
+      try {
+        worker = createWorker();
+      } catch {
+        continue;
+      }
+      worker.onmessage = (event) => {
+        onReply(worker, event.data);
+      };
+      worker.onerror = () => {
+        onFailure(worker);
+      };
+      worker.postMessage({ type: 'terrain', terrain });
+      workers.push(worker);
+      idle.push(worker);
     }
-    worker.onmessage = (event) => {
-      onReply(worker, event.data);
-    };
-    worker.onerror = () => {
-      onFailure(worker);
-    };
-    worker.postMessage({ type: 'terrain', terrain });
-    workers.push(worker);
-    idle.push(worker);
-  }
-  if (workerCount > 0 && workers.length === 0) failed = true;
+    if (workers.length === 0) failed = true;
+    return workers.length > 0;
+  };
 
   /** The result of `spec` if cached; otherwise starts (or continues) computing it. */
   const requestJob = (spec: JobSpec): ViewshedRequest => {
@@ -422,7 +443,7 @@ export function createViewshedService(
       return { viewshed: cached, pending: false, failed: false, preview: false };
     }
     if (failed) return { viewshed: latest, pending: false, failed: true, preview: false };
-    if (workers.length === 0) {
+    if (workerCount === 0) {
       // No workers (e.g. tests): compute synchronously.
       const viewshed: Viewshed = {
         grid,
@@ -443,6 +464,7 @@ export function createViewshedService(
       remember(key, viewshed);
       return { viewshed, pending: false, failed: false, preview: false };
     }
+    if (!startWorkers()) return { viewshed: latest, pending: false, failed: true, preview: false };
     if (job?.key !== key) {
       const running = job;
       if (running && running.grid.rows * running.grid.columns <= FINISH_FIRST_MAX_CELLS) {
@@ -517,6 +539,7 @@ export function createViewshedService(
       return lastTimings;
     },
     dispose() {
+      disposed = true;
       for (const worker of workers) worker.terminate();
       workers.length = 0;
       idle.length = 0;
@@ -552,7 +575,35 @@ function defaultWorker(): ViewshedWorker {
   }) as unknown as ViewshedWorker;
 }
 
-function defaultWorkerCount(): number {
-  const cores = typeof navigator === 'undefined' ? 2 : navigator.hardwareConcurrency;
-  return Math.min(4, Math.max(1, cores - 1));
+/**
+ * Battlefields with more feature points than these get at most two workers,
+ * or one (docs/adr/0045). Each worker holds the terrain and its visibility
+ * index (about 0.45 GB on central Amsterdam, 600,000 points), and every
+ * worker of a page shares one memory limit with it, as do the 3D view's
+ * generation workers.
+ */
+export const HEAVY_TERRAIN_POINTS = { two: 100_000, one: 300_000 } as const;
+
+/** How many viewshed workers to start: one per spare core, at most 4, fewer on a heavy battlefield. */
+export function defaultWorkerCount(cores: number, points: number): number {
+  const byCores = Math.min(4, Math.max(1, cores - 1));
+  if (points > HEAVY_TERRAIN_POINTS.one) return 1;
+  if (points > HEAVY_TERRAIN_POINTS.two) return Math.min(2, byCores);
+  return byCores;
+}
+
+/** The map points of a terrain's features (outlines, centre lines): its size as workers hold it. */
+export function featurePoints(terrain: TerrainDataset): number {
+  let points = 0;
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+    } else if (typeof value === 'object' && value !== null) {
+      const v = value as { x?: unknown; y?: unknown };
+      if (typeof v.x === 'number' && typeof v.y === 'number') points += 1;
+      else for (const item of Object.values(value)) walk(item);
+    }
+  };
+  walk(terrain.features);
+  return points;
 }

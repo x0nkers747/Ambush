@@ -10,7 +10,9 @@ import {
   type TerrainDataset,
 } from '#sim';
 import { buildingGeometry, designBuildings, ROOF_LAYER_BASE } from './building-geometry';
+import { BufferAttribute, BufferGeometry } from 'three';
 import { createDraper } from './drape';
+import { boundingSphereOf } from './geo-features';
 import { classifyLandCover, LAND_COVER_COLORS, landCoverTints } from './landcover';
 import { terrainMesh } from './terrain-mesh';
 import { planRoof } from './roof-geometry';
@@ -299,5 +301,23 @@ describe('landCoverTints', () => {
     const vegetated = classifyLandCover(demo).index.reduce((n, k) => n + (k > 0 ? 1 : 0), 0);
     expect(tints.classified).toBe(vegetated);
     expect(tints.classified).toBeLessThan(demo.heightfield.elevations.length);
+  });
+});
+
+describe('boundingSphereOf', () => {
+  it('is the sphere Three.js computes', () => {
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const positions = Float32Array.from({ length: 3000 }, () => (rnd() - 0.3) * 1000);
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(positions, 3));
+    g.computeBoundingSphere();
+    const three = g.boundingSphere;
+    const ours = boundingSphereOf(positions);
+    expect(ours.center.distanceTo(three?.center ?? ours.center)).toBeLessThan(1e-6);
+    expect(ours.radius).toBeCloseTo(three?.radius ?? -1, 6);
   });
 });

@@ -286,3 +286,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 42. [Viewsheds limited to the firing arc](docs/adr/0042-viewshed-in-the-firing-arc.md)
 43. [Bridge crossing and OPFOR road following](docs/adr/0043-bridge-and-road-navigation.md)
 44. [Road junctions, grade separation and bridge structures](docs/adr/0044-road-junction-and-bridge-topology.md)
+45. [Memory on large battlefields](docs/adr/0045-memory-on-large-battlefields.md)
