@@ -21,6 +21,8 @@ export const MATERIALS = [
   'sand',
   'litter',
   'paving',
+  'lush',
+  'dense',
 ] as const;
 export type MaterialName = (typeof MATERIALS)[number];
 
@@ -35,6 +37,8 @@ export const MATERIAL_TILE_M: Readonly<Record<MaterialName, number>> = {
   sand: 3.5,
   litter: 1.8,
   paving: 2.5,
+  lush: 1.4,
+  dense: 1.4,
 };
 
 /**
@@ -52,6 +56,9 @@ const FLAT: Readonly<Record<MaterialName, number>> = {
   sand: 0xb3a27e,
   litter: 0x7a6646,
   paving: 0x8a857d,
+  // Grass variants, blended in broad patches: deeper green, and darker and denser.
+  lush: 0x6b8744,
+  dense: 0x687b43,
 };
 
 const lin = (v: number) => {
@@ -59,7 +66,8 @@ const lin = (v: number) => {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 };
 
-const url = (name: string, kind: string) =>
+/** A material's texture file (kind: albedo, normal or hra). */
+export const textureUrl = (name: MaterialName, kind: string) =>
   new URL(`./textures/${name}-${kind}.jpg`, import.meta.url).href;
 
 export const TEXTURE_PX = 1024;
@@ -128,7 +136,7 @@ async function pixels(kind: string, size: number): Promise<Uint8Array> {
   const out = new Uint8Array(size * size * 4 * MATERIALS.length);
   const images = await Promise.all(
     MATERIALS.map(async (m) => {
-      const response = await fetch(url(m, kind));
+      const response = await fetch(textureUrl(m, kind));
       if (!response.ok) throw new Error(`${m}-${kind}: ${String(response.status)}`);
       // Colour space conversion off: normal and data maps are not colours.
       return createImageBitmap(await response.blob(), {

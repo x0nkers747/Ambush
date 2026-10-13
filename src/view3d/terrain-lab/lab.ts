@@ -18,10 +18,12 @@ import { cleanTerrain, waterLevels, type SourceCorrections, type TerrainDataset 
 import {
   compileField,
   createSurface,
+  deckIndex,
   DEFAULT_FIELD_SPEC,
   structureTerrain,
   TERRAIN_FIELD_VERSION,
   tileHash,
+  type DeckIndex,
   type FieldInput,
   type FieldSpec,
   type Rect,
@@ -35,9 +37,11 @@ import { hashPackage } from './determinism';
 import { createCurrentScene, type CurrentScene } from './current-scene';
 import { loadGroundTextures, placeholderTextures, type GroundTextures } from './ground-textures';
 import { createLabCamera, EYE_HEIGHT_M, type CameraMode, type LabCamera } from './lab-camera';
+import { createLabBridges, type LabBridges } from './lab-bridges';
 import { createLabStructures, type LabStructures } from './lab-structures';
 import { bridgeViewpoint, findViewpoints, type Viewpoint } from './presets';
 import { createTerrainRenderer, type DebugView, type TerrainRenderer } from './terrain-renderer';
+import { DETAIL_DEFAULT_M } from './terrain-shader';
 import { createTilePool, type TilePool } from './tile-pool';
 import type { VegetationLayer } from '../vegetation-layer';
 import { labWater, type LabWater } from './water';
@@ -88,8 +92,8 @@ const AREAS: readonly {
 const areaFor = (c: { lat: number; lon: number }) =>
   AREAS.find((a) => Math.abs(a.lat - c.lat) < 0.02 && Math.abs(a.lon - c.lon) < 0.02);
 const AREA_M = 1000;
-/** Structures and trees are generated this far beyond the test area, metres. */
-const STRUCTURE_MARGIN_M = 150;
+/** How far the finest ground level reaches by default, metres (chosen by eye). */
+const LOD_DEFAULT_M = 100;
 
 const SUN_AZIMUTH_DEG = 225;
 const SUN_ELEVATION_DEG = 38;
@@ -126,6 +130,8 @@ interface Built {
   readonly terrain: TerrainRenderer;
   readonly water: LabWater;
   readonly clutter: Clutter;
+  readonly bridges: LabBridges;
+  readonly decks: DeckIndex;
   readonly area: Rect;
   readonly views: Viewpoint[];
   readonly compileMs: number;
@@ -172,11 +178,14 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     <section>
       <h2>TERRAIN</h2>
       <label><span>Surface</span><select data-tl="spacing"><option value="0.5">0.5 m lattice</option><option value="1">1 m lattice</option></select></label>
+      <label><span>Ground LOD (m)</span><input type="range" data-tl="lod-m" min="32" max="512" step="4" value="100"><output data-tl="lod-m-out"></output></label>
       <label><span>Relief</span><input type="checkbox" data-tl="relief" checked><input type="range" data-tl="relief-amp" min="0" max="2.5" step="0.05" value="1"><output data-tl="relief-out"></output></label>
       <label><span>Seed</span><input type="number" data-tl="seed" value="1" min="0" step="1"></label>
       <div class="tl-row"><button data-tl="apply-field">Rebuild terrain</button></div>
       <label><span>Materials</span><select data-tl="advanced"><option value="1">Advanced (hex tiling, height blend)</option><option value="0">Simple</option></select></label>
       <label><span>Clutter</span><select data-tl="clutter"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option><option value="off">Off</option></select></label>
+      <label><span>Grass distance (m)</span><input type="range" data-tl="grass-m" min="10" max="150" step="5" value="40"><output data-tl="grass-m-out"></output></label>
+      <label><span>Texture detail (m)</span><input type="range" data-tl="detail-m" min="10" max="250" step="5" value="60"><output data-tl="detail-m-out"></output></label>
       <label><span>Debug view</span><select data-tl="debug"><option value="off">Off</option><option value="lod">LOD levels</option><option value="tiles">Tile boundaries</option><option value="fields">Material fields</option></select></label>
       <label><span>Wireframe</span><input type="checkbox" data-tl="wire"></label>
       <label><span>LOD morphing</span><input type="checkbox" data-tl="morph" checked></label>
@@ -263,6 +272,7 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
       textures = t;
       texturesReady = true;
       built?.terrain.setTextures(t);
+      built?.bridges.setTints(t.tints);
     },
     (e: unknown) => {
       console.error('terrain lab textures', e);
@@ -283,6 +293,16 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
   let morph = true;
   let advanced = true;
   let clutterQuality: 'low' | 'medium' | 'high' | 'off' = 'medium';
+  /** Grass and clutter radius, and where the ground's fine detail starts to fade (the sliders), metres. */
+  let grassM = CLUTTER_QUALITY.medium.radius;
+  let detailM = DETAIL_DEFAULT_M;
+  /** How far the finest ground level reaches (the slider), metres. */
+  let lodM: number | null = LOD_DEFAULT_M;
+  let lodShown = 0;
+  const clutterSettings = () =>
+    clutterQuality === 'off'
+      ? CLUTTER_QUALITY.medium
+      : { ...CLUTTER_QUALITY[clutterQuality], radius: grassM };
   let showStructures = true;
   const life = { disposed: false };
 
@@ -290,9 +310,9 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     if (!built) return 0;
     const s = built.surface;
     if (mode === 'current') return s.heightAt(x, y);
-    const deck = built.structures?.bridges.at(x, y);
+    const deck = built.decks.topAt(x, y);
     const g = s.heightAt(x, y);
-    return deck && deck.deck > g ? deck.deck : g;
+    return deck !== null && deck > g ? deck : g;
   };
   const cam: LabCamera = createLabCamera(canvas, (x, y) => {
     if (!built) return 0;
@@ -300,6 +320,8 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     return groundAt(Math.max(b.minX, Math.min(b.maxX, x)), Math.max(b.minY, Math.min(b.maxY, y)));
   });
 
+  // The surroundings, out to the horizon: below the battlefield's lowest
+  // ground, so they never cover it.
   const apron = new Mesh(
     new CircleGeometry(1, 64).rotateX(-Math.PI / 2),
     new MeshStandardMaterial({ color: 0x59604f, roughness: 1 }),
@@ -312,6 +334,7 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     b.terrain.dispose();
     b.water.dispose();
     b.clutter.dispose();
+    b.bridges.dispose();
     b.structures?.dispose();
     b.current?.dispose();
     scene.remove(b.group);
@@ -340,6 +363,10 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     terrain.setDebug(debugView);
     terrain.setWireframe(wire);
     terrain.setMorph(morph);
+    terrain.setDetailDistance(detailM);
+    // The finest ground level's reach: the slider's, once moved; else this lattice's default.
+    lodShown = terrain.setLodRange(lodM ?? terrain.defaultLodRange);
+    qi('lod-m').value = String(lodShown);
     terrain.setAdvanced(advanced);
     const group = new Group();
     group.name = 'lab';
@@ -347,8 +374,13 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     const lw = labWater(field, clean.features, water);
     group.add(lw.mesh);
     const clutter = createClutter(surface, group);
+    // The lab's own bridges, on the field's bridge roads.
+    const decks = deckIndex(field.roads);
+    const bridges = createLabBridges(field);
+    group.add(bridges.group);
+    if (texturesReady) bridges.setTints(textures.tints);
     clutter.setVisible(clutterQuality !== 'off');
-    if (clutterQuality !== 'off') clutter.setSettings(CLUTTER_QUALITY[clutterQuality]);
+    if (clutterQuality !== 'off') clutter.setSettings(clutterSettings());
     const match = areaFor(bf.centre);
     const c = centre ?? (match ? { x: match.x, y: match.y } : { x: 0, y: 0 });
     const area: Rect = {
@@ -361,11 +393,9 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     const b = field.bounds;
     const span = Math.max(b.maxX - b.minX, b.maxY - b.minY);
     apron.scale.setScalar(12 * span);
-    apron.position.set(
-      (b.minX + b.maxX) / 2,
-      field.base.at(b.minX, b.minY) - 3,
-      -(b.minY + b.maxY) / 2,
-    );
+    let lowest = Infinity;
+    for (const e of clean.heightfield.elevations) if (e < lowest) lowest = e;
+    apron.position.set((b.minX + b.maxX) / 2, lowest - 2, -(b.minY + b.maxY) / 2);
     scene.fog = new Fog(HAZE, 1.4 * span, 6 * span);
     const result: Built = {
       bf,
@@ -377,6 +407,8 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
       terrain,
       water: lw,
       clutter,
+      bridges,
+      decks,
       area,
       views,
       compileMs,
@@ -387,19 +419,13 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
       currentLoading: null,
       group,
     };
-    // Structures on the lab ground: a 1 m TerrainDataset over the area.
+    // Structures on the lab ground: a TerrainDataset sampled from it.
     setStatus('Generating buildings, bridges and trees…');
-    const sArea: Rect = {
-      minX: Math.max(b.minX, area.minX - STRUCTURE_MARGIN_M),
-      minY: Math.max(b.minY, area.minY - STRUCTURE_MARGIN_M),
-      maxX: Math.min(b.maxX, area.maxX + STRUCTURE_MARGIN_M),
-      maxY: Math.min(b.maxY, area.maxY + STRUCTURE_MARGIN_M),
-    };
-    // Light battlefields: everywhere, on 2 m samples from the workers' tiles,
-    // so distant views have their buildings and woods as the game does.
-    // Dense ones (many buildings): the test area and its margin, at 1 m.
+    // Everywhere, on 2 m samples from the workers' tiles, so distant views have
+    // their buildings and woods as the game does (dense cities included: the
+    // game draws all of them too).
     let sTerrain: TerrainDataset;
-    if (!heavy) {
+    {
       const level = Math.round(Math.log2(2 / spacing));
       const size = 64 * 2 ** level;
       const nx = Math.ceil((b.maxX - b.minX) / size);
@@ -436,8 +462,18 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
         if (!t) return field.height(x, y);
         return t.heights[(J - ty * cells + 1) * t.stride + (I - tx * cells + 1)] ?? 0;
       });
-    } else sTerrain = structureTerrain(surface, clean, water, sArea, 1);
-    result.structures = createLabStructures(sTerrain, quality);
+    }
+    result.structures = createLabStructures(sTerrain, quality, {
+      field,
+      surface,
+      deckAt: (x, y) => decks.topAt(x, y),
+      ground: (x, y) => surface.heightAt(x, y),
+    });
+    // Nothing grows through a bridge deck that is close over the ground.
+    clutter.setCovered((x, y, z) => {
+      const deck = decks.topAt(x, y);
+      return deck !== null && deck - z < 2;
+    });
     void result.structures.ready.then(
       ({ features, vegetation }) => {
         if (built !== result) return;
@@ -652,7 +688,24 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
   qs('clutter').addEventListener('change', (e) => {
     clutterQuality = (e.target as HTMLSelectElement).value as typeof clutterQuality;
     built?.clutter.setVisible(clutterQuality !== 'off');
-    if (clutterQuality !== 'off') built?.clutter.setSettings(CLUTTER_QUALITY[clutterQuality]);
+    if (clutterQuality !== 'off') {
+      // A quality sets its own distance; the slider then adjusts it.
+      grassM = CLUTTER_QUALITY[clutterQuality].radius;
+      qi('grass-m').value = String(grassM);
+      built?.clutter.setSettings(clutterSettings());
+    }
+  });
+  qi('grass-m').addEventListener('input', (e) => {
+    grassM = Number((e.target as HTMLInputElement).value);
+    if (clutterQuality !== 'off') built?.clutter.setSettings(clutterSettings());
+  });
+  qi('lod-m').addEventListener('input', (e) => {
+    lodM = Number((e.target as HTMLInputElement).value);
+    if (built) lodShown = built.terrain.setLodRange(lodM);
+  });
+  qi('detail-m').addEventListener('input', (e) => {
+    detailM = Number((e.target as HTMLInputElement).value);
+    built?.terrain.setDetailDistance(detailM);
   });
   qs('debug').addEventListener('change', (e) => {
     debugView = (e.target as HTMLSelectElement).value as DebugView;
@@ -777,6 +830,9 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
     hud.textContent = lines.join('\n');
     q('speed-out').textContent = s.speed.toFixed(1);
     q('relief-out').textContent = Number(reliefAmp.value).toFixed(2);
+    q('grass-m-out').textContent = String(grassM);
+    q('detail-m-out').textContent = String(detailM);
+    q('lod-m-out').textContent = String(Math.round(lodShown));
     if (b)
       q('settings').textContent = [
         `battlefield ${b.bf.name} (${b.bf.id})`,
@@ -945,6 +1001,7 @@ export function startTerrainLab(root: HTMLElement, source: LabSource): TerrainLa
       triangles: renderer.info.render.triangles,
       terrain: built?.terrain.stats,
       clutter: built?.clutter.stats,
+      vegetation: built?.vegetation?.stats() ?? null,
       surface: built?.surface.stats,
       field: built?.field.stats,
       compileMs: built?.compileMs,

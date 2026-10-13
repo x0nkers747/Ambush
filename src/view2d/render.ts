@@ -124,6 +124,7 @@ const LAND_USE_FILL: Readonly<Record<LandUseKind, string>> = {
   military: 'rgba(214, 150, 140, 0.18)',
   cemetery: 'rgba(170, 196, 170, 0.4)',
   recreation: 'rgba(186, 228, 170, 0.36)',
+  paved: 'rgba(196, 192, 186, 0.45)',
   other: 'rgba(210, 204, 190, 0.25)',
   beach: 'rgba(240, 226, 170, 0.6)',
   shingle: 'rgba(210, 204, 190, 0.55)',

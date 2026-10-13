@@ -94,6 +94,17 @@ export function overpassQuery(
       `relation["natural"~"^(wood|scrub|heath|wetland|water|grassland|beach|sand|shingle|bare_rock|scree|mud)$"]["type"="multipolygon"](${bbox});`,
       `way["landuse"](${bbox});`,
       `relation["landuse"]["type"="multipolygon"](${bbox});`,
+      // Surfaces (docs/adr/0048): parks and gardens, car parks, squares, pedestrian
+      // areas and mapped carriageway and footway outlines; grass mapped as land cover.
+      `way["leisure"~"${LEISURE_QUERY}"](${bbox});`,
+      `relation["leisure"~"${LEISURE_QUERY}"]["type"="multipolygon"](${bbox});`,
+      `way["amenity"="parking"](${bbox});`,
+      `relation["amenity"="parking"]["type"="multipolygon"](${bbox});`,
+      `way["place"="square"](${bbox});`,
+      `relation["place"="square"]["type"="multipolygon"](${bbox});`,
+      `relation["highway"="pedestrian"]["type"="multipolygon"](${bbox});`,
+      `way["area:highway"](${bbox});`,
+      `way["landcover"="grass"](${bbox});`,
       `way["waterway"](${bbox});`,
       `way["water"](${bbox});`,
       `relation["water"]["type"="multipolygon"](${bbox});`,
@@ -397,6 +408,32 @@ const SHINGLE_SURFACES = new Set([
 ]);
 const ROCK_SURFACES = new Set(['rock', 'bare_rock', 'stones', 'boulders']);
 const MUD_SURFACES = new Set(['mud', 'dirt', 'earth', 'ground', 'clay']);
+/** Hard surfaces () of pitches. */
+const PAVED_SURFACES = new Set([
+  'paved',
+  'asphalt',
+  'concrete',
+  'paving_stones',
+  'sett',
+  'cobblestone',
+  'bricks',
+  'tartan',
+  'acrylic',
+  'clay',
+]);
+/** Grass surfaces of otherwise paved areas (grass car parks, verges). */
+const GREEN_SURFACES = new Set(['grass', 'grass_paver']);
+/** Leisure areas that are green: parks, gardens, playgrounds, commons. */
+const LEISURE_GREEN = new Set([
+  'park',
+  'garden',
+  'playground',
+  'common',
+  'dog_park',
+  'golf_course',
+]);
+/** The leisure values the query asks for (green ones and pitches). */
+const LEISURE_QUERY = `^(${[...LEISURE_GREEN, 'pitch'].join('|')})$`;
 
 /** Bare shores and ground (docs/adr/0040): mapped beaches take precedence over inferred ones. */
 function shoreOf(t: Tags): LandUseKind | null {
@@ -414,10 +451,43 @@ function shoreOf(t: Tags): LandUseKind | null {
   return null;
 }
 
+/**
+ * Paved public spaces and green leisure areas (docs/adr/0048): car parks,
+ * squares, pedestrian areas and mapped carriageway and footway outlines
+ * (`area:highway`) are paved unless their surface is grass; parks, gardens,
+ * playgrounds and commons are recreation ground; pitches are paved or grass by
+ * their surface.
+ */
+function surfaceAreaOf(t: Tags): LandUseKind | null {
+  // A multi-storey car park is a building, not hard ground (even when the
+  // buildings come from elsewhere).
+  if (t['building'] !== undefined && t['building'] !== 'no') return null;
+  const surface = t['surface'];
+  const green = surface !== undefined && GREEN_SURFACES.has(surface);
+  const areaHighway = t['area:highway'];
+  if (
+    t['amenity'] === 'parking' ||
+    t['place'] === 'square' ||
+    (t['highway'] === 'pedestrian' && (t['area'] === 'yes' || t['type'] === 'multipolygon')) ||
+    areaHighway !== undefined
+  ) {
+    if (green || areaHighway === 'verge' || areaHighway === 'traffic_island') return 'meadow';
+    return 'paved';
+  }
+  if (t['landcover'] === 'grass') return 'meadow';
+  const leisure = t['leisure'];
+  if (leisure === 'pitch')
+    return surface !== undefined && PAVED_SURFACES.has(surface) ? 'paved' : 'recreation';
+  if (leisure !== undefined && LEISURE_GREEN.has(leisure)) return 'recreation';
+  return null;
+}
+
 function landUseOf(t: Tags): LandUseKind | null {
   if (t['natural'] === 'grassland') return 'meadow';
   const shore = shoreOf(t);
   if (shore) return shore;
+  const surfaced = surfaceAreaOf(t);
+  if (surfaced) return surfaced;
   const l = t['landuse'];
   if (l === undefined || l === 'forest' || l === 'reservoir' || l === 'basin') return null;
   return LAND_USE[l] ?? null;

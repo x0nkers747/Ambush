@@ -5,7 +5,7 @@ import type { CoverMap } from './landcover';
 // Roads as continuous constraints (research §5.3, §5.6): each road gets a
 // longitudinal profile (the smoothed ground along it, pinned at junctions) and a
 // cross-section evaluated at any point from its distance to the centreline:
-// carriageway with camber, shoulder, ditch, then cut or fill slopes back to
+// a level carriageway, shoulder, ditch, then cut or fill slopes back to
 // the ground. Nothing depends on a lattice.
 
 /** Road surface material codes (stored in the material tiles). */
@@ -24,8 +24,6 @@ interface ClassRule {
   readonly smooth: number;
   /** Most the centreline may leave the ground, metres. */
   readonly maxDepth: number;
-  /** Cross fall of the carriageway (per metre from the centre). */
-  readonly camber: number;
   /** Shoulder width (rural), metres. */
   readonly shoulder: number;
   /** Rural roads of this class get a ditch. */
@@ -43,7 +41,6 @@ const RULES: Readonly<Record<RoadClass, ClassRule>> = {
   major: {
     smooth: 24,
     maxDepth: 4,
-    camber: 0.025,
     shoulder: 1.2,
     ditch: true,
     fill: 0.5,
@@ -55,7 +52,6 @@ const RULES: Readonly<Record<RoadClass, ClassRule>> = {
   paved: {
     smooth: 16,
     maxDepth: 3,
-    camber: 0.025,
     shoulder: 0.8,
     ditch: true,
     fill: 0.5,
@@ -67,7 +63,6 @@ const RULES: Readonly<Record<RoadClass, ClassRule>> = {
   unpaved: {
     smooth: 10,
     maxDepth: 1.5,
-    camber: 0.03,
     shoulder: 0.5,
     ditch: true,
     fill: 0.6,
@@ -79,7 +74,6 @@ const RULES: Readonly<Record<RoadClass, ClassRule>> = {
   track: {
     smooth: 5,
     maxDepth: 0.6,
-    camber: 0.0,
     shoulder: 0.3,
     ditch: false,
     fill: 1,
@@ -91,7 +85,6 @@ const RULES: Readonly<Record<RoadClass, ClassRule>> = {
   path: {
     smooth: 2.5,
     maxDepth: 0.3,
-    camber: 0.0,
     shoulder: 0.15,
     ditch: false,
     fill: 1.2,
@@ -154,6 +147,13 @@ export interface RoadStamp {
   readonly profile: Float64Array;
   /** Furthest distance from the centreline the road changes the ground, metres. */
   readonly extent: number;
+  /**
+   * Where this road joins a higher-ranked one, its surface follows that road's
+   * grade near the junction (`roadLevel`): per junction, eight numbers: arc
+   * length here, junction x and y, level, the other road's direction (x, y)
+   * and grade there, and how far along this road the warp reaches.
+   */
+  readonly warps: number[];
 }
 
 /** A road's centre level at arc length s. */
@@ -167,6 +167,31 @@ export function levelAt(road: RoadStamp, s: number): number {
   if (i < 0) return p[0] ?? 0;
   const t = u - i;
   return (p[i] ?? 0) + t * ((p[i + 1] ?? 0) - (p[i] ?? 0));
+}
+
+/**
+ * The road's surface level at (x, y), whose nearest point on the road is at
+ * arc length s: its profile, except near a junction with a higher-ranked road,
+ * where it eases onto that road's grade (a plane through the junction along
+ * it), so the two surfaces meet without a step, as a graded junction does.
+ */
+export function roadLevel(road: RoadStamp, s: number, x: number, y: number): number {
+  let level = levelAt(road, s);
+  const w = road.warps;
+  for (let k = 0; k + 7 < w.length; k += 8) {
+    const from = s - (w[k] ?? 0);
+    const d = from < 0 ? -from : from;
+    const reach = w[k + 7] ?? 0;
+    if (d >= reach) continue;
+    const u = d / reach;
+    const f = 1 - u * u * (3 - 2 * u);
+    const plane =
+      (w[k + 3] ?? 0) +
+      (w[k + 6] ?? 0) *
+        ((x - (w[k + 1] ?? 0)) * (w[k + 4] ?? 0) + (y - (w[k + 2] ?? 0)) * (w[k + 5] ?? 0));
+    level += f * (plane - level);
+  }
+  return level;
 }
 
 /** Point at arc length s along a polyline. */
@@ -221,8 +246,8 @@ export function nearestOnRoad(road: RoadStamp, x: number, y: number): { d: numbe
 }
 
 /**
- * Builds every road's stamp: profiles from the base, then pinned at junctions
- * (highest-ranked road first; ties by id), bridges laid straight between their
+ * Builds every road's stamp: profiles from the base, then made to meet level
+ * at junctions and crossings (`pinJunctions`), bridges laid straight between their
  * ends. Tunnels are left out: the ground over them is untouched.
  */
 export function roadStamps(
@@ -284,130 +309,266 @@ export function roadStamps(
       cum,
       profile: smooth,
       extent: halfWidth + shoulder + (ditch ? DITCH_WIDTH_M : 0) + rule.reach + FADE_M,
+      warps: [],
     });
   }
   pinJunctions(stamps);
   return stamps;
 }
 
-/** Adds `delta` at arc length 0 (or the end), fading linearly to 0 over `length`. */
-function bend(road: RoadStamp, atStart: boolean, delta: number, length: number): void {
+/** Adds `delta` at arc length `at`, fading smoothly to 0 over `length` either side. */
+function bend(road: RoadStamp, at: number, delta: number, length: number): void {
   const p = road.profile;
   const total = road.cum[road.cum.length - 1] ?? 0;
   const n = p.length;
   for (let i = 0; i < n; i += 1) {
     const s = Math.min(total, i * PROFILE_STEP_M);
-    const from = atStart ? s : total - s;
+    const from = s > at ? s - at : at - s;
     if (from >= length) continue;
-    p[i] = (p[i] ?? 0) + delta * (1 - from / length);
+    const f = 1 - from / length;
+    p[i] = (p[i] ?? 0) + delta * f * f * (3 - 2 * f);
   }
 }
 
+/** Junction passes at most; they stop once every junction agrees within the tolerance, metres. */
+const PIN_PASSES = 12;
+const PIN_TOLERANCE_M = 0.002;
+/** How far past the higher road's surface a joining road eases onto its grade, metres. */
+const WARP_M = 8;
+/** Furthest a joining road is followed while its surface touches the higher road's, metres. */
+const WARP_MAX_M = 80;
+
+/**
+ * Makes roads meet level at every junction: where roads end together, where a
+ * road ends on another, and where roads cross. Each junction takes the level
+ * of its highest-ranked road (ties by id); every other road there is bent to
+ * it around the junction (from an end, or either side of a crossing). Bending
+ * a road moves the junctions near it, so the passes repeat until all agree.
+ * Bridges take the level at their ends and are laid straight between them.
+ */
 function pinJunctions(stamps: RoadStamp[]): void {
-  interface End {
+  interface Member {
     road: RoadStamp;
-    atStart: boolean;
+    /** Arc length of the junction along the road. */
+    s: number;
+  }
+  interface Junction {
     x: number;
     y: number;
+    members: Member[];
   }
-  const ends: End[] = [];
-  for (const road of stamps) {
-    const n = road.xy.length;
-    ends.push({ road, atStart: true, x: road.xy[0] ?? 0, y: road.xy[1] ?? 0 });
-    ends.push({ road, atStart: false, x: road.xy[n - 2] ?? 0, y: road.xy[n - 1] ?? 0 });
-  }
-  // Bucket ends and road segments for neighbour search.
   const B = 32;
-  const key = (x: number, y: number) => `${String(Math.floor(x / B))},${String(Math.floor(y / B))}`;
-  const endBuckets = new Map<string, End[]>();
-  for (const e of ends) {
-    const k = key(e.x, e.y);
-    const list = endBuckets.get(k);
-    if (list) list.push(e);
-    else endBuckets.set(k, [e]);
-  }
-  const segBuckets = new Map<string, RoadStamp[]>();
-  for (const road of stamps) {
-    const seen = new Set<string>();
+  /** A road's surface (carriageway and shoulder) either side of its centreline, at least JOIN_M. */
+  const reachOf = (road: RoadStamp) => Math.max(JOIN_M, road.half + road.shoulder);
+  const cell = (v: number) => Math.floor(v / B);
+  const key = (cx: number, cy: number) => `${String(cx)},${String(cy)}`;
+  // Road segments by bucket as (road index, segment offset), reaching as far as ends join them.
+  const segBuckets = new Map<string, number[]>();
+  stamps.forEach((road, ri) => {
+    const r = reachOf(road);
     for (let i = 0; i + 3 < road.xy.length; i += 2) {
-      const x0 = Math.min(road.xy[i] ?? 0, road.xy[i + 2] ?? 0) - JOIN_M;
-      const x1 = Math.max(road.xy[i] ?? 0, road.xy[i + 2] ?? 0) + JOIN_M;
-      const y0 = Math.min(road.xy[i + 1] ?? 0, road.xy[i + 3] ?? 0) - JOIN_M;
-      const y1 = Math.max(road.xy[i + 1] ?? 0, road.xy[i + 3] ?? 0) + JOIN_M;
-      for (let bx = Math.floor(x0 / B); bx <= Math.floor(x1 / B); bx += 1)
-        for (let by = Math.floor(y0 / B); by <= Math.floor(y1 / B); by += 1) {
-          const k = `${String(bx)},${String(by)}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
+      const x0 = Math.min(road.xy[i] ?? 0, road.xy[i + 2] ?? 0) - r;
+      const x1 = Math.max(road.xy[i] ?? 0, road.xy[i + 2] ?? 0) + r;
+      const y0 = Math.min(road.xy[i + 1] ?? 0, road.xy[i + 3] ?? 0) - r;
+      const y1 = Math.max(road.xy[i + 1] ?? 0, road.xy[i + 3] ?? 0) + r;
+      for (let bx = cell(x0); bx <= cell(x1); bx += 1)
+        for (let by = cell(y0); by <= cell(y1); by += 1) {
+          const k = key(bx, by);
           const list = segBuckets.get(k);
-          if (list) list.push(road);
-          else segBuckets.set(k, [road]);
+          if (list) list.push(ri, i);
+          else segBuckets.set(k, [ri, i]);
         }
     }
-  }
-  // Junctions: clusters of ends, processed from the highest-ranked road down.
-  const done = new Set<End>();
-  const clusters: { ends: End[]; x: number; y: number; rank: number; id: string }[] = [];
-  for (const e of ends) {
-    if (done.has(e)) continue;
-    const members: End[] = [];
+  });
+  const junctions: Junction[] = [];
+  const byCell = new Map<string, Junction[]>();
+  /** Whether `j` holds `road` (at about arc length `s`, when given). */
+  const holds = (j: Junction, road: RoadStamp, s?: number) =>
+    j.members.some((m) => m.road === road && (s === undefined || Math.abs(m.s - s) <= 2 * JOIN_M));
+  /** The junction within JOIN_M of (x, y) that holds `road` (at about `s`), if any. */
+  const nearJunction = (x: number, y: number, road: RoadStamp, s?: number): Junction | null => {
+    for (let bx = -1; bx <= 1; bx += 1)
+      for (let by = -1; by <= 1; by += 1)
+        for (const j of byCell.get(key(cell(x) + bx, cell(y) + by)) ?? []) {
+          const dx = j.x - x;
+          const dy = j.y - y;
+          if (dx * dx + dy * dy <= JOIN_M * JOIN_M && holds(j, road, s)) return j;
+        }
+    return null;
+  };
+  const addJunction = (j: Junction) => {
+    junctions.push(j);
+    const k = key(cell(j.x), cell(j.y));
+    const list = byCell.get(k);
+    if (list) list.push(j);
+    else byCell.set(k, [j]);
+  };
+  /**
+   * Adds `road` to `j` at its nearest point, when it passes within `extra`
+   * plus its own surface of `j` (an end on it, or whose surface touches it),
+   * and it is not there yet.
+   */
+  const join = (j: Junction, road: RoadStamp, extra: number) => {
+    if (holds(j, road)) return;
+    const n = nearestOnRoad(road, j.x, j.y);
+    if (n.d <= reachOf(road) + extra) j.members.push({ road, s: n.s });
+  };
+  /** Roads with a segment in the buckets around (x, y). */
+  const roadsNear = (x: number, y: number): RoadStamp[] => {
+    const out: RoadStamp[] = [];
     for (let bx = -1; bx <= 1; bx += 1)
       for (let by = -1; by <= 1; by += 1) {
-        const list = endBuckets.get(
-          `${String(Math.floor(e.x / B) + bx)},${String(Math.floor(e.y / B) + by)}`,
-        );
-        for (const o of list ?? []) {
-          if (done.has(o)) continue;
-          const dx = o.x - e.x;
-          const dy = o.y - e.y;
-          if (dx * dx + dy * dy <= JOIN_M * JOIN_M) members.push(o);
+        const list = segBuckets.get(key(cell(x) + bx, cell(y) + by)) ?? [];
+        for (let k = 0; k < list.length; k += 2) {
+          const r = stamps[list[k] ?? 0];
+          if (r && !out.includes(r)) out.push(r);
         }
       }
-    for (const m of members) done.add(m);
-    const rank = Math.max(...members.map((m) => (m.road.bridge ? 0 : m.road.rule.rank)));
-    clusters.push({ ends: members, x: e.x, y: e.y, rank, id: e.road.id });
-  }
-  clusters.sort((a, b) => b.rank - a.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const value = (e: End) => {
-    const p = e.road.profile;
-    return e.atStart ? (p[0] ?? 0) : (p[p.length - 1] ?? 0);
+    return out;
   };
-  for (const c of clusters) {
-    // A road passing through the junction (not ending there) holds it.
-    let through: { road: RoadStamp; level: number } | null = null;
-    const members = new Set(c.ends.map((e) => e.road));
-    for (const road of segBuckets.get(key(c.x, c.y)) ?? []) {
-      if (members.has(road) || road.bridge) continue;
-      const near = nearestOnRoad(road, c.x, c.y);
-      if (near.d > JOIN_M) continue;
-      if (!through || road.rule.rank > through.road.rule.rank)
-        through = { road, level: levelAt(road, near.s) };
-    }
-    const anchors = c.ends.filter((e) => !e.road.bridge);
-    anchors.sort(
-      (a, b) =>
-        b.road.rule.rank - a.road.rule.rank ||
-        (a.road.id < b.road.id ? -1 : a.road.id > b.road.id ? 1 : 0),
-    );
-    const top = anchors[0];
-    let level: number | null = null;
-    if (through && (!top || through.road.rule.rank >= top.road.rule.rank)) level = through.level;
-    else if (top) level = value(top);
-    if (level === null) continue;
-    for (const e of c.ends) {
-      if (e.road.bridge) continue;
-      const delta = level - value(e);
-      if (delta !== 0) bend(e.road, e.atStart, delta, e.road.rule.pin);
-    }
-    // Bridges: their ends take the junction's level (laid straight below).
-    for (const e of c.ends) {
-      if (!e.road.bridge) continue;
-      const p = e.road.profile;
-      if (e.atStart) p[0] = level;
-      else p[p.length - 1] = level;
+
+  // Road ends: each end with the other roads that end at it or pass through it.
+  for (const road of stamps) {
+    const n = road.xy.length;
+    const total = road.cum[road.cum.length - 1] ?? 0;
+    const ends: readonly [[number, number, number], [number, number, number]] = [
+      [road.xy[0] ?? 0, road.xy[1] ?? 0, 0],
+      [road.xy[n - 2] ?? 0, road.xy[n - 1] ?? 0, total],
+    ];
+    for (const [x, y, s] of ends) {
+      if (nearJunction(x, y, road, s)) continue;
+      const j: Junction = { x, y, members: [{ road, s }] };
+      // A road that ends where it began (a loop) meets itself.
+      const [ox, oy, os] = s === 0 ? ends[1] : ends[0];
+      if (os !== s && (ox - x) * (ox - x) + (oy - y) * (oy - y) <= JOIN_M * JOIN_M)
+        j.members.push({ road, s: os });
+      for (const other of roadsNear(x, y)) if (other !== road) join(j, other, reachOf(road));
+      if (j.members.length > 1) addJunction(j);
     }
   }
-  // Bridges are straight between their ends: they span what lies below.
+  // Crossings: segments of two roads (neither a bridge) that meet away from any junction of both.
+  for (const [k, list] of segBuckets) {
+    for (let a = 0; a < list.length; a += 2)
+      for (let b = a + 2; b < list.length; b += 2) {
+        const ra = stamps[list[a] ?? 0];
+        const rb = stamps[list[b] ?? 0];
+        if (!ra || !rb || ra === rb || ra.bridge || rb.bridge) continue;
+        const i = list[a + 1] ?? 0;
+        const m = list[b + 1] ?? 0;
+        const ax = ra.xy[i] ?? 0;
+        const ay = ra.xy[i + 1] ?? 0;
+        const adx = (ra.xy[i + 2] ?? 0) - ax;
+        const ady = (ra.xy[i + 3] ?? 0) - ay;
+        const bx = rb.xy[m] ?? 0;
+        const by = rb.xy[m + 1] ?? 0;
+        const bdx = (rb.xy[m + 2] ?? 0) - bx;
+        const bdy = (rb.xy[m + 3] ?? 0) - by;
+        const den = adx * bdy - ady * bdx;
+        if (den === 0) continue;
+        const t = ((bx - ax) * bdy - (by - ay) * bdx) / den;
+        const u = ((bx - ax) * ady - (by - ay) * adx) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+        const x = ax + t * adx;
+        const y = ay + t * ady;
+        // Each crossing once: in the bucket it lies in.
+        if (key(cell(x), cell(y)) !== k) continue;
+        const ja = nearJunction(x, y, ra);
+        if (ja) {
+          join(ja, rb, 0);
+          continue;
+        }
+        const jb = nearJunction(x, y, rb);
+        if (jb) {
+          join(jb, ra, 0);
+          continue;
+        }
+        const ca = ra.cum[i / 2] ?? 0;
+        const cb = rb.cum[m / 2] ?? 0;
+        addJunction({
+          x,
+          y,
+          members: [
+            { road: ra, s: ca + t * ((ra.cum[i / 2 + 1] ?? 0) - ca) },
+            { road: rb, s: cb + u * ((rb.cum[m / 2 + 1] ?? 0) - cb) },
+          ],
+        });
+      }
+  }
+
+  // Each junction's anchor: its highest-ranked road that is not a bridge; of equals, one
+  // passing through (not ending there), then by id and arc length.
+  const rankOf = (m: Member) => (m.road.bridge ? 0 : m.road.rule.rank);
+  const passes = (m: Member) => m.s > 0 && m.s < (m.road.cum[m.road.cum.length - 1] ?? 0);
+  const byId = (a: Member, b: Member) =>
+    a.road.id < b.road.id ? -1 : a.road.id > b.road.id ? 1 : a.s - b.s;
+  const solved: { j: Junction; anchor: Member; rank: number }[] = [];
+  for (const j of junctions) {
+    const anchor = [...j.members].sort(
+      (a, b) => rankOf(b) - rankOf(a) || Number(passes(b)) - Number(passes(a)) || byId(a, b),
+    )[0];
+    if (anchor && rankOf(anchor) > 0) solved.push({ j, anchor, rank: rankOf(anchor) });
+  }
+  solved.sort((a, b) => b.rank - a.rank || byId(a.anchor, b.anchor));
+  for (let pass = 0; pass < PIN_PASSES; pass += 1) {
+    let worst = 0;
+    for (const { j, anchor } of solved) {
+      const level = levelAt(anchor.road, anchor.s);
+      for (const m of j.members) {
+        if (m === anchor || m.road.bridge) continue;
+        const delta = level - levelAt(m.road, m.s);
+        if (delta === 0) continue;
+        bend(m.road, m.s, delta, m.road.rule.pin);
+        const e = delta < 0 ? -delta : delta;
+        if (e > worst) worst = e;
+      }
+    }
+    if (worst < PIN_TOLERANCE_M) break;
+  }
+  // Every other road at a junction eases onto the anchor's grade there.
+  for (const { j, anchor } of solved) {
+    if (anchor.road.bridge) continue;
+    const a = anchor.road;
+    const total = a.cum[a.cum.length - 1] ?? 0;
+    const s0 = Math.max(0, anchor.s - 1);
+    const s1 = Math.min(total, anchor.s + 1);
+    if (s1 <= s0) continue;
+    const [x0, y0] = pointAt(a.xy, a.cum, s0);
+    const [x1, y1] = pointAt(a.xy, a.cum, s1);
+    const len = Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    if (len === 0) continue;
+    const grade = (levelAt(a, s1) - levelAt(a, s0)) / (s1 - s0);
+    const level = levelAt(a, anchor.s);
+    for (const m of j.members) {
+      if (m === anchor || m.road === a || m.road.bridge) continue;
+      // As far along this road as its surface still touches the anchor's
+      // (roads leaving at a shallow angle), then WARP_M more.
+      const r = m.road;
+      const rTotal = r.cum[r.cum.length - 1] ?? 0;
+      const touch = a.half + a.shoulder + r.half + r.shoulder;
+      let along = 0;
+      for (const dir of [-1, 1]) {
+        for (let k = PROFILE_STEP_M; k <= WARP_MAX_M; k += PROFILE_STEP_M) {
+          const s = m.s + dir * k;
+          if (s < 0 || s > rTotal) break;
+          const [px, py] = pointAt(r.xy, r.cum, s);
+          if (nearestOnRoad(a, px, py).d > touch) break;
+          if (k > along) along = k;
+        }
+      }
+      const reach = Math.max(along, a.half + a.shoulder) + WARP_M;
+      r.warps.push(m.s, j.x, j.y, level, (x1 - x0) / len, (y1 - y0) / len, grade, reach);
+    }
+  }
+  // Bridges: their ends take the junction's level, and they are straight between them.
+  for (const { j, anchor } of solved) {
+    const level = levelAt(anchor.road, anchor.s);
+    for (const m of j.members) {
+      if (!m.road.bridge) continue;
+      const p = m.road.profile;
+      if (m.s <= 0) p[0] = level;
+      else if (m.s >= (m.road.cum[m.road.cum.length - 1] ?? 0)) p[p.length - 1] = level;
+    }
+  }
   for (const road of stamps) {
     if (!road.bridge) continue;
     const p = road.profile;
@@ -449,7 +610,7 @@ export function roadEffect(
   out.edge = e;
   out.ditch = 0;
   if (e <= 0) {
-    let z = level - rule.camber * d;
+    let z = level;
     if (road.surface === RoadSurface.Track) {
       const r = Math.abs(d - RUT_OFFSET_M) / RUT_HALF_M;
       if (r < 1) z -= RUT_DEPTH_M * (1 - r * r);
@@ -460,7 +621,7 @@ export function roadEffect(
     out.core = true;
     return;
   }
-  const edgeZ = level - rule.camber * half;
+  const edgeZ = level;
   const sh = road.shoulder;
   if (e <= sh) {
     const z = edgeZ - (road.urban ? 0.02 : 0.04) * e;

@@ -22,6 +22,7 @@ import {
 import { MATERIAL_BYTES, type SurfaceTile, type TerrainSurface } from '#sim/terrain-lab';
 import type { GroundTextures } from './ground-textures';
 import {
+  DETAIL_DEFAULT_M,
   FRAGMENT_ALBEDO,
   FRAGMENT_BEGIN,
   FRAGMENT_HEAD,
@@ -42,7 +43,7 @@ import type { TilePool } from './tile-pool';
 
 /** Quads per node side. */
 export const NODE_QUADS = 32;
-/** Level 0 range as a multiple of the level 0 node size. */
+/** Level 0 range as a multiple of the level 0 node size, by default (`setLodRange`). */
 const RANGE_FACTOR = 3;
 /** Atlas layers (tiles resident on the GPU). */
 const ATLAS_LAYERS = 256;
@@ -75,6 +76,15 @@ export interface TerrainRenderer {
   setWireframe(on: boolean): void;
   setAdvanced(on: boolean): void;
   setMorph(on: boolean): void;
+  /**
+   * How far the finest level reaches, metres (each coarser level reaches twice
+   * as far as the one before); at least two level 0 nodes. Returns what was set.
+   */
+  setLodRange(m: number): number;
+  /** The finest level's reach by default, metres. */
+  readonly defaultLodRange: number;
+  /** Where the ground's fine detail (normal maps) starts to fade, metres; it is gone at three times this. */
+  setDetailDistance(m: number): void;
   readonly stats: TerrainRendererStats;
   /** Levels in the quadtree (0 = finest). */
   readonly levels: number;
@@ -136,7 +146,8 @@ export function createTerrainRenderer(
   while (nodeCells * s * 2 ** top < extent) top += 1;
   const levels = top + 1;
   const nodeSize = (m: number) => nodeCells * s * 2 ** m;
-  const range = (m: number) => RANGE_FACTOR * nodeSize(0) * 2 ** m;
+  let rangeFactor = RANGE_FACTOR;
+  const range = (m: number) => rangeFactor * nodeSize(0) * 2 ** m;
 
   // Atlases.
   const heightData = new Float32Array(stride * stride * ATLAS_LAYERS);
@@ -249,6 +260,7 @@ export function createTerrainRenderer(
     labDebug: { value: 0 },
     labAdvanced: { value: 1 },
     labMorph: { value: 1 },
+    labDetail: { value: DETAIL_DEFAULT_M },
     labBounds: { value: [b.minX, b.minY, b.maxX, b.maxY] },
     labTint: { value: tintVectors(textures.tints) },
   };
@@ -449,6 +461,14 @@ export function createTerrainRenderer(
     },
     setAdvanced(on) {
       uniforms.labAdvanced.value = on ? 1 : 0;
+    },
+    defaultLodRange: RANGE_FACTOR * nodeSize(0),
+    setLodRange(m) {
+      rangeFactor = Math.max(2, m / nodeSize(0));
+      return rangeFactor * nodeSize(0);
+    },
+    setDetailDistance(m) {
+      uniforms.labDetail.value = m;
     },
     setMorph(on) {
       uniforms.labMorph.value = on ? 1 : 0;

@@ -13,8 +13,15 @@ import {
   scenarioProblems,
   type ScenarioDefinition,
 } from '#exercise';
-import type { BattlefieldPackage } from '#geo';
-import { demQualitySummary, shareTerrain, terrainModelId, type DemQualityReport } from '#sim';
+import { clipPolygon, parseBattlefieldPackage, type BattlefieldPackage } from '#geo';
+import {
+  demQualitySummary,
+  isSimplePolygon,
+  shareTerrain,
+  terrainModelId,
+  type DemQualityReport,
+  type VegetationArea,
+} from '#sim';
 import type { TacticalMap } from '#view2d';
 import type { PreviewData } from './battlefield-preview';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
@@ -176,17 +183,113 @@ async function main(root: HTMLElement): Promise<void> {
   // (docs/ground-level-terrain-architecture-research.md, stage 2).
   if (window.location.hash.startsWith('#terrain-lab')) {
     const { startTerrainLab } = await import('#view3d/terrain-lab');
+    // Battlefields recorded for the lab (tools/record-battlefield.ts) in lab-data/, which
+    // git ignores: listed by lab-data/index.json, served by the dev server only, opened
+    // in memory (never saved to the store).
+    interface Recorded {
+      readonly id: string;
+      readonly name: string;
+      readonly centre: { readonly lat: number; readonly lon: number };
+      readonly file: string;
+    }
+    const recorded = async (): Promise<Recorded[]> => {
+      if (!import.meta.env.DEV) return [];
+      try {
+        const response = await fetch('/lab-data/index.json');
+        return response.ok ? ((await response.json()) as Recorded[]) : [];
+      } catch {
+        return [];
+      }
+    };
     startTerrainLab(root, {
-      list: async () =>
-        (await store.list()).map((s) => ({ id: s.id, name: s.name, centre: s.centre })),
+      list: async () => [
+        ...(await store.list()).map((s) => ({ id: s.id, name: s.name, centre: s.centre })),
+        ...(await recorded()).map((r) => ({ id: r.id, name: r.name, centre: r.centre })),
+      ],
       open: async (id) => {
-        const pkg = await store.get(id);
+        const file = (await recorded()).find((r) => r.id === id)?.file;
+        // JSON cannot hold −0, NaN or ±Infinity, which the package's id (a fingerprint
+        // of its content) depends on: the recording writes them as "NUM:…" strings.
+        const revive = (_key: string, v: unknown) =>
+          typeof v === 'string' && v.startsWith('NUM:') ? Number(v.slice(4)) : v;
+        const pkg = file
+          ? parseBattlefieldPackage(
+              JSON.parse(await (await fetch(`/lab-data/${file}`)).text(), revive) as unknown,
+            )
+          : await store.get(id);
         const corrections = pkg.elevation.cleaning ?? null;
+        // Tree cover found in aerial imagery that OSM does not map
+        // (lab-data/extra-vegetation.json, UTM rings): added to the lab's copy of
+        // the terrain as woods, clipped to the battlefield. Never saved.
+        const extra: VegetationArea[] = [];
+        if (import.meta.env.DEV) {
+          try {
+            const response = await fetch('/lab-data/extra-vegetation.json');
+            if (response.ok) {
+              const data = (await response.json()) as {
+                epsg: number;
+                areas: { id: string; ring: [number, number][]; holes?: [number, number][][] }[];
+              };
+              const hf = pkg.terrain.heightfield;
+              const bounds = {
+                minX: hf.originX,
+                minY: hf.originY,
+                maxX: hf.originX + (hf.columns - 1) * hf.cellSize,
+                maxY: hf.originY + (hf.rows - 1) * hf.cellSize,
+              };
+              if (data.epsg === pkg.frame.epsg)
+                for (const area of data.areas) {
+                  const local = (r: [number, number][]) =>
+                    r.map(([e, n]) => ({
+                      x: e - pkg.frame.falseEasting,
+                      y: n - pkg.frame.falseNorthing,
+                    }));
+                  const ring = local(area.ring);
+                  const within = ring.every(
+                    (p) =>
+                      p.x > bounds.minX &&
+                      p.x < bounds.maxX &&
+                      p.y > bounds.minY &&
+                      p.y < bounds.maxY,
+                  );
+                  // Clearings are kept where the wood lies wholly on the battlefield.
+                  const holes = within
+                    ? (area.holes ?? [])
+                        .map(local)
+                        .filter((h) => h.length >= 3 && isSimplePolygon(h))
+                    : [];
+                  clipPolygon(ring, bounds).forEach((boundary, i) => {
+                    if (boundary.length >= 3 && isSimplePolygon(boundary))
+                      extra.push({
+                        id: `${area.id}-${String(i)}`,
+                        kind: 'woodland',
+                        boundary,
+                        ...(holes.length > 0 ? { holes } : {}),
+                        canopyHeightMeters: 15,
+                        seeThroughMeters: 25,
+                      });
+                  });
+                }
+            }
+          } catch {
+            // No extra vegetation.
+          }
+        }
+        const terrain =
+          extra.length > 0
+            ? {
+                ...pkg.terrain,
+                features: {
+                  ...pkg.terrain.features,
+                  vegetation: [...pkg.terrain.features.vegetation, ...extra],
+                },
+              }
+            : pkg.terrain;
         return {
           id: pkg.id,
           name: pkg.name,
           centre: pkg.request.centre,
-          terrain: pkg.terrain,
+          terrain,
           corrections,
           graded: async () =>
             (await authoritativeTerrain(pkg.id, pkg.terrain, corrections)).terrain,

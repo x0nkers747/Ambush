@@ -29,8 +29,9 @@ A **terrain lab** is added as an isolated prototype.
   - The lab reads the game's terrain packages and reuses, unchanged:
     - DEM cleaning;
     - the water levels and water query;
-    - bridge planning;
-    - the building, bridge, decor and vegetation generators;
+    - bridge planning (for viewpoints and markings; the lab draws its own decks);
+    - the building, decor and vegetation generators (the lab draws its own trees and shrubs on
+      the game's placement);
     - the water material.
   - The game's terrain model, grading, simulation, 2D map and 3D view are untouched.
 - **Field version.** The field is versioned (`TERRAIN_FIELD_VERSION`). It is deterministic in
@@ -39,7 +40,7 @@ A **terrain lab** is added as an isolated prototype.
   - `bench.cli.test.ts`: field, tiles, queries and caches for a recorded battlefield;
   - `determinism.cli.test.ts`: Node tile hashes, to compare with the page's
     `window.terrainLabHash`.
-- **Textures.** The lab's ground textures are CC0 (ambientCG), 1024 px, 11 MB, listed in
+- **Textures.** The lab's ground textures are CC0 (ambientCG), 1024 px, 14 MB, listed in
   `src/view3d/terrain-lab/textures/CREDITS.md`.
 
 ## Consequences

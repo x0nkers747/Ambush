@@ -20,9 +20,11 @@ export const Cover = {
   Military: 10,
   Lawn: 11,
   Orchard: 12,
+  Paved: 13,
+  Copse: 14,
 } as const;
 export type Cover = (typeof Cover)[keyof typeof Cover];
-export const COVER_COUNT = 13;
+export const COVER_COUNT = 15;
 
 /** Wavelengths of the relief's octaves, metres (fixed, so covers blend by amplitude only). */
 export const RELIEF_WAVELENGTHS = [28, 14, 7, 3.5] as const;
@@ -34,22 +36,74 @@ export interface CoverLook {
   readonly grass: number;
   readonly soil: number;
   readonly litter: number;
+  /**
+   * Share of the ground that is paved (0–1): towns are mostly paved (streets
+   * and pavements, yards), mapped hard ground wholly (docs/adr/0048).
+   */
+  readonly paved: number;
 }
 
 export const COVER_LOOK: Readonly<Record<Cover, CoverLook>> = {
-  [Cover.Open]: { relief: [0.08, 0.08, 0.04, 0.02], grass: 0.85, soil: 0.15, litter: 0 },
-  [Cover.Meadow]: { relief: [0.08, 0.07, 0.035, 0.015], grass: 1, soil: 0.05, litter: 0 },
-  [Cover.Farmland]: { relief: [0.1, 0.03, 0.015, 0.01], grass: 0.35, soil: 0.75, litter: 0 },
-  [Cover.Woodland]: { relief: [0.15, 0.14, 0.1, 0.05], grass: 0.15, soil: 0.2, litter: 0.9 },
-  [Cover.Scrub]: { relief: [0.08, 0.1, 0.08, 0.04], grass: 0.6, soil: 0.35, litter: 0.25 },
-  [Cover.Urban]: { relief: [0.02, 0.01, 0, 0], grass: 0.8, soil: 0.1, litter: 0 },
-  [Cover.Beach]: { relief: [0.06, 0.07, 0.03, 0.01], grass: 0.05, soil: 0.1, litter: 0 },
-  [Cover.Shingle]: { relief: [0.04, 0.04, 0.03, 0.015], grass: 0, soil: 0.1, litter: 0 },
-  [Cover.Rock]: { relief: [0.1, 0.12, 0.1, 0.06], grass: 0.1, soil: 0.3, litter: 0 },
-  [Cover.Mud]: { relief: [0.03, 0.03, 0.02, 0.01], grass: 0.1, soil: 0.4, litter: 0 },
-  [Cover.Military]: { relief: [0.06, 0.08, 0.07, 0.04], grass: 0.55, soil: 0.55, litter: 0 },
-  [Cover.Lawn]: { relief: [0.02, 0.02, 0.005, 0], grass: 1, soil: 0, litter: 0 },
-  [Cover.Orchard]: { relief: [0.05, 0.04, 0.02, 0.01], grass: 0.95, soil: 0.1, litter: 0.1 },
+  [Cover.Open]: { relief: [0.08, 0.08, 0.04, 0.02], grass: 0.95, soil: 0.05, litter: 0, paved: 0 },
+  [Cover.Meadow]: {
+    relief: [0.08, 0.07, 0.035, 0.015],
+    grass: 1,
+    soil: 0.02,
+    litter: 0,
+    paved: 0,
+  },
+  [Cover.Farmland]: {
+    relief: [0.1, 0.03, 0.015, 0.01],
+    grass: 0.35,
+    soil: 0.75,
+    litter: 0,
+    paved: 0,
+  },
+  [Cover.Woodland]: {
+    relief: [0.15, 0.14, 0.1, 0.05],
+    grass: 0.15,
+    soil: 0.2,
+    litter: 0.9,
+    paved: 0,
+  },
+  [Cover.Scrub]: {
+    relief: [0.08, 0.1, 0.08, 0.04],
+    grass: 0.75,
+    soil: 0.2,
+    litter: 0.25,
+    paved: 0,
+  },
+  // Towns: mostly paved; gardens and courtyards (field.ts) green.
+  [Cover.Urban]: { relief: [0.02, 0.01, 0, 0], grass: 0.85, soil: 0.03, litter: 0, paved: 0.75 },
+  [Cover.Beach]: { relief: [0.06, 0.07, 0.03, 0.01], grass: 0.05, soil: 0.1, litter: 0, paved: 0 },
+  [Cover.Shingle]: { relief: [0.04, 0.04, 0.03, 0.015], grass: 0, soil: 0.1, litter: 0, paved: 0 },
+  [Cover.Rock]: { relief: [0.1, 0.12, 0.1, 0.06], grass: 0.1, soil: 0.3, litter: 0, paved: 0 },
+  [Cover.Mud]: { relief: [0.03, 0.03, 0.02, 0.01], grass: 0.1, soil: 0.4, litter: 0, paved: 0 },
+  [Cover.Military]: {
+    relief: [0.06, 0.08, 0.07, 0.04],
+    grass: 0.9,
+    soil: 0.12,
+    litter: 0,
+    paved: 0,
+  },
+  [Cover.Lawn]: { relief: [0.02, 0.02, 0.005, 0], grass: 1, soil: 0, litter: 0, paved: 0 },
+  [Cover.Orchard]: {
+    relief: [0.05, 0.04, 0.02, 0.01],
+    grass: 0.95,
+    soil: 0.05,
+    litter: 0.1,
+    paved: 0,
+  },
+  // A small wood (a copse, garden or street trees): grass under the trees, a little litter.
+  [Cover.Copse]: {
+    relief: [0.04, 0.03, 0.02, 0.01],
+    grass: 0.8,
+    soil: 0.05,
+    litter: 0.3,
+    paved: 0,
+  },
+  // Car parks, squares, pedestrian areas, mapped carriageways and footways.
+  [Cover.Paved]: { relief: [0, 0, 0, 0], grass: 0, soil: 0, litter: 0, paved: 1 },
 };
 
 const LAND_USE_COVER: Readonly<Record<LandUseKind, Cover>> = {
@@ -62,6 +116,7 @@ const LAND_USE_COVER: Readonly<Record<LandUseKind, Cover>> = {
   military: Cover.Military,
   cemetery: Cover.Lawn,
   recreation: Cover.Lawn,
+  paved: Cover.Paved,
   other: Cover.Open,
   beach: Cover.Beach,
   shingle: Cover.Shingle,
@@ -75,6 +130,7 @@ const PRIORITY: Readonly<Record<Cover, number>> = {
   [Cover.Urban]: 1,
   [Cover.Military]: 1,
   [Cover.Lawn]: 2,
+  [Cover.Paved]: 2.5,
   [Cover.Farmland]: 3,
   [Cover.Meadow]: 3,
   [Cover.Orchard]: 3,
@@ -84,9 +140,22 @@ const PRIORITY: Readonly<Record<Cover, number>> = {
   [Cover.Rock]: 4,
   [Cover.Scrub]: 5,
   [Cover.Woodland]: 6,
+  [Cover.Copse]: 6,
 };
 
 export const COVER_CELL_M = 2;
+/** Woods smaller than this (m²) are copses: grass under the trees, not a forest floor. */
+export const COPSE_MAX_M2 = 2500;
+
+function ringArea(ring: readonly Vec2[]): number {
+  let s = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    if (a && b) s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s) / 2;
+}
 /** Cells this close to a building (metres) are built-up (roads get kerbs, not ditches). */
 export const BUILT_UP_REACH_M = 20;
 const BUILT_CELL_M = 8;
@@ -174,7 +243,12 @@ export function coverMap(
     });
   for (const v of [...features.vegetation].sort(byId))
     areas.push({
-      cover: v.kind === 'scrub' ? Cover.Scrub : Cover.Woodland,
+      cover:
+        v.kind === 'scrub'
+          ? Cover.Scrub
+          : ringArea(v.boundary) < COPSE_MAX_M2
+            ? Cover.Copse
+            : Cover.Woodland,
       rings: [v.boundary, ...(v.holes ?? [])],
       id: v.id,
     });
@@ -236,7 +310,8 @@ export function coverMap(
 /**
  * The cover's look at (x, y), blended bilinearly between the four nearest
  * cells, so relief and materials change smoothly across a boundary. Writes
- * [amp0, amp1, amp2, amp3, grass, soil, litter, urban] into `out`.
+ * [amp0, amp1, amp2, amp3, grass, soil, litter, urban, paved] into `out`
+ * (urban: 1 in towns and on mapped hard ground).
  */
 export function coverLookAt(map: CoverMap, x: number, y: number, out: Float64Array): void {
   const gx = (x - map.originX) / COVER_CELL_M - 0.5;
@@ -258,6 +333,7 @@ export function coverLookAt(map: CoverMap, x: number, y: number, out: Float64Arr
     out[4] = (out[4] ?? 0) + w * look.grass;
     out[5] = (out[5] ?? 0) + w * look.soil;
     out[6] = (out[6] ?? 0) + w * look.litter;
-    out[7] = (out[7] ?? 0) + w * (cov === Cover.Urban ? 1 : 0);
+    out[7] = (out[7] ?? 0) + w * (cov === Cover.Urban || cov === Cover.Paved ? 1 : 0);
+    out[8] = (out[8] ?? 0) + w * look.paved;
   }
 }

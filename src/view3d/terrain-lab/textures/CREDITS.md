@@ -25,6 +25,8 @@ asset data where it gives them; "est." marks our estimates.
 | `sand-*.jpg`    | sand           | ambientCG, Ground054          | 3.5      | CC0 1.0 | resized; channels packed |
 | `litter-*.jpg`  | forest litter  | ambientCG, ScatteredLeaves009 | 1.7      | CC0 1.0 | resized; channels packed |
 | `paving-*.jpg`  | concrete slabs | ambientCG, PavingStones112    | 2.5 est. | CC0 1.0 | resized; channels packed |
+| `lush-*.jpg`    | grass (lush)   | ambientCG, Grass001           | 1.4      | CC0 1.0 | resized; channels packed |
+| `dense-*.jpg`   | grass (dense)  | ambientCG, Grass002           | 1.4      | CC0 1.0 | resized; channels packed |
 
 "Channels packed" means the height map was stretched to the full range and the
 height, roughness and AO maps were combined into `-hra.jpg`.

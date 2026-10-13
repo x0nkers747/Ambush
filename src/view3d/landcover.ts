@@ -22,6 +22,7 @@ export const LAND_COVER_COLORS: Readonly<Record<LandCoverClass, number>> = {
   military: 0x9aa070,
   cemetery: 0x86996a,
   recreation: 0x8fa964,
+  paved: 0x9a978f,
   other: 0xa2a083,
   beach: 0xcdbb8e,
   shingle: 0x9b958a,

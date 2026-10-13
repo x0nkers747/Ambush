@@ -18,7 +18,16 @@ export {
 } from './field';
 export { Cover, COVER_LOOK, coverMap, RELIEF_WAVELENGTHS, type CoverMap } from './landcover';
 export { gradientNoise, hash01, hash2, smoothstep } from './noise';
-export { levelAt, nearestOnRoad, RoadSurface, type RoadStamp } from './roads';
+export {
+  DECK_CLEARANCE_M,
+  DECK_END_M,
+  DECK_SEAT_M,
+  DECK_THICKNESS_M,
+  deckHalfWidth,
+  deckIndex,
+  type DeckIndex,
+} from './decks';
+export { levelAt, nearestOnRoad, roadLevel, RoadSurface, type RoadStamp } from './roads';
 export {
   clipLine,
   clipRing,

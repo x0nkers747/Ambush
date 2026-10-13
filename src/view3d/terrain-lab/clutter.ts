@@ -22,6 +22,7 @@ import {
   SHORE_RANGE,
   type TerrainSurface,
 } from '#sim/terrain-lab';
+import { ROCK_FROM, SHOULDER_M } from './terrain-shader';
 
 // Near-field ground clutter (research §5.4): grass clumps, weeds, pebbles and
 // leaf litter, GPU-instanced (one draw call per kind), placed per 4 m cell
@@ -165,9 +166,38 @@ function clutterMaterial(options: {
   return { material: m, uniforms };
 }
 
+const dec = (v: number, lo: number, hi: number) => lo + (v / 255) * (hi - lo);
+/** Material fields at a point from the surface's level 0 tile (nearest sample), or null if it is not loaded. */
+export function groundFieldsAt(surface: TerrainSurface, x: number, y: number) {
+  const s = surface.spacing;
+  const I = Math.round((x - surface.originX) / s);
+  const J = Math.round((y - surface.originY) / s);
+  const tx = Math.floor(I / surface.cells);
+  const ty = Math.floor(J / surface.cells);
+  const t = surface.peek(0, tx, ty);
+  if (!t) return null;
+  const i = (J - ty * surface.cells + 1) * t.stride + (I - tx * surface.cells + 1);
+  const m = i * MATERIAL_BYTES;
+  const mat = t.material;
+  return {
+    road: dec(mat[m] ?? 0, ROAD_EDGE_RANGE[0], ROAD_EDGE_RANGE[1]),
+    shore: dec(mat[m + 1] ?? 0, SHORE_RANGE[0], SHORE_RANGE[1]),
+    building: dec(mat[m + 2] ?? 0, BUILDING_RANGE[0], BUILDING_RANGE[1]),
+    surf: (mat[m + 3] ?? 0) & 7,
+    shoreKind: ((mat[m + 3] ?? 0) >> 3) & 3,
+    urban: ((mat[m + 3] ?? 0) & 64) !== 0,
+    grass: (mat[m + 4] ?? 0) / 255,
+    soil: (mat[m + 5] ?? 0) / 255,
+    litter: (mat[m + 6] ?? 0) / 255,
+    wet: (mat[m + 7] ?? 0) / 255,
+  };
+}
+
 export interface Clutter {
   update(cameraX: number, cameraY: number, time: number, force?: boolean): void;
   setSettings(s: ClutterSettings): void;
+  /** Where something low covers the ground at (x, y), ground height z (bridge decks): nothing grows. */
+  setCovered(test: ((x: number, y: number, z: number) => boolean) | null): void;
   setVisible(on: boolean): void;
   readonly stats: { instances: number; triangles: number; rebuildMs: number };
   dispose(): void;
@@ -175,6 +205,7 @@ export interface Clutter {
 
 export function createClutter(surface: TerrainSurface, group: Group): Clutter {
   let settings = CLUTTER_QUALITY.medium;
+  let covered: ((x: number, y: number, z: number) => boolean) | null = null;
   const grassGeo = [grassClump(16, 0.22, 1), grassClump(12, 0.34, 2), grassClump(20, 0.16, 3)];
   const weedGeo = grassClump(5, 0.85, 4);
   const pebbleGeo = new IcosahedronGeometry(1, 0);
@@ -224,32 +255,7 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
   const tmp = new Object3D();
   const leafColour = new Color();
 
-  const dec = (v: number, lo: number, hi: number) => lo + (v / 255) * (hi - lo);
-  /** Material fields at a point from the level 0 tile (nearest sample), or null if not loaded. */
-  const fieldsAt = (x: number, y: number) => {
-    const s = surface.spacing;
-    const I = Math.round((x - surface.originX) / s);
-    const J = Math.round((y - surface.originY) / s);
-    const tx = Math.floor(I / surface.cells);
-    const ty = Math.floor(J / surface.cells);
-    const t = surface.peek(0, tx, ty);
-    if (!t) return null;
-    const i = (J - ty * surface.cells + 1) * t.stride + (I - tx * surface.cells + 1);
-    const m = i * MATERIAL_BYTES;
-    const mat = t.material;
-    return {
-      road: dec(mat[m] ?? 0, ROAD_EDGE_RANGE[0], ROAD_EDGE_RANGE[1]),
-      shore: dec(mat[m + 1] ?? 0, SHORE_RANGE[0], SHORE_RANGE[1]),
-      building: dec(mat[m + 2] ?? 0, BUILDING_RANGE[0], BUILDING_RANGE[1]),
-      surf: (mat[m + 3] ?? 0) & 7,
-      shoreKind: ((mat[m + 3] ?? 0) >> 3) & 3,
-      urban: ((mat[m + 3] ?? 0) & 64) !== 0,
-      grass: (mat[m + 4] ?? 0) / 255,
-      soil: (mat[m + 5] ?? 0) / 255,
-      litter: (mat[m + 6] ?? 0) / 255,
-      wet: (mat[m + 7] ?? 0) / 255,
-    };
-  };
+  const fieldsAt = (x: number, y: number) => groundFieldsAt(surface, x, y);
 
   const rebuild = (cx: number, cy: number) => {
     const started = performance.now();
@@ -294,9 +300,20 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
           const f = fieldsAt(x, y);
           if (!f) continue;
           if (f.shore < 0.15 || f.building < 0.5) continue;
-          const onRoad = f.surf !== RoadSurface.None && f.road < (f.urban ? 1.3 : 0.5);
+          // The carriageway and its shoulder, as wide as the ground's shader
+          // draws them (and a little more).
+          const bare =
+            f.surf === RoadSurface.None
+              ? -99
+              : (f.urban
+                  ? SHOULDER_M.urban
+                  : f.surf === RoadSurface.Asphalt
+                    ? SHOULDER_M.asphalt
+                    : SHOULDER_M.other) + 0.15;
+          const onRoad = f.road < bare;
           const roll = hash01(c * 131 + i, r, 3);
           const z = surface.heightAt(x, y);
+          if (covered?.(x, y, z)) continue;
           const yaw = hash01(c * 131 + i, r, 4) * Math.PI * 2;
           if (onRoad) {
             // Track centres grow grass; carriageways and pavements nothing; shoulders some pebbles.
@@ -315,8 +332,19 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
               );
             continue;
           }
-          const grassy =
-            f.grass * (1 - f.wet * 0.5) * (f.urban ? 0.45 : 1) * (f.shore < 1.2 ? 0.2 : 1);
+          // Thinner on the worn verge beside a road; none where slopes show rock.
+          const verge = bare < 0 ? 1 : Math.min(1, (f.road - bare) / 1.6);
+          let grassy =
+            f.grass *
+            (1 - f.wet * 0.5) *
+            (f.urban ? 0.45 : 1) *
+            (f.shore < 1.2 ? 0.2 : 1) *
+            (0.35 + 0.65 * verge);
+          if (grassy > 0 && roll < grassy * 0.9) {
+            const gx = surface.heightAt(x + 0.5, y) - surface.heightAt(x - 0.5, y);
+            const gy = surface.heightAt(x, y + 0.5) - surface.heightAt(x, y - 0.5);
+            if (1 - 1 / Math.sqrt(1 + gx * gx + gy * gy) > ROCK_FROM - 0.03) grassy = 0;
+          }
           if (roll < grassy * 0.9) {
             const k = kinds.grass[(i + c + r) % 3] ?? kinds.weed;
             // Taller in meadows and verges than on lawns; a little longer further out, to fill the view.
@@ -416,6 +444,10 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
     },
     setSettings(s) {
       settings = s;
+      lastX = Infinity;
+    },
+    setCovered(test) {
+      covered = test;
       lastX = Infinity;
     },
     setVisible(on) {

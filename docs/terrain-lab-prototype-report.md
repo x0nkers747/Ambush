@@ -44,7 +44,7 @@ same camera:
 
 - Procedural relief barely reads at eye height.
 - Built-up shores have no quay walls.
-- Dense battlefields get structures only around the test area.
+- Dense battlefields are slow to load (Amsterdam about 53 s) and heavy (about 2.6 GB of JS heap).
 - Cross-engine determinism is proven only on V8 (Node and Chrome); Firefox and Edge were not
   tested.
 
@@ -86,7 +86,7 @@ address. A test enforces that (`src/app/terrain-lab-isolation.test.ts`).
 | Tiled surface      | `src/sim/terrain-lab/surface.ts`                                                                                 | 64 m tiles, 0.5 m or 1 m lattice, LRU cache, min/max blocks, exact tracer                                                       |
 | Structures' ground | `src/sim/terrain-lab/structures.ts`                                                                              | A `TerrainDataset` sampled from the lab surface, so the game's own generators place buildings, bridges, details and trees on it |
 | CDLOD renderer     | `src/view3d/terrain-lab/terrain-renderer.ts`, `terrain-shader.ts`                                                | One 32 × 32 grid instanced per node, one draw call; heights and material fields in tile atlases                                 |
-| Materials          | `terrain-shader.ts`, `ground-textures.ts`, `textures/`                                                           | 9 CC0 PBR materials at 1024 px                                                                                                  |
+| Materials          | `terrain-shader.ts`, `ground-textures.ts`, `textures/`                                                           | 11 CC0 PBR materials at 1024 px                                                                                                 |
 | Clutter            | `clutter.ts`                                                                                                     | Grass, weeds, pebbles, leaves; 6 instanced draw calls                                                                           |
 | Water              | `water.ts`                                                                                                       | The game's opaque water material; sheets at the water grading's levels; ribbons for channels                                    |
 | Workers            | `tile.worker.ts`, `tile-pool.ts`                                                                                 | Each worker compiles the same field; tiles transferred                                                                          |
@@ -105,7 +105,8 @@ The field is `height(x, y)` and `sample(x, y)`, which also gives material fields
 - **Constraints.** All are continuous functions of distance, so none depends on a lattice:
   - **Roads** are profiled along their length (smoothed DEM, depth-limited, pinned at junctions
     in rank order, bridges laid straight between their ends). Their cross-sections give:
-    - a cambered carriageway;
+    - a level carriageway (no camber); roads meet level at junctions and crossings, a joining road
+      easing onto the main road's grade near the junction;
     - a shoulder, or a pavement in built-up areas;
     - a parabolic ditch, which fades out on embankments;
     - cut and fill slopes, which fade out after their reach;
@@ -187,10 +188,36 @@ The field is `height(x, y)` and `sample(x, y)`, which also gives material fields
   - Quality: low 25 m, medium 40 m, high 60 m.
 - **Structures.**
   - The game's own generators run on a `TerrainDataset` sampled from the lab surface: buildings
-    (walls to the pad, plinth band), bridges (decks from `planBridges`, piers to the lab
-    ground), road markings, roadside details and trees.
-  - The battlefield is sampled at 2 m from the workers' tiles. Dense battlefields (more than
-    20,000 buildings) use only the test area plus 150 m, at 1 m.
+    (walls to the pad, plinth band), road markings, roadside details and trees.
+  - **Bridges** are the lab's own (`decks.ts`, `lab-bridges.ts`), not the game's plan: each deck's
+    top is its bridge road's profile, which meets the approach roads' levels exactly. The field
+    holds the ground under a deck below its underside (an exact clamp, so nothing changes past
+    its ends), seating the deck on the road for its first 0.5 m. Decks have parapets (roads) or
+    railings (footbridges), abutments and piers. Markings the game lifted onto its decks are
+    re-seated on the lab's.
+  - **Trees from aerial imagery** (Quantico): USGS NAIP imagery (public domain, 0.3–0.6 m,
+    with near infrared) over 8 km, classified for tree cover by a naive Bayes model on NDVI,
+    brightness and texture, trained on OSM's woods and open grass. Four levels were compared on
+    1 m crops and level 3 chosen: 15 % of known grass called trees, 87 % of woodland pixels
+    found, 5 × 5 smoothing, areas from 40 m² (one large crown). Cover OSM lacks (away from
+    mapped vegetation, buildings, roads, water and paving) is traced as polygons (3,979 areas,
+    5.5 km²), kept in `lab-data/extra-vegetation.json` (UTM) and added in memory to any
+    battlefield in the same UTM zone. Woods under 2,500 m² are copses: grass under the trees.
+  - **Vegetation** is the lab's own (`lab-vegetation.ts`, `tree-models.ts`, `foliage-atlas.ts`) on
+    the game's placement (spacing, stands, edges, exclusions). Each plant becomes a species of
+    the Quantico area: white, red and chestnut oak, tulip poplar, red maple, sweetgum, beech,
+    hickory, loblolly and Virginia pine, eastern red cedar, dogwood and holly, and mountain
+    laurel, spicebush, blueberry and greenbrier as shrubs. Species grow in stands. Models are
+    procedural: bark trunks and limbs and crowns of leaf-cluster cards, two shapes per species,
+    three levels (near within 45 m, medium within 320 m). The texture atlas is drawn in the
+    browser at start-up, with mipmaps that keep leaf coverage at a distance. Under the canopy an
+    understorey (laurel thickets, fern patches, shrubs, saplings) grows round the camera within
+    80 m, from the ground's material tiles, a little each frame. Instance buffers are double
+    buffered and only uploaded when they change. Benchmark, Quantico, vsync on: walking 16.7 ms
+    mean (p99 26 ms), orbit p99 42 ms. Uncapped, buffer updates wait on the GPU's queue (p99
+    about 250 ms); this needs profiling before any integration.
+  - The battlefield is sampled at 2 m from the workers' tiles, everywhere (dense battlefields
+    too: Amsterdam loads in about 53 s, with a JS heap of about 2.6 GB).
   - The game's draped roads and water are hidden: the lab's ground and water draw them.
 
 ## 3. Test areas
@@ -352,7 +379,7 @@ the problem.
   - **Normal maps and parallax** (about ±2 cm of apparent depth) are visual only.
 - **Structures.** Buildings, bridges and trees stand on a 1–2 m sampling of the same surface,
   equal to it at its samples.
-- **Units on bridges.** Walking over bridges uses the planned decks (`bridgeIndex`), not a
+- **Units on bridges.** Walking over bridges uses the lab's decks (`deckIndex`), not a
   simulated layer (stage 6).
 
 ## 8. What worked, what did not
@@ -394,13 +421,13 @@ the problem.
 4. **Random `heightAt` is 2–3× slower** than today's, from tile lookups and cache misses.
 5. **Built-up water.** Amsterdam's canals get sloped banks, not quays: the field cannot hold a
    vertical step. Quays must be structures, as research §5.6 says.
-6. **Structure coverage.** On dense battlefields, buildings and trees are generated only in the
-   test area. Distant Amsterdam views are bare.
+6. **Structure cost.** Dense battlefields get buildings and trees everywhere, but slowly and with
+   much memory: Amsterdam takes about 53 s to load and about 2.6 GB of JS heap.
 7. **Viewpoints are found automatically, and some are poor.** Amsterdam's shoreline view
    stands on a bridge, and Grafenwöhr's bridge view is half wall.
 8. **Woodland floor** is darker than the current renderer's.
 9. **Stalls** of about 150 ms occur in all modes.
-10. **Repository size.** The textures add 11 MB.
+10. **Repository size.** The textures add 14 MB.
 
 ## 9. Recommendation
 

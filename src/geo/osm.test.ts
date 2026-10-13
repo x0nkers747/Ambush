@@ -197,6 +197,44 @@ describe('OSM import rules', () => {
     ]);
   });
 
+  it('imports paved ground and green leisure areas, by their tags and surface (docs/adr/0048)', () => {
+    const data: OverpassResponse = {
+      elements: [
+        way(50, { amenity: 'parking' }, sq(-300, 0, 30)),
+        way(51, { amenity: 'parking', surface: 'grass' }, sq(-150, 0, 30)),
+        way(52, { place: 'square' }, sq(0, 0, 30)),
+        way(53, { highway: 'pedestrian', area: 'yes' }, sq(150, 0, 30)),
+        way(54, { 'area:highway': 'footway' }, sq(300, 0, 30)),
+        way(55, { 'area:highway': 'verge' }, sq(-300, 200, 30)),
+        way(56, { leisure: 'park' }, sq(-150, 200, 30)),
+        way(57, { leisure: 'pitch', surface: 'asphalt' }, sq(0, 200, 30)),
+        way(58, { leisure: 'pitch' }, sq(150, 200, 30)),
+        way(59, { landcover: 'grass' }, sq(300, 200, 30)),
+        // A multi-storey car park is a building, not ground.
+        way(60, { amenity: 'parking', building: 'parking' }, sq(0, -200, 30)),
+      ],
+    };
+    const { features } = featuresFromOsm(data, QUANTICO);
+    expect(features.landUse.map((l) => [l.id, l.kind])).toEqual([
+      ['osm-w50', 'paved'],
+      ['osm-w51', 'meadow'],
+      ['osm-w52', 'paved'],
+      ['osm-w53', 'paved'],
+      ['osm-w54', 'paved'],
+      ['osm-w55', 'meadow'],
+      ['osm-w56', 'recreation'],
+      ['osm-w57', 'paved'],
+      ['osm-w58', 'recreation'],
+      ['osm-w59', 'meadow'],
+    ]);
+    expect(features.buildings.map((b) => b.id)).toEqual(['osm-w60']);
+    // A pedestrian area is ground, not a road along its outline.
+    expect(features.roads).toEqual([]);
+    expect(overpassQuery([{ south: 0, west: 0, north: 1, east: 1 }])).toMatch(
+      /way\["amenity"="parking"\].*\n.*/,
+    );
+  });
+
   it('maps tags to classes, widths and heights', () => {
     const line = [
       { x: -100, y: 0 },

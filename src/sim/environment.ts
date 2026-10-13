@@ -250,6 +250,8 @@ export type LandUseKind =
   | 'military'
   | 'cemetery'
   | 'recreation'
+  /** Hard ground: car parks, squares, pedestrian areas, mapped carriageway and footway outlines (docs/adr/0048). */
+  | 'paved'
   | 'other'
   // Bare shores and ground (docs/adr/0040): sand beaches and dunes, shingle
   // and pebble beaches, bare rock and scree, mud flats.

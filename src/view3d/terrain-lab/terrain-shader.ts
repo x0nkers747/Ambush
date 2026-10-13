@@ -1,5 +1,12 @@
 import { MATERIAL_TILE_M, MATERIALS } from './ground-textures';
 
+/** Shoulder or pavement widths beside a carriageway, metres: urban, rural asphalt, other surfaces. */
+export const SHOULDER_M = { urban: 1.25, asphalt: 0.85, other: 0.45 } as const;
+/** Slope (1 − the normal's up component) from which steep ground starts to show rock. */
+export const ROCK_FROM = 0.3;
+/** Where the ground's fine detail starts to fade by default, metres (`labDetail`). */
+export const DETAIL_DEFAULT_M = 60;
+
 // GLSL for the lab terrain, spliced into three's MeshStandardMaterial so its
 // lighting, shadows, fog and tone mapping are the game's own.
 //
@@ -89,6 +96,7 @@ uniform float labStride;
 uniform float labCells;
 uniform int labDebug;       // 0 off, 1 LOD levels, 2 tile edges, 3 material fields
 uniform int labAdvanced;    // 1: hex tiling, height blending, detail
+uniform float labDetail;    // where fine detail starts to fade, metres (gone at 3×)
 uniform vec3 labCam;
 uniform vec4 labBounds;     // minX, minY, maxX, maxY
 uniform vec3 labTint[${String(MATERIALS.length)}];
@@ -211,43 +219,82 @@ void labMaterial() {
   float w[${String(MATERIALS.length)}];
   for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] = 0.0;
   float cover = max(B.r + B.g + B.b, 0.001);
-  // Land cover, with patchy variation.
-  w[3] = B.r * (0.75 + 0.5 * n2);
-  w[2] = B.g * (0.7 + 0.6 * (1.0 - n2));
+  // Land cover. Grass in three textures (grass, lush, dense), blended in
+  // broad patches tens of metres across; bare soil only in large patches.
+  float lush = smoothstep(0.25, 0.85, labNoise(vMap.xy * 0.03 + 17.0));
+  float dense = smoothstep(0.3, 0.9, labNoise(vMap.xy * 0.05 + 41.0));
+  w[3] = B.r * (1.0 - lush) * (1.0 - dense);
+  w[9] = B.r * lush;
+  w[10] = B.r * (1.0 - lush) * dense;
+  w[2] = B.g * smoothstep(0.35, 0.65, labNoise(vMap.xy * 0.06 + 5.0));
   w[7] = B.b;
-  // Moderate slopes show earth; steep ones rock.
+  // Steeper slopes show some earth; steep ones rock.
   float slope = 1.0 - n.z;
-  w[2] += smoothstep(0.22, 0.4, slope + (n2 - 0.5) * 0.1) * 0.6;
-  float rock = smoothstep(0.3, 0.45, slope + (n1 - 0.5) * 0.06);
-  // Damp ground: ditches, banks.
-  w[4] += B.a * B.a * 0.9;
+  w[2] += smoothstep(0.28, 0.42, slope + (n2 - 0.5) * 0.1) * 0.35;
+  float rock = smoothstep(${ROCK_FROM.toFixed(2)}, ${(ROCK_FROM + 0.15).toFixed(2)}, slope + (n1 - 0.5) * 0.06);
+  // Surface codes blended between the four samples around (not the nearest),
+  // so where one surface meets another the boundary is smooth, not stepped by
+  // the lattice: road surfaces (sw) and paved ground (docs/adr/0048).
+  float sw[8];
+  for (int i = 0; i < 8; i++) sw[i] = 0.0;
+  float paved = 0.0;
+  {
+    vec2 cell = floor(vLattice);
+    vec2 fr = vLattice - cell;
+    for (int k = 0; k < 4; k++) {
+      ivec2 o = ivec2(k & 1, k >> 1);
+      int c = int(texelFetch(labMatA, ivec3(ivec2(cell) + o + 1, layer), 0).a * 255.0 + 0.5);
+      float wk = (o.x == 1 ? fr.x : 1.0 - fr.x) * (o.y == 1 ? fr.y : 1.0 - fr.y);
+      sw[c & 7] += wk;
+      if ((c & 128) != 0) paved += wk;
+    }
+  }
+  // Paved ground: towns' pavements, forecourts and yards, squares, car parks.
+  paved = smoothstep(0.3, 0.7, paved);
+  if (paved > 0.0) {
+    for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= 1.0 - paved;
+    w[8] += paved;
+  }
+  // Damp ground (ditches, banks): a little mud; mostly darker grass (below).
+  w[4] += B.a * B.a * 0.35;
 
-  // Roads: carriageway, shoulder or pavement, worn verge.
+  // Roads: carriageway and shoulder or pavement with exact, straight edges;
+  // then a worn, ragged verge.
   float road = 0.0;
+  float hard = 0.0;
   if (surf != 0) {
-    float e = roadE + (n1 - 0.5) * 0.14 + (n2 - 0.5) * 0.1;
-    road = 1.0 - smoothstep(-0.03, 0.03, e);
-    float shW = urban ? 1.25 : (surf == 1 ? 0.85 : 0.45);
-    float shoulder = (1.0 - road) * (1.0 - smoothstep(shW - 0.12, shW + 0.12, e + (n1 - 0.5) * 0.25));
+    float e = roadE;
+    // Tracks and dirt paths: a slightly softer edge.
+    float soft = surf >= 4 ? 0.12 : 0.02;
+    road = 1.0 - smoothstep(-soft, soft, e);
+    float shW = urban ? ${SHOULDER_M.urban.toFixed(2)} : (surf == 1 ? ${SHOULDER_M.asphalt.toFixed(2)} : ${SHOULDER_M.other.toFixed(2)});
+    float shoulder = (1.0 - road) * (1.0 - smoothstep(shW - soft, shW + soft, e));
+    hard = road + shoulder;
     float verge = (1.0 - road - shoulder) * (1.0 - smoothstep(0.0, 1.6, e - shW + (n2 - 0.5) * 0.8));
     float keep = 1.0 - road - shoulder;
     for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= keep;
-    if (surf == 1) w[0] += road;
-    else if (surf == 2) w[8] += road;
-    else if (surf == 3) w[1] += road;
-    else if (surf == 5) w[2] += road;
-    else if (surf == 4) {
-      // Track: grass down the middle, earth in the wheel ruts.
-      float mid = 1.0 - smoothstep(-1.05, -0.8, roadE + (n1 - 0.5) * 0.2);
-      w[3] += road * mid;
-      w[2] += road * (1.0 - mid) * 0.8;
-      w[1] += road * (1.0 - mid) * 0.2;
+    float swSum = 0.0;
+    for (int i = 1; i < 6; i++) {
+      sw[i] = smoothstep(0.2, 0.8, sw[i]);
+      swSum += sw[i];
     }
-    if (urban && surf != 4 && surf != 5) w[8] += shoulder;
-    else if (surf == 1 || surf == 3) w[1] += shoulder;
-    else w[2] += shoulder;
-    w[2] += verge * 0.35;
-    w[1] += verge * 0.1 * (surf == 1 ? 1.0 : 0.0);
+    for (int i = 1; i < 6; i++) sw[i] = swSum > 0.0 ? sw[i] / swSum : (i == surf ? 1.0 : 0.0);
+    w[0] += road * sw[1];
+    w[8] += road * sw[2];
+    w[1] += road * sw[3];
+    w[2] += road * sw[5];
+    // Track: grass down the middle, earth in the wheel ruts.
+    float mid = 1.0 - smoothstep(-1.05, -0.8, roadE + (n1 - 0.5) * 0.2);
+    w[3] += road * sw[4] * mid;
+    w[2] += road * sw[4] * (1.0 - mid) * 0.8;
+    w[1] += road * sw[4] * (1.0 - mid) * 0.2;
+    // Shoulders: paving in towns, gravel beside asphalt and gravel roads, earth otherwise.
+    float paved = sw[1] + sw[2] + sw[3];
+    w[8] += shoulder * (urban ? paved : 0.0);
+    w[1] += shoulder * (urban ? 0.0 : sw[1] + sw[3]);
+    w[2] += shoulder * (sw[4] + sw[5] + (urban ? 0.0 : sw[2]));
+    w[2] += verge * 0.2;
+    w[1] += verge * 0.1 * sw[1];
   }
   // Shores: sand or mud at the water's edge.
   float bankW = shoreKind == 1 ? 1.4 : 0.6;
@@ -264,7 +311,7 @@ void labMaterial() {
   float drip = (1.0 - smoothstep(0.35, 0.65, bld + (n1 - 0.5) * 0.15)) * (1.0 - road);
   for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= (1.0 - drip);
   if (urban) w[8] += drip; else w[1] += drip;
-  float trodden = (1.0 - smoothstep(0.5, 2.0, bld)) * (1.0 - drip) * 0.4;
+  float trodden = (1.0 - smoothstep(0.5, 2.0, bld)) * (1.0 - drip) * 0.2;
   w[2] += trodden;
 
   // The three strongest, blended by height.
@@ -276,7 +323,7 @@ void labMaterial() {
     else if (v > b1) { b2 = b1; m2 = m1; b1 = v; m1 = i; }
     else if (v > b2) { b2 = v; m2 = i; }
   }
-  float far = smoothstep(120.0, 220.0, dist);
+  float far = smoothstep(labDetail * 2.0, labDetail * 3.7, dist);
   // Parallax near one's feet: the strongest material's height shifts where
   // all three are read, so stones and cobbles stand out of the ground.
   vec2 at = vMap.xy;
@@ -299,21 +346,23 @@ void labMaterial() {
   if (labAdvanced == 1) {
     vec3 hh = vec3(s0.hra.r, s1.hra.r, s2.hra.r) * 0.6 + bw;
     float top = max(hh.x, max(hh.y, hh.z)) - 0.18;
-    bw = max(hh - top, 0.0);
-    bw /= max(bw.x + bw.y + bw.z, 1e-4);
+    vec3 byHeight = max(hh - top, 0.0);
+    byHeight /= max(byHeight.x + byHeight.y + byHeight.z, 1e-4);
+    // Not across a carriageway's or shoulder's edge: those stay straight.
+    bw = mix(byHeight, bw, smoothstep(0.0, 0.05, hard));
   }
   vec3 albedo = s0.albedo * bw.x + s1.albedo * bw.y + s2.albedo * bw.z;
   vec3 tn = (s0.normal * bw.x + s1.normal * bw.y + s2.normal * bw.z) * 2.0 - 1.0;
   vec3 hra = s0.hra * bw.x + s1.hra * bw.y + s2.hra * bw.z;
   // Grass and litter are too smooth in their maps: rough ground.
   float rough = hra.g;
-  if (m0 == 3 || m0 == 7) rough = mix(rough, 0.92, 0.7);
+  if (m0 == 3 || m0 == 7 || m0 == 9 || m0 == 10) rough = mix(rough, 0.92, 0.7);
   // Mud is wet: smoother, so it catches the light.
   rough = mix(rough, 0.42, bw.x * (m0 == 4 ? 1.0 : 0.0) + bw.y * (m1 == 4 ? 1.0 : 0.0) + bw.z * (m2 == 4 ? 1.0 : 0.0));
   // Tangent frame: map x east, y north, along the ground.
   vec3 T = normalize(vec3(1.0, 0.0, 0.0) - n * n.x);
   vec3 Bt = cross(n, T);
-  float detail = labAdvanced == 1 ? (1.0 - smoothstep(60.0, 180.0, dist)) : 0.4;
+  float detail = labAdvanced == 1 ? (1.0 - smoothstep(labDetail, labDetail * 3.0, dist)) : 0.4;
   vec3 nm = normalize(T * tn.x * detail + Bt * tn.y * detail + n * max(tn.z, 0.2));
   if (rock > 0.001) {
     LabSample r = labRock(vMap, n, gpx, gpy);
@@ -324,8 +373,8 @@ void labMaterial() {
   }
   // Broad variation: drier and greener patches, tens of metres across.
   vec3 tint = mix(vec3(1.06, 1.02, 0.86), vec3(0.9, 1.0, 0.97), n3);
-  albedo *= mix(vec3(1.0), tint, clamp(w[3] / cover, 0.0, 1.0) * 0.9 + 0.1);
-  albedo *= 0.9 + 0.2 * n2;
+  albedo *= mix(vec3(1.0), tint, clamp(B.r / cover, 0.0, 1.0) * 0.9 + 0.1);
+  albedo *= 0.95 + 0.1 * n2;
   // Damp: darker and smoother.
   albedo *= mix(1.0, 0.62, damp);
   rough = mix(rough, 0.45, damp * 0.8);

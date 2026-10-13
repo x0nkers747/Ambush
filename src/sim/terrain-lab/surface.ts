@@ -102,7 +102,7 @@ export const BUILDING_RANGE = [0, 8] as const;
 /**
  * Generates one tile: every sample is `field.sample` at its lattice point.
  * Material bytes per sample: road edge distance, shore distance, building
- * distance, surface codes (road surface | shore kind << 3), grass, soil,
+ * distance, surface codes (road surface | shore kind << 3 | urban 64 | paved 128), grass, soil,
  * litter, wetness.
  */
 export function generateTile(
@@ -144,7 +144,8 @@ export function generateTile(
       material[m] = enc(s.roadEdge, ROAD_EDGE_RANGE[0], ROAD_EDGE_RANGE[1]);
       material[m + 1] = enc(s.shore, SHORE_RANGE[0], SHORE_RANGE[1]);
       material[m + 2] = enc(s.building, BUILDING_RANGE[0], BUILDING_RANGE[1]);
-      material[m + 3] = s.roadSurface | (s.shoreKind << 3) | (s.urban > 0.5 ? 64 : 0);
+      material[m + 3] =
+        s.roadSurface | (s.shoreKind << 3) | (s.urban > 0.5 ? 64 : 0) | (s.paved > 0 ? 128 : 0);
       material[m + 4] = enc(s.grass, 0, 1);
       material[m + 5] = enc(s.soil, 0, 1);
       material[m + 6] = enc(s.litter, 0, 1);

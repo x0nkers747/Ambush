@@ -137,6 +137,7 @@ const NATURAL: Readonly<Record<LandCoverClass | 'none', boolean>> = {
   industrial: false,
   cemetery: false,
   recreation: false,
+  paved: false,
   other: false,
   beach: true,
   shingle: true,
@@ -158,6 +159,8 @@ const RECIPES: Readonly<Record<Exclude<LandCoverClass, 'farmland' | 'woodland'> 
     industrial: { weights: { gravel: 0.55, earth: 0.25, meadow: 0.2 }, dry: 0.5 },
     cemetery: { weights: { grass: 0.9, meadow: 0.1 } },
     recreation: { weights: { grass: 0.9, meadow: 0.1 } },
+    // Paving: grey, the nearest of the ground's layers being gravel and rock.
+    paved: { weights: { gravel: 0.75, rock: 0.25 }, dry: 0.3 },
     other: { weights: { meadow: 0.5, earth: 0.3, gravel: 0.2 }, dry: 0.5 },
     treeLine: { weights: { leaves: 0.45, grass: 0.35, meadow: 0.2 } },
     // Sparse grass over soil.

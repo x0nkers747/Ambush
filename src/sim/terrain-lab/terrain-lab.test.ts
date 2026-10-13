@@ -11,6 +11,11 @@ import {
   clipLine,
   clipRing,
   compileField,
+  DECK_CLEARANCE_M,
+  DECK_END_M,
+  DECK_SEAT_M,
+  DECK_THICKNESS_M,
+  deckHalfWidth,
   createSurface,
   emptySample,
   generateTile,
@@ -176,7 +181,7 @@ function largestStep(f: TerrainField, a: Vec2, b: Vec2): number {
 describe('terrain lab: the field', () => {
   const s = emptySample();
 
-  it('holds a road level across its carriageway, with camber, and marks its surface', () => {
+  it('holds a road level across its carriageway and marks its surface', () => {
     const road = field.roads.find((r) => r.id === 'road-w');
     if (!road) throw new Error('no road');
     const near = nearestOnRoad(road, -120, -20);
@@ -184,8 +189,8 @@ describe('terrain lab: the field', () => {
     field.sample(-120, -20, s);
     expect(s.h).toBeCloseTo(level, 9);
     field.sample(-120, -17.5, s);
-    // 2.5 m from the centre at 2.5 % cross fall.
-    expect(s.h).toBeCloseTo(level - 0.025 * 2.5, 9);
+    // Flat across: no camber.
+    expect(s.h).toBeCloseTo(level, 9);
     expect(s.roadSurface).toBe(RoadSurface.Asphalt);
     expect(s.roadEdge).toBeCloseTo(-0.5, 6);
   });
@@ -207,6 +212,25 @@ describe('terrain lab: the field', () => {
     field.sample(0, -20, s);
     expect(s.h).toBeLessThan(mid - 1);
     expect(s.shore).toBeLessThan(0);
+  });
+
+  it('keeps the ground under a deck below its underside, meeting the road at its ends', () => {
+    const bridge = field.roads.find((r) => r.id === 'road-b');
+    if (!bridge) throw new Error('no bridge');
+    const half = deckHalfWidth(bridge);
+    const inner = DECK_SEAT_M + DECK_END_M;
+    for (let x = -6 + inner; x <= 6 - inner; x += 0.25)
+      for (let dy = -half; dy <= half; dy += 0.25) {
+        const top = levelAt(bridge, x + 6);
+        expect(field.height(x, -20 + dy)).toBeLessThanOrEqual(
+          top - DECK_THICKNESS_M - DECK_CLEARANCE_M + 1e-6,
+        );
+      }
+    // At each end the ground is the road's (just under the deck's seat).
+    for (const x of [-6, 6]) {
+      const top = levelAt(bridge, x + 6);
+      expect(Math.abs(field.height(x, -20) - top)).toBeLessThan(0.05);
+    }
   });
 
   it('levels a pad under the house and keeps it to its apron', () => {
@@ -293,6 +317,111 @@ describe('terrain lab: the field', () => {
     // Conservative: relief stays within half a metre of the smooth DEM.
     expect(diffFlat).toBeGreaterThan(0.02);
     expect(diffFlat).toBeLessThan(0.5);
+  });
+});
+
+describe('terrain lab: roads meet level', () => {
+  // A lane across a hillside; a major road ending on it (outranking it), a
+  // track crossing it with no shared point, and a road stopping short of it.
+  const roads: EnvironmentFeatures = {
+    roads: [
+      {
+        id: 'lane',
+        roadClass: 'paved',
+        widthMeters: 6,
+        centerline: [
+          { x: -150, y: 0 },
+          { x: 150, y: 0 },
+        ],
+      },
+      {
+        id: 'main',
+        roadClass: 'major',
+        widthMeters: 8,
+        centerline: [
+          { x: -60, y: 150 },
+          { x: -60, y: 0 },
+        ],
+      },
+      {
+        id: 'cross',
+        roadClass: 'track',
+        widthMeters: 3,
+        centerline: [
+          { x: 40, y: -150 },
+          { x: 40, y: 150 },
+        ],
+      },
+      {
+        id: 'stub',
+        roadClass: 'paved',
+        widthMeters: 6,
+        centerline: [
+          { x: 100, y: -150 },
+          { x: 100, y: -5.5 },
+        ],
+      },
+    ],
+    buildings: [],
+    vegetation: [],
+  };
+  const hill = (x: number, y: number) => 100 + 0.08 * y + 2 * Math.sin(x / 30);
+  const terrain = createSyntheticTerrain(
+    { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
+    hill,
+    roads,
+  );
+  const f = compileField(
+    { heightfield: terrain.heightfield, features: terrain.features, water: null },
+    { seed: 3, relief: 1 },
+  );
+  const stamp = (id: string) => {
+    const r = f.roads.find((q) => q.id === id);
+    if (!r) throw new Error(`no ${id}`);
+    return r;
+  };
+  const levelNear = (id: string, x: number, y: number) => {
+    const r = stamp(id);
+    return levelAt(r, nearestOnRoad(r, x, y).s);
+  };
+
+  it('bends a lower road to a higher one ending on it, at crossings too', () => {
+    const lane = levelNear('lane', -60, 0);
+    expect(Math.abs(levelNear('main', -60, 0) - lane)).toBeLessThan(0.01);
+    expect(Math.abs(levelNear('cross', 40, 0) - levelNear('lane', 40, 0))).toBeLessThan(0.01);
+    // The stub ends on the lane's shoulder: it is pinned to the lane too.
+    expect(Math.abs(levelNear('stub', 100, -5.5) - levelNear('lane', 100, 0))).toBeLessThan(0.01);
+  });
+
+  it('has no steps where road surfaces overlap', () => {
+    const lines: [Vec2, Vec2][] = [
+      [
+        { x: -75, y: 0 },
+        { x: -45, y: 0 },
+      ],
+      [
+        { x: -60, y: -3.5 },
+        { x: -60, y: 20 },
+      ],
+      [
+        { x: 25, y: 0 },
+        { x: 55, y: 0 },
+      ],
+      [
+        { x: 40, y: -20 },
+        { x: 40, y: 20 },
+      ],
+      [
+        { x: 100, y: -20 },
+        { x: 100, y: 3.5 },
+      ],
+      [
+        { x: 85, y: -3.5 },
+        { x: 115, y: -3.5 },
+      ],
+    ];
+    // On the surfaces, every 5 cm: at most a 40 % grade.
+    for (const [a, b] of lines) expect(largestStep(f, a, b)).toBeLessThan(0.02);
   });
 });
 

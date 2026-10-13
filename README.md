@@ -303,3 +303,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 45. [Memory on large battlefields](docs/adr/0045-memory-on-large-battlefields.md)
 46. [Water visuals and shoreline smoothing](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)
 47. [Terrain lab: an isolated ground-level terrain prototype](docs/adr/0047-terrain-lab-prototype.md)
+48. [Paved ground and parks from OpenStreetMap](docs/adr/0048-paved-ground-and-parks-from-osm.md)

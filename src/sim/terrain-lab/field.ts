@@ -4,10 +4,11 @@ import { waterQuery, type WaterQuery, type WaterSurfaces } from '../water-gradin
 import { baseSurface, type BaseSurface } from './base';
 import { padDistance, padEffect, padStamps, type PadStamp } from './buildings';
 import { channelEffect, channelLevelAt, channelStamps, type ChannelStamp } from './channels';
+import { DECK_FADE_M, deckHalfWidth, deckHold, deckNear, type DeckAt } from './decks';
 import { coverLookAt, coverMap, RELIEF_WAVELENGTHS, type CoverMap } from './landcover';
 import { gradientNoise, smax, smin } from './noise';
 import {
-  levelAt,
+  roadLevel,
   roadEffect,
   RoadSurface,
   roadStamps,
@@ -29,7 +30,7 @@ import {
 // order, so the result is the same in every engine (§5.2 rule 5).
 
 /** Bump when anything here changes what the field gives. */
-export const TERRAIN_FIELD_VERSION = 4;
+export const TERRAIN_FIELD_VERSION = 5;
 
 export interface FieldSpec {
   readonly seed: number;
@@ -66,6 +67,8 @@ export interface FieldSample {
   wet: number;
   /** 0–1: built-up land. */
   urban: number;
+  /** 1 where the ground is paved (towns' streets and yards, mapped hard ground), else 0. */
+  paved: number;
 }
 
 export function emptySample(): FieldSample {
@@ -81,6 +84,7 @@ export function emptySample(): FieldSample {
     litter: 0,
     wet: 0,
     urban: 0,
+    paved: 0,
   };
 }
 
@@ -121,10 +125,27 @@ const MAX_CONSTRAINTS = 64;
 /** Width of the smooth clamp's rounding, metres. */
 const ROUND_M = 0.3;
 /**
+ * Road surfaces (carriageway and shoulder) that overlap take a weighted mean
+ * of their levels: each weight rises from `CORE_FLOOR` at the road's edge to 1
+ * this far inside it, metres.
+ */
+const CORE_BLEND_M = 3;
+const CORE_FLOOR = 1e-4;
+/**
+ * In towns the ground is paved this far from a road edge (pavements,
+ * forecourts) and this far from a building's wall (paths, patios); the rest
+ * is green (gardens, lawns, open ground), metres.
+ */
+const FRONTAGE_M = 9;
+const PATIO_M = 3;
+/** Each road rank's weight in that mean (by `rule.rank`, 1 path to 5 major). */
+const RANK_WEIGHT = [1, 1, 2, 4, 8, 16] as const;
+/**
  * Constraint priorities, applied lowest first: a band applied later wins
  * where bands conflict. A road's or pad's side slopes hold against a bank's
  * cut (a stream beside a track leaves the track its slope, not a cliff);
- * cores are exact and last.
+ * cores are exact; then bridge decks hold the ground under them below
+ * their undersides.
  */
 const PRI = {
   waterBank: 1,
@@ -135,6 +156,7 @@ const PRI = {
   waterBed: 13,
   channelBed: 13,
   roadCore: 14,
+  deck: 15,
 } as const;
 
 /** Sand or shingle shores for these; mud for the rest. */
@@ -215,6 +237,7 @@ export function compileField(
     }
   };
   for (const r of roads) if (!r.bridge) addLine(0, r.index, r.xy, r.extent);
+  for (const r of roads) if (r.bridge) addLine(3, r.index, r.xy, deckHalfWidth(r) + DECK_FADE_M);
   pads.forEach((p, i) => {
     add(1, i, 0, p.minX - p.extent, p.minY - p.extent, p.maxX + p.extent, p.maxY + p.extent);
   });
@@ -226,14 +249,17 @@ export function compileField(
   for (const b of buckets) entries += b.length / 3;
   lap('index');
 
-  const look = new Float64Array(8);
+  const look = new Float64Array(9);
   const cLo = new Float64Array(MAX_CONSTRAINTS);
   const cHi = new Float64Array(MAX_CONSTRAINTS);
   const cW = new Float64Array(MAX_CONSTRAINTS);
   const cPri = new Float64Array(MAX_CONSTRAINTS);
   const order = new Int32Array(MAX_CONSTRAINTS);
   const eff: RoadEffect = { lo: 0, hi: 0, w: 0, core: false, edge: 0, ditch: 0 };
+  const effSeg: RoadEffect = { lo: 0, hi: 0, w: 0, core: false, edge: 0, ditch: 0 };
   const bnd = { lo: 0, hi: 0, w: 0, core: false };
+  const deckAt: DeckAt = { top: 0, fromEnd: 0, across: 0 };
+  const hold = { hi: 0, w: 0 };
   // Per-sample state for "nearest segment of each road".
   let curKind = -1;
   let curIndex = -1;
@@ -256,6 +282,7 @@ export function compileField(
     }
     const b0 = base.at(x, y);
     out.roadEdge = 99;
+    let surfaceRank = 0;
     out.roadSurface = RoadSurface.None;
     out.shore = 99;
     out.shoreKind = 0;
@@ -272,6 +299,8 @@ export function compileField(
     // order gathered, which is fixed): each clamps the height so far into its
     // band, weighted by its fade. Every step is continuous, so the ground is.
     let n = 0;
+    let coreSum = 0;
+    let coreW = 0;
     const apply = (lo: number, hi: number, w: number, pri: number) => {
       if (n >= MAX_CONSTRAINTS || w <= 0) return;
       cLo[n] = lo;
@@ -321,11 +350,24 @@ export function compileField(
           if (road) {
             const d = Math.sqrt(curD2);
             if (d < road.extent) {
-              roadEffect(road, d, levelAt(road, curS), ground, eff);
-              apply(eff.lo, eff.hi, eff.w, eff.core ? PRI.roadCore : PRI.roadSlope);
-              if (eff.edge < out.roadEdge) {
+              roadEffect(road, d, roadLevel(road, curS, x, y), ground, eff);
+              // Its surface was taken segment by segment (below).
+              if (!eff.core) apply(eff.lo, eff.hi, eff.w, PRI.roadSlope);
+              // The surface: on a carriageway the highest-ranked road's (a path
+              // mapped along a road does not paint over it); elsewhere the nearest.
+              const rank = road.rule.rank;
+              const onIt = eff.edge < 0;
+              const onBest = out.roadEdge < 0;
+              if (
+                onIt
+                  ? !onBest ||
+                    rank > surfaceRank ||
+                    (rank === surfaceRank && eff.edge < out.roadEdge)
+                  : !onBest && eff.edge < out.roadEdge
+              ) {
                 out.roadEdge = eff.edge;
                 out.roadSurface = road.surface;
+                surfaceRank = rank;
               }
               if (eff.ditch > wet) wet = eff.ditch;
             }
@@ -348,9 +390,20 @@ export function compileField(
         }
         curKind = -1;
       };
+      let lastDeck = -1;
       for (let k = 0; k < list.length; k += 3) {
         const kind = list[k] ?? 0;
         const index = list[k + 1] ?? 0;
+        if (kind === 3) {
+          // A bridge deck (each once: its segments are listed together).
+          if (curKind !== -1) finish();
+          if (index === lastDeck) continue;
+          lastDeck = index;
+          const road = roads[index];
+          if (road && deckNear(road, x, y, deckAt) && deckHold(road, deckAt, hold))
+            apply(-1e9, hold.hi, hold.w, PRI.deck);
+          continue;
+        }
         if (kind === 1) {
           if (curKind !== -1) finish();
           const pad = pads[index];
@@ -391,13 +444,39 @@ export function compileField(
         const px = ax + t * dx - x;
         const py = ay + t * dy - y;
         const d2 = px * px + py * py;
+        const c0 = cum[seg / 2] ?? 0;
+        const s = c0 + t * ((cum[seg / 2 + 1] ?? 0) - c0);
         if (d2 < curD2) {
           curD2 = d2;
-          const c0 = cum[seg / 2] ?? 0;
-          curS = c0 + t * ((cum[seg / 2 + 1] ?? 0) - c0);
+          curS = s;
+        }
+        // Road surfaces: every segment whose surface is here, so where roads
+        // (or two stretches of one road) overlap their levels are blended,
+        // each weighted to fade towards its edge: one gives way smoothly to
+        // the other.
+        const road = kind === 0 ? roads[index] : undefined;
+        if (road) {
+          const r = road.half + road.shoulder;
+          if (d2 < r * r) {
+            const d = Math.sqrt(d2);
+            roadEffect(road, d, roadLevel(road, s, x, y), ground, effSeg);
+            const u = (r - d) / CORE_BLEND_M;
+            // Higher-ranked roads all but decide the level where they overlap
+            // (still fading to nothing at each road's edge).
+            const wc =
+              CORE_FLOOR + (u >= 1 ? 1 : u * u * (3 - 2 * u)) * (RANK_WEIGHT[road.rule.rank] ?? 1);
+            coreSum += wc * effSeg.lo;
+            coreW += wc;
+          }
         }
       }
       if (curKind !== -1) finish();
+    }
+    // Every road surface here, as one level.
+    if (coreW > 0) {
+      apply(coreSum / coreW, coreSum / coreW, 1, PRI.roadCore);
+      // Dry: another road's ditch (or a bank) does not reach across it.
+      wet = 0;
     }
 
     // Stable insertion sort of the constraint indices by priority.
@@ -418,12 +497,29 @@ export function compileField(
       const lo = cLo[k] ?? 0;
       const hi = cHi[k] ?? 0;
       // Rounded at the band's edges, but never outside it: exact bands (cores) stay exact.
-      let t = smax(lo, smin(h, hi, ROUND_M), ROUND_M);
+      // A deck's hold is exact: it ends at the deck's ends, where it must change nothing.
+      let t =
+        (cPri[k] ?? 0) === PRI.deck ? (h < hi ? h : hi) : smax(lo, smin(h, hi, ROUND_M), ROUND_M);
       t = t < lo ? lo : t > hi ? hi : t;
       h += (cW[k] ?? 0) * (t - h);
     }
     out.h = h;
     out.wet = wet > 1 ? 1 : wet;
+    // Paved ground (docs/adr/0048): mapped hard ground wholly; in towns the
+    // street frontage (pavements, forecourts) and paths and patios along
+    // walls, with gardens and lawns behind.
+    const paved = look[8] ?? 0;
+    const town = paved > 0 && paved < 0.999;
+    out.paved =
+      paved >= 0.999 ||
+      (town && paved > 0.35 && (out.roadEdge < FRONTAGE_M || out.building < PATIO_M))
+        ? 1
+        : 0;
+    if (out.paved === 1) {
+      out.grass *= 0.05;
+      out.soil *= 0.3;
+      out.litter *= 0.3;
+    }
   };
 
   const scratch = emptySample();
