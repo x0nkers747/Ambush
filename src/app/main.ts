@@ -172,6 +172,29 @@ function showFatal(root: HTMLElement, message: string): void {
 async function main(root: HTMLElement): Promise<void> {
   const { config, problems } = loadServiceConfig(localStorageOrNull());
   const { store, persistent } = await openStore();
+  // The terrain lab: an isolated prototype page, loaded only at its own address
+  // (docs/ground-level-terrain-architecture-research.md, stage 2).
+  if (window.location.hash.startsWith('#terrain-lab')) {
+    const { startTerrainLab } = await import('#view3d/terrain-lab');
+    startTerrainLab(root, {
+      list: async () =>
+        (await store.list()).map((s) => ({ id: s.id, name: s.name, centre: s.centre })),
+      open: async (id) => {
+        const pkg = await store.get(id);
+        const corrections = pkg.elevation.cleaning ?? null;
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          centre: pkg.request.centre,
+          terrain: pkg.terrain,
+          corrections,
+          graded: async () =>
+            (await authoritativeTerrain(pkg.id, pkg.terrain, corrections)).terrain,
+        };
+      },
+    });
+    return;
+  }
   // Back and Forward cross pages that were switched in place: load the one reached afresh.
   window.addEventListener('popstate', () => {
     window.location.reload();

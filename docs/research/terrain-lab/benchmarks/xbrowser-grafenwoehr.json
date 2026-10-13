@@ -1,0 +1,22 @@
+{
+  "node": [
+    "6d6b162d845622b2",
+    "e79a5f27235fdee4",
+    "53d53f6affce6d0b",
+    "59b4311328a7e490",
+    "e7e9ffa03fd4fb69",
+    "9f05901a8e1f4ab7",
+    "32db105620fe7c4b"
+  ],
+  "chrome": [
+    "6d6b162d845622b2",
+    "e79a5f27235fdee4",
+    "53d53f6affce6d0b",
+    "59b4311328a7e490",
+    "e7e9ffa03fd4fb69",
+    "9f05901a8e1f4ab7",
+    "32db105620fe7c4b"
+  ],
+  "chromeVersion": "155.0.8059.40",
+  "chromeSameAsNode": true
+}

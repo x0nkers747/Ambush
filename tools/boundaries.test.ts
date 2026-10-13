@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
 
@@ -71,7 +71,14 @@ describe('simulation sources', () => {
     const external = sources.flatMap(({ file, text }) =>
       [...text.matchAll(IMPORT)]
         .map((m) => m[1] ?? m[2] ?? '')
-        .filter((specifier) => !/^\.\/[\w-]+$/.test(specifier))
+        // Relative imports of modules inside src/sim (subfolders such as terrain-lab included).
+        .filter(
+          (specifier) =>
+            !(
+              /^(\.\.?\/)+[\w-]+(\/[\w-]+)*$/.test(specifier) &&
+              !relative(simDir, resolve(dirname(join(ROOT, file)), specifier)).startsWith('..')
+            ),
+        )
         .map((specifier) => `${file}: ${specifier}`),
     );
     expect(sources.length).toBeGreaterThan(5);

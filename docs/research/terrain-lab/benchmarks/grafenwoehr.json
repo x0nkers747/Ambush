@@ -1,0 +1,146 @@
+{
+  "battlefield": "Grafenwoehr, DE",
+  "fieldVersion": 4,
+  "centre": [250, 750],
+  "areaM": 1000,
+  "cleanMs": 58.1,
+  "waterLevelsMs": 9.1,
+  "features": {
+    "roads": 1211,
+    "buildings": 3567,
+    "vegetation": 61,
+    "water": 47,
+    "waterways": 33,
+    "landUse": 44
+  },
+  "compileMs": 140.8,
+  "field": {
+    "roads": 1196,
+    "bridges": 15,
+    "pads": 3567,
+    "channels": 30,
+    "buckets": 24964,
+    "bucketEntries": 60398,
+    "compileMs": {
+      "cover": 28.5831,
+      "water": 2.362000000000023,
+      "roads": 44.186000000000035,
+      "pads": 55.13749999999993,
+      "channels": 2.7644000000000233,
+      "index": 7.250300000000038
+    }
+  },
+  "s0.5": {
+    "tiles": 256,
+    "tileMs": {
+      "mean": 9.82,
+      "p50": 9.603,
+      "p95": 15.492,
+      "max": 21.832
+    },
+    "areaGenerationMs": 2516,
+    "samplesPerSecond": 1746367,
+    "bytesPerTile": 206956,
+    "areaCacheMB": 53,
+    "wholeBattlefieldMB": 1292,
+    "wholeBattlefieldHeightsOnlyMB": 428,
+    "heightAtWarmNs": 327,
+    "heightAtColdUs": 130.8,
+    "coldTilesGenerated": 268,
+    "losUs": {
+      "mean": 5.389,
+      "p50": 3.9,
+      "p95": 11.8,
+      "max": 962.5
+    },
+    "losReferenceUs": {
+      "mean": 43.877,
+      "p50": 35.3,
+      "p95": 95.3,
+      "max": 647.1
+    },
+    "losMismatches": 0,
+    "losBlockedShare": 0.311,
+    "walk20kmCache64": {
+      "ms": 2056,
+      "generated": 216,
+      "evicted": 152,
+      "hits": 76
+    },
+    "repeatable": true,
+    "hashes": [
+      "35,42:6d6b162d845622b2",
+      "35,43:e79a5f27235fdee4",
+      "35,44:53d53f6affce6d0b",
+      "36,42:59b4311328a7e490",
+      "36,43:e7e9ffa03fd4fb69",
+      "36,44:28f441503d1a846d",
+      "37,42:213120d6645b72f3",
+      "37,43:552deb652df882a2",
+      "37,44:98975e77bad3f68c"
+    ],
+    "checksum": true
+  },
+  "s1": {
+    "tiles": 256,
+    "tileMs": {
+      "mean": 2.717,
+      "p50": 2.689,
+      "p95": 4.024,
+      "max": 6.529
+    },
+    "areaGenerationMs": 696,
+    "samplesPerSecond": 1651022,
+    "bytesPerTile": 54124,
+    "areaCacheMB": 13.9,
+    "wholeBattlefieldMB": 338,
+    "wholeBattlefieldHeightsOnlyMB": 112,
+    "heightAtWarmNs": 227,
+    "heightAtColdUs": 36.8,
+    "coldTilesGenerated": 268,
+    "losUs": {
+      "mean": 4.774,
+      "p50": 3.1,
+      "p95": 12.7,
+      "max": 344.7
+    },
+    "losReferenceUs": {
+      "mean": 23.267,
+      "p50": 17.2,
+      "p95": 49.9,
+      "max": 998
+    },
+    "losMismatches": 0,
+    "losBlockedShare": 0.309,
+    "walk20kmCache64": {
+      "ms": 584,
+      "generated": 217,
+      "evicted": 153,
+      "hits": 89
+    },
+    "repeatable": true,
+    "hashes": [
+      "35,42:e8d5db2c2cf29d7d",
+      "35,43:5f40e9ac21860895",
+      "35,44:971e3d09508e8e56",
+      "36,42:f0586b8f4feb0cd8",
+      "36,43:428ea1115f7a6072",
+      "36,44:6a37979688352533",
+      "37,42:f7e6ffa76a2f8c84",
+      "37,43:2712147176d0e136",
+      "37,44:d32eaf3440e94ee5"
+    ],
+    "checksum": true
+  },
+  "current": {
+    "gradeMs": 1195,
+    "heightAtNs": 94,
+    "lineOfSightUs": {
+      "mean": 94.207,
+      "p50": 57.4,
+      "p95": 135.8,
+      "max": 54257.8
+    },
+    "checksum": true
+  }
+}

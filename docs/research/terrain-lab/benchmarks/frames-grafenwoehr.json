@@ -1,0 +1,144 @@
+{
+  "site": "grafenwoehr-main",
+  "errors": [],
+  "bench": {
+    "lab-0.5": {
+      "renderer": "lab",
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "spacing": 0.5,
+      "relief": 1,
+      "walk": {
+        "frames": 2840,
+        "meanMs": 10.57,
+        "p50Ms": 0.4,
+        "p95Ms": 12.8,
+        "p99Ms": 147.3,
+        "maxCalls": 88,
+        "maxTrianglesM": 3.45
+      },
+      "orbit": {
+        "frames": 5068,
+        "meanMs": 5.92,
+        "p50Ms": 0.3,
+        "p95Ms": 8.8,
+        "p99Ms": 150.4,
+        "maxCalls": 63,
+        "maxTrianglesM": 2.86
+      },
+      "stats": {
+        "calls": 54,
+        "triangles": 1928464,
+        "terrain": {
+          "nodes": 30,
+          "nodesPerLevel": [0, 0, 0, 0, 17, 10, 3, 0, 0, 0],
+          "triangles": 61440,
+          "resident": 38,
+          "uploads": 0,
+          "waiting": 0,
+          "atlasBytes": 52718592,
+          "workerTiles": 36,
+          "workerMs": 441.1999998688698
+        },
+        "clutter": {
+          "instances": 2847,
+          "triangles": 169556,
+          "rebuildMs": 1.9000000357627869
+        },
+        "compileMs": 147.30000001192093,
+        "workerMs": 199.5999999642372
+      }
+    },
+    "lab-1": {
+      "renderer": "lab",
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "spacing": 1,
+      "relief": 1,
+      "walk": {
+        "frames": 3143,
+        "meanMs": 9.55,
+        "p50Ms": 0.7,
+        "p95Ms": 11.5,
+        "p99Ms": 149,
+        "maxCalls": 88,
+        "maxTrianglesM": 3.47
+      },
+      "orbit": {
+        "frames": 5016,
+        "meanMs": 5.98,
+        "p50Ms": 0.3,
+        "p95Ms": 8.2,
+        "p99Ms": 147.1,
+        "maxCalls": 63,
+        "maxTrianglesM": 2.86
+      },
+      "stats": {
+        "calls": 54,
+        "triangles": 1967642,
+        "terrain": {
+          "nodes": 30,
+          "nodesPerLevel": [0, 0, 0, 17, 10, 3, 0, 0, 0],
+          "triangles": 61440,
+          "resident": 73,
+          "uploads": 0,
+          "waiting": 0,
+          "atlasBytes": 13790208,
+          "workerTiles": 71,
+          "workerMs": 245.2999997138977
+        },
+        "clutter": {
+          "instances": 2914,
+          "triangles": 173692,
+          "rebuildMs": 1.899999976158142
+        },
+        "compileMs": 175.5999999642372,
+        "workerMs": 211.30000001192093
+      }
+    },
+    "current": {
+      "renderer": "current",
+      "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "spacing": 1,
+      "relief": 1,
+      "walk": {
+        "frames": 2949,
+        "meanMs": 10.18,
+        "p50Ms": 0.6,
+        "p95Ms": 31.1,
+        "p99Ms": 146.1,
+        "maxCalls": 95,
+        "maxTrianglesM": 6.86
+      },
+      "orbit": {
+        "frames": 2265,
+        "meanMs": 13.28,
+        "p50Ms": 0.6,
+        "p95Ms": 49.7,
+        "p99Ms": 166.8,
+        "maxCalls": 69,
+        "maxTrianglesM": 5.98
+      },
+      "stats": {
+        "calls": 60,
+        "triangles": 5498198,
+        "terrain": {
+          "nodes": 30,
+          "nodesPerLevel": [0, 0, 0, 17, 10, 3, 0, 0, 0],
+          "triangles": 61440,
+          "resident": 73,
+          "uploads": 0,
+          "waiting": 0,
+          "atlasBytes": 13790208,
+          "workerTiles": 71,
+          "workerMs": 245.2999997138977
+        },
+        "clutter": {
+          "instances": 1117,
+          "triangles": 61676,
+          "rebuildMs": 2.099999964237213
+        },
+        "compileMs": 175.5999999642372,
+        "workerMs": 211.30000001192093
+      }
+    }
+  }
+}

@@ -76,6 +76,15 @@ and the cut is closed by straight brick quays on built-up shores and short earth
 Buildings standing in water reach down into it. Display only: the ground and the simulation are
 unchanged ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
 
+### Terrain lab (prototype)
+
+`#terrain-lab` (e.g. http://localhost:5173/#terrain-lab) opens an isolated prototype of a
+ground-level terrain engine on any saved battlefield: a constraint-based terrain field sampled
+into 0.5 m tiles, CDLOD rendering, PBR ground materials and ground clutter, with walk, fly and
+tactical cameras, debug views, and a switch to the current renderer for matched comparisons. It
+is not part of the game, and nothing in the game uses it
+([report](docs/terrain-lab-prototype-report.md), [ADR 0047](docs/adr/0047-terrain-lab-prototype.md)).
+
 ## Requirements
 
 - Node 24 (see `.nvmrc`) and npm
@@ -293,3 +302,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 44. [Road junctions, grade separation and bridge structures](docs/adr/0044-road-junction-and-bridge-topology.md)
 45. [Memory on large battlefields](docs/adr/0045-memory-on-large-battlefields.md)
 46. [Water visuals and shoreline smoothing](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)
+47. [Terrain lab: an isolated ground-level terrain prototype](docs/adr/0047-terrain-lab-prototype.md)
