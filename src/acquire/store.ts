@@ -1,3 +1,4 @@
+import type { StoredCanopy } from './canopy';
 import {
   parseBattlefieldPackage,
   type BattlefieldPackage,
@@ -9,7 +10,7 @@ import {
 // Saved battlefields (docs/adr/0014). Each battlefield is stored as its
 // package (what is played) plus its source data (the Overpass response as
 // received, the elevation tiles as PNG and the Overture building tiles,
-// docs/adr/0023), so it can be reprocessed later by
+// docs/adr/0023, and the canopy heights, docs/adr/0050), so it can be reprocessed later by
 // a newer importer without downloading again. Stored packages are re-validated
 // on load: damaged or incompatible data is reported, never half-loaded.
 
@@ -41,6 +42,11 @@ export interface BattlefieldSources {
     readonly url: string;
     readonly tiles: readonly OvertureTile[];
   } | null;
+  /**
+   * The canopy height windows tree cover was found in (docs/adr/0050);
+   * absent before importer 1.10, `null` when tree cover was off.
+   */
+  readonly canopy?: StoredCanopy | null;
 }
 
 export interface BattlefieldStore {

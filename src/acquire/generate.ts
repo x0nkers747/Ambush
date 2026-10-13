@@ -1,10 +1,12 @@
 import {
   buildBattlefield,
   planBattlefield,
+  planCanopy,
   type BattlefieldPackage,
   type BattlefieldRequest,
   type OverpassResponse,
 } from '#geo';
+import { fetchCanopy, packCanopy, type CanopySource } from './canopy';
 import type { ServiceConfig } from './config';
 import {
   CancelledError,
@@ -23,8 +25,11 @@ import type { BattlefieldStore } from './store';
 // Overture Maps (docs/adr/0023); when Overture cannot be reached they come
 // from OpenStreetMap with the other features, and the battlefield says so.
 // OSM problems can be accepted (no OSM features) when the player chooses to.
+// With tree cover on, the woods OSM does not map are then added from canopy
+// heights (docs/adr/0050); when those cannot be read the battlefield is built
+// without them, and says so.
 
-export type GenerationStep = 'elevation' | 'buildings' | 'osm' | 'processing' | 'saving';
+export type GenerationStep = 'elevation' | 'buildings' | 'osm' | 'trees' | 'processing' | 'saving';
 
 export interface GenerationProgress {
   readonly step: GenerationStep;
@@ -174,7 +179,25 @@ export async function generateBattlefield(
   }
   check();
 
-  // 4. Processing (pure; under a second for a 5 km battlefield, so it runs here).
+  // 4. Canopy heights for tree cover, when it is on.
+  let canopy: CanopySource | null = null;
+  let canopyProblem: string | undefined;
+  if (o.config.treeCover === 'canopy') {
+    report({ step: 'trees', message: 'Downloading canopy heights for tree cover…' });
+    try {
+      canopy = await fetchCanopy(planCanopy(plan.frame), o.config, client('trees'));
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error;
+      canopyProblem = error.message.replace(/.$/, '');
+      report({
+        step: 'trees',
+        message: 'Canopy heights could not be read: no woods are added from them.',
+      });
+    }
+    check();
+  }
+
+  // 5. Processing (pure; a few seconds for a 5 km battlefield, so it runs here).
   report({ step: 'processing', message: 'Building the battlefield…' });
   const pkg = buildBattlefield({
     request,
@@ -184,17 +207,20 @@ export async function generateBattlefield(
     osmEndpoint: osm?.endpoint ?? o.config.overpassEndpoints[0] ?? '',
     overture,
     ...(overtureProblem !== undefined ? { overtureProblem } : {}),
+    canopy,
+    ...(canopyProblem !== undefined ? { canopyProblem } : {}),
     createdAt: (o.now ?? (() => new Date()))().toISOString(),
   });
   check();
 
-  // 5. Saving, with the source data for reprocessing.
+  // 6. Saving, with the source data for reprocessing.
   report({ step: 'saving', message: 'Saving the battlefield…' });
   await o.store.put(pkg, {
     overpassText: osm?.text ?? null,
     overpassEndpoint: osm?.endpoint ?? '',
     tiles: tiles.map((t) => ({ z: t.z, x: t.x, y: t.y, png: t.png, sources: t.sources })),
     overture,
+    canopy: canopy ? await packCanopy(canopy) : null,
   });
   return pkg;
 }

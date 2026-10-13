@@ -71,9 +71,12 @@ soldiers cross on the deck that is drawn
 dark, coloured by a visual profile (urban canal, river, lake, reservoir, ocean, pond) with a
 restrained sky reflection ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
 
-Woods that OpenStreetMap does not map can be found in aerial imagery (USGS NAIP, United States
-only) with `tools/tree-cover.ts`; the app can add them to a battlefield, but this is switched
-off for now (`src/app/tree-cover.ts`).
+With **Tree cover** ticked on the terrain selection page, a new battlefield also gets the woods,
+tree lines and garden trees OpenStreetMap does not map, from the Meta / World Resources Institute
+global canopy height map (about 1 m, CC BY 4.0). The map is lined up with the mapped woods first,
+and the woods added are listed in Battlefield Information. It is off by default
+([ADR 0050](docs/adr/0050-tree-cover-from-canopy-heights.md)). `tools/tree-cover.ts` finds woods in
+USGS NAIP aerial imagery instead (United States only), for comparison.
 
 ## Requirements
 
@@ -295,3 +298,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 47. [Terrain lab: an isolated ground-level terrain prototype](docs/adr/0047-terrain-lab-prototype.md)
 48. [Paved ground and parks from OpenStreetMap](docs/adr/0048-paved-ground-and-parks-from-osm.md)
 49. [The terrain field is the game's ground and its 3D terrain](docs/adr/0049-terrain-field-ground-and-renderer.md)
+50. [Tree cover from canopy heights](docs/adr/0050-tree-cover-from-canopy-heights.md)

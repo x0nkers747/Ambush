@@ -6,6 +6,14 @@ import {
   type SourceCorrections,
   type TerrainDataset,
 } from '#sim';
+import {
+  CANOPY_ATTRIBUTION,
+  CANOPY_TREE_M,
+  canopyGrid,
+  canopyOnGrid,
+  treeCoverFromCanopy,
+  type CanopyRaster,
+} from './canopy';
 import { summarizeElevationSources, type SurfaceModel } from './elevation-sources';
 import { createFrame, geographicBounds, type BattlefieldFrame, type GeoBox } from './frame';
 import { featuresFromOsm, overpassQuery, type OsmImportReport, type OverpassResponse } from './osm';
@@ -39,7 +47,7 @@ import { normalizeLon, validateLatLon, type Hemisphere, type LatLon } from './ut
 export const BATTLEFIELD_SCHEMA = 'ambush.battlefield';
 export const BATTLEFIELD_SCHEMA_VERSION = 1;
 /** The importer's own version: tag mapping, defaults and processing rules. */
-export const IMPORTER_VERSION = '1.9.0';
+export const IMPORTER_VERSION = '1.10.0';
 
 /** The only battlefield size offered for now; the format supports others. */
 export const DEFAULT_BATTLEFIELD_SIZE_M = 5000;
@@ -131,6 +139,32 @@ export interface BattlefieldPackage {
       readonly heights: OvertureImportReport['heights'];
     } | null;
   };
+  /**
+   * Woods OpenStreetMap does not map, added from canopy heights
+   * (docs/adr/0050): how they were found. Absent when the battlefield was
+   * generated without them (or before importer 1.10).
+   */
+  readonly treeCover?: {
+    readonly source: 'meta-chm-v2';
+    /** The folder of the canopy tiles read. */
+    readonly url: string;
+    /** The tiles read (zoom-10 quadkeys), and those the map does not have. */
+    readonly tiles: readonly string[];
+    readonly missingTiles: readonly string[];
+    /** Cells at least this tall are trees, metres. */
+    readonly thresholdM: number;
+    /** The shift that lined the canopy map up with the mapped woods (east, north), metres. */
+    readonly shiftM: readonly [number, number];
+    /** Whether it was lined up (false: too few mapped woods to line it up with). */
+    readonly aligned: boolean;
+    /** Overlap of its trees and the mapped woods once lined up (0–1). */
+    readonly agreement: number;
+    /** Share of the mapped woods where it has trees (0–1). */
+    readonly mappedWoodsFound: number;
+    /** Woods added, and their area, m². */
+    readonly woods: number;
+    readonly areaM2: number;
+  };
   /** Credits the sources' licences require, to be shown with the map. */
   readonly attribution: readonly string[];
   readonly processing: {
@@ -218,6 +252,17 @@ export interface BattlefieldInputs {
   } | null;
   /** Why Overture's buildings were not used (it could not be reached), for the warnings. */
   readonly overtureProblem?: string;
+  /**
+   * Canopy heights over the battlefield (docs/adr/0050), to add the woods
+   * OpenStreetMap does not map; `null` or absent for none.
+   */
+  readonly canopy?: {
+    readonly url: string;
+    readonly rasters: readonly CanopyRaster[];
+    readonly missing: readonly string[];
+  } | null;
+  /** Why the canopy heights could not be read, for the warnings. */
+  readonly canopyProblem?: string;
   /** ISO 8601 time of generation (the builder is pure, so the caller supplies it). */
   readonly createdAt: string;
 }
@@ -264,9 +309,19 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
     waterways: [],
     landUse: [],
   };
-  const features: Required<EnvironmentFeatures> = ovt
+  const mapped: Required<EnvironmentFeatures> = ovt
     ? { ...osmFeatures, buildings: ovt.buildings }
     : osmFeatures;
+  // Woods from canopy heights (docs/adr/0050), beside the mapped ones.
+  const canopy = inputs.canopy ?? null;
+  let treeCover: ReturnType<typeof treeCoverFromCanopy> | null = null;
+  if (canopy && canopy.rasters.length > 0) {
+    const g = canopyGrid(frame);
+    treeCover = treeCoverFromCanopy(canopyOnGrid(frame, g, canopy.rasters), g, mapped);
+  }
+  const features: Required<EnvironmentFeatures> = treeCover
+    ? { ...mapped, vegetation: [...mapped.vegetation, ...treeCover.areas] }
+    : mapped;
   const buildingSource = ovt ? 'overture' : inputs.osm ? 'openstreetmap' : 'none';
   const terrain: TerrainDataset = {
     formatVersion: 3,
@@ -323,6 +378,19 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
   if (sources.surfaceModel === 'DSM' || sources.surfaceModel === 'mixed') {
     warnings.push(
       'The elevation source is (at least partly) a surface model: tree canopy and buildings may raise the ground, so woods and built-up areas can be counted twice in line of sight.',
+    );
+  }
+  if (inputs.canopyProblem !== undefined) {
+    warnings.push(
+      `Woods were not added from canopy heights: they could not be read (${inputs.canopyProblem}).`,
+    );
+  } else if (canopy?.rasters.length === 0) {
+    warnings.push(
+      'Woods were not added from canopy heights: the canopy map does not cover this area.',
+    );
+  } else if (treeCover && !treeCover.report.aligned) {
+    warnings.push(
+      'The canopy map could not be lined up with mapped woods (there are too few): the woods added from it may be a few metres out.',
     );
   }
   const missingTiles = inputs.tiles.filter((t) => t.elevations === null).length;
@@ -410,12 +478,30 @@ export function buildBattlefield(inputs: BattlefieldInputs): BattlefieldPackage 
             }
           : null,
     },
+    ...(canopy && treeCover
+      ? {
+          treeCover: {
+            source: 'meta-chm-v2' as const,
+            url: canopy.url,
+            tiles: canopy.rasters.map((r) => r.quadkey),
+            missingTiles: [...canopy.missing],
+            thresholdM: CANOPY_TREE_M,
+            shiftM: treeCover.report.shiftM,
+            aligned: treeCover.report.aligned,
+            agreement: treeCover.report.agreement,
+            mappedWoodsFound: treeCover.report.mappedWoodsFound,
+            woods: treeCover.report.woods,
+            areaM2: treeCover.report.areaM2,
+          },
+        }
+      : {}),
     attribution: [
       // OpenStreetMap's credit also covers Overture buildings drawn from OSM.
       ...(inputs.osm || ovt?.report.datasets.includes('OpenStreetMap') ? [OSM_ATTRIBUTION] : []),
       ...(ovt ? overtureAttribution(ovt.report.datasets) : []),
       TERRAIN_TILES_ATTRIBUTION,
       ...sources.attribution,
+      ...(treeCover ? [CANOPY_ATTRIBUTION] : []),
     ],
     processing: {
       importerVersion: IMPORTER_VERSION,

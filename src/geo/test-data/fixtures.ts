@@ -6,6 +6,7 @@ import quanticoOverture from './quantico-va.overture-buildings.json';
 import quantico from './quantico-va.overpass.json';
 
 export { encodeMvt, encodePmtiles, type TestFeature } from './vector-tiles';
+export { encodeTiff, type TestTiff } from './tiff';
 
 // Recorded Overpass responses for tests in any layer (`#geo/fixtures`; see
 // README.md here). Only tests import this entry point, so the application

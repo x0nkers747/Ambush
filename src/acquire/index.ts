@@ -4,8 +4,17 @@ export {
   DEFAULT_SERVICES,
   loadServiceConfig,
   SERVICE_CONFIG_KEY,
+  storeServiceSetting,
   type ServiceConfig,
 } from './config';
+export {
+  CANOPY,
+  fetchCanopy,
+  packCanopy,
+  unpackCanopy,
+  type CanopySource,
+  type StoredCanopy,
+} from './canopy';
 export {
   generateBattlefield,
   OsmUnavailableError,

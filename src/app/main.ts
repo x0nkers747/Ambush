@@ -1,5 +1,4 @@
 import { authoritativeTerrain } from './terrain-grading';
-import { terrainWithTreeCover } from './tree-cover';
 import {
   createMemoryStore,
   loadServiceConfig,
@@ -115,8 +114,7 @@ async function loadScenario(
 
 /**
  * A saved battlefield with its authoritative terrain: the stored raw terrain
- * (with tree cover from imagery, when switched on: tree-cover.ts) with its
- * DEM cleaned (docs/adr/0033), then the terrain field sampled from it
+ * with its DEM cleaned (docs/adr/0033), then the terrain field sampled from it
  * (docs/adr/0049), then shared (`shareTerrain`): everything on the page (scenario edits,
  * previews, the exercise, the 2D and 3D views) then uses one frozen terrain,
  * so its navigation grid and other per-terrain data are built once. The
@@ -126,7 +124,7 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Ope
   const pkg = await store.get(id);
   const { terrain, quality } = await authoritativeTerrain(
     pkg.id,
-    await terrainWithTreeCover(pkg),
+    pkg.terrain,
     pkg.elevation.cleaning ?? null,
   );
   return { ...pkg, terrain: shareTerrain(terrain), quality };

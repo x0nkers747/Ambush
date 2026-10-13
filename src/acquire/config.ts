@@ -25,6 +25,13 @@ export interface ServiceConfig {
   readonly overtureTilesUrl: string;
   /** Overture release to read (e.g. "2026-09-23.1"); empty for the newest published. */
   readonly overtureRelease: string;
+  /**
+   * Woods OpenStreetMap does not map, added from canopy heights when a
+   * battlefield is generated (docs/adr/0050), or not.
+   */
+  readonly treeCover: 'canopy' | 'off';
+  /** Folder of the canopy height map's tiles: `${canopyTilesUrl}${quadkey}.tif`. */
+  readonly canopyTilesUrl: string;
 }
 
 export const DEFAULT_SERVICES: ServiceConfig = {
@@ -36,6 +43,8 @@ export const DEFAULT_SERVICES: ServiceConfig = {
   buildingSource: 'overture',
   overtureTilesUrl: 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/',
   overtureRelease: '',
+  treeCover: 'off',
+  canopyTilesUrl: 'https://data.source.coop/tge-labs/meta-chm-v2/chm/',
 };
 
 export const SERVICE_CONFIG_KEY = 'ambush.services';
@@ -108,5 +117,39 @@ export function loadServiceConfig(storage: Pick<Storage, 'getItem'> | null): {
       config.overtureRelease = r;
     else problems.push('overtureRelease must be empty or a release name such as "2026-09-23.1"');
   }
+  if (o['treeCover'] !== undefined) {
+    const t = o['treeCover'];
+    if (t === 'canopy' || t === 'off') config.treeCover = t;
+    else problems.push('treeCover must be "canopy" or "off"');
+  }
+  if (o['canopyTilesUrl'] !== undefined) {
+    if (url(o['canopyTilesUrl'])) config.canopyTilesUrl = o['canopyTilesUrl'] as string;
+    else problems.push('canopyTilesUrl must be an http(s) URL');
+  }
   return { config, problems };
+}
+
+/**
+ * Stores one service setting under `SERVICE_CONFIG_KEY`, keeping the others
+ * stored there. Does nothing when storage is unavailable.
+ */
+export function storeServiceSetting<K extends keyof ServiceConfig>(
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null,
+  key: K,
+  value: ServiceConfig[K],
+): void {
+  if (!storage) return;
+  let stored: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(storage.getItem(SERVICE_CONFIG_KEY) ?? '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      stored = parsed as Record<string, unknown>;
+  } catch {
+    // Replaced below.
+  }
+  try {
+    storage.setItem(SERVICE_CONFIG_KEY, JSON.stringify({ ...stored, [key]: value }));
+  } catch {
+    // Storage full or blocked: the setting lasts for this page only.
+  }
 }

@@ -63,9 +63,9 @@ and hide behind is what the trainee sees.
    (`grading.ts`); the terrain mesh, ground map and ground material; the draped road surface,
    water mesh, shoreline, bridge geometry and bridge structures; geometry diagnostics; and the
    old vegetation renderer.
-9. **Tree cover from imagery** (`tools/tree-cover.ts`) is kept, switched off. It classifies NAIP
-   imagery for woods OpenStreetMap does not map; the app adds them to a battlefield only when
-   `TREE_COVER_FILES` (`src/app/tree-cover.ts`) names a file for it, and none does.
+9. **Tree cover from imagery** (`tools/tree-cover.ts`) is kept. It classifies NAIP imagery for
+   woods OpenStreetMap does not map. Its dormant hook in the app was replaced by tree cover from
+   canopy heights ([ADR 0050](0050-tree-cover-from-canopy-heights.md)).
 10. **Woods' edges are blended** (`field-v6`). The land cover is mapped on 2 m cells, so the
     forest floor met the grass in a hard, stepped line. Near a boundary between covers, a
     wood's litter, grass, soil and relief are averaged over about 3.5 m either side of a line

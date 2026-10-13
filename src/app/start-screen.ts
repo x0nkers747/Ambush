@@ -6,6 +6,7 @@ import {
   OsmUnavailableError,
   searchPlaces,
   ServiceError,
+  storeServiceSetting,
   type BattlefieldStore,
   type BattlefieldSummary,
   type GenerationStep,
@@ -109,6 +110,7 @@ export function battlefieldInfoHtml(
       <dt>Elevation</dt><dd>${String(pkg.request.cellSizeM)} m grid from ${escapeHtml(datasets.join(', ') || 'unrecognised sources')} (${resolution}; ${escapeHtml(SURFACE_LABEL[e.surfaceModel] ?? e.surfaceModel)}). ${String(Math.round(lowM))}–${String(Math.round(highM))} m.</dd>
       ${quality ? `<dt>Terrain check</dt><dd>${terrainCheckHtml(quality)}</dd>` : ''}
       <dt>Buildings</dt><dd>${buildingsLine(pkg)}</dd>
+      ${pkg.treeCover ? `<dt>Tree cover</dt><dd>${treeCoverLine(pkg.treeCover)}</dd>` : ''}
       <dt>Map data</dt><dd>${
         pkg.osm.available
           ? `OpenStreetMap as of ${escapeHtml(pkg.osm.timestampOsmBase ?? 'unknown')}: ${String(c.roads)} roads and paths, ${String(c.vegetation)} vegetation, ${String(c.water)} water, ${String(c.waterways)} waterways, ${String(c.landUse)} land use`
@@ -125,6 +127,16 @@ export function battlefieldInfoHtml(
     <details class="sub"><summary>Sources and credits</summary><ul class="credits">${pkg.attribution
       .map((a) => `<li>${escapeHtml(a)}</li>`)
       .join('')}</ul></details>`;
+}
+
+/** Woods added from canopy heights (docs/adr/0050): how many, and how well the map lined up. */
+function treeCoverLine(t: NonNullable<BattlefieldPackage['treeCover']>): string {
+  const ha = (t.areaM2 / 10_000).toFixed(1);
+  const [dx, dy] = t.shiftM;
+  const lined = t.aligned
+    ? `lined up with the mapped woods (moved ${String(Math.abs(dx))} m ${dx < 0 ? 'west' : 'east'}, ${String(Math.abs(dy))} m ${dy < 0 ? 'south' : 'north'}; it has trees in ${String(Math.round(t.mappedWoodsFound * 100))}% of them)`
+    : 'not lined up (too few mapped woods)';
+  return `${String(t.woods)} woods (${ha} ha) OpenStreetMap does not map, from the Meta / WRI canopy height map: trees ${String(t.thresholdM)} m or taller, ${lined}.`;
 }
 
 /** The DEM quality check (docs/adr/0033): one line, with the details folded away. */
@@ -178,6 +190,7 @@ const STEPS: readonly [GenerationStep, string][] = [
   ['elevation', 'Elevation tiles'],
   ['buildings', 'Buildings (Overture Maps)'],
   ['osm', 'Map features (OpenStreetMap)'],
+  ['trees', 'Tree cover (canopy heights)'],
   ['processing', 'Building the battlefield'],
   ['saving', 'Saving'],
 ];
@@ -242,6 +255,11 @@ export function startBattlefieldSelection(
         </form>
         <p><button class="link" data-ui="here">Use my current position</button></p>
         <p class="hint" data-ui="position-message" hidden></p>
+      </section>
+      <section class="sec">
+        <h2>Tree cover</h2>
+        <label class="check-row"><input type="checkbox" data-ui="tree-cover"> Add woods OpenStreetMap does not map, from satellite canopy heights</label>
+        <p class="hint">For new battlefields: about 10 MB more to download, and a few seconds. From the Meta / World Resources Institute canopy height map (about 1 m; imagery from recent years).</p>
       </section>
       <section class="sec">
         <h2>Saved battlefields</h2>
@@ -544,16 +562,36 @@ export function startBattlefieldSelection(
   // --- Generation ----------------------------------------------------------
 
   const renderSteps = (current: GenerationStep | null, failed = false) => {
-    const index = STEPS.findIndex(([s]) => s === current);
+    // The tree cover step only when it is on.
+    const steps = STEPS.filter(([s]) => s !== 'trees' || treeCover === 'canopy');
+    const index = steps.findIndex(([s]) => s === current);
     show(
       'steps',
-      STEPS.map(([step, label], i) => {
-        const state = i < index ? 'done' : i === index ? (failed ? 'failed' : 'active') : 'waiting';
-        return `<li data-state="${state}" data-step="${step}">${escapeHtml(label)}</li>`;
-      }).join(''),
+      steps
+        .map(([step, label], i) => {
+          const state =
+            i < index ? 'done' : i === index ? (failed ? 'failed' : 'active') : 'waiting';
+          return `<li data-state="${state}" data-step="${step}">${escapeHtml(label)}</li>`;
+        })
+        .join(''),
     );
   };
   let lastStep: GenerationStep | null = null;
+
+  // Tree cover from canopy heights (docs/adr/0050): remembered in the service settings.
+  let treeCover = o.config.treeCover;
+  const treeCoverBox = ui('tree-cover') as HTMLInputElement;
+  treeCoverBox.checked = treeCover === 'canopy';
+  treeCoverBox.addEventListener('change', () => {
+    treeCover = treeCoverBox.checked ? 'canopy' : 'off';
+    let storage: Storage | null = null;
+    try {
+      storage = window.localStorage;
+    } catch {
+      // Unavailable: the choice lasts for this page.
+    }
+    storeServiceSetting(storage, 'treeCover', treeCover);
+  });
 
   const generate = (allowMissingOsm: boolean) => {
     if (selection.kind !== 'location' || generating) return;
@@ -570,7 +608,7 @@ export function startBattlefieldSelection(
       selection.name !== null ? { name: selection.name } : {},
     );
     generateBattlefield(request, {
-      config: o.config,
+      config: { ...o.config, treeCover },
       store: o.store,
       fetch: (u, i) => window.fetch(u, i),
       decodePng: decodePngInBrowser,
