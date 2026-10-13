@@ -35,10 +35,10 @@ in detail, especially in the Netherlands:
   `recreation`. Pitches are `paved` when their surface is hard (asphalt, concrete, clay,
   tartan…), otherwise `recreation`. `landcover=grass` is `meadow`.
 - **Precedence:** `paved` areas are drawn over the land use they lie in. The game's ground and
-  land-cover colours paint smaller areas over larger ones; the terrain lab paints `paved` over
-  towns and lawns.
-- **Display only.** `paved` gets a 2D map tint, a 3D land-cover colour and a ground recipe (grey
-  gravel and rock). The simulation does not use land use.
+  land-cover colours paint smaller areas over larger ones; the terrain field (ADR 0049) paints
+  `paved` over towns and lawns.
+- **Display only.** `paved` gets a 2D map tint and the 3D ground's paving. The simulation does
+  not use land use.
 
 ## Consequences
 
@@ -47,7 +47,8 @@ in detail, especially in the Netherlands:
   stored Overpass response lacks the new tags.
 - **Download size.** Overpass responses for dense cities grow. Amsterdam's `area:highway` and
   leisure areas add many small polygons.
-- **The terrain lab** (ADR 0047) draws towns as mostly paved:
+- **The 3D ground** (the terrain field, ADR 0049; prototyped in the terrain lab, ADR 0047) draws
+  towns as mostly paved:
   - paving within 9 m of a road edge (pavements, forecourts);
   - paths and patios within 3 m of buildings;
   - gardens, lawns and open ground green behind the frontage;

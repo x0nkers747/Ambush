@@ -1,6 +1,6 @@
 # ADR 0044: Road junctions, grade separation and bridge structures
 
-- Status: Accepted
+- Status: Partly superseded by ADR 0049: the road surface is the terrain field's; bridge structures are the field's decks
 - Date: 2026-10-12
 - Extends ADR 0030 (3D geographic features), ADR 0037 (road markings) and ADR 0041 (procedural
   road bridges). Keeps ADR 0032 (authoritative graded terrain) and ADR 0043 (bridge navigation):

@@ -1,6 +1,6 @@
 # ADR 0038: Terrain materials and surface realism
 
-- Status: Accepted
+- Status: Superseded by ADR 0049: the ground is drawn from the terrain field with its own materials
 - Date: 2026-10-11
 - Builds on ADR 0029 (the 3D view), ADR 0030 (land cover, whose ground colours become the
   fallback), ADR 0031 (vegetation and the generation worker), ADR 0032 (the authoritative graded

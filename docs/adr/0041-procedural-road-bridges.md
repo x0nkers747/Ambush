@@ -1,6 +1,6 @@
 # ADR 0041: Procedural road bridges
 
-- Status: Accepted
+- Status: Partly superseded by ADR 0049: bridges are planned as here, but their deck heights come from the terrain field, and the 3D view draws the field's decks
 - Date: 2026-10-12
 - Builds on ADR 0030 (draped roads), ADR 0032 (the authoritative graded terrain), ADR 0036
   (decoration), ADR 0037 (road markings) and ADR 0040 (levelled water and shores).

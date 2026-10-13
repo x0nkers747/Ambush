@@ -1,6 +1,6 @@
 # ADR 0030: Geographic features in the 3D view
 
-- Status: Accepted (its buildings are superseded by ADR 0035: procedural roofs, textures, windows and doors; its land-cover ground colours by ADR 0038, which keeps them only as the fallback until the ground textures are ready)
+- Status: Accepted (its roads and water are drawn by the terrain field since ADR 0049; its buildings are superseded by ADR 0035: procedural roofs, textures, windows and doors; its land-cover ground colours by ADR 0038, which keeps them only as the fallback until the ground textures are ready)
 - Date: 2026-10-11
 - Implements milestone 2 (phase 2, "draped features") of `docs/3d-terrain-architecture-research.md`.
   Builds on ADR 0029 (the 3D view), ADR 0011 and ADR 0014 (environment features), ADR 0006 and

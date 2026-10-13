@@ -24,17 +24,19 @@ battlefield once its scenario (ORP, OPFOR and route) is set up in the scenario e
 on the simulated terrain, with its roads, buildings, water, forests, tree lines and scrub, and
 the ground coloured by land cover: switch with **2D | 3D** under the map; drag to pan, as in
 2D, right-drag to orbit, use the wheel to zoom and double-click to focus. Soldiers hidden by trees or
-buildings show through as dim silhouettes. Roads and buildings are graded into the ground
-(cuttings, embankments and level pads, on 2.5 m refinement tiles), and that one graded terrain is
-used by everything: the 2D map, the 3D view, movement, line of sight and replay
-([ADR 0032](docs/adr/0032-authoritative-graded-terrain.md)). Faulty elevation samples in the
-source data (voids, spikes, no-data values) are found and repaired before grading, real cliffs and
+buildings show through as dim silhouettes. The ground is a terrain field: the elevation data with
+roads (level across, smoothed along, blended at junctions), bridge decks, building pads, ditches,
+stream channels and water beds built in as constraints. The simulation samples it on a 1 m
+lattice wherever it has detail, and the 3D view draws the same field, so the 2D map, the 3D view,
+movement, line of sight and replay all use one ground
+([ADR 0049](docs/adr/0049-terrain-field-ground-and-renderer.md)). Faulty elevation samples in the
+source data (voids, spikes, no-data values) are found and repaired first, real cliffs and
 ravines are left alone, and Battlefield Information reports what was found
 ([ADR 0033](docs/adr/0033-dem-quality-validation.md)). Buildings in 3D are procedural: gable,
 hip, shed and flat roofs on rectangles and L/T plans, textured walls and roofs at real scale,
 windows, and doors facing the nearest road, styled for the battlefield's region (North American
 or central European) from the source's building tags where it has them. They are display only:
-the simulated building heights, line of sight, grading and movement are unchanged
+the simulated building heights, line of sight, the ground and movement are unchanged
 ([ADR 0035](docs/adr/0035-procedural-buildings.md)). Around them the 3D view draws paths and
 driveways to front doors, street lamps in built-up streets, utility poles, fences, walls
 and front-garden hedges, roadside and garden trees, and a few signs and mailboxes: mapped
@@ -43,13 +45,14 @@ part of the simulation ([ADR 0036](docs/adr/0036-procedural-environmental-detail
 painted markings where real roads would (centrelines, lane separators, edge lines, mapped crossings
 and stop lines), in the region's conventions: yellow centrelines in North America, white in
 Germany, and none on residential streets, service roads or tracks
-([ADR 0037](docs/adr/0037-road-markings.md)). The ground is textured from its land cover:
-grass and rough grass, leaf or needle litter under woods (following the trees above), field soil
-with furrows, bare earth and gravel in yards and on worn road shoulders, damp earth in wetlands,
-and bare earth or rock on steep slopes and graded cuttings. The textures (CC0) are mapped in world
-space at real scale, without visible tiling, and natural edges are soft while field and settlement
-edges stay sharp. It is display only: no vertex moves, and the simulation never reads it
-([ADR 0038](docs/adr/0038-terrain-materials.md)). The whole exercise can be played in either view, or switching
+([ADR 0037](docs/adr/0037-road-markings.md)). In 3D the ground is drawn in tiles down to
+0.5 m near the camera, with physically based materials (CC0) chosen per pixel from the field:
+asphalt, gravel and dirt roads with straight edges and shoulders, paved streets and yards in towns
+([ADR 0048](docs/adr/0048-paved-ground-and-parks-from-osm.md)), grass in several kinds, forest
+litter, mud and sand at shores, damp ditches and rock on steep slopes, with grass, weeds and
+pebbles near the camera. Woods are drawn as trees of the Quantico area (oaks, maples, tulip
+poplars, pines and others) in several sizes and shapes, with shrubs and ferns under them
+([ADR 0049](docs/adr/0049-terrain-field-ground-and-renderer.md)). The whole exercise can be played in either view, or switching
 between them at any moment: in 3D, click a Marine to select him, click the ground to send him
 there, drag his destination or facing arrow, place fire teams, draw the kill zone and edit the
 scenario, with the same purple viewsheds painted on the terrain, the same routes, wedges and labels
@@ -58,32 +61,19 @@ the same commands on the same exercise; the 3D view only projects them onto the 
 ([ADR 0039](docs/adr/0039-2d-3d-functional-parity.md)). Open water is levelled into the
 ground: the sea at 0 m, each lake, reservoir and pond at one exactly horizontal level from its
 shoreline, and rivers and canals at least 8 m wide level across and falling smoothly downstream.
-The ground under the water is a shallow bed, the shores meet the water, and the banks blend into
-the land within a few metres. Every system uses that one graded ground. Shores get sand, shingle,
-mud or rock, as mapped (`natural=beach` and its `surface`, `shingle`, `bare_rock`, `mud`) or
-inferred from the kind of water, the slope and the land cover, with a damp band at the waterline
-([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)). Roads crossing rivers, canals and lakes, and every
-road mapped as a bridge, get a bridge in 3D: a deck that continues the road and its markings,
-barriers, abutments and piers. Bridges are decoration only; the simulation and the ground are
-unchanged ([ADR 0041](docs/adr/0041-procedural-road-bridges.md)). Roads form one surface: a side road
-stops at the edge of the road it joins, junctions are paved by their most important road, roads on
-different levels (bridges, tunnels, `layer`) stay whole, and ways mapped side by side as one bridge
-are drawn as one structure, with barriers only on its outside and gaps where roads join it
-([ADR 0044](docs/adr/0044-road-junction-and-bridge-topology.md)). In 3D the water is opaque and dark, coloured by
-a visual profile (urban canal, river, lake, reservoir, ocean, pond) with a restrained sky
-reflection; ground the grading left above the water inside it is cut away at the mapped shore,
-and the cut is closed by straight brick quays on built-up shores and short earth banks elsewhere.
-Buildings standing in water reach down into it. Display only: the ground and the simulation are
-unchanged ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
+The ground under the water is a shallow bed, and the banks rise from the water's level; shores
+get sand, shingle or mud by the kind of water
+([ADR 0040](docs/adr/0040-water-grading-and-shorelines.md)). Every road mapped as a bridge has a
+deck that continues the road, with parapets and abutments; the ground is kept clear under it, and
+soldiers cross on the deck that is drawn
+([ADR 0043](docs/adr/0043-bridge-and-road-navigation.md),
+[ADR 0049](docs/adr/0049-terrain-field-ground-and-renderer.md)). In 3D the water is opaque and
+dark, coloured by a visual profile (urban canal, river, lake, reservoir, ocean, pond) with a
+restrained sky reflection ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
 
-### Terrain lab (prototype)
-
-`#terrain-lab` (e.g. http://localhost:5173/#terrain-lab) opens an isolated prototype of a
-ground-level terrain engine on any saved battlefield: a constraint-based terrain field sampled
-into 0.5 m tiles, CDLOD rendering, PBR ground materials and ground clutter, with walk, fly and
-tactical cameras, debug views, and a switch to the current renderer for matched comparisons. It
-is not part of the game, and nothing in the game uses it
-([report](docs/terrain-lab-prototype-report.md), [ADR 0047](docs/adr/0047-terrain-lab-prototype.md)).
+Woods that OpenStreetMap does not map can be found in aerial imagery (USGS NAIP, United States
+only) with `tools/tree-cover.ts`; the app can add them to a battlefield, but this is switched
+off for now (`src/app/tree-cover.ts`).
 
 ## Requirements
 
@@ -304,3 +294,4 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 46. [Water visuals and shoreline smoothing](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)
 47. [Terrain lab: an isolated ground-level terrain prototype](docs/adr/0047-terrain-lab-prototype.md)
 48. [Paved ground and parks from OpenStreetMap](docs/adr/0048-paved-ground-and-parks-from-osm.md)
+49. [The terrain field is the game's ground and its 3D terrain](docs/adr/0049-terrain-field-ground-and-renderer.md)

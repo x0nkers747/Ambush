@@ -1,6 +1,6 @@
 # ADR 0032: One authoritative, graded terrain
 
-- Status: Accepted
+- Status: Superseded by ADR 0049: the ground is sampled from the terrain field on a 1 m lattice; one authoritative ground for every system, and scenarios recording the terrain model, stay
 - Date: 2026-10-11
 - Implements milestone 4 (critical architectural change) of
   `docs/3d-terrain-architecture-research.md`. Amends ADR 0006 and ADR 0008 (the terrain dataset and

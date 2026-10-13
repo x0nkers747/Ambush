@@ -1,6 +1,6 @@
 # ADR 0040: Water surface flattening, shorelines and beaches
 
-- Status: Accepted
+- Status: Accepted for the water levels; the grading of the water bed and shores is superseded by ADR 0049 (the terrain field does it)
 - Date: 2026-10-12
 - Builds on ADR 0014 (real-world terrain import), ADR 0030 (geographic features in the 3D view),
   ADR 0032 (one authoritative, graded terrain), ADR 0033 (DEM quality validation) and ADR 0038

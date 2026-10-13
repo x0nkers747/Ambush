@@ -1,6 +1,6 @@
 # ADR 0047: Terrain lab: an isolated ground-level terrain prototype
 
-- Status: Accepted (prototype only; integration into the game is not decided)
+- Status: Superseded by ADR 0049: the prototype is the game's ground and 3D terrain; the lab page is removed
 - Date: 2026-10-13
 - Follows [`docs/ground-level-terrain-architecture-research.md`](../ground-level-terrain-architecture-research.md),
   stage 2. Results: [`docs/terrain-lab-prototype-report.md`](../terrain-lab-prototype-report.md).

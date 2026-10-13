@@ -1,6 +1,6 @@
 # ADR 0046: Water visuals and shoreline smoothing
 
-- Status: Accepted
+- Status: Partly superseded by ADR 0049: the water material and profiles stay; the water mesh, shoreline cut and walls are replaced by the terrain field's banks and water
 - Date: 2026-10-12
 - Amends ADR 0040 (water grading and shorelines: how water and shores are drawn in 3D). Keeps ADR
   0032 (the terrain surface) and ADR 0040's grading: the ground, its heights and every simulation

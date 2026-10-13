@@ -1,6 +1,6 @@
 # Terrain Lab: Ground-Level Terrain Prototype Report
 
-- Status: Prototype complete, for review. **Not integrated into the game.**
+- Status: Prototype complete; adopted as the game's ground and 3D terrain by [ADR 0049](adr/0049-terrain-field-ground-and-renderer.md). The lab page described here has been removed.
 - Date: 2026-10-13
 - Implements stage 2 of [`ground-level-terrain-architecture-research.md`](ground-level-terrain-architecture-research.md)
   (architecture A4★). Decision record: [ADR 0047](adr/0047-terrain-lab-prototype.md).
