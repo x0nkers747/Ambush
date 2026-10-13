@@ -575,7 +575,7 @@ describe('roads, buildings and sight', () => {
   });
 
   it('names a new model of the ground', () => {
-    expect(terrainModelId(t)).toBe('field-v5');
+    expect(terrainModelId(t)).toBe('field-v6');
     // A terrain graded by the earlier rules is left as it was (its scenarios notice the model).
     const old: TerrainDataset = { ...source, grading: { version: 1, fineSpacingM: 2.5 } };
     expect(gradeTerrain(old)).toBe(old);

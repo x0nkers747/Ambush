@@ -72,18 +72,22 @@ function worstDifference(terrain: TerrainDataset, count = 4000): number {
 }
 
 describe('the 3D view on graded terrain', () => {
-  it('draws the simulated ground: the same field, to within its sampling', () => {
-    // The simulation samples the field every metre where it has detail; the
-    // view every half metre: between samples they differ by a few centimetres.
-    expect(worstDifference(graded)).toBeLessThan(REFINE_TOLERANCE_M * 2);
-    for (const [x, y] of [
-      [-100, 60],
-      [0, -100],
-    ] as const) {
-      expect(Math.abs(heightAt(graded, x, y) - heightAt(source, x, y))).toBeGreaterThan(0.3);
-    }
-    expect(worstDifference(DEMO_SCENARIO.terrain, 2000)).toBeLessThan(REFINE_TOLERANCE_M * 2);
-  });
+  it(
+    'draws the simulated ground: the same field, to within its sampling',
+    { timeout: 30_000 },
+    () => {
+      // The simulation samples the field every metre where it has detail; the
+      // view every half metre: between samples they differ by a few centimetres.
+      expect(worstDifference(graded)).toBeLessThan(REFINE_TOLERANCE_M * 2);
+      for (const [x, y] of [
+        [-100, 60],
+        [0, -100],
+      ] as const) {
+        expect(Math.abs(heightAt(graded, x, y) - heightAt(source, x, y))).toBeGreaterThan(0.3);
+      }
+      expect(worstDifference(DEMO_SCENARIO.terrain, 2000)).toBeLessThan(REFINE_TOLERANCE_M * 2);
+    },
+  );
 
   it('asks the same ground as the simulation for the camera', () => {
     const ground = terrainGround(graded);

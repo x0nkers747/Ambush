@@ -29,7 +29,7 @@ export const REFINE_TOLERANCE_M = 0.1;
 /**
  * Which model of the ground a terrain is: the DEM cleaning version
  * (docs/adr/0033) and the terrain field version it was sampled from, e.g.
- * `dem-clean-v1+field-v5`; `source` for an untouched terrain. Scenarios
+ * `dem-clean-v1+field-v6`; `source` for an untouched terrain. Scenarios
  * record it, so plans made on another model are noticed (docs/adr/0032).
  */
 export function terrainModelId(terrain: TerrainDataset): string {

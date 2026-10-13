@@ -439,7 +439,7 @@ describe('the authoritative ground', () => {
     expect(Math.abs(heightAt(terrain, 200, 150) - plane(20, 15))).toBeLessThan(1);
     expect(terrain.refinement?.factor).toBe(10);
     expect(terrainModelId(terrain)).toBe(TERRAIN_MODEL);
-    expect(TERRAIN_MODEL).toBe('dem-clean-v1+field-v5');
+    expect(TERRAIN_MODEL).toBe('dem-clean-v1+field-v6');
     // Grading the raw DEM gives another model, and other ground.
     const uncleaned = gradeTerrain(source);
     expect(terrainModelId(uncleaned)).not.toBe(TERRAIN_MODEL);

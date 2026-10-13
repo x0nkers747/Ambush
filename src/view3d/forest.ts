@@ -46,6 +46,8 @@ const UNDER_BUDGET_MS = 1.5;
 const UNDER_RETRY_MS = 300;
 const UNDER_CELL_M = 4;
 const MAX_WIDEN = 1.8;
+/** Distance steps of the widening, metres. */
+const WIDEN_STEP_M = 40;
 /**
  * The bands: the near models are rich (layers of leaf cards, costly to fill),
  * so they reach only this far, and medium ones this far; the far band and
@@ -671,8 +673,8 @@ uniform float vegTime;`,
           const scale = model.lodScale;
           if (nearest >= s.far * scale) continue;
           const rank = inst.rank[i] ?? 0;
+          // (The tile's nearest point keeps the most: past it, no plant of the tile is kept.)
           if (rank >= bound) break;
-          if (rank >= keepFraction(nearest, s, scale)) continue;
           const x = inst.position[i * 3] ?? 0;
           const y = inst.position[i * 3 + 1] ?? 0;
           const z = inst.position[i * 3 + 2] ?? 0;
@@ -682,12 +684,17 @@ uniform float vegTime;`,
           const d = Math.hypot(x - view.x, y - view.y, z + h / 2 - view.z);
           const band = lodBand(d, s, scale);
           if (band < 0) continue;
+          // Thinned by the plant's own distance, so the density changes smoothly,
+          // never in steps at tile edges.
+          const keep = keepFraction(d, s, scale);
+          if (rank >= keep) continue;
           let widen = 1;
           if (band === LOD_LEVELS - 1 && model.tree) {
-            if (rank >= keepFraction(d, s, scale)) continue;
-            // Widened by the tile's distance, not the plant's: it changes only
-            // when the tile's does, so buffers need not be uploaded as often.
-            widen = Math.min(MAX_WIDEN, 1 / Math.sqrt(keepFraction(nearest, s, scale)));
+            // Kept crowns widen as the others thin, so cover is kept. In steps
+            // of WIDEN_STEP_M of distance: rings, not tile edges, and buffers
+            // need not be uploaded for every small move.
+            const dq = Math.round(d / WIDEN_STEP_M) * WIDEN_STEP_M;
+            widen = Math.min(MAX_WIDEN, 1 / Math.sqrt(keepFraction(dq, s, scale)));
           }
           const target = model.targets[band];
           if (!target) continue;

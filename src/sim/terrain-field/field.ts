@@ -30,7 +30,7 @@ import {
 // order, so the result is the same in every engine (§5.2 rule 5).
 
 /** Bump when anything here changes what the field gives. */
-export const TERRAIN_FIELD_VERSION = 5;
+export const TERRAIN_FIELD_VERSION = 6;
 
 export interface FieldSpec {
   readonly seed: number;

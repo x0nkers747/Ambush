@@ -107,13 +107,29 @@ function grassClump(blades: number, height: number, seed: number): BufferGeometr
   return g;
 }
 
+/** A fallen leaf: a pointed oval, 1 long and 0.5 wide, lying flat (a fan round its middle). */
 function leaf(): BufferGeometry {
-  const pos = [-0.5, 0, -0.3, 0.5, 0, -0.3, 0.5, 0, 0.3, -0.5, 0, -0.3, 0.5, 0, 0.3, -0.5, 0, 0.3];
+  const n = 8;
+  const rim: [number, number][] = [];
+  for (let k = 0; k < n; k += 1) {
+    const a = (2 * Math.PI * k) / n;
+    // Pointed at both ends: narrower towards the tips than an ellipse.
+    const w = 0.25 * Math.abs(Math.sin(a)) ** 0.7;
+    rim.push([0.5 * Math.cos(a), Math.sign(Math.sin(a)) * w]);
+  }
+  const pos: number[] = [];
+  rim.forEach(([x, z], k) => {
+    const [x2, z2] = rim[(k + 1) % n] ?? rim[0] ?? [0, 0];
+    pos.push(0, 0, 0, x, 0, z, x2, 0, z2);
+  });
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
   g.setAttribute(
     'normal',
-    new BufferAttribute(new Float32Array(Array.from({ length: 6 }, () => [0, 1, 0]).flat()), 3),
+    new BufferAttribute(
+      new Float32Array(Array.from({ length: pos.length / 3 }, () => [0, 1, 0]).flat()),
+      3,
+    ),
   );
   return g;
 }
@@ -409,10 +425,11 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
         }
       for (let i = 0; i < kinds.leaf.capacity; i += 1) {
         const h = hash01(i, 5, 5);
+        // Litter browns, as dark as the forest floor's texture, a few lighter or redder.
         leafColour.setHSL(
-          0.06 + 0.06 * h,
-          0.45 + 0.25 * hash01(i, 6, 6),
-          0.18 + 0.14 * hash01(i, 7, 7),
+          0.05 + 0.05 * h,
+          0.35 + 0.25 * hash01(i, 6, 6),
+          0.07 + 0.08 * hash01(i, 7, 7) ** 2,
         );
         kinds.leaf.mesh.setColorAt(i, leafColour);
       }

@@ -226,11 +226,17 @@ void labMaterial() {
   // broad patches tens of metres across; bare soil only in large patches.
   float lush = smoothstep(0.25, 0.85, labNoise(vMap.xy * 0.03 + 17.0));
   float dense = smoothstep(0.3, 0.9, labNoise(vMap.xy * 0.05 + 41.0));
-  w[3] = B.r * (1.0 - lush) * (1.0 - dense);
-  w[9] = B.r * lush;
-  w[10] = B.r * (1.0 - lush) * dense;
+  // Where grass meets forest litter (a wood's edge), patches of each a metre
+  // or two across reach into the other, rather than a smooth fade.
+  float edge = clamp(4.0 * B.r * B.b / (cover * cover), 0.0, 1.0);
+  float patches = labNoise(vMap.xy * 0.55 + 23.0) * 0.65 + labNoise(vMap.xy * 1.9 + 3.0) * 0.35;
+  float shift = (patches - 0.5) * 2.2 * edge;
+  float grassy = B.r * clamp(1.0 + shift, 0.0, 2.0);
+  w[3] = grassy * (1.0 - lush) * (1.0 - dense);
+  w[9] = grassy * lush;
+  w[10] = grassy * (1.0 - lush) * dense;
   w[2] = B.g * smoothstep(0.35, 0.65, labNoise(vMap.xy * 0.06 + 5.0));
-  w[7] = B.b;
+  w[7] = B.b * clamp(1.0 - shift, 0.0, 2.0);
   // Steeper slopes show some earth; steep ones rock.
   float slope = 1.0 - n.z;
   w[2] += smoothstep(0.28, 0.42, slope + (n2 - 0.5) * 0.1) * 0.35;

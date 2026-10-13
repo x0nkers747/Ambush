@@ -178,6 +178,31 @@ function largestStep(f: TerrainField, a: Vec2, b: Vec2): number {
 describe('terrain field: the field', () => {
   const s = emptySample();
 
+  it('blends a wood’s floor into the grass over several metres, along a wavering line', () => {
+    // The wood's west edge is at x = 100 (y 60 to 190).
+    const litterAt = (x: number, y: number) => {
+      field.sample(x, y, s);
+      return s.litter;
+    };
+    expect(litterAt(90, 120)).toBeLessThan(0.02);
+    expect(litterAt(112, 120)).toBeGreaterThan(0.85);
+    // A gradual band, not a step: some points within 4 m of the edge are part-way.
+    const between: number[] = [];
+    for (let y = 80; y <= 170; y += 5)
+      for (let x = 96; x <= 104; x += 1) {
+        const l = litterAt(x, y);
+        if (l > 0.1 && l < 0.8) between.push(l);
+      }
+    expect(between.length).toBeGreaterThan(40);
+    // Wavering: where the litter reaches half its depth differs along the edge.
+    const halfway = [80, 110, 140, 170].map((y) => {
+      let x = 90;
+      while (x < 112 && litterAt(x, y) < 0.45) x += 0.25;
+      return x;
+    });
+    expect(Math.max(...halfway) - Math.min(...halfway)).toBeGreaterThan(1);
+  });
+
   it('holds a road level across its carriageway and marks its surface', () => {
     const road = field.roads.find((r) => r.id === 'road-w');
     if (!road) throw new Error('no road');

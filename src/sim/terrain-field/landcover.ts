@@ -1,5 +1,6 @@
 import type { Building, EnvironmentFeatures, LandUseKind } from '../environment';
 import type { Vec2 } from '../geometry';
+import { gradientNoise } from './noise';
 
 // What covers the ground, on a 2 m raster (research §5.3): it shapes the
 // small-scale relief and the ground's materials. Polygons are filled by the
@@ -166,6 +167,8 @@ export interface CoverMap {
   readonly columns: number;
   readonly rows: number;
   readonly cover: Uint8Array;
+  /** Cells near a boundary between covers (within reach of a wood's blended edge). */
+  readonly edge: Uint8Array;
   /** Whether a point is in a built-up area (buildings within `BUILT_UP_REACH_M`). */
   builtUp(x: number, y: number): boolean;
   /** The cover of the cell at (x, y). */
@@ -286,12 +289,48 @@ export function coverMap(
   };
   for (const b of features.buildings) mark(b);
 
+  // Cells within reach of a boundary between covers: only there is a wood's edge blended.
+  const edge = new Uint8Array(columns * rows);
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < columns; c += 1) {
+      const i = r * columns + c;
+      const v = cover[i];
+      if ((c + 1 < columns && cover[i + 1] !== v) || (r + 1 < rows && cover[i + columns] !== v))
+        edge[i] = 1;
+    }
+  const reach = Math.ceil((EDGE_BLEND_M + EDGE_WARP_M) / cell) + 2;
+  // Grown by `reach` cells: along the rows, then the columns.
+  const along = (
+    from: Uint8Array,
+    n: number,
+    count: number,
+    at: (line: number, k: number) => number,
+  ) => {
+    const to = new Uint8Array(from.length);
+    for (let line = 0; line < count; line += 1) {
+      let last = -Infinity;
+      for (let k = 0; k < n; k += 1) {
+        if (from[at(line, k)]) last = k;
+        if (k - last <= reach) to[at(line, k)] = 1;
+      }
+      let next = Infinity;
+      for (let k = n - 1; k >= 0; k -= 1) {
+        if (from[at(line, k)]) next = k;
+        if (next - k <= reach) to[at(line, k)] = 1;
+      }
+    }
+    return to;
+  };
+  const byRow = along(edge, columns, rows, (r, c) => r * columns + c);
+  edge.set(along(byRow, rows, columns, (c, r) => r * columns + c));
+
   return {
     originX: ox,
     originY: oy,
     columns,
     rows,
     cover,
+    edge,
     builtUp(x, y) {
       const c = Math.floor((x - ox) / BUILT_CELL_M);
       const r = Math.floor((y - oy) / BUILT_CELL_M);
@@ -308,12 +347,61 @@ export function coverMap(
 }
 
 /**
- * The cover's look at (x, y), blended bilinearly between the four nearest
- * cells, so relief and materials change smoothly across a boundary. Writes
+ * Woods' edges (their litter, grass and soil, and relief) blend over this far
+ * either side of the mapped edge, metres, along a line wavering by up to
+ * `EDGE_WARP_M` over about `EDGE_WAVE_M`: a forest floor thins out into
+ * grass, not along a straight line. Other edges (fields, towns, paved ground)
+ * stay as mapped.
+ */
+export const EDGE_BLEND_M = 3.5;
+export const EDGE_WARP_M = 3;
+const EDGE_WAVE_M = 17;
+/** Blur taps: the centre and eight round it, in units of `EDGE_BLEND_M`. */
+const TAPS = [
+  [0, 0, 2],
+  [1, 0, 1],
+  [-1, 0, 1],
+  [0, 1, 1],
+  [0, -1, 1],
+  [0.7, 0.7, 1],
+  [-0.7, 0.7, 1],
+  [0.7, -0.7, 1],
+  [-0.7, -0.7, 1],
+] as const;
+const TAP_WEIGHT = TAPS.reduce((s, [, , w]) => s + w, 0);
+/** Litter at which a point counts as at a wood's edge, fully blended. */
+const EDGE_LITTER = 0.08;
+const tap = new Float64Array(9);
+const blur = new Float64Array(7);
+
+/**
+ * The cover's look at (x, y): blended bilinearly between the four nearest
+ * cells, so relief and materials change smoothly across a boundary, and at a
+ * wood's edge over a wider, wavering band (`EDGE_BLEND_M`). Writes
  * [amp0, amp1, amp2, amp3, grass, soil, litter, urban, paved] into `out`
- * (urban: 1 in towns and on mapped hard ground).
+ * (urban: 1 in towns and on mapped hard ground; urban and paved never blended).
  */
 export function coverLookAt(map: CoverMap, x: number, y: number, out: Float64Array): void {
+  sharpLookAt(map, x, y, out);
+  const c = Math.floor((x - map.originX) / COVER_CELL_M);
+  const r = Math.floor((y - map.originY) / COVER_CELL_M);
+  if (c < 0 || r < 0 || c >= map.columns || r >= map.rows || !map.edge[r * map.columns + c]) return;
+  const wx = x + EDGE_WARP_M * gradientNoise(x / EDGE_WAVE_M, y / EDGE_WAVE_M, 0x3e1d);
+  const wy = y + EDGE_WARP_M * gradientNoise(x / EDGE_WAVE_M + 31.7, y / EDGE_WAVE_M, 0x7a59);
+  blur.fill(0);
+  for (const [dx, dy, w] of TAPS) {
+    sharpLookAt(map, wx + dx * EDGE_BLEND_M, wy + dy * EDGE_BLEND_M, tap);
+    for (let o = 0; o < 7; o += 1) blur[o] = (blur[o] ?? 0) + w * (tap[o] ?? 0);
+  }
+  const litter = Math.max(out[6] ?? 0, (blur[6] ?? 0) / TAP_WEIGHT);
+  const t = litter >= EDGE_LITTER ? 1 : litter / EDGE_LITTER;
+  if (t === 0) return;
+  for (let o = 0; o < 7; o += 1)
+    out[o] = (out[o] ?? 0) + t * ((blur[o] ?? 0) / TAP_WEIGHT - (out[o] ?? 0));
+}
+
+/** The cover's look at (x, y), blended bilinearly between the four nearest cells; as `coverLookAt`. */
+function sharpLookAt(map: CoverMap, x: number, y: number, out: Float64Array): void {
   const gx = (x - map.originX) / COVER_CELL_M - 0.5;
   const gy = (y - map.originY) / COVER_CELL_M - 0.5;
   const c = Math.floor(gx);

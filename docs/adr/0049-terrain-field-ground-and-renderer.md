@@ -56,7 +56,7 @@ and hide behind is what the trainee sees.
 6. **Quality.** Each quality preset sets the ground's finest-level reach (75 / 100 / 130 m for
    low / medium / high), where fine detail fades, and the grass (none on software renderers).
    There are no new settings.
-7. **The model changes.** `TERRAIN_MODEL` becomes `dem-clean-v1+field-v5`. A scenario planned on
+7. **The model changes.** `TERRAIN_MODEL` becomes `dem-clean-v1+field-v5` (`field-v6` since woods' edges are blended, section 10). A scenario planned on
    the graded model is kept and checked, and the trainee told (as for ADR 0032). Replays are
    held in memory only, so none need converting.
 8. **Removed.** The terrain lab page, its cameras, benchmark and comparison mode; the grading
@@ -66,6 +66,13 @@ and hide behind is what the trainee sees.
 9. **Tree cover from imagery** (`tools/tree-cover.ts`) is kept, switched off. It classifies NAIP
    imagery for woods OpenStreetMap does not map; the app adds them to a battlefield only when
    `TREE_COVER_FILES` (`src/app/tree-cover.ts`) names a file for it, and none does.
+10. **Woods' edges are blended** (`field-v6`). The land cover is mapped on 2 m cells, so the
+    forest floor met the grass in a hard, stepped line. Near a boundary between covers, a
+    wood's litter, grass, soil and relief are averaged over about 3.5 m either side of a line
+    wavering by up to 3 m, and the ground's shader breaks the band into patches a metre or two
+    across. Field, town and paved edges stay as mapped. Fallen leaves (clutter) are leaf-shaped
+    and as dark as the floor, no longer light rectangles; sun shadows fade out towards the edge
+    of the square they are cast in; and far trees thin by their own distance, not their tile's.
 
 ## Consequences
 

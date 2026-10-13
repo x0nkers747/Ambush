@@ -54,6 +54,7 @@ import {
   type QualityLevel,
   type QualityPreset,
 } from './quality';
+import { installShadowEdgeFade } from './shadow-fade';
 import { apronElevation, surroundings } from './surroundings';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
 import {
@@ -203,6 +204,7 @@ function tileWorkers(terrain: TerrainDataset): number {
 }
 
 export function createBattlefieldView3d(o: BattlefieldView3dOptions): BattlefieldView3d {
+  installShadowEdgeFade();
   const canvas = document.createElement('canvas');
   canvas.className = 'view3d';
   canvas.setAttribute('aria-label', '3D battlefield view');
@@ -789,6 +791,31 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   // `lift` metres) is on the canvas, in CSS pixels, as clicks see it.
   Object.defineProperty(canvas, 'ambushProject', {
     value: (x: number, y: number, lift = 0) => projectionNow().toScreen({ x, y }, lift),
+  });
+  // For automated browser checks: show or hide the vegetation, buildings and grass (to see the ground).
+  Object.defineProperty(canvas, 'ambushShowLayers', {
+    value: (o: {
+      vegetation?: boolean;
+      features?: boolean;
+      clutter?: boolean;
+      water?: boolean;
+      ground?: boolean;
+    }) => {
+      if (!current) return;
+      if (o.water !== undefined) current.water.mesh.visible = o.water;
+      if (o.ground !== undefined && current.ground) current.ground.mesh.visible = o.ground;
+      if (o.vegetation !== undefined && current.vegetation)
+        current.vegetation.group.visible = o.vegetation;
+      if (o.features !== undefined && current.features) current.features.group.visible = o.features;
+      if (o.clutter !== undefined) current.clutter.setVisible(o.clutter);
+    },
+  });
+  // For automated browser checks: a frame drawn and read back at once, as a JPEG data URL.
+  Object.defineProperty(canvas, 'ambushCapture', {
+    value: () => {
+      view.render();
+      return canvas.toDataURL('image/jpeg', 0.9);
+    },
   });
   // For automated browser checks: switch the quality level.
   Object.defineProperty(canvas, 'ambushSetQuality', {
