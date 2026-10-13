@@ -4,7 +4,6 @@ export {
   DEFAULT_SERVICES,
   loadServiceConfig,
   SERVICE_CONFIG_KEY,
-  storeServiceSetting,
   type ServiceConfig,
 } from './config';
 export {

@@ -71,10 +71,10 @@ soldiers cross on the deck that is drawn
 dark, coloured by a visual profile (urban canal, river, lake, reservoir, ocean, pond) with a
 restrained sky reflection ([ADR 0046](docs/adr/0046-water-visuals-and-shoreline-smoothing.md)).
 
-With **Tree cover** ticked on the terrain selection page, a new battlefield also gets the woods,
+A new battlefield also gets the woods,
 tree lines and garden trees OpenStreetMap does not map, from the Meta / World Resources Institute
 global canopy height map (about 1 m, CC BY 4.0). The map is lined up with the mapped woods first,
-and the woods added are listed in Battlefield Information. It is off by default
+and the woods added are listed in Battlefield Information
 ([ADR 0050](docs/adr/0050-tree-cover-from-canopy-heights.md)). `tools/tree-cover.ts` finds woods in
 USGS NAIP aerial imagery instead (United States only), for comparison.
 

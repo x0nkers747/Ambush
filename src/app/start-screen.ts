@@ -6,7 +6,6 @@ import {
   OsmUnavailableError,
   searchPlaces,
   ServiceError,
-  storeServiceSetting,
   type BattlefieldStore,
   type BattlefieldSummary,
   type GenerationStep,
@@ -255,11 +254,6 @@ export function startBattlefieldSelection(
         </form>
         <p><button class="link" data-ui="here">Use my current position</button></p>
         <p class="hint" data-ui="position-message" hidden></p>
-      </section>
-      <section class="sec">
-        <h2>Tree cover</h2>
-        <label class="check-row"><input type="checkbox" data-ui="tree-cover"> Add woods OpenStreetMap does not map, from satellite canopy heights</label>
-        <p class="hint">For new battlefields: about 10 MB more to download, and a few seconds. From the Meta / World Resources Institute canopy height map (about 1 m; imagery from recent years).</p>
       </section>
       <section class="sec">
         <h2>Saved battlefields</h2>
@@ -563,7 +557,7 @@ export function startBattlefieldSelection(
 
   const renderSteps = (current: GenerationStep | null, failed = false) => {
     // The tree cover step only when it is on.
-    const steps = STEPS.filter(([s]) => s !== 'trees' || treeCover === 'canopy');
+    const steps = STEPS.filter(([s]) => s !== 'trees' || o.config.treeCover === 'canopy');
     const index = steps.findIndex(([s]) => s === current);
     show(
       'steps',
@@ -577,21 +571,6 @@ export function startBattlefieldSelection(
     );
   };
   let lastStep: GenerationStep | null = null;
-
-  // Tree cover from canopy heights (docs/adr/0050): remembered in the service settings.
-  let treeCover = o.config.treeCover;
-  const treeCoverBox = ui('tree-cover') as HTMLInputElement;
-  treeCoverBox.checked = treeCover === 'canopy';
-  treeCoverBox.addEventListener('change', () => {
-    treeCover = treeCoverBox.checked ? 'canopy' : 'off';
-    let storage: Storage | null = null;
-    try {
-      storage = window.localStorage;
-    } catch {
-      // Unavailable: the choice lasts for this page.
-    }
-    storeServiceSetting(storage, 'treeCover', treeCover);
-  });
 
   const generate = (allowMissingOsm: boolean) => {
     if (selection.kind !== 'location' || generating) return;
@@ -608,7 +587,7 @@ export function startBattlefieldSelection(
       selection.name !== null ? { name: selection.name } : {},
     );
     generateBattlefield(request, {
-      config: { ...o.config, treeCover },
+      config: o.config,
       store: o.store,
       fetch: (u, i) => window.fetch(u, i),
       decodePng: decodePngInBrowser,

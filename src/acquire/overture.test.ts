@@ -22,7 +22,8 @@ const noSleep: Sleep = (_ms, signal) =>
   signal?.aborted ? Promise.reject(new CancelledError()) : Promise.resolve();
 
 const BASE = 'https://overture.example.test/tiles/';
-const CONFIG: ServiceConfig = { ...DEFAULT_SERVICES, overtureTilesUrl: BASE };
+// Tree cover (on by default) is tested in canopy.test.ts.
+const CONFIG: ServiceConfig = { ...DEFAULT_SERVICES, overtureTilesUrl: BASE, treeCover: 'off' };
 const LISTING = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult><Prefix>tiles/</Prefix>
 <CommonPrefixes><Prefix>tiles/2026-08-19.0/</Prefix></CommonPrefixes>

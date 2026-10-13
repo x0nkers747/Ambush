@@ -1,6 +1,6 @@
 # ADR 0050: Tree cover from canopy heights
 
-- Status: Accepted (off by default: a switch on the terrain selection page)
+- Status: Accepted (on by default since the trials below)
 - Date: 2026-10-13
 - Supersedes: the dormant tree cover file hook of [ADR 0049](0049-terrain-field-ground-and-renderer.md),
   section 9. The NAIP imagery classifier (`tools/tree-cover.ts`) stays, as a research tool.
@@ -24,8 +24,8 @@ imagery.
 
 ## Decision
 
-1. **Where.** With tree cover on (`ServiceConfig.treeCover: 'canopy'`, a checkbox remembered in
-   the service settings), generating a battlefield adds a step after OpenStreetMap. The step reads
+1. **Where.** With tree cover on (`ServiceConfig.treeCover: 'canopy'`, the default; `'off'` in the
+   stored service settings turns it off), generating a battlefield adds a step after OpenStreetMap. The step reads
    the canopy map over the battlefield: each tile's header (about 120 kB) and the 512-pixel
    blocks under the battlefield, about 8 MB for 5 km (`acquire/canopy.ts`). A failure only
    leaves the woods out, with a warning.
@@ -75,5 +75,5 @@ In Amsterdam a few thin strips along tall buildings' fronts are taken for trees.
 - **Errors.** Masts, cranes or tall buildings missing from the map data could be taken for trees.
   Thin lines are removed, but a solitary mast block is not. Battlefields far from any mapped
   wood are not lined up, and their added woods may be several metres out (a warning says so).
-- **Off by default** until it has been checked on more places. Existing battlefields keep their
-  woods. Regenerating one with tree cover on adds them.
+- **On by default**, after the trials above; it was first off, behind a checkbox. Existing
+  battlefields keep their woods. Regenerating one adds them.

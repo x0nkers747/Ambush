@@ -286,7 +286,12 @@ describe('service clients', () => {
 describe('generating a battlefield', () => {
   // These tests script OpenStreetMap and the elevation tiles only; buildings from
   // Overture Maps (docs/adr/0023) are tested in overture.test.ts.
-  const OSM_ONLY: ServiceConfig = { ...DEFAULT_SERVICES, buildingSource: 'openstreetmap' };
+  // Tree cover (on by default) is tested in canopy.test.ts.
+  const OSM_ONLY: ServiceConfig = {
+    ...DEFAULT_SERVICES,
+    buildingSource: 'openstreetmap',
+    treeCover: 'off',
+  };
   const request = battlefieldRequest(
     { lat: 38.5223, lon: -77.2934 },
     { name: 'Quantico', widthM: 1000 },
