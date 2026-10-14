@@ -217,11 +217,14 @@ void labMaterial() {
   // so a path narrower than the samples' spacing showed only where a sample
   // fell near it (dashes). A sample at the encoding's limit (12 m) bounds
   // nothing useful, so with any such sample the blend is kept. The surface is
-  // the nearest road sample's.
+  // the nearest road sample's. Only where samples are 2 m apart or more:
+  // closer, the blend is exact enough, and the bounds turned single samples
+  // just off a road (between carriageways, at a crossing) into discs of verge.
   float roadE = -100.0;
-  int surf = 0;
-  bool bounded = true;
-  {
+  int surf = code & 7;
+  bool bounded = vSpacing >= 2.0;
+  if (bounded) {
+    surf = 0;
     vec2 f = fract(vLattice);
     ivec2 c0 = ivec2(floor(vLattice)) + 1;
     float nearest = 1e9;
@@ -238,8 +241,9 @@ void labMaterial() {
           surf = s;
         }
       }
-    if (!bounded) roadE = mix(-4.0, 12.0, A.r);
+    if (surf == 0) surf = code & 7;
   }
+  if (!bounded) roadE = mix(-4.0, 12.0, A.r);
   float shore = mix(-6.0, 10.0, A.g);
   float bld = mix(0.0, 8.0, A.b);
   vec3 n = normalize(vMapNormal);
