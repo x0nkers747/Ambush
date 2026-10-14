@@ -36,7 +36,7 @@ const rocketbox = [
 ];
 for (const f of rocketbox) copyFileSync(join(ASSETS, 'rocketbox', f), join(OUT, 'rocketbox', f));
 copyFileSync(join(ASSETS, 'weapons', 'rifle-west.glb'), join(OUT, 'weapons', 'rifle-west.glb'));
-copyFileSync(join(ASSETS, 'm2m', 'AK.glb'), join(OUT, 'weapons', 'ak.glb'));
+// The AK-47 (public/characters/weapons/ak47.glb, Zsky, CC BY 3.0) is kept in the game directly.
 console.log(
   `baked ${String(Object.keys(baked.clips).length)} clips, ${String(baked.skeleton.length)} bones`,
 );

@@ -117,22 +117,24 @@ const RIFLES: Record<'m16' | 'ak', RifleModel> = {
       sightHeight: 0.075,
     }),
   },
-  // The Quaternius AK (via Mesh2Motion): muzzle at +X; the AKM is about 880 mm.
+  // "Assault Rifle" by Zsky (an AK-47, CC BY 3.0): muzzle at −Z; the AK-47
+  // is about 880 mm.
   ak: {
-    label: 'AK (Quaternius via Mesh2Motion, CC0), scaled to 0.88 m',
+    label: 'AK-47: "Assault Rifle" by Zsky (CC BY 3.0), scaled to 0.88 m',
     length: 0.88,
-    turn: -Math.PI / 2,
+    turn: Math.PI,
     // Measured on the model (side view, scaled to 0.88 m): pistol grip
-    // 8.5 cm behind the origin and 7.5 cm below it, lower handguard 22 to
-    // 34 cm ahead and 2 to 12 cm above, front sight 18 cm high at 25 cm,
-    // stock butt at −33.5 cm, muzzle at 59 cm, 7 cm high.
+    // centred 7 cm behind the origin and 6 cm below it, lower handguard 19
+    // to 35 cm ahead, centred 5.5 cm up, sight line (rear sight mid-gun,
+    // front post at the muzzle) 10.5 cm up, stock butt at −33.5 cm, muzzle
+    // at 58.5 cm, 4 cm up. The eye sits on the sight line over the stock.
     sockets: () => ({
-      butt: v(0, 0.02, -0.335),
-      grip: pistolGrip(v(0, -0.075, -0.085)),
-      support: handguard(v(0, 0.06, 0.28), 0.57),
-      eye: v(0, 0.15, -0.16),
-      muzzle: v(0, 0.07, 0.59),
-      sightHeight: 0.1,
+      butt: v(0, -0.02, -0.335),
+      grip: pistolGrip(v(0, -0.06, -0.07)),
+      support: handguard(v(0, 0.055, 0.27), 0.57),
+      eye: v(0, 0.105, -0.16),
+      muzzle: v(0, 0.04, 0.585),
+      sightHeight: 0.105,
     }),
   },
 };

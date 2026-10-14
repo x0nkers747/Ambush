@@ -11,7 +11,10 @@ import { type BakedCharacter, type CharacterAsset, clipsFromBaked } from './asse
 
 export interface SoldierAssets {
   readonly soldier: CharacterAsset;
-  /** The rifle models: "Assault Rifle West" (CC0, the M16A2 stand-in) and the AK (CC0). */
+  /**
+   * The rifle models: "Assault Rifle West" by Pichuliru (CC0, the M16A2
+   * stand-in) and "Assault Rifle" by Zsky (CC BY 3.0, the AK-47).
+   */
   readonly rifle: THREE.Object3D;
   readonly ak: THREE.Object3D;
   /** Materials by side: OPFOR's uniform is tinted (`opforMaterials`). */
@@ -63,7 +66,7 @@ export async function loadSoldierAssets(base: string): Promise<SoldierAssets> {
       return (await r.json()) as BakedCharacter;
     }),
     gltf.loadAsync(url('weapons/rifle-west.glb')).then((g) => g.scene),
-    gltf.loadAsync(url('weapons/ak.glb')).then((g) => g.scene),
+    gltf.loadAsync(url('weapons/ak47.glb')).then((g) => g.scene),
   ]);
 
   const friendly = new Map<string, THREE.Material>();

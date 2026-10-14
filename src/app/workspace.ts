@@ -135,6 +135,16 @@ function seedFromAddress(): number {
   return Number.isInteger(seed) && seed >= 0 && seed <= MAX_SEED ? seed : 1;
 }
 
+/**
+ * Credits for the 3D view's models (public/characters/README.md), shown with
+ * the map's attribution while the 3D view is: the AK-47's licence (CC BY 3.0)
+ * asks for it; the others are credited alike.
+ */
+const MODEL_CREDITS = [
+  '3D soldier: Microsoft Rocketbox (MIT)',
+  'AK-47: "Assault Rifle" by Zsky (CC BY 3.0)',
+];
+
 const PLANNING_TOOLS: readonly { tool: 'deploy' | 'killZone'; label: string; key: string }[] = [
   { tool: 'deploy', label: 'Waypoints', key: 'P' },
   { tool: 'killZone', label: 'Kill zone', key: 'K' },
@@ -877,6 +887,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     app.dataset['view'] = viewMode;
     ui('fit').title = viewMode === '3d' ? 'Back to the overhead view (F)' : 'Fit the whole map (F)';
     setText(ui('fit'), viewMode === '3d' ? 'Reset view' : 'Fit map');
+    showAttribution();
   };
   const setViewMode = (mode: '2d' | '3d') => {
     if (mode === '2d' || view3d) {
@@ -942,15 +953,23 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     else map.fitView();
   };
   ui('fit').addEventListener('click', fitView);
-  if (o.attribution.length > 0) {
+  /** The battlefield's attribution, and in 3D the soldier and weapon models' (`MODEL_CREDITS`). */
+  const showAttribution = () => {
+    const three = viewMode === '3d' && view3d !== null;
+    const lines = [...o.attribution, ...(three ? MODEL_CREDITS : [])];
+    ui('attribution').hidden = lines.length === 0;
+    if (lines.length === 0) return;
     // Compact on the map; the full list is under Battlefield Information.
-    ui('attribution').hidden = false;
-    ui('attribution').textContent = o.attribution
-      .map((line) => line.replace(/^Map data /, ''))
-      .slice(0, 2)
-      .join(' · ');
-    ui('attribution').title = o.attribution.join('\n');
-  }
+    setText(
+      ui('attribution'),
+      [
+        ...o.attribution.map((line) => line.replace(/^Map data /, '')).slice(0, 2),
+        ...(three ? MODEL_CREDITS : []),
+      ].join(' · '),
+    );
+    ui('attribution').title = lines.join('\n');
+  };
+  showAttribution();
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (
