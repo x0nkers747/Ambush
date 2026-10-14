@@ -173,9 +173,19 @@ needle tufts grow along the outer 60% of every branch, worked out at every level
 broadleaves. Cards: loblolly 190 (was 120), Virginia pine 170 (was 120); near models 976 and 884
 triangles. The red cedar (`cone`), already a dense cone, is unchanged.
 
+**Step 4: closer woods and flared trunks.**
+
+- Woodland trees are spaced 1.25 × their crown radius (conifers 1.45; were 1.4 and 1.6), still
+  at least 4.2 m apart (`vegetation-placement.ts`, `PLACEMENT_VERSION` 3). Many trees were
+  already at the minimum, so a Quantico wood view drew 7–10% more trees and 2% more triangles;
+  the canopy from above is a little more closed. Placement changed, so existing battlefields
+  grow slightly different woods.
+- Trunks of trees (radius 0.2 m or more, taller than 4 m) flare at the ground: 1.45 × their
+  radius at the foot, narrowing over about a metre (`tree-models.ts`).
+
 ### Phase 3: still to do
 
-- Trunk taper, root flare and a bark per species.
+- A bark per species (three barks serve all the species now).
 - Forest density matched to a closed canopy where the woods are mapped as closed.
 
 ### Tuning later (phase 3)

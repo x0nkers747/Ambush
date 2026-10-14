@@ -590,11 +590,18 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
       p = q;
     }
   } else {
+    const topRadius = spec.trunk * (spec.form === 'pine' ? 0.35 : 0.6);
+    // Trees' trunks flare at the ground (the roots' buttresses), over about a metre.
+    const flare = spec.trunk >= 0.2 && L.sides > 3 && trunkTop[1] > 4;
+    const f = flare ? Math.min(0.12, (2.6 * spec.trunk) / trunkTop[1]) : 0;
+    const from: V3 = mul(trunkTop, f);
+    if (flare)
+      b.limb([0, 0, 0], from, spec.trunk * 1.45, spec.trunk * 0.99, L.sides, spec.bark, bark, 0);
     b.limb(
-      [0, 0, 0],
+      from,
       trunkTop,
-      spec.trunk,
-      spec.trunk * (spec.form === 'pine' ? 0.35 : 0.6),
+      flare ? spec.trunk * 0.99 : spec.trunk,
+      topRadius,
       L.sides,
       spec.bark,
       bark,

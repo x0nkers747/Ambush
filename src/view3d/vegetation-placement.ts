@@ -114,7 +114,7 @@ export interface PlacedInstance {
 }
 
 /** Bump when placement changes, e.g. to key a cache. */
-export const PLACEMENT_VERSION = 2;
+export const PLACEMENT_VERSION = 3;
 export const TILE_M = 100;
 export const DEFAULT_MAX_INSTANCES = 500_000;
 
@@ -308,7 +308,7 @@ export function placeVegetation(
       (0.88 + 0.24 * unit(hashInts(h, 3, 0x21)));
     const spacing = Math.min(
       TREE_MAX_SPACING_M,
-      Math.max(TREE_MIN_SPACING_M, crown * (spec?.kind === 'conifer' ? 1.6 : 1.4) * extraSpacing),
+      Math.max(TREE_MIN_SPACING_M, crown * (spec?.kind === 'conifer' ? 1.45 : 1.25) * extraSpacing),
     );
     return { plant, height, crown, spacing };
   };
