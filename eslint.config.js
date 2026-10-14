@@ -61,7 +61,19 @@ const DETERMINISM_GLOBALS = [
 
 export default defineConfig(
   // tools/*.mjs: asset preparation scripts run outside the game (with Playwright, not a dependency).
-  { ignores: ['dist/', '.tsbuild/', 'node_modules/', 'tools/*.mjs'] },
+  // Prototypes are linted with the same rules through their own tsconfig; their
+  // downloaded assets, builds and Node scripts are not.
+  {
+    ignores: [
+      'dist/',
+      '.tsbuild/',
+      'node_modules/',
+      'tools/*.mjs',
+      'prototypes/*/dist/',
+      'prototypes/*/public/',
+      'prototypes/*/tools/*.mjs',
+    ],
+  },
 
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

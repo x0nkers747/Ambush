@@ -1,0 +1,18 @@
+{
+  "name": "ambush-character-animation-prototype",
+  "private": true,
+  "description": "Standalone comparison of browser animation runtimes for Ambush! soldiers (not part of the game build)",
+  "type": "module",
+  "scripts": {
+    "assets": "node tools/fetch-assets.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root .",
+    "bench": "node tools/bench.mjs"
+  },
+  "dependencies": {
+    "@three.ez/instanced-mesh": "0.3.16",
+    "animouse": "0.8.0"
+  }
+}

@@ -1,6 +1,8 @@
 # Character animation roadmap
 
-- Status: **plan for review** (nothing implemented). Companion documents:
+- Status: **superseded** by the [revised roadmap](character-animation-revised-roadmap.md) (2026-10-14),
+  after the [framework evaluation](character-animation-framework-evaluation.md) and its prototype.
+  Kept for the record. Companion documents:
   [research](character-animation-research.md),
   [architecture](character-animation-architecture.md),
   [asset evaluation](character-asset-evaluation.md).

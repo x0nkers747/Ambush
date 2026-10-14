@@ -1,6 +1,9 @@
 # Character animation architecture: proposal
 
-- Status: **proposal for review** (nothing implemented). Companion documents:
+- Status: **proposal for review**; its character-layer design (§5 and §12: the custom layer) is superseded by
+  the [recommended architecture](character-animation-recommended-architecture.md) (2026-10-14),
+  which keeps three.js's mixer as the runtime with a thin pose layer. Its simulation additions (§4)
+  still stand. Companion documents:
   [research](character-animation-research.md),
   [asset evaluation](character-asset-evaluation.md),
   [roadmap](character-animation-roadmap.md).

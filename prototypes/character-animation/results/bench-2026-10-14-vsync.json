@@ -1,0 +1,873 @@
+{
+ "startedAt": "2026-10-14T10:59:43.090Z",
+ "browser": "155.0.8059.40",
+ "vsync": true,
+ "viewport": "1600x900 (canvas about 1000x860), devicePixelRatio 1",
+ "gpu": "ANGLE (AMD, AMD Radeon(TM) 880M Graphics (0x0000150E) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+ "runs": [
+  {
+   "config": {
+    "n": 1,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.65916666666667,
+    "p95": 17.600000000000364
+   },
+   "anim": {
+    "mean": 0.4887499999565383,
+    "p95": 0.6999999992549419
+   },
+   "render": {
+    "mean": 0.6279166666169961,
+    "p95": 0.9000000022351742
+   },
+   "gpu": {
+    "mean": 1.8583345833333325,
+    "p95": 3.11245
+   },
+   "calls": 115,
+   "triangles": 956440,
+   "createMs": 4.300000000745058,
+   "firstFrameMs": 18.899999998509884,
+   "seekMsPerSoldier": 1,
+   "heapMB": 152.6502227783203,
+   "heapDeltaMB": 6.570159912109375,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 10,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.6625,
+    "p95": 18.099999999998545
+   },
+   "anim": {
+    "mean": 2.4554166666852932,
+    "p95": 3.300000000745058
+   },
+   "render": {
+    "mean": 1.2245833333426466,
+    "p95": 1.4000000022351742
+   },
+   "gpu": {
+    "mean": 2.399746666666666,
+    "p95": 2.77819
+   },
+   "calls": 475,
+   "triangles": 1311760,
+   "createMs": 41,
+   "firstFrameMs": 119.09999999776483,
+   "seekMsPerSoldier": 0.6900000002235174,
+   "heapMB": 185.8803071975708,
+   "heapDeltaMB": 3.7097930908203125,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 25,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.664166666666656,
+    "p95": 17.299999999999272
+   },
+   "anim": {
+    "mean": 4.827499999835466,
+    "p95": 5.300000000745058
+   },
+   "render": {
+    "mean": 2.678333333460614,
+    "p95": 3.600000001490116
+   },
+   "gpu": {
+    "mean": 2.5854627500000005,
+    "p95": 2.97432
+   },
+   "calls": 1075,
+   "triangles": 1903960,
+   "createMs": 97.80000000074506,
+   "firstFrameMs": 285.5,
+   "seekMsPerSoldier": 0.3399999998509884,
+   "heapMB": 207.7300386428833,
+   "heapDeltaMB": 12.678733825683594,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 50,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.662083333333324,
+    "p95": 17
+   },
+   "anim": {
+    "mean": 8.643333333420257,
+    "p95": 9.300000000745058
+   },
+   "render": {
+    "mean": 5.763749999785796,
+    "p95": 6.5
+   },
+   "gpu": {
+    "mean": 3.580792625,
+    "p95": 3.94
+   },
+   "calls": 2075,
+   "triangles": 2890960,
+   "createMs": 193.10000000149012,
+   "firstFrameMs": 551,
+   "seekMsPerSoldier": 0.4300000000745058,
+   "heapMB": 228.39895343780518,
+   "heapDeltaMB": 26.788002014160156,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 100,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 130,
+   "frame": {
+    "mean": 30.633076923076946,
+    "p95": 33.400000000001455
+   },
+   "anim": {
+    "mean": 16.226923076779798,
+    "p95": 16.699999999254942
+   },
+   "render": {
+    "mean": 14.136923077100745,
+    "p95": 14.700000002980232
+   },
+   "gpu": {
+    "mean": 8.510498846153846,
+    "p95": 9.0012
+   },
+   "calls": 4081,
+   "triangles": 4864972,
+   "createMs": 408.9000000022352,
+   "firstFrameMs": 1104.5999999977648,
+   "seekMsPerSoldier": 0.3400000002235174,
+   "heapMB": 221.3873872756958,
+   "heapDeltaMB": -74.49009799957275,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 250,
+    "mode": "native",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 52,
+   "frame": {
+    "mean": 76.58653846153847,
+    "p95": 83.40000000000146
+   },
+   "anim": {
+    "mean": 39.64230769199248,
+    "p95": 40.899999998509884
+   },
+   "render": {
+    "mean": 36.93846153854751,
+    "p95": 37.5
+   },
+   "gpu": {
+    "mean": 23.112594423076928,
+    "p95": 24.10572
+   },
+   "calls": 10087,
+   "triangles": 10786984,
+   "createMs": 1014.6000000014901,
+   "firstFrameMs": 2758.400000002235,
+   "seekMsPerSoldier": 0.35999999977648256,
+   "heapMB": 301.2960138320923,
+   "heapDeltaMB": 32.92211723327637,
+   "group": "terrain/native"
+  },
+  {
+   "config": {
+    "n": 1,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.666666666666668,
+    "p95": 17.700000000000728
+   },
+   "anim": {
+    "mean": 0.5062500001086543,
+    "p95": 0.6999999992549419
+   },
+   "render": {
+    "mean": 0.6249999998447796,
+    "p95": 0.9000000022351742
+   },
+   "gpu": {
+    "mean": 1.270254291666668,
+    "p95": 1.88931
+   },
+   "calls": 115,
+   "triangles": 956440,
+   "createMs": 5.300000000745058,
+   "firstFrameMs": 17.200000002980232,
+   "seekMsPerSoldier": 0.8999999985098839,
+   "heapMB": 159.60671710968018,
+   "heapDeltaMB": 6.588630676269531,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 10,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.658333333333342,
+    "p95": 17.19999999999891
+   },
+   "anim": {
+    "mean": 2.5658333333364376,
+    "p95": 3.100000001490116
+   },
+   "render": {
+    "mean": 1.201249999863406,
+    "p95": 1.5
+   },
+   "gpu": {
+    "mean": 1.939975625,
+    "p95": 2.31208
+   },
+   "calls": 475,
+   "triangles": 1311760,
+   "createMs": 41.30000000074506,
+   "firstFrameMs": 122,
+   "seekMsPerSoldier": 0.5800000000745058,
+   "heapMB": 208.93439197540283,
+   "heapDeltaMB": 3.820240020751953,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 25,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.660416666666666,
+    "p95": 17.200000000000728
+   },
+   "anim": {
+    "mean": 4.010833333432674,
+    "p95": 4.699999999254942
+   },
+   "render": {
+    "mean": 2.4579166665207595,
+    "p95": 2.699999999254942
+   },
+   "gpu": {
+    "mean": 2.9577381666666667,
+    "p95": 3.28828
+   },
+   "calls": 1075,
+   "triangles": 1903960,
+   "createMs": 101.39999999850988,
+   "firstFrameMs": 290.19999999925494,
+   "seekMsPerSoldier": 0.35,
+   "heapMB": 215.44914436340332,
+   "heapDeltaMB": 15.241397857666016,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 50,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.66208333333334,
+    "p95": 17
+   },
+   "anim": {
+    "mean": 4.719999999863406,
+    "p95": 5.5
+   },
+   "render": {
+    "mean": 6.900000000046566,
+    "p95": 8.300000000745058
+   },
+   "gpu": {
+    "mean": 4.359075791666666,
+    "p95": 5.43761
+   },
+   "calls": 2075,
+   "triangles": 2890960,
+   "createMs": 203.5,
+   "firstFrameMs": 556.5,
+   "seekMsPerSoldier": 0.4300000000745058,
+   "heapMB": 234.7065668106079,
+   "heapDeltaMB": 33.1080322265625,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 100,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 168,
+   "frame": {
+    "mean": 23.802976190476198,
+    "p95": 33.5
+   },
+   "anim": {
+    "mean": 8.327976190507234,
+    "p95": 8.599999997764826
+   },
+   "render": {
+    "mean": 15.263095238246024,
+    "p95": 15.699999999254942
+   },
+   "gpu": {
+    "mean": 9.634045952380951,
+    "p95": 10.03596
+   },
+   "calls": 4075,
+   "triangles": 4864960,
+   "createMs": 424.69999999925494,
+   "firstFrameMs": 1133.6000000014901,
+   "seekMsPerSoldier": 0.4899999998509884,
+   "heapMB": 238.2505350112915,
+   "heapDeltaMB": -55.86500263214111,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 250,
+    "mode": "native-lod",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": true,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 72,
+   "frame": {
+    "mean": 55.541666666666664,
+    "p95": 66.70000000000437
+   },
+   "anim": {
+    "mean": 16.77916666653214,
+    "p95": 17.599999997764826
+   },
+   "render": {
+    "mean": 38.398611111359465,
+    "p95": 39.20000000298023
+   },
+   "gpu": {
+    "mean": 25.734148472222216,
+    "p95": 26.60288
+   },
+   "calls": 10084,
+   "triangles": 10786978,
+   "createMs": 1033,
+   "firstFrameMs": 2755.599999997765,
+   "seekMsPerSoldier": 0.4200000002980232,
+   "heapMB": 316.9438142776489,
+   "heapDeltaMB": 54.2150764465332,
+   "group": "terrain/native-lod"
+  },
+  {
+   "config": {
+    "n": 1,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.6625,
+    "p95": 17.800000000000182
+   },
+   "anim": {
+    "mean": 0.8129166668125739,
+    "p95": 1.199999999254942
+   },
+   "render": {
+    "mean": 0.5366666667008152,
+    "p95": 0.8000000007450581
+   },
+   "gpu": {
+    "mean": 1.2810115833333333,
+    "p95": 1.91697
+   },
+   "calls": 101,
+   "triangles": 947734,
+   "createMs": 4.800000000745058,
+   "firstFrameMs": 22.700000002980232,
+   "seekMsPerSoldier": 0,
+   "heapMB": 163.56499576568604,
+   "heapDeltaMB": 3.644725799560547,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 10,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.66249999999999,
+    "p95": 17.200000000000728
+   },
+   "anim": {
+    "mean": 0.7212499999906867,
+    "p95": 1
+   },
+   "render": {
+    "mean": 0.6883333334854493,
+    "p95": 1
+   },
+   "gpu": {
+    "mean": 1.9689927916666659,
+    "p95": 2.30836
+   },
+   "calls": 335,
+   "triangles": 1224700,
+   "createMs": 4.899999998509884,
+   "firstFrameMs": 100.80000000074506,
+   "seekMsPerSoldier": 0,
+   "heapMB": 187.41527271270752,
+   "heapDeltaMB": 3.610797882080078,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 25,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.66124999999999,
+    "p95": 17.200000000000728
+   },
+   "anim": {
+    "mean": 0.8120833333116024,
+    "p95": 1.199999999254942
+   },
+   "render": {
+    "mean": 1.0225000001645337,
+    "p95": 1.5
+   },
+   "gpu": {
+    "mean": 2.283662375,
+    "p95": 2.67572
+   },
+   "calls": 725,
+   "triangles": 1686310,
+   "createMs": 5.400000002235174,
+   "firstFrameMs": 223.80000000074506,
+   "seekMsPerSoldier": 0,
+   "heapMB": 207.1193437576294,
+   "heapDeltaMB": 3.769824981689453,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 50,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.661666666666665,
+    "p95": 17.899999999997817
+   },
+   "anim": {
+    "mean": 0.8575000000031044,
+    "p95": 1.199999999254942
+   },
+   "render": {
+    "mean": 1.6037499999472251,
+    "p95": 2.199999999254942
+   },
+   "gpu": {
+    "mean": 2.8973297083333347,
+    "p95": 3.52332
+   },
+   "calls": 1375,
+   "triangles": 2455660,
+   "createMs": 4.799999997019768,
+   "firstFrameMs": 431.1000000014901,
+   "seekMsPerSoldier": 0,
+   "heapMB": 221.2040376663208,
+   "heapDeltaMB": 3.804412841796875,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 100,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.660416666666666,
+    "p95": 17.099999999998545
+   },
+   "anim": {
+    "mean": 0.7345833334450921,
+    "p95": 1
+   },
+   "render": {
+    "mean": 2.29833333332402,
+    "p95": 3
+   },
+   "gpu": {
+    "mean": 4.403706833333332,
+    "p95": 4.91815
+   },
+   "calls": 2675,
+   "triangles": 3994360,
+   "createMs": 5.5,
+   "firstFrameMs": 852.8000000007451,
+   "seekMsPerSoldier": 0,
+   "heapMB": 247.25569438934326,
+   "heapDeltaMB": 4.143398284912109,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 250,
+    "mode": "native-shared",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.664166666666674,
+    "p95": 17
+   },
+   "anim": {
+    "mean": 0.7812499998758237,
+    "p95": 1.0999999977648258
+   },
+   "render": {
+    "mean": 4.8699999999875825,
+    "p95": 5.5
+   },
+   "gpu": {
+    "mean": 9.468239166666654,
+    "p95": 9.86344
+   },
+   "calls": 6575,
+   "triangles": 8610460,
+   "createMs": 5.300000000745058,
+   "firstFrameMs": 2115.800000000745,
+   "seekMsPerSoldier": 0,
+   "heapMB": 272.4742031097412,
+   "heapDeltaMB": 4.802543640136719,
+   "group": "terrain/native-shared"
+  },
+  {
+   "config": {
+    "n": 1,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.664166666666667,
+    "p95": 17.799999999999272
+   },
+   "anim": {
+    "mean": 0.2466666666790843,
+    "p95": 0.3999999985098839
+   },
+   "render": {
+    "mean": 0.6283333332122614,
+    "p95": 0.9000000022351742
+   },
+   "gpu": {
+    "mean": 1.636292083333333,
+    "p95": 1.97747
+   },
+   "calls": 101,
+   "triangles": 947734,
+   "createMs": 4.699999999254942,
+   "firstFrameMs": 11.699999999254942,
+   "seekMsPerSoldier": 0,
+   "heapMB": 172.93162631988525,
+   "heapDeltaMB": 12.415000915527344,
+   "group": "terrain/instanced"
+  },
+  {
+   "config": {
+    "n": 10,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.660833333333336,
+    "p95": 17.5
+   },
+   "anim": {
+    "mean": 0.7462499999130766,
+    "p95": 1
+   },
+   "render": {
+    "mean": 0.6274999999751647,
+    "p95": 0.8999999985098839
+   },
+   "gpu": {
+    "mean": 2.7623122916666665,
+    "p95": 3.44863
+   },
+   "calls": 101,
+   "triangles": 1224700,
+   "createMs": 3.300000000745058,
+   "firstFrameMs": 11.5,
+   "seekMsPerSoldier": 0,
+   "heapMB": 175.5140085220337,
+   "heapDeltaMB": -23.79477310180664,
+   "group": "terrain/instanced"
+  },
+  {
+   "config": {
+    "n": 25,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.662083333333324,
+    "p95": 17.799999999999272
+   },
+   "anim": {
+    "mean": 1.1624999999689558,
+    "p95": 1.699999999254942
+   },
+   "render": {
+    "mean": 0.45958333330539364,
+    "p95": 0.6999999992549419
+   },
+   "gpu": {
+    "mean": 2.720972375,
+    "p95": 3.97888
+   },
+   "calls": 101,
+   "triangles": 1686310,
+   "createMs": 2.599999997764826,
+   "firstFrameMs": 10.199999999254942,
+   "seekMsPerSoldier": 0,
+   "heapMB": 213.19650745391846,
+   "heapDeltaMB": 8.04964828491211,
+   "group": "terrain/instanced"
+  },
+  {
+   "config": {
+    "n": 50,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.65958333333333,
+    "p95": 17.700000000000728
+   },
+   "anim": {
+    "mean": 1.816249999900659,
+    "p95": 2.599999997764826
+   },
+   "render": {
+    "mean": 0.4379166666418314,
+    "p95": 0.6999999992549419
+   },
+   "gpu": {
+    "mean": 4.062313958333332,
+    "p95": 5.3571
+   },
+   "calls": 101,
+   "triangles": 2455660,
+   "createMs": 3.300000000745058,
+   "firstFrameMs": 11.800000000745058,
+   "seekMsPerSoldier": 0,
+   "heapMB": 227.22358798980713,
+   "heapDeltaMB": 8.08530044555664,
+   "group": "terrain/instanced"
+  },
+  {
+   "config": {
+    "n": 100,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.657916666666672,
+    "p95": 17.30000000000291
+   },
+   "anim": {
+    "mean": 2.6637500000186263,
+    "p95": 3.399999998509884
+   },
+   "render": {
+    "mean": 0.38083333323399227,
+    "p95": 0.5999999977648258
+   },
+   "gpu": {
+    "mean": 5.955972374999998,
+    "p95": 6.88156
+   },
+   "calls": 101,
+   "triangles": 3994360,
+   "createMs": 3.099999997764826,
+   "firstFrameMs": 10.5,
+   "seekMsPerSoldier": 0,
+   "heapMB": 253.58784770965576,
+   "heapDeltaMB": 8.118873596191406,
+   "group": "terrain/instanced"
+  },
+  {
+   "config": {
+    "n": 250,
+    "mode": "instanced",
+    "scene": "terrain",
+    "shadows": true,
+    "weapons": false,
+    "warmupMs": 1500,
+    "measureMs": 4000
+   },
+   "frames": 240,
+   "frame": {
+    "mean": 16.665833333333314,
+    "p95": 17.400000000001455
+   },
+   "anim": {
+    "mean": 5.642083333355064,
+    "p95": 6.300000000745058
+   },
+   "render": {
+    "mean": 0.4766666665983697,
+    "p95": 0.7000000029802322
+   },
+   "gpu": {
+    "mean": 12.057407541666663,
+    "p95": 18.12312
+   },
+   "calls": 101,
+   "triangles": 8610460,
+   "createMs": 2.600000001490116,
+   "firstFrameMs": 15.399999998509884,
+   "seekMsPerSoldier": 0,
+   "heapMB": 277.86571311950684,
+   "heapDeltaMB": 8.247970581054688,
+   "group": "terrain/instanced"
+  }
+ ]
+}

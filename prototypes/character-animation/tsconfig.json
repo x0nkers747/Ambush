@@ -1,0 +1,15 @@
+{
+  // Not part of the game's `tsc -b` solution: the prototype has its own
+  // dependencies (prototypes/character-animation/node_modules).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "composite": false,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "rootDir": "../.."
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts", "vitest.config.ts"]
+}

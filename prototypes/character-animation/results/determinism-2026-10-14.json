@@ -1,0 +1,206 @@
+{
+ "A. three.js AnimationMixer, explicit time (stateless)": [
+  {
+   "name": "reference: continuous 60 Hz",
+   "maxDeg": 0,
+   "maxMm": 0,
+   "worstAt": 0,
+   "worstBone": "",
+   "exact": true,
+   "visual": true,
+   "ms": 284.5
+  },
+  {
+   "name": "continuous 144 Hz",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 635
+  },
+  {
+   "name": "continuous, irregular frame times",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 6.525158196549439e-7,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 215.30000000074506
+  },
+  {
+   "name": "slow motion 0.25× (60 Hz)",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 1054
+  },
+  {
+   "name": "fast forward 16× (60 Hz)",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 23.100000001490116
+  },
+  {
+   "name": "seek forward (ascending)",
+   "maxDeg": 0.000016199215970291508,
+   "maxMm": 0.000008987089020077934,
+   "worstAt": 31,
+   "worstBone": "Bip01_L_UpperArm",
+   "exact": true,
+   "visual": true,
+   "ms": 6.399999998509884
+  },
+  {
+   "name": "seek backward (descending)",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 43.4,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 6.199999999254942
+  },
+  {
+   "name": "seek shuffled",
+   "maxDeg": 0.000016199215970291508,
+   "maxMm": 0.000008987089020077934,
+   "worstAt": 31,
+   "worstBone": "Bip01_L_UpperArm",
+   "exact": true,
+   "visual": true,
+   "ms": 6.5
+  },
+  {
+   "name": "repeat reference on fresh animator",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 261.5
+  },
+  {
+   "name": "3D hidden then resumed",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 211.80000000074506
+  }
+ ],
+ "B. animouse 0.8.0 state machine + blend trees (stateful)": [
+  {
+   "name": "reference: continuous 60 Hz",
+   "maxDeg": 0,
+   "maxMm": 0,
+   "worstAt": 0,
+   "worstBone": "",
+   "exact": true,
+   "visual": true,
+   "ms": 267.6000000014901
+  },
+  {
+   "name": "continuous 144 Hz",
+   "maxDeg": 3.371139677046334,
+   "maxMm": 10.32436127628632,
+   "worstAt": 27.5,
+   "worstBone": "Bip01_L_Calf",
+   "exact": false,
+   "visual": false,
+   "ms": 626.1999999992549
+  },
+  {
+   "name": "continuous, irregular frame times",
+   "maxDeg": 5.045620943401534,
+   "maxMm": 9.298817474214443,
+   "worstAt": 10.9,
+   "worstBone": "Bip01_R_Calf",
+   "exact": false,
+   "visual": false,
+   "ms": 212.40000000223517
+  },
+  {
+   "name": "slow motion 0.25× (60 Hz)",
+   "maxDeg": 4.057388978561708,
+   "maxMm": 11.608934112503327,
+   "worstAt": 27.5,
+   "worstBone": "Bip01_L_Calf",
+   "exact": false,
+   "visual": false,
+   "ms": 1028.1000000014901
+  },
+  {
+   "name": "fast forward 16× (60 Hz)",
+   "maxDeg": 48.3220474108289,
+   "maxMm": 108.58950970187469,
+   "worstAt": 9.1,
+   "worstBone": "Bip01_R_Calf",
+   "exact": false,
+   "visual": false,
+   "ms": 22.199999999254942
+  },
+  {
+   "name": "seek forward (ascending)",
+   "maxDeg": 70.0810338941166,
+   "maxMm": 186.35993212873083,
+   "worstAt": 31,
+   "worstBone": "Bip01_L_Thigh",
+   "exact": false,
+   "visual": false,
+   "ms": 13.200000002980232
+  },
+  {
+   "name": "seek backward (descending)",
+   "maxDeg": 70.0810338941166,
+   "maxMm": 186.35993212873083,
+   "worstAt": 31,
+   "worstBone": "Bip01_L_Thigh",
+   "exact": false,
+   "visual": false,
+   "ms": 13.799999997019768
+  },
+  {
+   "name": "seek shuffled",
+   "maxDeg": 70.0810338941166,
+   "maxMm": 186.35993212873083,
+   "worstAt": 31,
+   "worstBone": "Bip01_L_Thigh",
+   "exact": false,
+   "visual": false,
+   "ms": 12.600000001490116
+  },
+  {
+   "name": "repeat reference on fresh animator",
+   "maxDeg": 0.0000034150945850063755,
+   "maxMm": 0,
+   "worstAt": 1.7,
+   "worstBone": "Bip01_REyeBlinkBottom",
+   "exact": true,
+   "visual": true,
+   "ms": 264.29999999701977
+  },
+  {
+   "name": "3D hidden then resumed",
+   "maxDeg": 4.665763378105783,
+   "maxMm": 13.132257293123986,
+   "worstAt": 19.37,
+   "worstBone": "Bip01_R_Calf",
+   "exact": false,
+   "visual": false,
+   "ms": 211.69999999925494
+  }
+ ]
+}

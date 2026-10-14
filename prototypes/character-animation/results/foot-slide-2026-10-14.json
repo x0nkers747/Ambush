@@ -1,0 +1,155 @@
+{
+ "method": "proto.footSlide(): planted-foot joint speed in cm/s over the test sequence at 60 Hz, standing phases only",
+ "rocketbox": {
+  "A. three.js AnimationMixer, explicit time (stateless)": {
+   "standing still": {
+    "mean": 4.291724091970356,
+    "p95": 6.383248910117417,
+    "samples": 653
+   },
+   "all": {
+    "mean": 57.06624747491277,
+    "p95": 228.37899904721345,
+    "samples": 1523
+   },
+   "walk": {
+    "mean": 35.70197571418855,
+    "p95": 152.55138525241617,
+    "samples": 286
+   },
+   "run": {
+    "mean": 27.63840250687039,
+    "p95": 48.35620828960874,
+    "samples": 79
+   },
+   "sprint": {
+    "mean": 53.67388684201371,
+    "p95": 119.98044825535202,
+    "samples": 27
+   },
+   "turn in place": {
+    "mean": 169.58177037370498,
+    "p95": 108.8831615775379,
+    "samples": 30
+   },
+   "strafe / back / diagonal": {
+    "mean": 145.48783965176156,
+    "p95": 282.9085703638527,
+    "samples": 448
+   }
+  },
+  "B. animouse 0.8.0 state machine + blend trees (stateful)": {
+   "standing still": {
+    "mean": 1.833163912782213,
+    "p95": 6.334700036657649,
+    "samples": 653
+   },
+   "all": {
+    "mean": 74.6675021795035,
+    "p95": 273.47002434735225,
+    "samples": 1560
+   },
+   "walk": {
+    "mean": 37.21077891411698,
+    "p95": 121.26456330558923,
+    "samples": 279
+   },
+   "run": {
+    "mean": 98.7405245320974,
+    "p95": 242.1337980442455,
+    "samples": 82
+   },
+   "sprint": {
+    "mean": 418.81035962568166,
+    "p95": 923.048686291439,
+    "samples": 56
+   },
+   "turn in place": {
+    "mean": 68.9014588704924,
+    "p95": 73.79816743820913,
+    "samples": 30
+   },
+   "strafe / back / diagonal": {
+    "mean": 154.96802854598857,
+    "p95": 286.4508207466463,
+    "samples": 460
+   }
+  }
+ },
+ "mannequin": {
+  "A. three.js AnimationMixer, explicit time (stateless)": {
+   "standing still": {
+    "mean": 5.382018450932595,
+    "p95": 2.508934159408201,
+    "samples": 653
+   },
+   "all": {
+    "mean": 50.6298270827017,
+    "p95": 229.1615553239962,
+    "samples": 1580
+   },
+   "walk": {
+    "mean": 29.158013925793163,
+    "p95": 93.32824536761831,
+    "samples": 307
+   },
+   "run": {
+    "mean": 29.123076072585206,
+    "p95": 122.01284926312684,
+    "samples": 88
+   },
+   "sprint": {
+    "mean": 71.28042938405312,
+    "p95": 231.78519926729098,
+    "samples": 42
+   },
+   "turn in place": {
+    "mean": 111.37577995970649,
+    "p95": 91.06714198534034,
+    "samples": 30
+   },
+   "strafe / back / diagonal": {
+    "mean": 127.45929639061391,
+    "p95": 268.26451412689363,
+    "samples": 460
+   }
+  },
+  "B. animouse 0.8.0 state machine + blend trees (stateful)": {
+   "standing still": {
+    "mean": 1.4155791137079745,
+    "p95": 2.5062746045521993,
+    "samples": 653
+   },
+   "all": {
+    "mean": 75.68254652906924,
+    "p95": 266.88419858732937,
+    "samples": 1599
+   },
+   "walk": {
+    "mean": 37.44228121004576,
+    "p95": 125.50265511635443,
+    "samples": 300
+   },
+   "run": {
+    "mean": 145.97012072243075,
+    "p95": 320.0285770761553,
+    "samples": 103
+   },
+   "sprint": {
+    "mean": 443.8743563688212,
+    "p95": 1188.690069705361,
+    "samples": 59
+   },
+   "turn in place": {
+    "mean": 69.89363949210141,
+    "p95": 74.94826116044115,
+    "samples": 30
+   },
+   "strafe / back / diagonal": {
+    "mean": 144.35906548630615,
+    "p95": 271.26401570681315,
+    "samples": 454
+   }
+  }
+ }
+}

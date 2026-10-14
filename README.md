@@ -302,7 +302,12 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 51. [Realistic trees](docs/adr/0051-realistic-trees.md)
 
 Proposals awaiting a decision: animated 3D soldiers (no ADR yet) —
+[framework evaluation](docs/character-animation-framework-evaluation.md) (recommendation),
+[prototype results](docs/character-animation-prototype-results.md),
+[recommended architecture](docs/character-animation-recommended-architecture.md),
+[revised roadmap](docs/character-animation-revised-roadmap.md); earlier
 [research](docs/character-animation-research.md),
 [architecture](docs/character-animation-architecture.md),
 [asset evaluation](docs/character-asset-evaluation.md) and
-[roadmap](docs/character-animation-roadmap.md).
+[roadmap](docs/character-animation-roadmap.md). The comparison prototype is in
+[`prototypes/character-animation`](prototypes/character-animation/) (not part of the game build).

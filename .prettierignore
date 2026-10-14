@@ -3,3 +3,6 @@ dist/
 package-lock.json
 src/geo/test-data/*.overpass.json
 src/geo/test-data/*.dem-excerpt.json
+prototypes/*/public/
+prototypes/*/dist/
+prototypes/*/results/
