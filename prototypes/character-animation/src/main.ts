@@ -33,6 +33,7 @@ import {
   TICK_HZ,
   wrap,
 } from './sim';
+import { saveScreenshot, screenshotName } from './screenshot';
 import { makeRifle, makeSawPlaceholder, type WeaponInstance } from './weapons';
 
 const RUNTIMES: Record<RuntimeId, Runtime> = { native: nativeRuntime, animouse: animouseRuntime };
@@ -72,6 +73,30 @@ const state = {
   view: '3d' as '3d' | '2d',
   review: false,
 };
+
+/** The URL settings beyond runtime, character and weapon (see `shareUrl`). */
+function readParams(): void {
+  const flag = (k: string, d: boolean) => (params.has(k) ? params.get(k) !== '0' : d);
+  const num = (k: string, d: number) => {
+    const v = Number(params.get(k));
+    return params.has(k) && Number.isFinite(v) ? v : d;
+  };
+  state.ik = (params.get('ik') as IkMode | null) ?? state.ik;
+  state.crowd = Math.max(1, Math.min(100, Math.round(num('crowd', state.crowd))));
+  state.rate = num('rate', state.rate);
+  state.time = num('t', state.time);
+  state.footIk = flag('footIk', state.footIk);
+  state.spineAim = flag('spineAim', state.spineAim);
+  state.weaponHold = flag('weaponHold', state.weaponHold);
+  state.skeleton = flag('skeleton', state.skeleton);
+  state.shadows = flag('shadows', state.shadows);
+  state.forest = flag('forest', state.forest);
+  state.follow = flag('follow', state.follow);
+  state.ground = (params.get('ground') as GroundKind | null) ?? state.ground;
+  const upper = params.get('upper');
+  if (upper === 'idle' || upper === 'kaykit') upperBodySettings.source = upper;
+}
+readParams();
 
 interface Live {
   readonly sim: MiniSim;
@@ -430,6 +455,116 @@ const infoPre = el('pre');
 const inputPre = el('pre');
 const staticInfo = el('div');
 const detDiv = el('div');
+const shotNote = el('input', {
+  type: 'text',
+  placeholder: 'note for the screenshot…',
+  title: 'Saved with the screenshot (Enter saves)',
+});
+shotNote.style.width = '220px';
+const shotStatus = el('span', { className: 'note' });
+
+// ---------------------------------------------------------------- screenshots
+
+let shotRequested = false;
+
+/** A URL that reopens this view: settings, time (paused) and camera. */
+function shareUrl(): string {
+  const q = new URLSearchParams({
+    runtime: state.runtime,
+    character: state.character,
+    weapon: state.weapon,
+    t: state.time.toFixed(3),
+    paused: '1',
+    rate: String(state.rate),
+    crowd: String(state.crowd),
+    ik: state.ik,
+    upper: upperBodySettings.source,
+    footIk: state.footIk ? '1' : '0',
+    spineAim: state.spineAim ? '1' : '0',
+    weaponHold: state.weaponHold ? '1' : '0',
+    skeleton: state.skeleton ? '1' : '0',
+    shadows: state.shadows ? '1' : '0',
+    forest: state.forest ? '1' : '0',
+    follow: state.follow ? '1' : '0',
+    ground: state.ground,
+    cam: [...stage.camera.position.toArray(), ...stage.controls.target.toArray()]
+      .map((v) => v.toFixed(3))
+      .join(','),
+  });
+  return `${location.origin}${location.pathname}?${q.toString()}`;
+}
+
+/**
+ * Saves what is on screen (called right after rendering, while the drawing
+ * buffer still holds the frame): the 3D view or the 2D map, the A/B tags,
+ * and a caption with the note and time; the notes hold everything needed to
+ * find the moment again.
+ */
+function takeScreenshot(): void {
+  const src = state.view === '2d' ? plan : canvas;
+  const out = document.createElement('canvas');
+  const k = src.width / Math.max(1, src.clientWidth);
+  const captionH = Math.round(26 * k);
+  out.width = src.width;
+  out.height = src.height + captionH;
+  const g = out.getContext('2d');
+  if (!g) return;
+  g.drawImage(src, 0, 0);
+  g.font = `${String(Math.round(12 * k))}px system-ui, sans-serif`;
+  g.textBaseline = 'middle';
+  if (state.view === '3d')
+    for (const s of soldiers) {
+      if (!s.tag) continue;
+      const x = parseFloat(s.tag.style.left) * k;
+      const y = parseFloat(s.tag.style.top) * k;
+      const text = s.tag.textContent;
+      const w = g.measureText(text).width + 10 * k;
+      g.fillStyle = '#000a';
+      g.fillRect(x - w / 2, y - 16 * k, w, 16 * k);
+      g.fillStyle = '#fff';
+      g.fillText(text, x - w / 2 + 5 * k, y - 8 * k);
+    }
+  const note = shotNote.value.trim();
+  g.fillStyle = '#1b1e22';
+  g.fillRect(0, src.height, out.width, captionH);
+  g.fillStyle = '#e8e8e8';
+  g.fillText(
+    `t ${state.time.toFixed(2)} s · ${state.character} · ${state.runtime} · ${state.weapon}` +
+      (note ? ` — ${note}` : ''),
+    8 * k,
+    src.height + captionH / 2,
+  );
+
+  const when = new Date();
+  const name = screenshotName(state.character, state.time, when);
+  const notes = {
+    note,
+    taken: when.toISOString(),
+    time: state.time,
+    mode: state.mode,
+    reproducible:
+      state.mode === 'sequence'
+        ? 'open url'
+        : 'live control: the url shows the scripted sequence instead',
+    url: shareUrl(),
+    settings: { ...state, upperBody: upperBodySettings.source },
+    camera: {
+      position: stage.camera.position.toArray(),
+      target: stage.controls.target.toArray(),
+    },
+    input: lastInput,
+    animation: soldiers
+      .filter((s, i) => i === 0 || s.tag)
+      .map((s) => ({ runtime: s.runtime.label, state: s.animator.describe() })),
+    performance: statsPre.textContent,
+  };
+  const label = shotStatus;
+  label.textContent = 'Saving…';
+  void saveScreenshot(out, name, notes).then((file) => {
+    label.textContent = file ? `Saved ${file}` : 'Downloaded';
+    shotNote.value = '';
+  });
+}
 
 function buildUi(): void {
   const left = $('left') as HTMLDivElement;
@@ -477,7 +612,7 @@ function buildUi(): void {
       1,
       100,
       1,
-      1,
+      state.crowd,
       (v) => {
         state.crowd = v;
         rebuild();
@@ -639,7 +774,7 @@ function buildUi(): void {
   const rateSel = el('select');
   for (const r of [0.1, 0.25, 0.5, 1, 2, 4, 8, 16])
     rateSel.add(new Option(`${String(r)}×`, String(r)));
-  rateSel.value = '1';
+  rateSel.value = String(state.rate);
   rateSel.onchange = () => (state.rate = Number(rateSel.value));
   const step = (d: number) => () => {
     state.playing = false;
@@ -665,7 +800,22 @@ function buildUi(): void {
       },
       'Live',
     ),
+    shotNote,
+    el(
+      'button',
+      {
+        onclick: () => {
+          shotRequested = true;
+        },
+        title: 'Save a picture of the view with your note, the time and every setting',
+      },
+      'Screenshot',
+    ),
+    shotStatus,
   );
+  shotNote.onkeydown = (e) => {
+    if (e.key === 'Enter') shotRequested = true;
+  };
 
   const right = $('right') as HTMLDivElement;
   right.append(
@@ -702,7 +852,7 @@ function buildInfoStatic(): void {
     `<h2>Character</h2><div>${a.label}</div><div class="note">${String(a.triangles)} triangles, ${String(a.boneCount)} bones, licence: ${a.licence}</div>` +
     `<div class="note">Weapon: ${w ? w.profile.label : 'none'}</div>` +
     `<h2>Clip slots</h2><table><tr><th>slot</th><th>source</th><th>m/s</th></tr>${rows}</table>` +
-    `<p class="note">Missing or substituted: prone idle (crawl clip held), stand↔kneel↔prone transitions (timed crossfades), rifle reload (procedural hand path), M249 handling (rifle hold, placeholder model), turn-in-place (stepping from the walk clip).</p>` +
+    `<p class="note">Missing or substituted: prone and low crawl (procedural for the Rocketbox soldier, prone.ts), stand↔kneel↔prone transitions (timed crossfades), rifle reload (procedural hand path), M249 handling (rifle hold, placeholder model), turn-in-place (stepping from the walk clip).</p>` +
     `<p class="note">Assets load in ${(assets.loadMs / 1000).toFixed(1)} s (download, parse, retarget, measure).</p>`;
 }
 
@@ -854,6 +1004,10 @@ function tick(): void {
 
   if (state.view === '2d') {
     drawPlan(state.time);
+    if (shotRequested) {
+      shotRequested = false;
+      takeScreenshot();
+    }
     return;
   }
 
@@ -899,6 +1053,10 @@ function tick(): void {
     s.tag.style.left = `${String(((p.x + 1) / 2) * canvas.clientWidth)}px`;
     s.tag.style.top = `${String(((1 - p.y) / 2) * canvas.clientHeight)}px`;
   }
+  if (shotRequested) {
+    shotRequested = false;
+    takeScreenshot();
+  }
   if (Math.floor(now / 250) !== Math.floor((now - realDt * 1000) / 250)) {
     updateStats();
     infoPre.textContent = soldiers
@@ -927,9 +1085,17 @@ const assets: AssetSet = await loadAssets((m) => (loading.textContent = m));
 loading.remove();
 buildUi();
 rebuild();
-if (params.get('ground') === 'uneven') {
-  state.ground = 'uneven';
-  stage.setGround('uneven');
+stage.setGround(state.ground);
+stage.setShadows(state.shadows);
+if (state.forest) {
+  forest = createForest((x, y) => stage.heightAt(x, y));
+  stage.scene.add(forest.group);
+}
+const cam = params.get('cam')?.split(',').map(Number);
+if (cam?.length === 6 && cam.every(Number.isFinite)) {
+  stage.camera.position.fromArray(cam);
+  stage.controls.target.fromArray(cam, 3);
+  stage.controls.update();
 }
 stage.renderer.setAnimationLoop(tick);
 
@@ -978,6 +1144,9 @@ const hooks = {
     stage.controls.target.set(...target);
     stage.controls.update();
   },
+  /** The placed soldiers and loaded assets (for probes from the console). */
+  soldiers: () => soldiers.map((s) => s.view),
+  assets: () => assets,
   determinism: () => runAllDeterminism(),
   bench: (cfg: BenchConfig) => runBenchmark(stage, assets, cfg, { makeWeapon, loop: tick }),
   describe: () => soldiers.map((s) => s.animator.describe()),
@@ -1070,7 +1239,7 @@ const hooks = {
         .applyQuaternion(w.object.quaternion)
         .toArray()
         .map((x) => +x.toFixed(3)),
-      support: w.profile.support
+      support: w.profile.support.point
         .clone()
         .applyMatrix4(w.object.matrixWorld)
         .toArray()
@@ -1078,7 +1247,7 @@ const hooks = {
       missL: s.view.bones.handL
         ? +s.view.bones.handL
             .getWorldPosition(new THREE.Vector3())
-            .distanceTo(w.profile.support.clone().applyMatrix4(w.object.matrixWorld))
+            .distanceTo(w.profile.support.point.clone().applyMatrix4(w.object.matrixWorld))
             .toFixed(3)
         : null,
       missR: s.view.bones.handR

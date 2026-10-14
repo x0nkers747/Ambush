@@ -40,6 +40,8 @@ class AnimouseAnimator implements Animator {
   private trees!: {
     standing: FreeformBlendTree;
     kneeling: LinearBlendTree | null;
+    prone: LinearBlendTree | null;
+    upperProne: LinearBlendTree | null;
     upperMove: LinearBlendTree | null;
   };
   private prev: PoseInput | null = null;
@@ -117,8 +119,18 @@ class AnimouseAnimator implements Animator {
           ])
         : null;
     if (kneeling) kneeling.name = 'kneeling (linear 1D)';
-    const prone = new ClipState(need(this.action('crawl', 'lower'), 'crawl'));
-    prone.name = 'prone (crawl clip)';
+    // Prone: the prone pose when still and the crawl when moving (a 1D tree,
+    // like kneeling), or the crawl clip alone for characters without the pose.
+    const pIdle = this.action('proneIdle', 'lower');
+    const crawl = need(this.action('crawl', 'lower'), 'crawl');
+    const proneTree = pIdle
+      ? new LinearBlendTree([
+          { action: pIdle, value: 0 },
+          { action: crawl, value: sp('crawl') },
+        ])
+      : null;
+    const prone = proneTree ?? new ClipState(crawl);
+    prone.name = proneTree ? 'prone (linear 1D: pose, crawl)' : 'prone (crawl clip)';
     const deathA = this.action('death', 'lower', true);
     const death = deathA ? new ClipState(deathA) : null;
     if (death) death.name = 'death';
@@ -160,8 +172,16 @@ class AnimouseAnimator implements Animator {
     const fireA = kaykit ? this.action('fire', 'overlay', true) : null;
     const fire = fireA ? new ClipState(fireA) : null;
     if (fire) fire.name = 'fire';
-    const upProne = new ClipState(need(this.action('crawl', 'overlay'), 'crawl'));
-    upProne.name = 'prone (crawl upper)';
+    const pIdleUp = this.action('proneIdle', 'overlay');
+    const crawlUp = need(this.action('crawl', 'overlay'), 'crawl');
+    const upProneTree = pIdleUp
+      ? new LinearBlendTree([
+          { action: pIdleUp, value: 0 },
+          { action: crawlUp, value: sp('crawl') },
+        ])
+      : null;
+    const upProne = upProneTree ?? new ClipState(crawlUp);
+    upProne.name = upProneTree ? 'prone (upper: pose, crawl)' : 'prone (crawl upper)';
     const kIdleUp = this.action('kneelIdle', 'overlay');
     const upKneel = kIdleUp ? new ClipState(kIdleUp) : upIdle;
     if (kIdleUp) upKneel.name = 'kneeling (upper)';
@@ -189,7 +209,13 @@ class AnimouseAnimator implements Animator {
     }
     if (upDeath) allTo('down', upDeath, 0.25);
 
-    this.trees = { standing, kneeling, upperMove: upMove };
+    this.trees = {
+      standing,
+      kneeling,
+      prone: proneTree,
+      upperProne: upProneTree,
+      upperMove: upMove,
+    };
     this.prev = null;
   }
 
@@ -249,6 +275,8 @@ class AnimouseAnimator implements Animator {
     const fwd = Math.cos(input.moveAngle) * input.speed;
     this.safeBlend(right, fwd);
     this.trees.kneeling?.setBlend(input.speed);
+    this.trees.prone?.setBlend(input.speed);
+    this.trees.upperProne?.setBlend(input.speed);
     this.trees.upperMove?.setBlend(Math.min(1, input.speed / 3));
     // Speed matching is not part of animouse: scale each moving action's rate.
     const clips = this.soldier.asset.clips;

@@ -9,7 +9,8 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { boneOf, type CharacterAsset } from './assets';
-import { aimBone, CcdArm, rotateWorld, twoBoneIK } from './ik';
+import { graspTarget, type HandModel, measureHand, orientHand, poseFingers } from './hands';
+import { aimBone, CcdArm, rotateWorld, setWorldQuaternion, twoBoneIK } from './ik';
 import type { PoseInput } from './pose-input';
 import { type BoneKey, RIG_BONES } from './rigs';
 import { placeOnMap } from './scene';
@@ -34,8 +35,14 @@ export interface SoldierView {
   weapon: WeaponInstance | null;
   /** The face's forward direction in the head bone's local frame (from the rest pose). */
   readonly headForward: THREE.Vector3;
+  /** The head's up direction in the head bone's frame (from the rest pose). */
+  readonly headUp: THREE.Vector3;
+  /** The right (aiming) eye's bone, when the rig has one. */
+  readonly eye: THREE.Object3D | null;
   /** Hand direction toward the fingers, in each hand bone's local frame. */
   readonly fingerDir: { L: THREE.Vector3; R: THREE.Vector3 };
+  /** Measured hands (null for rigs without five-fingered hands: KayKit). */
+  readonly hands: { L: HandModel | null; R: HandModel | null };
   ccd: { L: CcdArm; R: CcdArm } | null;
   /** Every bone's local transform as the mixer last wrote it (see `saveClipPose`). */
   readonly clipPose: Float64Array;
@@ -117,6 +124,11 @@ export function createSoldier(asset: CharacterAsset): SoldierView {
   const headForward = new THREE.Vector3(0, 0, 1)
     .applyQuaternion(rootQ)
     .applyQuaternion(headQ.invert());
+  const headUp = new THREE.Vector3(0, 1, 0).applyQuaternion(rootQ).applyQuaternion(headQ);
+  let eye: THREE.Object3D | null = null;
+  bones.head?.traverse((o) => {
+    if (!eye && o instanceof THREE.Bone && /R_?Eye$/i.test(o.name)) eye = o;
+  });
   const allBones: THREE.Bone[] = [];
   root.traverse((o) => {
     if (o instanceof THREE.Bone) allBones.push(o as THREE.Bone);
@@ -127,11 +139,17 @@ export function createSoldier(asset: CharacterAsset): SoldierView {
     bones,
     skinned,
     headForward,
+    headUp,
+    eye,
     allBones,
     clipPose: new Float64Array(allBones.length * 7),
     restPose: new Float64Array(allBones.length * 7),
     weapon: null,
     fingerDir: { L: finger(bones.handL, bones.lowerArmL), R: finger(bones.handR, bones.lowerArmR) },
+    hands: {
+      L: bones.handL ? measureHand(bones.handL) : null,
+      R: bones.handR ? measureHand(bones.handR) : null,
+    },
     ccd: null,
   };
   saveClipPose(view);
@@ -175,7 +193,8 @@ interface Hold {
  * - aimed: butt in the shoulder pocket (inside the right shoulder joint),
  *   barrel along the aim;
  * - ready (low ready): butt in the pocket, muzzle 30° below the aim;
- * - lowered (patrol): weapon across the body, grip at the right hip-front,
+ * - lowered (patrol): weapon across the body, grip at the right hip-front
+ *   (clear of a vest's pouches),
  *   muzzle down and to the left.
  * Prone: always along the ground at the shoulder.
  */
@@ -217,7 +236,7 @@ function holdFor(
       .clone()
       .addScaledVector(R, -0.08)
       .addScaledVector(UP, -0.3)
-      .addScaledVector(F, 0.22);
+      .addScaledVector(F, 0.36);
     anchorIsGrip = true;
   }
   // Orientation: forward along `dir`, up as close to world up as possible.
@@ -228,6 +247,15 @@ function holdFor(
   const y = new THREE.Vector3().crossVectors(z, x);
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
   const pos = anchorIsGrip ? anchor : anchor.sub(w.profile.butt.clone().applyQuaternion(quat));
+  // Aiming (not prone): the butt stays in the shoulder pocket along the aim,
+  // and the weapon goes up or down so its sight line passes through the
+  // right eye, as when looking down the sights.
+  if (carry === 'aimed' && !prone && s.asset.sighting && s.eye) {
+    const eye = s.eye.getWorldPosition(new THREE.Vector3());
+    const sightEye = w.profile.eye.clone().applyQuaternion(quat).add(pos);
+    const wUp = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+    pos.addScaledVector(wUp, eye.sub(sightEye).dot(wUp));
+  }
   return { pos, quat };
 }
 
@@ -390,9 +418,35 @@ export function postProcess(
   w.object.quaternion.copy(hold.quat);
   w.object.updateMatrixWorld(true);
 
+  // Prone or aiming: the head goes to the weapon (the weapon stays where the
+  // hold put it): the right eye behind the sights, the cheek on the stock.
+  // Prone, the upper back curls to help; aiming, the neck alone finishes the
+  // small correction left after the hold put the sight line at the eye.
+  if (s.asset.sighting && !down) {
+    const pw =
+      input.posture === 'prone'
+        ? input.postureFrom === 'prone'
+          ? 1
+          : smooth(input.postureT)
+        : input.postureFrom === 'prone'
+          ? 1 - smooth(input.postureT)
+          : 0;
+    const weight = Math.max(pw, aimW);
+    if (weight > 0) headToSights(s, w, hold.quat, weight, 0.35 * pw);
+  }
+
   if (opts.ik === 'off' || handW <= 0) return;
-  const grip = w.object.position.clone();
-  const support = reloadHand ?? w.profile.support.clone().applyMatrix4(w.object.matrixWorld);
+  // Hand targets: where each wrist must be for the palm to sit on its grasp
+  // (hands.ts); rigs without measured hands put the wrist on the grasp point.
+  const hands = s.hands;
+  const gripT = hands.R ? graspTarget(hands.R, w.profile.grip, w.object.matrixWorld) : null;
+  const supportT =
+    hands.L && !reloadHand ? graspTarget(hands.L, w.profile.support, w.object.matrixWorld) : null;
+  const grip = gripT?.wrist ?? w.profile.grip.point.clone().applyMatrix4(w.object.matrixWorld);
+  const support =
+    reloadHand ??
+    supportT?.wrist ??
+    w.profile.support.point.clone().applyMatrix4(w.object.matrixWorld);
   const F = new THREE.Vector3(0, 0, 1).applyQuaternion(hold.quat);
   const Wup = new THREE.Vector3(0, 1, 0).applyQuaternion(hold.quat);
   const Wr = new THREE.Vector3(-1, 0, 0).applyQuaternion(hold.quat);
@@ -426,10 +480,18 @@ export function postProcess(
       );
     }
   }
-  // Hands: fingers wrap the grip (forward-down) and cradle the handguard.
-  if (b.handR)
+  // Hands: turned to their grasps and the fingers closed round the grip and
+  // the handguard; without measured hands, the fingers just point forward-down
+  // (grip) and forward-right (handguard).
+  if (hands.R && gripT) {
+    orientHand(hands.R, gripT.quat, handW);
+    poseFingers(hands.R, w.profile.grip, handW);
+  } else if (b.handR)
     aimBone(b.handR, s.fingerDir.R, F.clone().multiplyScalar(0.55).addScaledVector(Wup, -0.8));
-  if (b.handL && !reloadHand && supportW > 0.5)
+  if (hands.L && supportT) {
+    orientHand(hands.L, supportT.quat, handW * supportW);
+    poseFingers(hands.L, w.profile.support, handW * supportW);
+  } else if (b.handL && !reloadHand && supportW > 0.5)
     aimBone(
       b.handL,
       s.fingerDir.L,
@@ -438,6 +500,55 @@ export function postProcess(
 }
 
 const _g = new THREE.Vector3();
+
+/** The head tipped toward the stock when sighting (rad). */
+const CHEEK_RAD = 0.3;
+
+/**
+ * Brings the head to the weapon's sights: the neck swings so the right eye
+ * lies toward the weapon's eye point, and the head faces along the bore,
+ * tipped onto the stock. A few fixed passes (the eye moves when the head
+ * turns), so the result is a function of this frame's pose alone.
+ */
+function headToSights(
+  s: SoldierView,
+  w: WeaponInstance,
+  weaponQ: THREE.Quaternion,
+  weight: number,
+  spineShare: number,
+): void {
+  const neck = s.bones.neck;
+  const head = s.bones.head;
+  const eye = s.eye;
+  if (!neck || !head || !eye) return;
+  const target = w.profile.eye.clone().applyMatrix4(w.object.matrixWorld);
+  const F = new THREE.Vector3(0, 0, 1).applyQuaternion(weaponQ);
+  const up = UP.clone().addScaledVector(F, -UP.dot(F)).normalize().applyAxisAngle(F, CHEEK_RAD);
+  const f = s.headForward.clone().normalize();
+  const u = s.headUp.clone().addScaledVector(f, -s.headUp.dot(f)).normalize();
+  const local = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(f, u, new THREE.Vector3().crossVectors(f, u)),
+  );
+  const want = new THREE.Quaternion()
+    .setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(F, up, new THREE.Vector3().crossVectors(F, up)),
+    )
+    .multiply(local.invert());
+  // Each joint swings part of the way that takes the eye to the target: the
+  // upper back curls a little (the neck alone cannot reach), the neck the rest.
+  const swing = (bone: THREE.Object3D, share: number) => {
+    const p = bone.getWorldPosition(new THREE.Vector3());
+    const from = eye.getWorldPosition(new THREE.Vector3()).sub(p).normalize();
+    const to = target.clone().sub(p).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(from, to);
+    rotateWorld(bone, new THREE.Quaternion().slerp(q, share * weight));
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    if (s.bones.spine3 && spineShare > 0) swing(s.bones.spine3, spineShare);
+    swing(neck, 1);
+    setWorldQuaternion(head, head.getWorldQuaternion(new THREE.Quaternion()).slerp(want, weight));
+  }
+}
 
 function footIk(s: SoldierView, heightAt: (x: number, y: number) => number) {
   const b = s.bones;

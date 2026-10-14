@@ -9,6 +9,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type BoneKey, type ClipSlot, RIG_BONES, type RigId } from './rigs';
 import { type ClipMetrics, measureClip } from './clip-analysis';
+import { makeProneClips } from './prone';
 import { retargetClip } from './retarget';
 
 const BASE = `${import.meta.env.BASE_URL}assets/`;
@@ -37,6 +38,12 @@ export interface CharacterAsset {
   readonly triangles: number;
   readonly boneCount: number;
   readonly licence: string;
+  /**
+   * Sights used for real (the Rocketbox soldier, with eye bones): aiming,
+   * the weapon's sight line is put through the right eye and the head goes
+   * onto the stock; prone is the procedural pose (prone.ts).
+   */
+  readonly sighting?: boolean;
 }
 
 /** Clip libraries by rig: every source clip, keyed by original name. */
@@ -413,6 +420,16 @@ export async function loadAssets(onProgress: (msg: string) => void): Promise<Ass
       licence: 'CC0 (quaternius.com) / CC BY 3.0 (Poly Pizza listing)',
     },
   };
+  // The soldier's prone position and low crawl: built from its skeleton
+  // (prone.ts), in place of the KayKit "Lie_Idle" (lies on its side) and the
+  // retargeted crawl (face down).
+  const prone = makeProneClips(rbRoot, 'rocketbox');
+  if (prone)
+    characters.rocketbox = {
+      ...characters.rocketbox,
+      clips: { ...characters.rocketbox.clips, ...prone },
+      sighting: true,
+    };
   characters.kaykit = {
     id: 'kaykit',
     label: 'KayKit mannequin (CC0; the rifle clips on their own rig, for reference)',

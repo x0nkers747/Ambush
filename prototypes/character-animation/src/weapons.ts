@@ -8,6 +8,7 @@
 
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import type { Grasp } from './hands';
 import type { WeaponKind } from './sim';
 
 export interface WeaponProfile {
@@ -15,8 +16,12 @@ export interface WeaponProfile {
   readonly label: string;
   /** Socket positions in the weapon frame (metres). */
   readonly butt: THREE.Vector3;
-  readonly support: THREE.Vector3;
+  /** The firing hand on the pistol grip, and the support hand on the handguard. */
+  readonly grip: Grasp;
+  readonly support: Grasp;
   readonly muzzle: THREE.Vector3;
+  /** Where the aiming eye goes: on the sight line, behind the rear sight. */
+  readonly eye: THREE.Vector3;
   /** Height of the sight line above the grip origin. */
   readonly sightHeight: number;
   /** Recoil impulse: kick back (m) and muzzle rise (rad). */
@@ -32,6 +37,53 @@ export interface WeaponInstance {
 }
 
 const M16_LENGTH = 1.0; // M16A2 overall length, about 1,006 mm
+
+const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+/**
+ * The firing hand around a pistol grip raked back 12°: palm on the grip's
+ * right side, knuckles along the grip, middle, ring and little fingers
+ * wrapped round its front, index finger on the trigger, thumb over the left.
+ */
+function pistolGrip(point: THREE.Vector3): Grasp {
+  return {
+    point,
+    forward: v(0, -0.2, 0.98),
+    palm: v(1, 0, 0),
+    at: [0.66, 0.3, -0.12],
+    curl: {
+      thumb: [0.35, 0.35, 0.25],
+      index: [0.35, 0.75, 0.35],
+      middle: [1.25, 1.35, 0.7],
+      ring: [1.3, 1.35, 0.7],
+      pinky: [1.35, 1.3, 0.7],
+    },
+    thumbOppose: 0.5,
+  };
+}
+
+/**
+ * The support hand under a handguard: palm up, fingers forward and to the
+ * right wrapping its right side, thumb along the left. `depth`: from the
+ * hand bone's axis to the handguard's centre, in hand lengths (half the
+ * palm's thickness plus the handguard's half-height).
+ */
+function handguard(point: THREE.Vector3, depth: number): Grasp {
+  return {
+    point,
+    forward: v(-0.75, 0, 0.66),
+    palm: v(0, 1, 0),
+    at: [0.6, depth, 0],
+    curl: {
+      thumb: [0.2, 0.2, 0.15],
+      index: [0.55, 0.6, 0.35],
+      middle: [0.65, 0.65, 0.35],
+      ring: [0.7, 0.65, 0.35],
+      pinky: [0.75, 0.65, 0.35],
+    },
+    thumbOppose: 0.2,
+  };
+}
 
 /** The CC0 "Assault Rifle West" (AR-15 pattern) scaled to an M16A2's length. */
 export function makeRifle(source: THREE.Object3D): WeaponInstance {
@@ -71,7 +123,13 @@ export function makeRifle(source: THREE.Object3D): WeaponInstance {
       kind: 'm16',
       label: 'M16A2 stand-in: "Assault Rifle West" (CC0), scaled to 1.0 m',
       butt: new THREE.Vector3(0, -0.02, -0.36 * len),
-      support: new THREE.Vector3(0, -0.035, 0.21),
+      // Measured on the model (side view): pistol grip 7.5 cm below the
+      // origin, handguard from 26 to 55 cm, 2 to 10 cm above it.
+      grip: pistolGrip(v(0, -0.075 * len, -0.016 * len)),
+      support: handguard(v(0, 0.058 * len, 0.3 * len), 0.57),
+      // Sight line 13 cm above the origin (rear sight at the receiver's
+      // rear); the eye 9 cm behind the rear sight.
+      eye: v(0, 0.13 * len, -0.09 * len),
       muzzle: new THREE.Vector3(0, 0, len * 0.64),
       sightHeight: 0.075,
       kick: 0.025,
@@ -119,7 +177,9 @@ export function makeSawPlaceholder(): WeaponInstance {
       kind: 'm249',
       label: 'M249 SAW PLACEHOLDER (boxes; no licensed model or clips)',
       butt: new THREE.Vector3(0, -0.02, -0.45),
-      support: new THREE.Vector3(0, 0.0, 0.33),
+      grip: pistolGrip(v(0, -0.075, 0)),
+      support: handguard(v(0, 0.04, 0.33), 0.46),
+      eye: v(0, 0.14, -0.12),
       muzzle: new THREE.Vector3(0, 0.05, 0.75),
       sightHeight: 0.11,
       kick: 0.018,

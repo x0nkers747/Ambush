@@ -37,6 +37,10 @@ npm run dev          # http://localhost:5199/  (inspect.html: clip inspector)
   `CCDIKSolver` arm IK, spine aim and head look, foot IK on the uneven ground.
 - **Panels**: frame/animation/render timings, draw calls, triangles, heap; the animator's layers and
   weights; the simulation input; clip coverage; the determinism test.
+- **Screenshot** (bottom bar, with an optional note; Enter in the note saves): with `npm run dev`
+  the view is saved in `screenshots/` (git-ignored) as a JPEG with a JSON beside it: the note,
+  every setting, the time, the camera, the simulation input, the animators' state and a URL that
+  reopens the same moment, paused, from the same camera (scripted sequence only).
 
 ## Measurements
 
