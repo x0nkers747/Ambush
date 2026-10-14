@@ -71,3 +71,80 @@ export function pavedDistance(area: PavedArea, x: number, y: number): number {
   const d = Math.sqrt(d2);
   return inside ? -d : d;
 }
+
+/** A paved area's ground: z = a + b x + c y, or null where the ground is too uneven for one plane. */
+export interface PavedPlane {
+  readonly a: number;
+  readonly b: number;
+  readonly c: number;
+}
+
+/** Ground varying more than this from the best plane (RMS, metres) is not flattened. */
+export const PAVED_PLANE_MAX_RMS_M = 0.6;
+/** Points fitted per area, at most (on a regular grid over it). */
+const PLANE_POINTS = 400;
+
+/**
+ * The plane each paved area is graded to: the least-squares fit of the
+ * ground under it (car parks and squares are laid flat, or on an even slope),
+ * or null where the ground is too uneven (a long paved street over a hill).
+ */
+export function pavedPlane(
+  area: PavedArea,
+  ground: (x: number, y: number) => number,
+): PavedPlane | null {
+  const w = area.maxX - area.minX;
+  const h = area.maxY - area.minY;
+  const step = Math.max(1, Math.sqrt((w * h) / PLANE_POINTS));
+  // Normal equations about the box's centre (well conditioned).
+  const ox = (area.minX + area.maxX) / 2;
+  const oy = (area.minY + area.maxY) / 2;
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  let sxz = 0;
+  let syz = 0;
+  const zs: [number, number, number][] = [];
+  for (let y = area.minY + step / 2; y < area.maxY; y += step)
+    for (let x = area.minX + step / 2; x < area.maxX; x += step) {
+      if (pavedDistance(area, x, y) >= 0) continue;
+      const z = ground(x, y);
+      const u = x - ox;
+      const v = y - oy;
+      n += 1;
+      sx += u;
+      sy += v;
+      sz += z;
+      sxx += u * u;
+      syy += v * v;
+      sxy += u * v;
+      sxz += u * z;
+      syz += v * z;
+      zs.push([u, v, z]);
+    }
+  if (n < 3) return null;
+  // Solve [n sx sy; sx sxx sxy; sy sxy syy] [a b c] = [sz sxz syz] (Cramer's rule).
+  const det3 = (m: number[]) =>
+    (m[0] ?? 0) * ((m[4] ?? 0) * (m[8] ?? 0) - (m[5] ?? 0) * (m[7] ?? 0)) -
+    (m[1] ?? 0) * ((m[3] ?? 0) * (m[8] ?? 0) - (m[5] ?? 0) * (m[6] ?? 0)) +
+    (m[2] ?? 0) * ((m[3] ?? 0) * (m[7] ?? 0) - (m[4] ?? 0) * (m[6] ?? 0));
+  const M = [n, sx, sy, sx, sxx, sxy, sy, sxy, syy];
+  const D = det3(M);
+  let a: number;
+  let b = 0;
+  let c = 0;
+  if (Math.abs(D) < 1e-9) a = sz / n;
+  else {
+    a = det3([sz, sx, sy, sxz, sxx, sxy, syz, sxy, syy]) / D;
+    b = det3([n, sz, sy, sx, sxz, sxy, sy, syz, syy]) / D;
+    c = det3([n, sx, sz, sx, sxx, sxz, sy, sxy, syz]) / D;
+  }
+  let r2 = 0;
+  for (const [u, v, z] of zs) r2 += (z - (a + b * u + c * v)) ** 2;
+  if (Math.sqrt(r2 / n) > PAVED_PLANE_MAX_RMS_M) return null;
+  return { a: a - b * ox - c * oy, b, c };
+}

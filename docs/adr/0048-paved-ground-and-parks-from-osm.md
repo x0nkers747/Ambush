@@ -61,3 +61,11 @@ in detail, especially in the Netherlands:
   (`PAVED_AREA_SURFACE`): paving with no shoulder or verge. Footways, pedestrian ways, steps and
   corridors without a surface tag are paved everywhere (crossings showed as dirt outside towns);
   a `highway=path` stays dirt outside towns, and cycleways are asphalt.
+- **Graded flat** (2026-10-13). Each mapped paved area is held to the least-squares plane of the
+  ground under it (`pavedPlane`; left as it is where the ground varies more than 0.6 m RMS from
+  any plane, e.g. a long paved street over a hill), fading out over 2 m beyond its outline. It
+  ranks above roads' side slopes and ditches and below their carriageways, and its ground is
+  dry: a car park's aisles, graded as country roads, had left ditches and damp troughs in it.
+  Within 2 m of a carriageway the road's edge is stored, not the paved area's (so aisles keep
+  exact edges), with paved shoulders; the shader blends road and paved-area samples separately.
+  Terrain field version 7.

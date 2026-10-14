@@ -7,7 +7,7 @@ import { channelEffect, channelLevelAt, channelStamps, type ChannelStamp } from 
 import { DECK_FADE_M, deckHalfWidth, deckHold, deckNear, type DeckAt } from './decks';
 import { coverLookAt, coverMap, RELIEF_WAVELENGTHS, type CoverMap } from './landcover';
 import { gradientNoise, smax, smin } from './noise';
-import { PAVED_REACH_M, pavedAreas, pavedDistance } from './paved';
+import { PAVED_REACH_M, pavedAreas, pavedDistance, pavedPlane } from './paved';
 import {
   roadLevel,
   roadEffect,
@@ -22,7 +22,7 @@ import {
 // material description at any (x, y). Composition:
 //
 //   ground = base (smooth DEM) + relief (seeded, by land cover)
-//   then each constraint (road, pad, water, channel) clamps it into its band
+//   then each constraint (road, pad, paved area, water, channel) clamps it into its band
 //   [lo, hi] with a smooth clamp, weighted by its fade, lowest priority first,
 //   so the highest wins where bands conflict and the result stays continuous.
 //   Cores (carriageway, pad, water bed) are exact bands.
@@ -31,7 +31,7 @@ import {
 // order, so the result is the same in every engine (§5.2 rule 5).
 
 /** Bump when anything here changes what the field gives. */
-export const TERRAIN_FIELD_VERSION = 6;
+export const TERRAIN_FIELD_VERSION = 7;
 
 export interface FieldSpec {
   readonly seed: number;
@@ -126,6 +126,8 @@ export interface TerrainField {
 const BUCKET_M = 32;
 /** Most constraints applied at one point (more are ignored: never reached in practice). */
 const MAX_CONSTRAINTS = 64;
+/** A paved area's grading fades out over this far beyond its outline, metres. */
+const PAVED_FADE_M = 2;
 /** Width of the smooth clamp's rounding, metres. */
 const ROUND_M = 0.3;
 /**
@@ -156,6 +158,7 @@ const PRI = {
   channelBank: 1,
   padSlope: 2,
   roadSlope: 3,
+  pavedArea: 11,
   padCore: 12,
   waterBed: 13,
   channelBed: 13,
@@ -203,6 +206,8 @@ export function compileField(
   const channels = channelStamps(input.features.waterways ?? [], base, water);
   lap('channels');
   const paving = pavedAreas(input.features);
+  // Each paved area is graded to a plane (over roads' side slopes and ditches, under their carriageways).
+  const planes = paving.map((p) => pavedPlane(p, (x, y) => base.at(x, y)));
 
   // Buckets: (kind, index, segment) triples of everything reaching each 32 m cell.
   const bc = Math.ceil((bounds.maxX - bounds.minX) / BUCKET_M) + 1;
@@ -302,6 +307,8 @@ export function compileField(
     out.litter = look[6] ?? 0;
     out.urban = look[7] ?? 0;
     let wet = 0;
+    // Whether a graded paved area reaches here (its ground is then dry).
+    let planesAt = false;
 
     // Water areas and levelled rivers (the water grading's own query).
     const ground = b0 + relief;
@@ -427,6 +434,17 @@ export function compileField(
             continue;
           const d = pavedDistance(area, x, y);
           if (d < out.pavedEdge) out.pavedEdge = d;
+          const plane = planes[index];
+          if (plane && d < PAVED_FADE_M) {
+            planesAt = true;
+            const t = d <= 0 ? 0 : d / PAVED_FADE_M;
+            apply(
+              plane.a + plane.b * x + plane.c * y,
+              plane.a + plane.b * x + plane.c * y,
+              1 - t * t * (3 - 2 * t),
+              PRI.pavedArea,
+            );
+          }
           continue;
         }
         if (kind === 1) {
@@ -529,6 +547,11 @@ export function compileField(
       h += (cW[k] ?? 0) * (t - h);
     }
     out.h = h;
+    // Paved areas are graded over roads' ditches: dry, fading back beyond their outline.
+    if (out.pavedEdge < PAVED_FADE_M && planesAt) {
+      const t = out.pavedEdge <= 0 ? 0 : out.pavedEdge / PAVED_FADE_M;
+      wet *= t * t * (3 - 2 * t);
+    }
     out.wet = wet > 1 ? 1 : wet;
     // Paved ground (docs/adr/0048): mapped hard ground wholly; in towns the
     // street frontage (pavements, forecourts) and paths and patios along

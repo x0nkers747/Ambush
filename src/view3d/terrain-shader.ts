@@ -211,40 +211,56 @@ void labMaterial() {
   int code = int(texelFetch(labMatA, ivec3(ivec2(floor(vLattice + 0.5)) + 1, layer), 0).a * 255.0 + 0.5);
   int shoreKind = (code >> 3) & 3;
   bool urban = (code & 64) != 0;
-  // The road edge's distance from the four samples round this point: a
-  // distance changes by at most a metre a metre, so each sample bounds it from
-  // below by its own less the way to it, and the largest bound is taken.
-  // Blending the samples instead overestimates it near a road's centreline,
-  // so a path narrower than the samples' spacing showed only where a sample
-  // fell near it (dashes). A sample at the encoding's limit (12 m) bounds
-  // nothing useful, so with any such sample the blend is kept. The surface is
-  // the nearest road sample's. Only where samples are 2 m apart or more:
-  // closer, the blend is exact enough, and the bounds turned single samples
-  // just off a road (between carriageways, at a crossing) into discs of verge.
-  float roadE = -100.0;
-  int surf = code & 7;
+  // The four samples round this point. Each holds a road edge's distance
+  // (with that road's surface, 1–5), or, more than ROAD_KEEP_M from roads, a
+  // mapped paved area's edge distance (surface ${String(PAVED_AREA_SURFACE)}), and the paved
+  // flag (towns' frontage; paved areas' insides near roads). Roads and paved
+  // ground are each blended from their own samples only: blending one kind's
+  // distance with the other's drew a sliver of edge where they met.
+  //
+  // Roads where samples are 2 m apart or more: a distance changes by at most a
+  // metre a metre, so each road sample bounds it from below by its own less
+  // the way to it, and the largest bound is taken. The plain blend
+  // overestimates it near a road's centreline, so a path narrower than the
+  // samples' spacing showed only where a sample fell near it (dashes). A
+  // sample at the encoding's limit (12 m) bounds nothing useful, so with any
+  // such sample, or one that is not a road's, the blend is kept. Closer, the
+  // blend is exact enough, and the bounds turned single samples just off a
+  // road into discs of verge.
+  float roadE = 0.0;
+  float bound = -100.0;
   bool bounded = vSpacing >= 2.0;
-  if (bounded) {
-    surf = 0;
+  float areaE = 0.0;
+  int surf = 0;
+  float sw[8];
+  for (int i = 0; i < 8; i++) sw[i] = 0.0;
+  {
     vec2 f = fract(vLattice);
     ivec2 c0 = ivec2(floor(vLattice)) + 1;
-    float nearest = 1e9;
+    float nearestE = 1e9;
     for (int j = 0; j < 2; j++)
       for (int i = 0; i < 2; i++) {
         vec4 t = texelFetch(labMatA, ivec3(c0 + ivec2(i, j), layer), 0);
-        float away = length(f - vec2(float(i), float(j))) * vSpacing;
+        float wk = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
         float e = mix(-4.0, 12.0, t.r);
-        roadE = max(roadE, e - away);
-        if (e > 11.8) bounded = false;
-        int s = int(t.a * 255.0 + 0.5) & 7;
-        if (s != 0 && e + away < nearest) {
-          nearest = e + away;
-          surf = s;
+        int c = int(t.a * 255.0 + 0.5);
+        int s = c & 7;
+        bool isArea = s == ${String(PAVED_AREA_SURFACE)};
+        // A paved area's sample is at least ROAD_KEEP_M (2 m) from any road.
+        roadE += wk * (isArea ? 2.0 : e);
+        areaE += wk * (isArea ? e : ((c & 128) != 0 ? -4.0 : 12.0));
+        if (isArea || e > 11.8) bounded = false;
+        bound = max(bound, e - length(f - vec2(float(i), float(j))) * vSpacing);
+        if (s != 0 && !isArea) {
+          sw[s] += wk;
+          if (e < nearestE) {
+            nearestE = e;
+            surf = s;
+          }
         }
       }
-    if (surf == 0) surf = code & 7;
   }
-  if (!bounded) roadE = mix(-4.0, 12.0, A.r);
+  if (bounded) roadE = bound;
   float shore = mix(-6.0, 10.0, A.g);
   float bld = mix(0.0, 8.0, A.b);
   vec3 n = normalize(vMapNormal);
@@ -277,25 +293,10 @@ void labMaterial() {
   float slope = 1.0 - n.z;
   w[2] += smoothstep(0.28, 0.42, slope + (n2 - 0.5) * 0.1) * 0.35;
   float rock = smoothstep(${ROCK_FROM.toFixed(2)}, ${(ROCK_FROM + 0.15).toFixed(2)}, slope + (n1 - 0.5) * 0.06);
-  // Surface codes blended between the four samples around (not the nearest),
-  // so where one surface meets another the boundary is smooth, not stepped by
-  // the lattice: road surfaces (sw) and paved ground (docs/adr/0048).
-  float sw[8];
-  for (int i = 0; i < 8; i++) sw[i] = 0.0;
-  float paved = 0.0;
-  {
-    vec2 cell = floor(vLattice);
-    vec2 fr = vLattice - cell;
-    for (int k = 0; k < 4; k++) {
-      ivec2 o = ivec2(k & 1, k >> 1);
-      int c = int(texelFetch(labMatA, ivec3(ivec2(cell) + o + 1, layer), 0).a * 255.0 + 0.5);
-      float wk = (o.x == 1 ? fr.x : 1.0 - fr.x) * (o.y == 1 ? fr.y : 1.0 - fr.y);
-      sw[c & 7] += wk;
-      if ((c & 128) != 0) paved += wk;
-    }
-  }
-  // Paved ground: towns' pavements, forecourts and yards, squares, car parks.
-  paved = smoothstep(0.3, 0.7, paved);
+  // Paved ground (docs/adr/0048): mapped paved areas to their outlines;
+  // towns' pavements, forecourts and yards, and paved areas' insides near
+  // roads, by the samples' paved flags.
+  float paved = 1.0 - smoothstep(-0.02, 0.02, areaE);
   if (paved > 0.0) {
     for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= 1.0 - paved;
     w[8] += paved;
@@ -312,25 +313,23 @@ void labMaterial() {
     // Tracks and dirt paths: a slightly softer edge.
     float soft = surf == 4 || surf == 5 ? 0.12 : 0.02;
     road = 1.0 - smoothstep(-soft, soft, e);
-    // A mapped paved area (car park, square): its paving to its outline, no shoulder or verge.
-    bool area = surf == ${String(PAVED_AREA_SURFACE)};
     float shW = urban ? ${SHOULDER_M.urban.toFixed(2)} : (surf == 1 ? ${SHOULDER_M.asphalt.toFixed(2)} : ${SHOULDER_M.other.toFixed(2)});
-    float shoulder = area ? 0.0 : (1.0 - road) * (1.0 - smoothstep(shW - soft, shW + soft, e));
+    float shoulder = (1.0 - road) * (1.0 - smoothstep(shW - soft, shW + soft, e));
     hard = road + shoulder;
-    float verge = area ? 0.0 : (1.0 - road - shoulder) * (1.0 - smoothstep(0.0, 1.6, e - shW + (n2 - 0.5) * 0.8));
+    // No worn verge on paved ground (a car park's aisles).
+    float verge = (1.0 - paved) * (1.0 - road - shoulder) * (1.0 - smoothstep(0.0, 1.6, e - shW + (n2 - 0.5) * 0.8));
     float keep = 1.0 - road - shoulder;
     for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= keep;
     float swSum = 0.0;
-    for (int i = 1; i < 7; i++) {
+    for (int i = 1; i < 6; i++) {
       sw[i] = smoothstep(0.2, 0.8, sw[i]);
       swSum += sw[i];
     }
-    for (int i = 1; i < 7; i++) sw[i] = swSum > 0.0 ? sw[i] / swSum : (i == surf ? 1.0 : 0.0);
+    for (int i = 1; i < 6; i++) sw[i] = swSum > 0.0 ? sw[i] / swSum : (i == surf ? 1.0 : 0.0);
     w[0] += road * sw[1];
     w[8] += road * sw[2];
     w[1] += road * sw[3];
     w[2] += road * sw[5];
-    w[8] += road * sw[${String(PAVED_AREA_SURFACE)}];
     // Track: grass down the middle, earth in the wheel ruts.
     float mid = 1.0 - smoothstep(-1.05, -0.8, roadE + (n1 - 0.5) * 0.2);
     w[3] += road * sw[4] * mid;

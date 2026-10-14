@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FEATURES } from '../environment';
-import { pavedAreas, pavedDistance } from './paved';
+import { pavedAreas, pavedDistance, pavedPlane } from './paved';
 
 // Mapped paved areas' exact outlines (docs/adr/0048): straight edges, not the
 // land cover raster's 2 m steps.
@@ -32,5 +32,14 @@ describe('paved areas', () => {
     expect(pavedDistance(area, 15, 10)).toBeCloseTo(5, 9);
     // Straight along an edge: the same distance anywhere along it.
     for (const x of [25.3, 31.7, 38.1]) expect(pavedDistance(area, x, -0.4)).toBeCloseTo(0.4, 9);
+  });
+
+  it('grades an area to the plane of the ground under it, unless the ground is too uneven', () => {
+    if (!area) throw new Error('no area');
+    const plane = pavedPlane(area, (x, y) => 20 + 0.03 * x - 0.01 * y + 0.2 * Math.sin(x));
+    expect(plane).not.toBeNull();
+    expect(plane?.b).toBeCloseTo(0.03, 2);
+    expect(plane?.c).toBeCloseTo(-0.01, 2);
+    expect(pavedPlane(area, (x) => (x > 25 ? 5 : 0))).toBeNull();
   });
 });
