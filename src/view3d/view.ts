@@ -49,7 +49,7 @@ import {
 import { emptyMotionSample } from '#exercise';
 import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
-import { SUN_NORMAL_BIAS } from './characters/shadow';
+import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -301,7 +301,6 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   // Shadows are cast only in a square round the camera's focus, which moves
   // with it: enough for the trees and buildings near where one is looking.
   sun.castShadow = quality.shadows !== null;
-  sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = SUN_NORMAL_BIAS;
   const generator = createGenerator();
   const ambient = new HemisphereLight(0xd6e4f0, 0x6f7062, 1.0);
@@ -594,6 +593,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       cam.far = 4 * extent + 2000;
       cam.updateProjectionMatrix();
     }
+    // The depth bias in metres, whatever the depth range (shadow.ts).
+    sun.shadow.bias = -SUN_DEPTH_BIAS_M / (cam.far - cam.near);
     sun.target.position.set(fx, target.y, fz);
     sun.position.set(fx, target.y, fz).addScaledVector(sunDirection, 2 * extent + 1000);
   };

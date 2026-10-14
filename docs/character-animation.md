@@ -156,10 +156,13 @@ applies past the end of the recorded timeline only.
 - **Determinism:** a fixed step (1/120 s) for 3 s from the hit, every step memoised. The body at
   a time is the same however the time is reached: the replay tests are exact through falls.
 
-**Shadows** (`shadow.ts`). The sun's shadow has a 0.4 m normal bias, against speckled
-self-shadowing of the terrain. The ground therefore showed the shadow cast on a plane 0.4 m up,
-and a soldier's lowest 0.4 m cast none, so his shadow came loose from his feet. The soldiers are
-drawn into the shadow map 0.4 m higher, which puts their whole shadow at their feet.
+**Shadows** (`shadow.ts`). The sun's shadow had a depth bias of a fixed fraction of the
+shadow camera's depth range, which is several kilometres: over 2 m along the light. The ground
+lost the shadow of whatever stood within about 1.5 m of it, so soldiers' (and poles' and
+buildings') shadows came loose from their bases. The bias is now 8 cm, converted for the depth
+range each frame, with no speckling. The 0.4 m normal bias stays, against terrain
+self-shadowing; it cuts the lowest 0.4 m of a shadow, so soldiers are drawn into the shadow map
+0.4 m higher, which puts their shadows at their feet.
 
 ## 6. Assets
 
