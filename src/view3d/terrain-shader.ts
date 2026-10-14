@@ -35,6 +35,7 @@ varying vec3 vMap;
 varying vec3 vMapNormal;
 flat varying float vLayer;
 flat varying float vLevel;
+flat varying float vSpacing;
 varying float vMorph;
 
 float labH(vec2 p, int layer) {
@@ -77,6 +78,7 @@ export const VERTEX_BODY = /* glsl */ `
   vMapNormal = n;
   vLayer = iTile.x;
   vLevel = iNode.w;
+  vSpacing = sp;
   vMorph = k;
   transformed = vec3(mxy.x, h, -mxy.y);
 `;
@@ -108,6 +110,7 @@ varying vec3 vMap;
 varying vec3 vMapNormal;
 flat varying float vLayer;
 flat varying float vLevel;
+flat varying float vSpacing;
 varying float vMorph;
 
 const float LAB_SCALE[${String(MATERIALS.length)}] = float[](${tileScales});
@@ -205,10 +208,38 @@ void labMaterial() {
   vec4 A = texture(labMatA, vec3(uvm, vLayer));
   vec4 B = texture(labMatB, vec3(uvm, vLayer));
   int code = int(texelFetch(labMatA, ivec3(ivec2(floor(vLattice + 0.5)) + 1, layer), 0).a * 255.0 + 0.5);
-  int surf = code & 7;
   int shoreKind = (code >> 3) & 3;
   bool urban = (code & 64) != 0;
-  float roadE = mix(-4.0, 12.0, A.r);
+  // The road edge's distance from the four samples round this point: a
+  // distance changes by at most a metre a metre, so each sample bounds it from
+  // below by its own less the way to it, and the largest bound is taken.
+  // Blending the samples instead overestimates it near a road's centreline,
+  // so a path narrower than the samples' spacing showed only where a sample
+  // fell near it (dashes). A sample at the encoding's limit (12 m) bounds
+  // nothing useful, so with any such sample the blend is kept. The surface is
+  // the nearest road sample's.
+  float roadE = -100.0;
+  int surf = 0;
+  bool bounded = true;
+  {
+    vec2 f = fract(vLattice);
+    ivec2 c0 = ivec2(floor(vLattice)) + 1;
+    float nearest = 1e9;
+    for (int j = 0; j < 2; j++)
+      for (int i = 0; i < 2; i++) {
+        vec4 t = texelFetch(labMatA, ivec3(c0 + ivec2(i, j), layer), 0);
+        float away = length(f - vec2(float(i), float(j))) * vSpacing;
+        float e = mix(-4.0, 12.0, t.r);
+        roadE = max(roadE, e - away);
+        if (e > 11.8) bounded = false;
+        int s = int(t.a * 255.0 + 0.5) & 7;
+        if (s != 0 && e + away < nearest) {
+          nearest = e + away;
+          surf = s;
+        }
+      }
+    if (!bounded) roadE = mix(-4.0, 12.0, A.r);
+  }
   float shore = mix(-6.0, 10.0, A.g);
   float bld = mix(0.0, 8.0, A.b);
   vec3 n = normalize(vMapNormal);
