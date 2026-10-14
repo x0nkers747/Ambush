@@ -21,7 +21,12 @@ import type { VegetationLayer, VegetationStats } from './vegetation-layer';
 import { keepFraction, lodBand, type LodSettings } from './vegetation-lod';
 import type { VegetationInstances } from './vegetation-placement';
 import { groundFieldsAt } from './clutter';
-import { ALPHA_CUT, barkUvTest, createFoliageTextures } from './foliage-atlas';
+import {
+  ALPHA_CUT,
+  barkUvTest,
+  createFoliageTextures,
+  type FoliageTextures,
+} from './foliage-atlas';
 import { SPECIES, treeModels, type SpeciesName, type TreeModel } from './tree-models';
 
 // The vegetation (docs/adr/0049, research §5.5). Where trees and shrubs
@@ -71,6 +76,73 @@ function foliageLights(): string {
 		}`;
   return chunk.slice(0, at) + added + chunk.slice(at + call.length);
 }
+/**
+ * The trees' material (docs/adr/0051): the foliage atlas with alpha cut and
+ * coverage, swaying by `time` (seconds), crown and card normals, and
+ * sunlight through the leaves. Bark shares it (its own normals, no light through).
+ */
+export function createFoliageMaterial(): {
+  textures: FoliageTextures;
+  material: MeshStandardMaterial;
+  time: { value: number };
+} {
+  const atlas = createFoliageTextures();
+  const time = { value: 0 };
+  const foliage = new MeshStandardMaterial({
+    map: atlas.map,
+    // The barks' relief (flat on leaves).
+    normalMap: atlas.normalMap,
+    vertexColors: true,
+    alphaTest: ALPHA_CUT,
+    alphaToCoverage: true,
+    side: DoubleSide,
+    // Leaves are a little waxy: a soft sheen where the sun catches them.
+    roughness: 0.74,
+    metalness: 0,
+  });
+  foliage.onBeforeCompile = (shader) => {
+    shader.uniforms['vegTime'] = time;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+  attribute float sway;
+  uniform float vegTime;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+  #ifdef USE_INSTANCING
+  vec3 vegAt = instanceMatrix[3].xyz;
+  #else
+  vec3 vegAt = vec3(0.0);
+  #endif
+  float vegPhase = vegTime * 1.3 + vegAt.x * 0.21 + vegAt.z * 0.17;
+  transformed.x += sway * 0.05 * (sin(vegPhase) + 0.4 * sin(vegPhase * 2.7 + position.y));
+  transformed.z += sway * 0.04 * sin(vegPhase * 1.3 + position.x);`,
+      );
+    // Lit by the crown's outward normals on both faces (no flipped back faces),
+    // with some of each card's own facing (turned to the crown's side), so
+    // clusters catch the light one by one.
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+  // Leaves 1, bark 0: bark keeps its own (round) normals and lets no light through.
+  float vegLeaf = ${barkUvTest('vMapUv')} ? 0.0 : 1.0;
+  vec3 vegCrown = normalize(vNormal);
+  vec3 vegCard = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+  if (dot(vegCard, vegCrown) < 0.0) vegCard = -vegCard;
+  normal = normalize(mix(vegCrown, vegCard, ${CARD_NORMAL_SHARE.toFixed(2)} * vegLeaf));
+  // The normal map's frame round the normal just chosen.
+  tbn = getTangentFrame(-vViewPosition, normal, vNormalMapUv);`,
+      )
+      .replace('#include <lights_fragment_begin>', foliageLights());
+  };
+  foliage.customProgramCacheKey = () => 'forest';
+  return { textures: atlas, material: foliage, time };
+}
+
 const RESELECT_MS = 150;
 /** Understorey: round the camera, grown cell by cell for at most this long per frame, milliseconds. */
 const UNDER_RADIUS_M = 80;
@@ -227,60 +299,7 @@ export function createForest(o: ForestOptions): VegetationLayer & {
   const { instances: inst, field } = o;
   const group = new Group();
   group.name = 'vegetation';
-  const atlas = createFoliageTextures();
-  const time = { value: 0 };
-  const foliage = new MeshStandardMaterial({
-    map: atlas.map,
-    // The barks' relief (flat on leaves).
-    normalMap: atlas.normalMap,
-    vertexColors: true,
-    alphaTest: ALPHA_CUT,
-    alphaToCoverage: true,
-    side: DoubleSide,
-    // Leaves are a little waxy: a soft sheen where the sun catches them.
-    roughness: 0.74,
-    metalness: 0,
-  });
-  foliage.onBeforeCompile = (shader) => {
-    shader.uniforms['vegTime'] = time;
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-attribute float sway;
-uniform float vegTime;`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-#ifdef USE_INSTANCING
-  vec3 vegAt = instanceMatrix[3].xyz;
-#else
-  vec3 vegAt = vec3(0.0);
-#endif
-  float vegPhase = vegTime * 1.3 + vegAt.x * 0.21 + vegAt.z * 0.17;
-  transformed.x += sway * 0.05 * (sin(vegPhase) + 0.4 * sin(vegPhase * 2.7 + position.y));
-  transformed.z += sway * 0.04 * sin(vegPhase * 1.3 + position.x);`,
-      );
-    // Lit by the crown's outward normals on both faces (no flipped back faces),
-    // with some of each card's own facing (turned to the crown's side), so
-    // clusters catch the light one by one.
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <normal_fragment_begin>',
-        `#include <normal_fragment_begin>
-  // Leaves 1, bark 0: bark keeps its own (round) normals and lets no light through.
-  float vegLeaf = ${barkUvTest('vMapUv')} ? 0.0 : 1.0;
-  vec3 vegCrown = normalize(vNormal);
-  vec3 vegCard = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
-  if (dot(vegCard, vegCrown) < 0.0) vegCard = -vegCard;
-  normal = normalize(mix(vegCrown, vegCard, ${CARD_NORMAL_SHARE.toFixed(2)} * vegLeaf));
-  // The normal map's frame round the normal just chosen.
-  tbn = getTangentFrame(-vViewPosition, normal, vNormalMapUv);`,
-      )
-      .replace('#include <lights_fragment_begin>', foliageLights());
-  };
-  foliage.customProgramCacheKey = () => 'forest';
+  const { textures: atlas, material: foliage, time } = createFoliageMaterial();
   const propMaterial = new MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.9,

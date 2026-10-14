@@ -114,12 +114,42 @@ them (`foliage-atlas.ts`; sources in `view3d/textures/foliage/CREDITS.md`, prepa
 - Not yet tried: leaf normal maps (they would need rotating with each stamped leaf), and a
   per-species bark (only three barks for all the species now).
 
-## Phase 3: structure (to do)
+## Decision: phase 3, structure (in progress)
 
-Denser, clumped crowns on a branch structure; trunk taper, root flare and bark variety; forest
-density matched to a closed canopy; impostors (pictures of the near models) for distant
-trees. An open-source Three.js tree generator (e.g. EZ-Tree) is to be evaluated first,
-licence and performance included.
+**EZ-Tree evaluated, not adopted.** `@dgreenheck/ez-tree` 1.1.0 (MIT, Three.js ≥ 0.167) grows
+convincing branch structures, but its trees are 14,000–23,000 triangles against our 300–700, and
+the near band holds thousands of trees (the high preset drew about 3.5 million triangles in a
+Quantico wood). Its leaf textures have no stated source. Its approach (limbs forking towards
+the crown, leaves at the branch ends) is used in our own models instead.
+
+**Step 1: broadleaf crowns held by their limbs** (`tree-models.ts`, forms `round`, `oval`,
+`column`). Before, each clump's cards were scattered over a sphere about half the crown's radius
+across, so some floated free of any branch, and each clump was sparse. Now:
+
+1. Each clump's limb (from the trunk, bending up) and 3–4 forks are worked out at every level
+   (drawn at the near one only), and the cards grow round the limb's end and the forks' tips,
+   a little back along each twig.
+2. Forks spread outwards and fairly level (`outward` 0.6, rise −0.1 to 0.35), 0.75–1.25 of the
+   clump's radius long, so open-grown crowns are broad. Clumps reach lower (8–90% of the crown).
+3. More cards: `LODS` near 1.1 × the species' cards (was 0.65), card scale 1.1 (was 1.22);
+   medium 0.5 (was 0.34), scale 1.6 (was 1.8).
+
+Cost: a near broadleaf tree is 760–990 triangles (was 570–720), a medium one 190–240 (was
+140–190). A Quantico wood view drew 3.72 million triangles (was 3.55), with the same draw calls.
+
+### Phase 3: still to do
+
+- Impostors (pictures of the near models) for distant trees, so the mid-distance and air views
+  keep the near trees' look.
+- The conifers (`pine`, `scrubPine`, `cone`): whorled branches and tufts at the tips, as above.
+- Trunk taper, root flare and a bark per species.
+- Forest density matched to a closed canopy where the woods are mapped as closed.
+
+### Tuning later (phase 3)
+
+A throwaway lab page was used: each species alone and a mixed stand, lit as the game, rendered
+in Chrome. To rebuild it: a page that calls `createFoliageMaterial()` (`forest.ts`) and builds a
+mesh per `treeModels()` level, as the forest does.
 
 ## Consequences
 

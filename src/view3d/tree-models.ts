@@ -509,8 +509,8 @@ function cardAxes(out: V3, r: () => number): [V3, V3] {
 
 /** Level of detail: share of cards, card scale, trunk sides, limbs drawn. */
 const LODS = [
-  { cards: 0.65, size: 1.22, sides: 7, limbs: true },
-  { cards: 0.34, size: 1.8, sides: 5, limbs: false },
+  { cards: 1.1, size: 1.1, sides: 7, limbs: true },
+  { cards: 0.5, size: 1.6, sides: 5, limbs: false },
   { cards: 0.045, size: 4.4, sides: 3, limbs: false },
 ] as const;
 
@@ -634,9 +634,19 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
       ];
       if (L.limbs)
         b.limb(trunkTop, leader, spec.trunk * 0.55, spec.trunk * 0.22, 5, spec.bark, bark, 0.15);
-      const centres: { c: V3; rad: number }[] = [];
+      // Each clump is held by a limb from the trunk, forking near its end; the
+      // leaves grow round the tips of the limb and its forks, so no leaf mass
+      // floats free of a branch. The limbs have their own random numbers and
+      // are worked out at every level (drawn only at the near one), so the
+      // leaves are in the same places at every level.
+      interface Tip {
+        readonly at: V3;
+        readonly dir: V3;
+        readonly reach: number;
+      }
+      const clumpTips: Tip[][] = [];
       for (let k = 0; k < clumps; k += 1) {
-        const t = spec.form === 'column' ? 0.1 + 0.85 * (k / clumps) : 0.15 + 0.75 * r();
+        const t = spec.form === 'column' ? 0.1 + 0.85 * (k / clumps) : 0.08 + 0.82 * r();
         const env =
           spec.form === 'round'
             ? Math.sqrt(Math.max(0.05, 1 - Math.pow(2 * t - 1.1, 2)))
@@ -644,7 +654,7 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
               ? Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.05)), 0.8)
               : 0.6 + 0.4 * Math.sin(Math.PI * t);
         const ang = (k / clumps) * Math.PI * 2 * 2.39 + r() * 0.8;
-        const rr = R * env * (0.5 + 0.3 * r());
+        const rr = R * env * (0.55 + 0.35 * r());
         const c: V3 = [
           crownCentre[0] + Math.cos(ang) * rr,
           base + t * (H - base) * 0.92,
@@ -652,58 +662,58 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
         ];
         const rad =
           R * (spec.form === 'column' ? 0.46 : 0.5) * (0.75 + 0.4 * r()) * (0.6 + 0.4 * env);
-        centres.push({ c, rad });
+        // A limb leaves the trunk below its clump (higher limbs higher up),
+        // bends upward on its way and ends inside the clump, forking.
+        const y0 = Math.min(
+          leader[1] - 0.6,
+          Math.max(base * 0.85, c[1] - (H - base) * (0.25 + 0.2 * lr())),
+        );
+        const k0 = y0 / leader[1];
+        const from: V3 = [leader[0] * k0, y0, leader[2] * k0];
+        const end = add(from, mul(sub(c, from), 0.78 + 0.12 * lr()));
+        const mid = add(add(from, mul(sub(end, from), 0.5)), [
+          (lr() - 0.5) * 0.9,
+          0.5 + 0.9 * lr(),
+          (lr() - 0.5) * 0.9,
+        ]);
+        const r0 = spec.trunk * (0.3 + 0.1 * lr());
         if (L.limbs) {
-          // A limb leaves the trunk below its clump (higher limbs higher up),
-          // bends upward on its way and ends inside the clump, forking into
-          // thinner branches. Its own random numbers, so the cards are the
-          // same at every level.
-          const y0 = Math.min(
-            leader[1] - 0.6,
-            Math.max(base * 0.85, c[1] - (H - base) * (0.25 + 0.2 * lr())),
-          );
-          const k0 = y0 / leader[1];
-          const from: V3 = [leader[0] * k0, y0, leader[2] * k0];
-          const end = add(from, mul(sub(c, from), 0.72 + 0.12 * lr()));
-          const mid = add(add(from, mul(sub(end, from), 0.5)), [
-            (lr() - 0.5) * 0.9,
-            0.5 + 0.9 * lr(),
-            (lr() - 0.5) * 0.9,
-          ]);
-          const r0 = spec.trunk * (0.3 + 0.1 * lr());
           b.limb(from, mid, r0, r0 * 0.6, 5, spec.bark, bark, 0.25);
           b.limb(mid, end, r0 * 0.6, r0 * 0.25, 4, spec.bark, bark, 0.3);
-          const forks = 2 + Math.floor(lr() * 2);
-          for (let f = 0; f < forks; f += 1) {
-            const at = add(mid, mul(sub(end, mid), 0.3 + 0.7 * lr()));
-            const dir = norm(
-              add(norm(sub(end, from)), [
-                (lr() - 0.5) * 1.4,
-                0.25 + 0.5 * lr(),
-                (lr() - 0.5) * 1.4,
-              ]),
-            );
-            b.limb(
-              at,
-              add(at, mul(dir, rad * (0.55 + 0.4 * lr()))),
-              r0 * 0.22,
-              r0 * 0.06,
-              3,
-              spec.bark,
-              bark,
-              0.4,
-            );
-          }
         }
+        const along = norm(sub(end, from));
+        const tips: Tip[] = [{ at: end, dir: norm(add(along, [0, 0.3, 0])), reach: rad * 0.55 }];
+        // Forks spread outwards and fairly level (an open-grown crown is broad).
+        const outward = norm([end[0] - crownCentre[0], 0, end[2] - crownCentre[2]]);
+        const forks = 3 + Math.floor(lr() * 2);
+        for (let f = 0; f < forks; f += 1) {
+          const at = add(mid, mul(sub(end, mid), 0.2 + 0.8 * lr()));
+          const dir = norm(
+            add(add(mul(along, 0.7), mul(outward, 0.6)), [
+              (lr() - 0.5) * 1.4,
+              -0.1 + 0.45 * lr(),
+              (lr() - 0.5) * 1.4,
+            ]),
+          );
+          const len = rad * (0.75 + 0.5 * lr());
+          const tip = add(at, mul(dir, len));
+          if (L.limbs) b.limb(at, tip, r0 * 0.22, r0 * 0.06, 3, spec.bark, bark, 0.4);
+          tips.push({ at: tip, dir, reach: rad * 0.5 });
+        }
+        clumpTips.push(tips);
       }
-      // A top clump.
-      centres.push({ c: [crownCentre[0], H - R * 0.35, crownCentre[2]], rad: R * 0.4 });
+      // A top clump on the leader.
+      clumpTips.push([
+        { at: [crownCentre[0], H - R * 0.3, crownCentre[2]], dir: [0, 1, 0], reach: R * 0.38 },
+      ]);
+      const allTips = clumpTips.flat();
       for (let i = 0; i < nCards; i += 1) {
-        const cl = centres[i % centres.length];
-        if (!cl) continue;
-        const d = norm([r() - 0.5, (r() - 0.35) * 0.9, r() - 0.5]);
-        const depth = 0.55 + 0.45 * Math.sqrt(r());
-        const p = add(cl.c, mul(d, cl.rad * depth));
+        const tip = allTips[i % allTips.length];
+        if (!tip) continue;
+        // Round the tip, more on its outer side and a little back along the twig.
+        const d = norm(add(mul(tip.dir, 0.45), [r() - 0.5, (r() - 0.35) * 0.9, r() - 0.5]));
+        const depth = 0.25 + 0.75 * Math.sqrt(r());
+        const p = add(sub(tip.at, mul(tip.dir, r() * tip.reach * 0.6)), mul(d, tip.reach * depth));
         const inner =
           Math.min(1, Math.hypot(p[0] - crownCentre[0], p[2] - crownCentre[2]) / R) * 0.6 +
           depth * 0.4;
