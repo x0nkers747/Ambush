@@ -147,6 +147,8 @@ function previewData(pkg: BattlefieldPackage, definition: ScenarioDefinition): P
       ? 'no OPFOR yet'
       : `OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`;
   return {
+    name: pkg.name,
+    centre: pkg.request.centre,
     scenario,
     squadPlaced,
     attribution: pkg.attribution,

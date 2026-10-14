@@ -3,6 +3,7 @@ import { createSession, setTool, type Session } from '#session';
 import { DEFAULT_TICK_RATE_HZ } from '#sim';
 import { createTacticalMap, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d } from '#view3d';
+import { saveScreenshot, screenshotName } from './screenshot';
 
 // The terrain-selection preview (docs/adr/0025): the selected battlefield on
 // the tactical map, with its scenario as saved (ORP, OPFOR and route). It is
@@ -17,6 +18,9 @@ import type { BattlefieldView3d } from '#view3d';
 // handed to the workspace, which has its own 3D view.
 
 export interface PreviewData {
+  /** The battlefield's name and centre (for screenshots' names and notes). */
+  readonly name: string;
+  readonly centre: { readonly lat: number; readonly lon: number };
   /** The battlefield's scenario as it would be played (its terrain is the battlefield's). */
   readonly scenario: AmbushScenario;
   /** Whether its ORP is placed; until then the squad and the ORP are not shown. */
@@ -54,7 +58,8 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
         <button class="small" data-preview-view="2d" aria-pressed="true" title="The 2D tactical map">2D</button>
         <button class="small" data-preview-view="3d" aria-pressed="false" title="The terrain in 3D">3D</button>
       </span>
-      <button class="small" data-ui="preview-fit" title="Fit the whole map">Fit map</button></div>`;
+      <button class="small" data-ui="preview-fit" title="Fit the whole map">Fit map</button>
+      <button class="small" data-ui="preview-shot" title="Save a screenshot of the map (in development: to assets/reference/)">Screenshot</button></div>`;
   const el = (name: string) => {
     const e = container.querySelector<HTMLElement>(`[data-ui="${name}"]`);
     if (!e) throw new Error(`Missing UI element ${name}`);
@@ -239,8 +244,36 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     else map?.fitView();
   });
 
+  // Screenshots (screenshot.ts): the view as shown, and notes to find it again.
+  let shown: PreviewData | null = null;
+  el('preview-shot').addEventListener('click', () => {
+    if (!shown) return;
+    const three = showing3d() ? view3d : null;
+    const picture = three ? three.capture() : map?.canvas;
+    if (!picture) return;
+    const when = new Date();
+    const name = screenshotName(shown.name, three ? '3d' : '2d', when);
+    const notes = {
+      battlefield: shown.name,
+      centre: shown.centre,
+      view: three ? '3d' : '2d',
+      camera: three?.view() ?? null,
+      takenAt: when.toISOString(),
+      page: 'terrain selection',
+    };
+    status('Saving the screenshot…');
+    void saveScreenshot(picture, name, notes).then((file) => {
+      const said = file ? `Saved ${file}` : 'Screenshot downloaded';
+      status(said);
+      setTimeout(() => {
+        if (el('preview-status').textContent === said) status(null);
+      }, 4000);
+    });
+  });
+
   /** Shows `data` on `existing` (a handed-back map) or on a new map. */
   const present = (data: PreviewData, existing: TacticalMap | null) => {
+    shown = data;
     if (map !== existing) stopMap();
     stopLoop();
     // The 3D view follows the map, so a new one is made for the new map and battlefield.

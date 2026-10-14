@@ -23,3 +23,12 @@ and every role and affiliation is shown on the development page `symbols.html`
 The workflow header: Previous and Next either side of the five stage segments, the current one
 outlined in blue. The application leaves out the reference's "n / 5" counter. Adopted by
 [ADR 0025](../../docs/adr/0025-five-stage-workflow.md) and implemented in `src/app/shell.ts`.
+
+## Screenshots from the app
+
+In development (`npm run dev`), the **Screenshot** button under the map on the terrain
+selection page saves what the map shows (2D or 3D) here as
+`<battlefield>-<2d|3d>-<date>-<time>.jpg`, with a `.json` beside it giving the battlefield and,
+in 3D, the camera (`x`, `y`, `distance`, `pitch`, `azimuth`, as the automated captures use
+them). The built site downloads the picture instead. Screenshots are working material: they
+are not committed.

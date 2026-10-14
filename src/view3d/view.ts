@@ -129,6 +129,19 @@ export interface BattlefieldView3d {
   resetView(): void;
   /** What the view is still preparing, for the user (e.g. "Growing vegetation…"), or null. */
   status(): string | null;
+  /** A frame drawn now, with the overlay (the tactical picture) over it, at the canvas's resolution. */
+  capture(): HTMLCanvasElement;
+  /**
+   * The camera: it looks at map point (x, y) from `distance` metres away,
+   * `pitch` degrees down, facing `azimuth` degrees (clockwise from north).
+   */
+  view(): {
+    readonly x: number;
+    readonly y: number;
+    readonly distance: number;
+    readonly pitch: number;
+    readonly azimuth: number;
+  } | null;
   /** Frees the GPU resources and listeners. The view cannot be used afterwards. */
   dispose(): void;
 }
@@ -733,6 +746,36 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     },
     resetView() {
       current?.camera.reset();
+    },
+    capture() {
+      // Drawn and copied in one go (the drawing buffer is not preserved).
+      view.render();
+      const out = document.createElement('canvas');
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const ctx = out.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(canvas, 0, 0);
+        ctx.drawImage(overlay, 0, 0, out.width, out.height);
+      }
+      return out;
+    },
+    view() {
+      if (!current) return null;
+      const { target, position } = current.camera.pose();
+      const dx = position.x - target.x;
+      const dy = position.y - target.y;
+      // Map y is north: Three.js -z.
+      const dn = -(position.z - target.z);
+      const distance = Math.hypot(dx, dy, dn);
+      const deg = 180 / Math.PI;
+      return {
+        x: target.x,
+        y: -target.z,
+        distance,
+        pitch: Math.asin(Math.max(-1, Math.min(1, dy / Math.max(distance, 1e-6)))) * deg,
+        azimuth: (Math.atan2(-dx, -dn) * deg + 360) % 360,
+      };
     },
     status() {
       switch (current?.generation.stage) {
