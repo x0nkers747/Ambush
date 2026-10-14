@@ -21,20 +21,28 @@ describe('tree models', () => {
         expect(g.positions.length).toBe(g.triangles * 9);
         expect(g.uvs.length).toBe(g.triangles * 6);
         expect(g.sway.length).toBe(g.triangles * 3);
+        // Checked in plain loops (an expect per vertex made this test slow), listed together.
+        const bad: string[] = [];
+        const low = -spec.card * 3.5;
+        const high = spec.height * 1.25 + spec.card * 3;
+        const reach = spec.crown * 1.6 + spec.card * 2.5 + 1;
         for (let i = 0; i < g.positions.length; i += 3) {
           const x = g.positions[i] ?? NaN;
           const y = g.positions[i + 1] ?? NaN;
           const z = g.positions[i + 2] ?? NaN;
-          expect(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)).toBe(true);
           // Cards overhang a little; nothing goes far below the ground or above the crown.
-          expect(y).toBeGreaterThan(-spec.card * 3.5);
-          expect(y).toBeLessThan(spec.height * 1.25 + spec.card * 3);
-          expect(Math.hypot(x, z)).toBeLessThan(spec.crown * 1.6 + spec.card * 2.5 + 1);
+          if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)))
+            bad.push(`vertex ${String(i / 3)} not finite`);
+          else if (y <= low || y >= high || Math.hypot(x, z) >= reach)
+            bad.push(
+              `vertex ${String(i / 3)} at (${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`,
+            );
         }
-        for (const v of g.uvs) {
-          expect(v).toBeGreaterThanOrEqual(0);
-          expect(v).toBeLessThanOrEqual(1);
+        for (let i = 0; i < g.uvs.length; i += 1) {
+          const v = g.uvs[i] ?? NaN;
+          if (!(v >= 0 && v <= 1)) bad.push(`uv ${String(i)} = ${String(v)}`);
         }
+        expect(bad.slice(0, 5), `${m.species} ${String(m.variant)}`).toEqual([]);
       }
     }
   });
