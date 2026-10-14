@@ -130,7 +130,7 @@ export interface AgentState {
   farSince: number | null;
   /** Out of contact for `stragglerSeconds`: the pace law no longer waits for him. */
   straggling: boolean;
-  /** Stuck detection: his error at the start of the current window, and when it began. */
+  /** Stuck detection: his error at the start of the current window (−1: none yet), and when it began. */
   checkError: number;
   checkAt: number;
   /** Made less than `stuckProgress` m of progress toward his slot over a window. */

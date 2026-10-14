@@ -76,6 +76,7 @@ export function applyDisturbAgent(
   agent.farSince = null;
   agent.straggling = false;
   agent.stuck = false;
+  agent.checkError = -1;
 }
 
 export type OrderUnitRejection =
@@ -315,7 +316,7 @@ export function applyOrderUnit(
       override: null,
       farSince: null,
       straggling: false,
-      checkError: 0,
+      checkError: -1,
       checkAt: startSeconds,
       stuck: false,
     };

@@ -228,3 +228,94 @@ All 600 runs accepted: 2 organizations, 6 scenario variants and 50 seeds, agains
 - Facing always follows travel: no observation sectors.
 - The pace law waits for a held Marine until he is 2 intervals behind (by design: scenario 3).
 - Speed reversals in turns reach 1.25–1.47 per minute for the squad. These are the inner and outer Marines slowing and speeding up through the bends. The 1-per-minute threshold applies to straight-line movement only (scenario 1).
+
+## M3: the Behavior Lab page
+
+**Opening it.** Open **http://localhost:5173/#behavior-lab** while `npm run dev` is running, or `#behavior-lab` on the published site.
+
+- The page loads only at that address, as its own chunk (`behavior-lab-*.js`, 59 kB, 21 kB gzipped).
+- No game module imports it (`src/app/behavior-lab-isolation.test.ts`).
+- Query options: `#behavior-lab?scenario=s4-turn&org=element3&formation=element3.file&seed=3`.
+
+**Code** (`src/view3d/behavior-lab/`):
+
+| File          | Contents                                                                                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.ts`  | Session logic: the head run, keyframes every 5 s, scrubbing, branching, recording, replay with per-second hash checks, save/load (`recordingToJson` keeps −0)  |
+| `scene.ts`    | The game's renderer settings, sun and sky light, soldier shadows, tactical camera; flat grass ground with a 10 m grid                                          |
+| `overlays.ts` | Route, anchor, slots, actual → desired, heading, velocity, error, state, phase, trails: all drawn from state and diagnostics, interpolated like the characters |
+| `lab.ts`      | The page: controls, inspector, explanation text, graphs, metrics, comparison, picking, frame loop, test hooks (`window.ambushBehaviorLab`)                     |
+| `style.ts`    | Styles                                                                                                                                                         |
+
+### Controls
+
+| Area         | Controls                                                                                                                                                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Header       | Play/Pause (Space), Step one tick (.), Reset (R); speed ¼× to 16×; elapsed time and tick; seed; tick rate (10, 20, 30, 60, 120 Hz)                                                                                                                            |
+| Scenario     | Free (click to order) or scenarios 1–5                                                                                                                                                                                                                        |
+| Organization | 3-Marine element, 4-Marine fire team or 13-Marine squad; formation (from the templates for that organization); interval; team spacing; pace                                                                                                                   |
+| Orders       | **Set destination** (D), then click the ground: the whole organization moves there. Ordered again while moving, it carries on without stopping. **Halt** cancels the order.                                                                                   |
+| Overlays     | Toggle each of: shared route, anchor, slots, actual → desired, heading, velocity, error labels, agent state, task phase, trails                                                                                                                               |
+| Recording    | **Replay & verify**: re-simulates this run from the start and checks every second's state hash. **Save** and **Load**: a JSON file.                                                                                                                           |
+| Timeline     | Scrub (pauses). Playing from an earlier tick branches: later commands are dropped.                                                                                                                                                                            |
+| Inspector    | The organization tree, coloured by each Marine's error band. Select a Marine or unit (or click one in the view) to see membership, slot, task, phase, speed, wanted speed, position error, heading and state, with a sentence on **why** he moves as he does. |
+| Disturb      | **Hold**, **Release**, **Displace…** (then click the ground: he walks there and rejoins). These are simulation commands, recorded and replayed.                                                                                                               |
+| Compare      | Each completed run is listed with its error, completion time and acceptance. **Sweep 10 seeds** runs the current settings headless.                                                                                                                           |
+| Graphs       | Mean and maximum error, worst lag, anchor speed, and the Marines' speed band over the run, with a cursor at the tick shown                                                                                                                                    |
+| Metrics      | Error, cohesion, fastest Marine, anchor speed, catch-up, reversals, sideways speed, completion, collisions, stuck, straggling, simulation CPU per tick                                                                                                        |
+
+### Departures from the design (04)
+
+| Design                                                                     | Built                                                                                                                                                                                          | Why                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Reuse the game's battlefield 3D view by narrowing its option type (07, Q6) | Its own small scene: the game's renderer settings, lights, shadow configuration and tactical camera; the game's character layer (Rocketbox soldiers, native animation); a flat textured ground | The battlefield view needs a whole `Exercise` and the terrain pipeline (field compilation, tile workers). The lab's terrain is flat and synthetic in M1–M4. Narrowing the view would have changed game code for nothing the lab uses yet. Revisit for real terrain (M5). |
+| A 2D view with the same overlays                                           | Not built; the 3D view can be looked at from straight above                                                                                                                                    | The overlays are drawn in screen space from ground projections, so a top-down camera gives the 2D picture.                                                                                                                                                               |
+| Trace sink for values that exist only inside a substep                     | Not built                                                                                                                                                                                      | Diagnostics explain everything the inspector shows.                                                                                                                                                                                                                      |
+
+### Fixes found by browser validation
+
+| Defect                                                                      | Cause                                                                                   | Fix                                                                                                                                             |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| A saved-and-loaded run replayed to different hashes from T+1 s              | A mirrored centred slot was −0, which JSON writes as 0; the state hash tells them apart | The builder never produces −0; recordings keep −0 (`"NUM:-0"`). Tested (`session.test.ts`).                                                     |
+| Six Marines flagged **stuck** 10 s into a free run while walking at 1.8 m/s | Stuck detection's first window compared against a starting error of 0                   | The first window only takes the reference (−1: none yet).                                                                                       |
+| Sidestepping at 0.42–0.55 m/s when re-forming toward a new heading          | "Turn before walking" still allowed 23 % speed at 90° off facing                        | Full speed within about 35° of facing; 5 % at 90° or more. Sideways speed in that run is now 0.33 m/s. The 50-seed sweep is unchanged: 600/600. |
+
+### Browser validation
+
+Playwright against the dev server, Chrome, 1600 × 950; the scripts are in the session scratchpad.
+
+- **Scenarios 1–5**, squad and 3-Marine element, in the lab at 16×: every run `arrived`. The metrics match the headless runs (same kernel):
+  - steady error 0.41–0.42 m;
+  - maximum 2.18–2.31 m;
+  - no collisions, nobody stuck;
+  - sideways speed at most 0.11 m/s;
+  - the held Marine recovered in 11.5 s.
+- **Characters and simulation agree.** When paused, every character's root sits exactly on its simulation position (difference 0).
+- **Overlays** come from the diagnostics the system steers with: slot crosses and actual → desired lines are the diagnostics' targets.
+- **Clicking to order.** A click on the ground with Set destination ordered the squad to within centimetres of the click.
+- **Displacing.** A Marine displaced by the UI walked to the point and rejoined. The run `arrived` with no stuck Marines.
+- **Scrubbing** to the middle of a run showed that tick; returning to the head resumed it.
+- **Replay & verify** matched all 184 seconds of the run, every state hash equal. Saving, loading and replaying matched all 185 seconds.
+- **Production build** (`vite preview`):
+  - the lab loads at `#behavior-lab` with all 13 soldiers;
+  - the game's page does not load the lab;
+  - no console errors.
+- **Simulation CPU** in the browser for a squad is about 0.04–0.07 ms per tick (mean; p95 0.1–0.2 ms).
+
+### Needs your visual review
+
+Automated checks cannot judge these:
+
+- whether the walking gait matches the speeds (walk at 1.4 m/s, faster walking at 1.82 m/s when catching up);
+- whether starting off and stopping look natural (acceleration 1 m/s², braking 2 m/s²);
+- whether the turn and the re-forming after a displacement read as people moving together.
+
+The scenarios to look at are 1, 3 and 4, and a free run with a displacement, at 1× and close in.
+
+### Limitations after M3
+
+- Flat synthetic ground only; no obstacles (M4) or real terrain (M5).
+- No 2D map view; use a top-down camera.
+- Replay in the lab re-simulates; the game's frame-based review is unchanged and untouched.
+- Branching re-simulates from the start: about a second for a ten-minute run.
+- The soldiers' animation has no running sidestep or backward clips (ADR 0052). Facing follows travel, so they are not needed in M1–M3.

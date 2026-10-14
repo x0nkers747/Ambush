@@ -145,8 +145,9 @@ export function buildFormationSpec(
       slots.push({
         id: member.slot.id,
         soldierId: soldierId(member.soldierId),
-        back: -place.forward * scale,
-        right: place.right * scale * flip,
+        // `+ 0`: no negative zeros (a centred slot mirrored), which plain JSON would not keep.
+        back: -place.forward * scale + 0,
+        right: place.right * scale * flip + 0,
       });
       rear = Math.max(rear, -place.forward * scale);
     }
@@ -166,12 +167,12 @@ export function buildFormationSpec(
         rear += 2 * spacing;
         return build(child, defaultFormation(child, templateId), rear, 0, false);
       }
-      const childRight = place.right * spacing * flip;
+      const childRight = place.right * spacing * flip + 0;
       const childTemplate = formationTemplate(place.formation);
       return build(
         child,
         place.formation,
-        -place.forward * spacing,
+        -place.forward * spacing + 0,
         childRight,
         childRight < 0 && childTemplate.mirror !== false,
       );

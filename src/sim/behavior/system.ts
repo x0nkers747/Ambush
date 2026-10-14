@@ -326,7 +326,7 @@ export interface Desire {
   /** Wanted velocity (m/s) after the caps and the turning factor. */
   readonly wx: number;
   readonly wy: number;
-  /** Dead band in force (m), the speed cap (m/s), and the turning factor (0.1–1). */
+  /** Dead band in force (m), the speed cap (m/s), and the turning factor (0.05–1). */
   readonly band: number;
   readonly cap: number;
   readonly turnFactor: number;
@@ -405,7 +405,9 @@ export function desire(
   let turnFactor = 1;
   if (w > 1e-9) {
     const cos = (wx * Math.sin(soldier.azimuth) + wy * Math.cos(soldier.azimuth)) / w;
-    turnFactor = Math.min(1, Math.max(0.1, (cos + 0.3) / 1.3));
+    // Full speed within about 35° of his facing; at 90° or more, a few
+    // centimetres a second while he turns (people turn, then walk).
+    turnFactor = Math.min(1, Math.max(0.05, (cos - 0.2) / 0.6));
     wx *= turnFactor;
     wy *= turnFactor;
   }
@@ -547,7 +549,9 @@ function stepAgent(
   }
   // Stuck: over each window, too little progress toward a slot he is not near.
   if (t - agent.checkAt >= params.stuckSeconds) {
+    // The first window only takes the reference (`checkError` < 0: none yet).
     agent.stuck =
+      agent.checkError >= 0 &&
       agent.override === null &&
       !agent.latched &&
       e > 2 * wanted.band + params.latchRadius &&

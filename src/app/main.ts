@@ -306,6 +306,13 @@ async function main(root: HTMLElement): Promise<void> {
 
 // The Feedback button (a screenshot with a note) on every page.
 installFeedbackButton();
-main(app).catch((error: unknown) => {
+// The Behavior Lab (docs/behavior-lab/04) has its own address and is loaded
+// only there: nothing else in the game imports it.
+const start = window.location.hash.startsWith('#behavior-lab')
+  ? import('#view3d/behavior-lab').then(({ startBehaviorLab }) => {
+      startBehaviorLab(app);
+    })
+  : main(app);
+start.catch((error: unknown) => {
   showFatal(app, error instanceof Error ? error.message : String(error));
 });

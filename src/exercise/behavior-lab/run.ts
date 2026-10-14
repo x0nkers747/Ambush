@@ -92,10 +92,12 @@ export interface LabRun {
   readonly formation: FormationSpec;
   /** Every command submitted, in order (with any added later by the lab). */
   readonly commands: SimCommand[];
+  /** Where each command came from: the scenario's script (legs, disturbances) or the user. */
+  readonly origins: CommandOrigin[];
   /** Soldier id holding an organization slot. */
   soldierOf(slotId: string): string | undefined;
   /** Submits a command and records it. */
-  submit(command: SimCommand): void;
+  submit(command: SimCommand, origin?: CommandOrigin): void;
   /** One tick: scripted orders and disturbances due, then the step. Returns the tick's events. */
   step(): readonly SimEvent[];
   /** Whether the run has nothing left to do: every waypoint ordered and the last task ended. */
@@ -113,7 +115,25 @@ export function labTerrain(): TerrainDataset {
 }
 
 /** Starts a run: builds the organization, lays it out loosely at the start, orders the first waypoint. */
-export function createLabRun(spec: LabRunSpec, terrain: TerrainDataset = labTerrain()): LabRun {
+/** Who issued a command of a run. */
+export type CommandOrigin = 'leg' | 'disturbance' | 'user';
+
+/**
+ * A run rebuilt from commands (replay, branching): these are submitted as
+ * they are instead of the script's first leg and disturbances, and the
+ * script's later legs continue from `legsIssued`.
+ */
+export interface LabReplay {
+  readonly commands: readonly SimCommand[];
+  readonly origins: readonly CommandOrigin[];
+  readonly legsIssued: number;
+}
+
+export function createLabRun(
+  spec: LabRunSpec,
+  terrain: TerrainDataset = labTerrain(),
+  replay?: LabReplay,
+): LabRun {
   const template = LAB_ORGANIZATIONS[spec.organization];
   const root = template.units.find((u) => u.parentId === null)?.id ?? '';
   // Members fill slots in template order; ids by organization.
@@ -172,40 +192,55 @@ export function createLabRun(spec: LabRunSpec, terrain: TerrainDataset = labTerr
   const nextLegAt =
     ahead + halfWidth + (spec.params ?? DEFAULT_BEHAVIOR_PARAMS).cornerMargin + NEXT_LEG_MARGIN_M;
   const commands: SimCommand[] = [];
+  const origins: CommandOrigin[] = [];
   const slotHolder = new Map(instance.members.map((m) => [m.slotId, m.soldierId]));
   let next = 0;
 
-  const submit = (command: SimCommand) => {
+  const submit = (command: SimCommand, origin: CommandOrigin = 'user') => {
     sim.submit(command);
     commands.push(command);
+    origins.push(origin);
   };
   const orderLeg = (tick: number) => {
     const destination = spec.waypoints[next];
     if (!destination) return;
-    submit({
-      type: 'orderUnit',
-      tick,
-      unitId,
-      order: {
-        kind: 'moveInFormation',
-        destination,
-        ...(next === 0 && spec.via ? { via: spec.via } : {}),
-        formation,
-        pace: spec.pace,
+    submit(
+      {
+        type: 'orderUnit',
+        tick,
+        unitId,
+        order: {
+          kind: 'moveInFormation',
+          destination,
+          ...(next === 0 && spec.via ? { via: spec.via } : {}),
+          formation,
+          pace: spec.pace,
+        },
       },
-    });
+      'leg',
+    );
     next += 1;
   };
-  orderLeg(0);
-  for (const d of spec.disturbances ?? []) {
-    const id = slotHolder.get(d.slotId);
-    if (id === undefined) continue;
-    submit({
-      type: 'disturbAgent',
-      tick: Math.round(d.atSeconds * spec.tickRateHz),
-      soldierId: soldierId(id),
-      disturbance: d.disturbance,
+  if (replay) {
+    replay.commands.forEach((c, i) => {
+      submit(c, replay.origins[i] ?? 'user');
     });
+    next = replay.legsIssued;
+  } else {
+    orderLeg(0);
+    for (const d of spec.disturbances ?? []) {
+      const id = slotHolder.get(d.slotId);
+      if (id === undefined) continue;
+      submit(
+        {
+          type: 'disturbAgent',
+          tick: Math.round(d.atSeconds * spec.tickRateHz),
+          soldierId: soldierId(id),
+          disturbance: d.disturbance,
+        },
+        'disturbance',
+      );
+    }
   }
 
   const current = () =>
@@ -217,6 +252,7 @@ export function createLabRun(spec: LabRunSpec, terrain: TerrainDataset = labTerr
     unitId,
     formation,
     commands,
+    origins,
     soldierOf: (slotId) => slotHolder.get(slotId),
     submit,
     step() {

@@ -6,7 +6,9 @@ Its first behaviour is **MOVE_IN_FORMATION**: noncombat movement in formation to
 
 These documents are the research and the proposal (approved at `2da3386`).
 
-**Status:** milestones M1 (kernel foundations) and M2 (formation templates, movement laws, metrics, scenarios 1–5) are implemented: [ADR 0053](../adr/0053-unit-tasks-and-formation-movement.md), and the [implementation notes](implementation.md) (departures, parameters, measurements).
+**Status:** milestones M1–M3 are implemented ([ADR 0053](../adr/0053-unit-tasks-and-formation-movement.md), [ADR 0054](../adr/0054-behavior-lab.md); [implementation notes](implementation.md): departures, parameters, measurements, validation).
+
+**Open the lab:** run `npm run dev` and go to **http://localhost:5173/#behavior-lab** (or `#behavior-lab` on the published site). Pick a scenario or _Free_, then _Set destination_ and click the ground.
 
 | Document                                                    | Contents                                                                                                                                           |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
