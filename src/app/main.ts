@@ -17,6 +17,7 @@ import type { BattlefieldPackage } from '#geo';
 import { demQualitySummary, shareTerrain, terrainModelId, type DemQualityReport } from '#sim';
 import type { TacticalMap } from '#view2d';
 import type { PreviewData } from './battlefield-preview';
+import { installFeedbackButton } from './feedback';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
 import { demoInfoHtml, startWorkspace } from './workspace';
@@ -303,6 +304,8 @@ async function main(root: HTMLElement): Promise<void> {
   }
 }
 
+// The Feedback button (a screenshot with a note) on every page.
+installFeedbackButton();
 main(app).catch((error: unknown) => {
   showFatal(app, error instanceof Error ? error.message : String(error));
 });
