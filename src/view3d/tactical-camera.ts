@@ -44,6 +44,8 @@ export interface TacticalCamera extends CameraMode {
 
 /** Field of view, vertical. */
 const FOV_DEG = 45;
+/** The mouse wheel's zoom speed (three.js's default is 1). */
+const WHEEL_ZOOM_SPEED = 2;
 /** Time for a double-click refocus, in milliseconds. */
 const FOCUS_MS = 450;
 
@@ -63,6 +65,24 @@ export function createTacticalCamera(
   controls.touches = { ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE };
   controls.screenSpacePanning = false;
   controls.zoomToCursor = true;
+  // The wheel zooms twice as fast as three.js's default (each notch's zoom
+  // squared); dragging with the middle button and pinching keep the default.
+  // The controls read `zoomSpeed` as they handle each event, so it is set by
+  // the kind of event, before they see it.
+  canvas.addEventListener(
+    'wheel',
+    () => {
+      controls.zoomSpeed = WHEEL_ZOOM_SPEED;
+    },
+    { capture: true, passive: true },
+  );
+  canvas.addEventListener(
+    'pointerdown',
+    () => {
+      controls.zoomSpeed = 1;
+    },
+    { capture: true },
+  );
   controls.enableDamping = true;
   controls.dampingFactor = 0.15;
   controls.minDistance = MIN_DISTANCE_M;
