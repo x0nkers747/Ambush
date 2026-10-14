@@ -152,7 +152,7 @@ describe('orderUnit', () => {
       if (events.some(ended)) break;
     }
     const task = sim.state.behavior?.tasks[0];
-    expect(phases).toEqual(['moving', 'settling']);
+    expect(phases).toEqual(['settling']);
     expect(task?.phase).toBe('complete');
     expect(task?.outcome).toBe('arrived');
     // Within the catch-up limit, never faster.
@@ -165,7 +165,7 @@ describe('orderUnit', () => {
       expect(a.desire.error).toBeLessThanOrEqual(1);
       expect(a.speed).toBe(0);
     }
-    // About 300 m at 1.4 m/s, plus forming and settling.
+    // About 300 m at 1.4 m/s, plus falling in and settling.
     expect(sim.timeSeconds).toBeLessThan(300 / 1.4 + 60);
     // The motion is written to the soldiers: the squad's centre is at the destination.
     const xs = sim.state.soldiers.map((s) => s.position.x);
@@ -310,7 +310,7 @@ describe('orderUnit', () => {
     const tasks = sim.state.behavior?.tasks ?? [];
     expect(tasks.map((t) => [t.unitId, t.phase])).toEqual([
       ['SQD', 'moving'],
-      ['FT1', 'forming'],
+      ['FT1', 'moving'],
     ]);
     run(sim, 400, (e) => e.type === 'unitTaskEnded' && e.unitId === 'SQD');
     expect(sim.state.behavior?.tasks.find((t) => t.unitId === 'SQD')?.outcome).toBe('arrived');
@@ -352,14 +352,14 @@ describe('disturbAgent', () => {
   it('holds a Marine, releases him, sends him away; he rejoins; soldiers no task steers are refused', () => {
     const sim = squadSim();
     sim.submit({ type: 'orderUnit', tick: 0, unitId: SQD, order: order({ x: 0, y: 400 }) });
+    // Held once he has fallen in (at T+20 s), so the squad waits for him.
     sim.submit({
       type: 'disturbAgent',
-      tick: 0,
+      tick: 600,
       soldierId: soldierId('M09'),
       disturbance: { kind: 'hold' },
     });
     const first = run(sim, 1 / 30);
-    // Not yet steered when the command applied (the order applies first, in submission order).
     expect(first.some((e) => e.type === 'commandRejected')).toBe(false);
     run(sim, 30);
     const m09 = () => sim.state.soldiers.find((s) => s.id === 'M09')?.position;

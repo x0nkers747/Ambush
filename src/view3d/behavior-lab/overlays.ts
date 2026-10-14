@@ -70,6 +70,7 @@ export const STATE_TEXT: Readonly<Record<AgentDiagnostics['desire']['state'], st
   arriving: 'arriving',
   held: 'held',
   displaced: 'sent away',
+  fallingIn: 'falling in',
 };
 
 export interface OverlayFrame {
@@ -120,7 +121,7 @@ export function drawOverlays(f: OverlayFrame): void {
   for (const task of behavior.tasks) {
     const d = diagnostics.tasks.find((t) => t.taskId === task.id);
     if (!d) continue;
-    const interval = task.order.formation.interval;
+    const interval = task.formation.interval;
     const running = task.outcome === null;
     // The shared route.
     if (options.route) {

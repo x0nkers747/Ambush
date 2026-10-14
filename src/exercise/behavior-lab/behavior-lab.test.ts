@@ -144,6 +144,50 @@ describe.each(ORGS)('scenarios, %s', (kind) => {
   });
 });
 
+describe('falling in: the leader steps off, the others fall in on the move', () => {
+  it.each(ORGS)('%s ordered off to the rear', (kind) => {
+    const result = scenario('fall-in', { organization: kind });
+    const m = result.metrics;
+    expect(m.outcome).toBe('arrived');
+    // Nobody forms up first: the unit is moving from the order on.
+    const phases = result.events.flatMap((e) => (e.type === 'unitPhaseChanged' ? [e.phase] : []));
+    expect(phases).toEqual(['settling']);
+    expect(m.joinSeconds ?? Infinity).toBeLessThanOrEqual(60);
+    expect(m.collisions).toBe(0);
+    expect(m.stuck).toBe(0);
+    expect(m.steadyMaxError).toBeLessThanOrEqual(4);
+  });
+
+  it('the leader starts toward the objective within 5 s; a reversing squad does not walk through itself', () => {
+    const spec = {
+      ...scenarioSpec('fall-in', { organization: 'squad' }),
+      waypoints: [{ x: 0, y: -200 }],
+    };
+    const run = createLabRun(spec);
+    const leader = run.sim.state.units.find((u) => u.id === run.unitId)?.leaderId ?? '';
+    const start = run.sim.state.soldiers.find((s) => s.id === leader)?.position;
+    const y0 = start?.y ?? 0;
+    let moved: number | null = null;
+    let closest = Infinity;
+    for (let i = 0; i < 30 * 300 && !run.done; i += 1) {
+      run.step();
+      const s = run.sim.state.soldiers;
+      const p = s.find((x) => x.id === leader)?.position;
+      if (moved === null && p && y0 - p.y > 1) moved = run.sim.timeSeconds;
+      for (let a = 0; a < s.length; a += 1) {
+        for (let b = a + 1; b < s.length; b += 1) {
+          const pa = s[a]?.position;
+          const pb = s[b]?.position;
+          if (pa && pb) closest = Math.min(closest, Math.hypot(pa.x - pb.x, pa.y - pb.y));
+        }
+      }
+    }
+    expect(moved ?? Infinity).toBeLessThanOrEqual(5);
+    expect(closest).toBeGreaterThan(0.6);
+    expect(run.sim.state.behavior?.tasks[0]?.outcome).toBe('arrived');
+  }, 60_000);
+});
+
 describe('scenario 4, squad team order', () => {
   it('keeps the 1st team ahead of the 2nd and 3rd through the turn', () => {
     const run = createLabRun(scenarioSpec('s4-turn', { organization: 'squad' }));

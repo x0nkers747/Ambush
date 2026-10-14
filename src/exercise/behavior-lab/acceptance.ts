@@ -20,6 +20,10 @@ export function acceptanceFailures(
   };
   check(metrics.outcome === 'arrived', `outcome ${String(metrics.outcome)}`);
   check(metrics.collisions === 0, `${String(metrics.collisions)} collisions`);
+  check(
+    (metrics.joinSeconds ?? Infinity) <= 60,
+    `fallen in after ${String(metrics.joinSeconds)} s`,
+  );
   check(metrics.maxSpeedRatio <= 1.3 + 1e-9, `speed ${metrics.maxSpeedRatio.toFixed(2)} × pace`);
   const formation = () => {
     check(
@@ -55,6 +59,10 @@ export function acceptanceFailures(
     case 's4-turn':
       check(metrics.maxError <= 0.5 * d, `max error ${metrics.maxError.toFixed(2)} m`);
       check(metrics.maxSlip <= 0.4, `sideways ${metrics.maxSlip.toFixed(2)} m/s`);
+      break;
+    case 'fall-in':
+      check(metrics.steadyMaxError <= 0.4 * d, `max error ${metrics.steadyMaxError.toFixed(2)} m`);
+      check(metrics.stuck === 0, `${String(metrics.stuck)} stuck`);
       break;
     case 's5-waypoints':
       formation();

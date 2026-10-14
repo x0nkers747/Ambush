@@ -29,9 +29,16 @@ export interface BehaviorParams {
   readonly accel: number;
   readonly decel: number;
   readonly lateralAccel: number;
-  /** Forming ends when every Marine is within this many intervals of his slot, or after `formingTimeout` s. */
-  readonly formingBand: number;
-  readonly formingTimeout: number;
+  /**
+   * Falling in: there is no forming up before moving off. The leader steps
+   * off at once and the others make for their slots on the move; a Marine
+   * has fallen in once within `joinBand` intervals of his slot. Until all
+   * have (or for `joinTimeout` s at most), the unit keeps to `joinPace` ×
+   * pace, and Marines still falling in do not hold it back.
+   */
+  readonly joinBand: number;
+  readonly joinPace: number;
+  readonly joinTimeout: number;
   /** Slots blend from the route into the final layout over this many seconds. */
   readonly settleBlend: number;
   /** In position: within `latchRadius` m of the slot and slower than `latchSpeed`; out again beyond `unlatchRadius`. */
@@ -81,8 +88,9 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   accel: 1.0,
   decel: 2.0,
   lateralAccel: 1.5,
-  formingBand: 0.25,
-  formingTimeout: 20,
+  joinBand: 0.25,
+  joinPace: 0.75,
+  joinTimeout: 60,
   settleBlend: 3,
   latchRadius: 1.0,
   latchSpeed: 0.2,
@@ -93,7 +101,7 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   driftRadius: 0.1,
   driftSeconds: 8,
   personalSpace: 1.2,
-  separationSpeed: 0.8,
+  separationSpeed: 1.2,
   contactRadius: 3,
   contactMinimum: 30,
   stragglerSeconds: 10,

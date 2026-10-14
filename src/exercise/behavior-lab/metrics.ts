@@ -11,7 +11,10 @@ import {
 // renderer drew.
 
 export interface LabMetrics {
-  /** Formation error (m) over every Marine and tick while moving (not forming or settling). */
+  /**
+   * Formation error (m) over every Marine and tick while moving, once he
+   * has fallen in (not while making for his slot after the order, nor settling).
+   */
   readonly meanError: number;
   readonly maxError: number;
   readonly p95Error: number;
@@ -61,6 +64,8 @@ export interface LabMetrics {
   readonly straggling: number;
   /** Longest stop of the anchor between the first move and the final arrival (s). */
   readonly longestStop: number;
+  /** Seconds from the first order until every Marine had fallen in (null: some never did). */
+  readonly joinSeconds: number | null;
   /** Seconds of simulation measured. */
   readonly seconds: number;
 }
@@ -114,6 +119,7 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
   const reversals = new Map<string, number>();
   const disturbedUntil = new Map<string, number>();
   let quietUntil = -Infinity;
+  let allJoinedAt: number | null = null;
   const everDisturbed = new Set<string>();
   const releasedAt = new Map<string, number>();
   const backSince = new Map<string, number>();
@@ -156,7 +162,7 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
       const soldiers = new Map(state.soldiers.map((s) => [s.id as string, s]));
 
       // Disturbances in effect, and the quiet period after them.
-      const d = task.order.formation.interval;
+      const d = task.formation.interval;
       for (const a of agents) {
         if (a.override !== null) {
           disturbedUntil.set(a.soldierId, t + DISTURBANCE_SETTLE_S);
@@ -238,7 +244,7 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
             since: t,
           });
         }
-        if (moving) {
+        if (moving && a.joined) {
           if (!everDisturbed.has(a.soldierId)) othersMax = Math.max(othersMax, a.desire.error);
           errors.push(a.desire.error);
           tickErrorSum += a.desire.error;
@@ -249,6 +255,8 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
         }
       }
 
+      if (allJoinedAt === null && agents.length > 0 && agents.every((a) => a.joined))
+        allJoinedAt = t;
       // Contacts between any two soldiers (each approach once).
       const all = state.soldiers;
       for (let i = 0; i < all.length; i += 1) {
@@ -292,7 +300,7 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
         node.children.forEach(visit);
       };
       if (moving) {
-        visit(task.order.formation.root);
+        visit(task.formation.root);
         if (cohesionN > 0) cohesion.push(cohesionTick / cohesionN);
       }
 
@@ -363,6 +371,7 @@ export function createMetrics(sim: Simulation, unitId: string): MetricsRecorder 
         stuck: stuck.size,
         straggling: straggling.size,
         longestStop,
+        joinSeconds: allJoinedAt !== null && firstOrder !== null ? allJoinedAt - firstOrder : null,
         seconds: measured,
       };
     },

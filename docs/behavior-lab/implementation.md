@@ -319,3 +319,52 @@ The scenarios to look at are 1, 3 and 4, and a free run with a displacement, at 
 - Replay in the lab re-simulates; the game's frame-based review is unchanged and untouched.
 - Branching re-simulates from the start: about a second for a ten-minute run.
 - The soldiers' animation has no running sidestep or backward clips (ADR 0052). Facing follows travel, so they are not needed in M1–M3.
+
+## After review: the leader steps off, the others fall in on the move
+
+**Review note** (2026-10-14): "when you set a direction, the squad moves into formation and then moves toward the objective. It would be better if the leader started to move to the location, and the squad moves into formation based upon leader position, while the leader is moving. In the real world you don't form a perfect, oriented formation and then move off."
+
+**What changed.**
+
+1. **No forming phase.** A task starts `moving` (`TaskPhase` no longer has `forming`).
+   - The route starts where the ordered unit's **leader** stands, shifted by his slot's lateral offset. The anchor is placed so that his slot is exactly where he is.
+   - He walks the route from the first moment, after turning toward it if he faces away. Without a leader in the formation, the route starts at the Marines' centre as before.
+2. **Falling in.** Every other Marine makes for his slot on the move at up to 1.3 × pace. He has _fallen in_ (`AgentState.joined`) once within `joinBand` (0.25 intervals) of it.
+   - Marines still falling in do not hold the unit back.
+   - Until all have fallen in (at most `joinTimeout`, 60 s), the unit keeps `joinPace` (0.75 × pace), so the others can catch up.
+   - After that the pace law works as before: a Marine who drops behind once he has fallen in still slows the unit.
+3. **Arrangement as best they can** (`arrange.ts`). When the order applies, the unit takes the arrangement of its formation that asks the least walking (least sum of squared distances) from where the Marines stand, laid out round the leader facing the first leg. The free choices:
+   - which element takes which position (whichever team is nearest the front leads; all 3! = 6 orders for a squad);
+   - whether the whole formation is mirrored.
+
+   Roles within a team stay doctrinal. A team moved across the centre line is mirrored inside, so its leader stays on the inner side. A continued order keeps its arrangement. The task records it (`UnitTask.formation`, the formation as executed); `order.formation` stays the intent.
+   - **Evidence:** without it, a squad ordered to reverse turned its wedge inside out, and its flank teams crossed through each other at a combined 3.6 m/s (9 contacts under 0.6 m).
+
+4. **Anticipated personal space** (`crowd.ts`). Marines ease away from anyone who will come within 1.2 m of them in the next second at present velocities, the sooner the harder (a time-to-collision rule, after Karamouzas, Skinner & Guy 2014). Head-on, each steps to his own right. The push is up to 1.2 m/s (was 0.8).
+   - Neighbours are searched within 6 m, from start-of-substep positions and velocities, so the result does not depend on processing order.
+
+**New scenario 6, "Falling in"**: standing loosely facing north, ordered 210 m to the south-east.
+
+**Results (50 seeds, `tools/behavior-sweep.test.ts`):** all 700 runs accepted (scenarios 1–6, squad and 3-Marine element).
+
+| Organization | Scenario         | Fallen in: median / worst | Mean error p50 | Max error worst | Collisions | Stuck |
+| ------------ | ---------------- | ------------------------: | -------------: | --------------: | ---------: | ----: |
+| squad        | 6 fall in (rear) |             23.4 / 25.9 s |         0.48 m |          2.50 m |          0 |     0 |
+| element3     | 6 fall in (rear) |             11.6 / 12.2 s |         0.47 m |          2.50 m |          0 |     0 |
+
+Scenarios 1–5 are unchanged in substance. They start already roughly in formation, so falling in takes at most 2.4 s.
+
+**Order in every direction** (squad, fire team, element; headless):
+
+- the leader is walking (1 m covered) within 2.0–4.2 s, the longer times when he first turns round;
+- everyone has fallen in within 1–56 s, the longest for a squad ordered straight back;
+- no contacts and nobody stuck in any direction, including the full reversal.
+
+**Tests added:**
+
+- scenario 6 for the squad and the element: no forming phase, fallen in within 60 s, no collisions, nobody stuck;
+- a squad ordered straight back: the leader is walking within 5 s, and no two Marines ever come within 0.6 m.
+
+**Browser** (`#behavior-lab?scenario=fall-in`). The leader steps off at once. At T+4 s, 11 Marines are still falling in and the unit moves at 1.05 m/s ("joining"); at T+10 s, 4; at T+30 s, all, and the unit is at full pace (1.4 m/s).
+
+**Parameters replaced:** `formingBand` and `formingTimeout` are replaced by `joinBand` 0.25, `joinPace` 0.75 and `joinTimeout` 60 s. `separationSpeed` is now 1.2 (was 0.8).

@@ -552,6 +552,9 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       return `Sent away by a disturbance: walking to E ${a.override.x.toFixed(0)} N ${a.override.y.toFixed(0)}, then he rejoins his slot.`;
     }
     if (a.latched) return 'In position at the destination: stopped, facing the final direction.';
+    if (d.state === 'fallingIn') {
+      return `Falling in: the leader has stepped off and he is making for his slot (${d.error.toFixed(1)} m away) on the move, up to ${d.cap.toFixed(2)} m/s. The unit keeps an easier pace until everyone has fallen in.`;
+    }
     parts.push(
       `His slot is ${d.error.toFixed(1)} m away (${d.along >= 0 ? `${d.along.toFixed(1)} m ahead of him` : `${(-d.along).toFixed(1)} m behind him`}, ${Math.abs(d.across).toFixed(1)} m to his ${d.across >= 0 ? 'right' : 'left'}).`,
     );
@@ -632,13 +635,15 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       <dt>Worst lag</dt><dd>${p.worstLag.toFixed(2)} m ${p.worstLagId ? `(${escape(p.worstLagId)})` : ''}</dd>
       <dt>In position</dt><dd>${String(p.latched)} / ${String(p.members)}</dd>
     </dl><div class="why">${escape(
-      p.limitedBy === 'cohesion'
-        ? `Slowing to ${(p.keep * 100).toFixed(0)} % of pace: ${p.worstLagId ?? 'a Marine'} is ${p.worstLag.toFixed(1)} m behind his slot.`
-        : p.limitedBy === 'bend'
-          ? 'Slowing for a bend, so the outermost Marine need not run.'
-          : p.limitedBy === 'arrival'
-            ? 'Braking to stop at the destination.'
-            : 'At the commanded pace: every Marine is near his slot.',
+      p.limitedBy === 'joining'
+        ? `The leader has stepped off at an easier pace while ${String(p.joining)} Marine(s) fall in on the move.`
+        : p.limitedBy === 'cohesion'
+          ? `Slowing to ${(p.keep * 100).toFixed(0)} % of pace: ${p.worstLagId ?? 'a Marine'} is ${p.worstLag.toFixed(1)} m behind his slot.`
+          : p.limitedBy === 'bend'
+            ? 'Slowing for a bend, so the outermost Marine need not run.'
+            : p.limitedBy === 'arrival'
+              ? 'Braking to stop at the destination.'
+              : 'At the commanded pace: every Marine is near his slot.',
     )}</div>`;
   };
 

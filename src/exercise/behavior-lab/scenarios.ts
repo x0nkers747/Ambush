@@ -8,7 +8,7 @@ import { createLabRun, type LabOrganization, type LabRun, type LabRunSpec } from
 // sweep runs them over many seeds.
 
 export type LabScenarioId =
-  's1-straight' | 's2-speeds' | 's3-straggler' | 's4-turn' | 's5-waypoints';
+  's1-straight' | 's2-speeds' | 's3-straggler' | 's4-turn' | 's5-waypoints' | 'fall-in';
 
 export interface LabScenario {
   readonly id: LabScenarioId;
@@ -37,6 +37,12 @@ export const LAB_SCENARIOS: readonly LabScenario[] = [
     id: 's4-turn',
     name: '4. 90° turn',
     description: '150 m north, then 150 m east (one order with a route point).',
+  },
+  {
+    id: 'fall-in',
+    name: '6. Falling in (ordered off to the rear)',
+    description:
+      'Standing loosely facing north, ordered 210 m to the south-east: the leader steps off at once and the others fall in on the move.',
   },
   {
     id: 's5-waypoints',
@@ -97,6 +103,8 @@ export function scenarioSpec(id: LabScenarioId, options: ScenarioOptions): LabRu
       };
     case 's4-turn':
       return { ...base, via: [{ x: 0, y: 150 }], waypoints: [{ x: 150, y: 150 }] };
+    case 'fall-in':
+      return { ...base, waypoints: [{ x: 150, y: -150 }] };
     case 's5-waypoints':
       return {
         ...base,

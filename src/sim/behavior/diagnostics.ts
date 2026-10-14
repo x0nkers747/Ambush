@@ -41,6 +41,8 @@ export interface AgentDiagnostics {
   readonly taskId: string;
   readonly slotId: string;
   readonly latched: boolean;
+  /** Has fallen in (reached his slot since the order). */
+  readonly joined: boolean;
   readonly straggling: boolean;
   readonly stuck: boolean;
   readonly override: AgentState['override'];
@@ -114,6 +116,7 @@ export function behaviorDiagnostics(
         taskId: task.id,
         slotId: agent.slotId,
         latched: agent.latched,
+        joined: agent.joined,
         straggling: agent.straggling,
         stuck: agent.stuck,
         override: agent.override,

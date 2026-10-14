@@ -25,6 +25,7 @@ const CASES: readonly { id: LabScenarioId; label: string; options?: Partial<Scen
   { id: 's3-straggler', label: '3 straggler' },
   { id: 's4-turn', label: '4 turn' },
   { id: 's5-waypoints', label: '5 waypoints' },
+  { id: 'fall-in', label: '6 fall in (rear)' },
 ];
 
 const stat = (xs: number[], q: number) =>
@@ -33,8 +34,8 @@ const stat = (xs: number[], q: number) =>
 describe.skipIf(seeds <= 0)('Behavior Lab seed sweep', () => {
   it('runs scenarios 1–5 over the seeds', () => {
     const rows = [
-      '| Organization | Scenario | Accepted | Mean error p50 / p95 (m) | Max error p95 / worst (m) | Completion p50 (s) | Reversals/min worst | Recovery worst (s) | Collisions | Stuck |',
-      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+      '| Organization | Scenario | Accepted | Fallen in p50 / worst (s) | Mean error p50 / p95 (m) | Max error p95 / worst (m) | Completion p50 (s) | Reversals/min worst | Recovery worst (s) | Collisions | Stuck |',
+      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ];
     const failures: string[] = [];
     for (const organization of ['squad', 'element3'] as LabOrganization[]) {
@@ -53,6 +54,9 @@ describe.skipIf(seeds <= 0)('Behavior Lab seed sweep', () => {
         const of = (f: (m: LabMetrics) => number) => results.map(f);
         rows.push(
           `| ${organization} | ${c.label} | ${String(accepted)}/${String(seeds)} | ${stat(
+            of((m) => m.joinSeconds ?? NaN),
+            0.5,
+          ).toFixed(1)} / ${Math.max(...of((m) => m.joinSeconds ?? NaN)).toFixed(1)} | ${stat(
             of((m) => m.steadyMeanError),
             0.5,
           ).toFixed(2)} / ${stat(

@@ -57,7 +57,7 @@ export function taskFrame(
   t: number,
   params: BehaviorParams,
 ): TaskFrame {
-  const flat = flattenFormation(task.order.formation);
+  const flat = flattenFormation(task.formation);
   let b = 0;
   let r = 0;
   let n = 0;
@@ -82,7 +82,7 @@ export function taskFrame(
     rightCentre: n > 0 ? r / n : 0,
     settle,
     t,
-    drift: params.driftRadius * task.order.formation.interval * Math.SQRT1_2,
+    drift: params.driftRadius * task.formation.interval * Math.SQRT1_2,
     driftSeconds: params.driftSeconds,
   };
 }

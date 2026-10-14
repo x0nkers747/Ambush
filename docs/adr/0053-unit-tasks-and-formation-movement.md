@@ -69,6 +69,15 @@ replayably.
    - The task's seed is one draw per order.
    - Diagnostics are pure functions over the state, using the same laws the system steers with.
 
+## Amendment (after the M3 review)
+
+- **No forming up before moving off.** The route starts at the ordered unit's leader, who steps off at once; the others fall in on the move.
+  - Until all have fallen in, the unit keeps 0.75 × pace, and Marines still falling in do not hold it back.
+- **The formation is arranged** (which team leads, mirrored or not) to ask the least walking from where the Marines stand.
+- **Personal space is anticipated** (time to collision).
+- The phases are `moving`, `settling`, then `complete` or `failed`.
+- Details and evidence: [implementation notes](../behavior-lab/implementation.md#after-review-the-leader-steps-off-the-others-fall-in-on-the-move).
+
 ## Consequences
 
 - An organization of any echelon can be moved by one command. Formations are data the kernel

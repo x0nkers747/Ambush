@@ -7,6 +7,7 @@ import type { OrgUnitId, SimState, SoldierId } from '../state';
 import type { SimWorld } from '../world';
 import { flattenFormation, validateFormationSpec } from './formation-spec';
 import { behaviorParams, endTask, releaseAgent } from './system';
+import { arrangeFormation } from './arrange';
 import { buildGroupRoute, routeAt, routePoint } from './route';
 import type {
   AgentOverride,
@@ -194,24 +195,64 @@ export function applyOrderUnit(
       (t.phase === 'moving' || t.phase === 'settling') &&
       canonicalEncode(t.order.formation) === formationKey,
   );
+  // The unit's leader, when he takes part, steps off first; the formation is
+  // arranged (which team leads, which side) to ask the least walking of the
+  // rest from where they stand. A continued order keeps its arrangement.
+  const leader = members.find((s) => s.id === unit.leaderId);
+  const firstStop = stops[0] ?? order.destination;
+  let fromX = 0;
+  let fromY = 0;
+  for (const s of members) {
+    fromX += s.position.x / members.length;
+    fromY += s.position.y / members.length;
+  }
+  if (leader) {
+    fromX = leader.position.x;
+    fromY = leader.position.y;
+  }
+  const hx = firstStop.x - fromX;
+  const hy = firstStop.y - fromY;
+  const hl = Math.sqrt(hx * hx + hy * hy);
+  const facing = leader?.azimuth ?? members[0]?.azimuth ?? 0;
+  const heading =
+    hl > 1e-6 ? { x: hx / hl, y: hy / hl } : { x: Math.sin(facing), y: Math.cos(facing) };
+  const formation =
+    previous?.formation ??
+    arrangeFormation(
+      order.formation,
+      new Map(members.map((s) => [s.id as string, { x: s.position.x, y: s.position.y }])),
+      heading,
+      leader?.id ?? null,
+    );
+  const laid = flattenFormation(formation);
   let rc = 0;
   let bc = 0;
-  for (let i = 0; i < flat.right.length; i += 1) {
-    rc += flat.right[i] ?? 0;
-    bc += flat.back[i] ?? 0;
+  for (let i = 0; i < laid.right.length; i += 1) {
+    rc += laid.right[i] ?? 0;
+    bc += laid.back[i] ?? 0;
   }
-  rc /= flat.right.length;
-  bc /= flat.back.length;
+  rc /= laid.right.length;
+  bc /= laid.back.length;
   let halfWidth = 0;
   let behind = 0;
-  for (let i = 0; i < flat.right.length; i += 1) {
-    halfWidth = Math.max(halfWidth, Math.abs((flat.right[i] ?? 0) - rc));
-    behind = Math.max(behind, (flat.back[i] ?? 0) - bc);
+  for (let i = 0; i < laid.right.length; i += 1) {
+    halfWidth = Math.max(halfWidth, Math.abs((laid.right[i] ?? 0) - rc));
+    behind = Math.max(behind, (laid.back[i] ?? 0) - bc);
   }
   // Continuing, the new route keeps the old one from just behind the rear
   // Marine through to the old destination, and turns there: Marines ahead
   // of the anchor keep their slots (turning at the anchor would swing them
   // round the corner), and the corner is rounded like any route point.
+  // Where the leader's slot is in the formation.
+  const leaderSlot = leader ? laid.soldierIds.indexOf(leader.id) : -1;
+  const leaderAt =
+    leader && leaderSlot >= 0
+      ? {
+          soldier: leader,
+          back: (laid.back[leaderSlot] ?? 0) - bc,
+          right: (laid.right[leaderSlot] ?? 0) - rc,
+        }
+      : null;
   let tail: Vec2[] = [];
   let start: Vec2;
   let anchorPoint: Vec2 | null = null;
@@ -223,6 +264,16 @@ export function applyOrderUnit(
     const at = routeAt(previous.route, previous.anchorS, routePoint());
     anchorPoint = { x: at.x, y: at.y };
     anchorWithin = previous.route.length - from + 1;
+  } else if (leaderAt) {
+    // The leader steps off at once: the route starts where his slot puts
+    // him, and the others fall in round him on the move.
+    const ux = heading.x;
+    const uy = heading.y;
+    // The route's right is (uy, −ux); his slot is `right` metres to that side of it.
+    start = {
+      x: leaderAt.soldier.position.x - uy * leaderAt.right,
+      y: leaderAt.soldier.position.y + ux * leaderAt.right,
+    };
   } else {
     let cx = 0;
     let cy = 0;
@@ -282,17 +333,20 @@ export function applyOrderUnit(
   });
   const last = route.x.length - 1;
   const finalFacing = order.finalFacing ?? azimuthOf(route.tx[last] ?? 0, route.ty[last] ?? 1);
-  const anchorS = anchorPoint ? nearestArcLength(route, anchorPoint, anchorWithin) : 0;
+  const anchorS = anchorPoint
+    ? nearestArcLength(route, anchorPoint, anchorWithin)
+    : (leaderAt?.back ?? 0);
 
   const task: UnitTask = {
     id: `${command.unitId}#${String(behavior.nextTaskSeq)}`,
     unitId: command.unitId,
     order: clonePlainData(order),
+    formation: clonePlainData(formation),
     route,
     finalFacing,
     pace: order.pace ?? world.movement.speed,
     seed: nextUint32(state.rng),
-    phase: previous ? 'moving' : 'forming',
+    phase: 'moving',
     phaseSince: startSeconds,
     anchorS,
     anchorSpeed: carriedSpeed,
@@ -313,6 +367,8 @@ export function applyOrderUnit(
       vx: carried.get(soldier.id)?.vx ?? 0,
       vy: carried.get(soldier.id)?.vy ?? 0,
       latched: false,
+      // Marines already in formation (a continued order) have fallen in.
+      joined: carried.has(soldier.id),
       override: null,
       farSince: null,
       straggling: false,

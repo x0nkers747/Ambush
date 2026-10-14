@@ -70,7 +70,6 @@ export interface GroupRoute {
 }
 
 /**
- * - `forming`: the anchor waits at the start while Marines take their slots;
  * - `moving`: the anchor advances along the route at a pace that waits for
  *   the Marines;
  * - `settling`: the anchor has stopped at the destination; slots blend into
@@ -78,7 +77,7 @@ export interface GroupRoute {
  * - `complete`: every Marine is in position (or the task gave up waiting);
  * - `failed`: the task could not continue (no Marines left).
  */
-export type TaskPhase = 'forming' | 'moving' | 'settling' | 'complete' | 'failed';
+export type TaskPhase = 'moving' | 'settling' | 'complete' | 'failed';
 
 /**
  * `superseded`: replaced by a new order to the same unit in the same
@@ -93,6 +92,12 @@ export interface UnitTask {
   readonly unitId: OrgUnitId;
   /** The order as given (never changed). */
   readonly order: UnitOrder;
+  /**
+   * The formation as executed: the order's, arranged when the order applied
+   * (which element takes which position, mirrored or not) to ask the least
+   * walking of the Marines from where they stood.
+   */
+  readonly formation: FormationSpec;
   readonly route: GroupRoute;
   /** Facing of the final layout (the order's, or the route's last heading). */
   readonly finalFacing: Azimuth;
@@ -121,6 +126,8 @@ export interface AgentState {
   vy: number;
   /** In position at the destination and stopping (completion hysteresis). */
   latched: boolean;
+  /** Has reached his slot since the order (falling in on the move until then). */
+  joined: boolean;
   /**
    * A disturbance (the Behavior Lab's `disturbAgent`): held where he is, or
    * sent to a point, after which he rejoins his slot. `null`: none.
