@@ -546,7 +546,7 @@ async function loadPhotos(): Promise<Photos> {
   for (const [name, rects] of Object.entries(leafSheet.sprites)) {
     const cell = Cell[name as keyof typeof Cell];
     const list: LeafSprite[] = [];
-    for (const [x, y, w, h] of rects) {
+    for (const [x = 0, y = 0, w = 1, h = 1] of rects) {
       const shades = SPRITE_SHADES.map((b) => {
         const c = new OffscreenCanvas(w, h);
         const cx = c.getContext('2d');
