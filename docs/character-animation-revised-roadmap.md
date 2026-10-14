@@ -1,6 +1,8 @@
 # Character animation: revised roadmap
 
-- Status: **plan for review**. Supersedes [character-animation-roadmap.md](character-animation-roadmap.md).
+- Status: **M0 and M1 done** (2026-10-14, with combat and the After Action Review; see
+  [character-animation.md](character-animation.md) and [ADR 0052](adr/0052-animated-soldiers.md)).
+  The rest is a plan. Supersedes [character-animation-roadmap.md](character-animation-roadmap.md).
   Based on the [framework evaluation](character-animation-framework-evaluation.md), the
   [prototype results](character-animation-prototype-results.md) and the
   [recommended architecture](character-animation-recommended-architecture.md). Date: 2026-10-14.

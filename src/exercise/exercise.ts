@@ -28,6 +28,7 @@ import {
   type Vec2,
   type Viewshed,
 } from '#sim';
+import { createMotionRecorder, type MotionLog } from './motion-log';
 import { createStateRecorder, type ReplayRecording } from './replay';
 import {
   validateOpforRoutes,
@@ -424,6 +425,19 @@ export interface Exercise {
    * budget (docs/adr/0003), e.g. after the browser stalled. Diagnostic only.
    */
   readonly droppedSeconds: number;
+  /**
+   * Every soldier's motion at every tick since the exercise began
+   * (`MotionLog`), its latest tick as the state is now. The 3D characters'
+   * input; recording it never changes the simulation.
+   */
+  readonly motionLog: MotionLog;
+  /**
+   * The simulation time to draw now, in seconds: while the simulation runs,
+   * one tick behind it plus the part of a tick the runner has accumulated
+   * (so motion between ticks can be interpolated from recorded ticks);
+   * otherwise the current tick's time.
+   */
+  readonly renderSeconds: number;
 
   /** Whether the soldier belongs to the trainee and so can be planned for. */
   isPlannable(soldierId: SoldierId): boolean;
@@ -609,6 +623,8 @@ export function createExercise({
     ...scenario,
     combat: { config: combat, weapons: combatWeapons },
   });
+  const motion = createMotionRecorder(config.tickRateHz);
+  motion.record(sim.state);
   const terrain = sim.world.terrain;
   /**
    * The simulation state the exercise's queries read: the live state, or,
@@ -816,6 +832,7 @@ export function createExercise({
       // The runner may ask for several ticks per frame; stop as soon as the phase stops running.
       if (!running()) return;
       const events = sim.step();
+      motion.record(sim.state);
       stepped.push(...events);
       afterTick(events);
       // Every tick from the trigger to the end of the engagement, as it is now.
@@ -1203,6 +1220,15 @@ export function createExercise({
     },
     combatLog,
     timeline,
+    get motionLog() {
+      // The latest tick as it is now (plans and placements change it between ticks).
+      motion.record(sim.state);
+      return motion;
+    },
+    get renderSeconds() {
+      const rate = config.tickRateHz;
+      return running() ? (sim.tick - 1 + runner.alpha) / rate : sim.tick / rate;
+    },
     get droppedSeconds() {
       return droppedBefore + runner.droppedSeconds;
     },

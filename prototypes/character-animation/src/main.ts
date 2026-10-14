@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { type AssetSet, type CharacterId, loadAssets } from './assets';
+import { bakeCharacter } from './bake';
 import { runBenchmark, type BenchConfig } from './bench';
 import {
   createSoldier,
@@ -1144,6 +1145,8 @@ const hooks = {
     stage.controls.target.set(...target);
     stage.controls.update();
   },
+  /** The approved soldier, baked for the game (bake.ts, tools/bake.mjs). */
+  bake: () => bakeCharacter(assets.characters.rocketbox),
   /** The placed soldiers and loaded assets (for probes from the console). */
   soldiers: () => soldiers.map((s) => s.view),
   assets: () => assets,

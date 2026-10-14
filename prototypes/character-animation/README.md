@@ -19,6 +19,13 @@ npm run dev          # http://localhost:5199/  (inspect.html: clip inspector)
 
 `npm run typecheck`, `npm test` (node), `npm run build`.
 
+## Baking the soldier for the game
+
+The game's soldier (`public/characters/`, `docs/character-animation.md`) comes from here:
+with `npm run dev` running, `PLAYWRIGHT=<path to playwright/index.mjs> npm run bake` writes the
+Rocketbox soldier's clips as the page plays them (`src/bake.ts`) to
+`public/characters/rocketbox/clips.json` and copies the model, textures and rifles next to it.
+
 ## What is on the page
 
 - **Runtime**: A (three.js `AnimationMixer` sampled at explicit times, stateless), B (animouse 0.8.0

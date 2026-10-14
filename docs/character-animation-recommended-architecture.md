@@ -1,5 +1,15 @@
 # Character animation: recommended architecture
 
+> **Implemented** (2026-10-14): [character-animation.md](character-animation.md) describes the
+> production code. Differences from this plan:
+>
+> - The input is a per-tick motion log recorded by the exercise from its first tick
+>   (`MotionLog`), not the review's full-state frames.
+> - Module names: `motion.ts` (pose input), `animator.ts`, `character.ts` (hold and
+>   post-processing), `layer.ts` (rendering).
+> - Clips are baked from the prototype (`public/characters/rocketbox/clips.json`).
+> - Soldiers replace the markers at every distance, with a team indicator over each.
+
 - Status: **recommendation for review**. Supersedes the runtime parts of
   [character-animation-architecture.md](character-animation-architecture.md) (its simulation
   additions, §4, still stand). Evidence: [framework evaluation](character-animation-framework-evaluation.md),

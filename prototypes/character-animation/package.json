@@ -9,7 +9,8 @@
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --root .",
-    "bench": "node tools/bench.mjs"
+    "bench": "node tools/bench.mjs",
+    "bake": "node tools/bake.mjs"
   },
   "dependencies": {
     "@three.ez/instanced-mesh": "0.3.16",

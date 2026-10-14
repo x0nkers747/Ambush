@@ -157,6 +157,13 @@ export {
 } from './runner';
 export { createStateRecorder, frameAt, frameSeconds, type ReplayRecording } from './replay';
 export {
+  createMotionRecorder,
+  emptyMotionSample,
+  type MotionLog,
+  type MotionRecorder,
+  type MotionSample,
+} from './motion-log';
+export {
   displayPoints,
   EXCELLENT_EFFICIENCY_POINTS,
   gradeOf,

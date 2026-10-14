@@ -18,7 +18,7 @@ import {
 import { Sky } from 'three/addons/objects/Sky.js';
 import type { Exercise } from '#exercise';
 import type { Session } from '#session';
-import { groundFieldInput, type TerrainDataset } from '#sim';
+import { groundFieldInput, isOnTerrain, surfaceHeightAt, type TerrainDataset } from '#sim';
 import {
   compileField,
   createSurface,
@@ -46,6 +46,9 @@ import {
   type MapPoint,
   type ScreenPoint,
 } from './ground-projection';
+import { emptyMotionSample } from '#exercise';
+import { benchCrowd, type BenchCrowd } from './characters/bench';
+import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -86,6 +89,21 @@ export interface BattlefieldView3dOptions {
   readonly hideTrainee: () => boolean;
   /** Rendering quality; by default chosen from the GPU. */
   readonly quality?: QualityLevel | 'auto';
+  /**
+   * What the soldiers are posed from (docs/character-animation.md): by
+   * default the shown exercise's motion log, combat log and render time
+   * (`Exercise.renderSeconds`). The After Action Review gives its replay time
+   * and the whole logs.
+   */
+  readonly animation?: () => AnimationClock | null;
+  /**
+   * Animated soldiers (default), or the simple markers alone (`false`; also
+   * `?characters=off` in the page's address). Until the soldier models have
+   * loaded, and if they cannot be, markers stand in.
+   */
+  readonly characters?: boolean;
+  /** Where the soldier models are (the folder holding `rocketbox/` and `weapons/`). */
+  readonly characterAssets?: string;
 }
 
 /**
@@ -290,6 +308,16 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
 
   const markers = createMarkerLayer();
   scene.add(markers.group);
+  const charactersOn =
+    o.characters ?? new URLSearchParams(location.search).get('characters') !== 'off';
+  const characters = charactersOn
+    ? createCharacterLayer(o.characterAssets ?? new URL('characters/', document.baseURI).href)
+    : null;
+  if (characters) scene.add(characters.group);
+  const aftermath = createAftermath();
+  /** A stand-in crowd for measuring (`ambushBenchCharacters`), replacing the soldiers while set. */
+  let bench: { crowd: BenchCrowd; startMs: number } | null = null;
+  const benchSample = emptyMotionSample();
 
   let current: TerrainEntry | null = null;
   /** How many times a terrain's ground has been built (for checks: once per terrain). */
@@ -724,12 +752,46 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       followWithShadows(entry);
       const session = o.session();
       const hide = o.hideTrainee();
-      markers.update(
-        unitMarkers(exercise, session, hide),
-        destinationMarkers(exercise, session, hide),
-        eye,
-        height,
-      );
+      const units = unitMarkers(exercise, session, hide);
+      const destinations = destinationMarkers(exercise, session, hide);
+      if (characters?.ready && bench) {
+        const terrain = exercise.simulation.world.terrain;
+        const { crowd, startMs } = bench;
+        const seconds = ((performance.now() - startMs) / 1000) % crowd.seconds;
+        const tick = Math.floor(seconds * crowd.log.tickRateHz);
+        characters.update({
+          units: crowd.units.map((u, i) => {
+            const p = crowd.log.read(i, tick, benchSample);
+            return { ...u, position: { x: p.x, y: p.y, z: p.z } };
+          }),
+          clock: { log: crowd.log, combatLog: [], seconds },
+          weapons: crowd.weapons,
+          surfaceAt: (x, y) =>
+            isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
+          camera: eye,
+          viewportHeightPx: height,
+        });
+        markers.update([], [], eye, height);
+      } else if (characters?.ready) {
+        const terrain = exercise.simulation.world.terrain;
+        const clock = o.animation?.() ?? {
+          log: exercise.motionLog,
+          combatLog: exercise.combatLog,
+          seconds: exercise.renderSeconds,
+          ended: exercise.phase === 'engagementComplete',
+        };
+        characters.update({
+          units,
+          clock: { ...clock, seconds: clock.seconds + aftermath(clock, performance.now()) },
+          weapons: exercise.combatWeapons,
+          surfaceAt: (x, y) =>
+            isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
+          camera: eye,
+          viewportHeightPx: height,
+        });
+        // The soldiers are drawn as characters; markers keep the planned destinations.
+        markers.update([], destinations, eye, height);
+      } else markers.update(units, destinations, eye, height);
       const drawing = performance.now();
       entry.ground?.setOverlay(groundOverlay);
       renderer.render(scene, eye);
@@ -808,6 +870,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       textures.dispose();
       sun.shadow.dispose();
       markers.dispose();
+      characters?.dispose();
       sky.geometry.dispose();
       sky.material.dispose();
       renderer.dispose();
@@ -861,6 +924,42 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       return canvas.toDataURL('image/jpeg', 0.9);
     },
   });
+  // For automated browser checks: each posed soldier's pose fingerprint (the
+  // numbers of its root, bones, weapon and clips) and its playing clips.
+  Object.defineProperty(canvas, 'ambushCharacters', {
+    value: () => {
+      const prints = characters?.fingerprints();
+      if (!prints) return {};
+      return Object.fromEntries(
+        [...prints].map(([id, f]) => [
+          id,
+          {
+            numbers: Array.from(f.fingerprint.numbers),
+            state: f.fingerprint.state,
+            describe: f.describe,
+          },
+        ]),
+      );
+    },
+  });
+  // For automated performance checks: `count` stand-in soldiers walking round
+  // the camera's focus in place of the exercise's (0: back to the exercise).
+  Object.defineProperty(canvas, 'ambushBenchCharacters', {
+    value: (count: number) => {
+      const target = current?.camera.pose().target;
+      if (!current || !target || count <= 0) {
+        bench = null;
+        return;
+      }
+      const terrain = o.exercise().simulation.world.terrain;
+      bench = {
+        crowd: benchCrowd(count, { x: target.x, y: -target.z }, (x, y) =>
+          isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
+        ),
+        startMs: performance.now(),
+      };
+    },
+  });
   // For automated browser checks: switch the quality level.
   Object.defineProperty(canvas, 'ambushSetQuality', {
     value: (level: QualityLevel) => {
@@ -912,14 +1011,15 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         })(),
         bounds: current?.extent ?? null,
         markers: markers.group.children.length,
+        characters: characters?.stats() ?? null,
         clearance:
           pose && current
             ? pose.position.y -
               (current.groundAt(pose.position.x, pose.position.z) ?? current.apronZ)
             : null,
-        // Marker feet back in battlefield metres, beside the simulated positions.
+        // Marker (or character) feet back in battlefield metres, beside the simulated positions.
         soldiers: o.exercise().simulation.state.soldiers.map((s) => {
-          const m = markers.positions().get(s.id);
+          const m = (characters?.ready ? characters.positions() : markers.positions()).get(s.id);
           return {
             id: s.id,
             sim: { x: s.position.x, y: s.position.y, z: s.position.z },

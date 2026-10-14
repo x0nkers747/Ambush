@@ -899,6 +899,21 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
           exercise: shown,
           session: () => session,
           hideTrainee: squadHidden,
+          // In the review, the soldiers are posed at the replay time (between
+          // ticks, not snapped to them) from the whole exercise's logs: the
+          // same poses as live at that time (docs/character-animation.md).
+          animation: () => {
+            const recording = reviewed();
+            if (stage !== 'aar' || !exercise || !recording) return null;
+            return {
+              log: exercise.motionLog,
+              combatLog: exercise.combatLog,
+              seconds:
+                recording.triggerSeconds +
+                Math.max(0, Math.min(replay.seconds, recording.durationSeconds)),
+              ended: replay.seconds >= recording.durationSeconds,
+            };
+          },
         });
         ui('attribution').before(view3d.canvas, view3d.overlay);
         connect3d(view3d);
