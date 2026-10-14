@@ -1,0 +1,147 @@
+{
+  "schema": "ambush.formation-templates",
+  "schemaVersion": 1,
+  "notes": [
+    "Movement formations (docs/behavior-lab/03 §6). A template places the roles of one unit (`slots`) and its child units (`elements`, in the organization's order). Offsets are `forward` and `right` of the unit's reference point.",
+    "Units: a template without elements measures its slots in individual intervals (d); a template with elements measures its slots and elements in element spacings (D). Both are chosen when the formation is built (defaults d = 10 m, D = 2 d).",
+    "A slot is held by the first unassigned member whose role is listed; members left over follow in file at the rear.",
+    "`mirror` (default true): placed left of its parent's reference line, the unit is mirrored, so leaders are on the side nearest their parent's leader, as the doctrinal figures draw them.",
+    "Geometry follows the doctrinal figures, which give relative positions only; the numbers (stagger, column spacing, element spacings) are Ambush! tuning choices."
+  ],
+  "templates": [
+    {
+      "id": "usmc.fireTeam.wedge",
+      "name": "Wedge",
+      "echelon": "fireTeam",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-12; MCWP 3-11.2 Fig 3-2: rifleman at the point, team leader and grenadier (AAR) on the shoulders, automatic rifleman at the rear.",
+      "slots": [
+        { "roles": ["rifleman"], "forward": 1, "right": 0 },
+        { "roles": ["fireTeamLeader"], "forward": 0, "right": -0.7 },
+        { "roles": ["assistantAutomaticRifleman", "grenadier"], "forward": 0, "right": 0.7 },
+        { "roles": ["automaticRifleman"], "forward": -0.7, "right": 0 }
+      ]
+    },
+    {
+      "id": "usmc.fireTeam.column",
+      "name": "Column",
+      "echelon": "fireTeam",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-11; MCWP 3-11.2 Fig 3-1: rifleman, team leader, automatic rifleman, grenadier (AAR), slightly staggered.",
+      "slots": [
+        { "roles": ["rifleman"], "forward": 1.2, "right": -0.15 },
+        { "roles": ["fireTeamLeader"], "forward": 0.4, "right": 0.15 },
+        { "roles": ["automaticRifleman"], "forward": -0.4, "right": -0.15 },
+        { "roles": ["assistantAutomaticRifleman", "grenadier"], "forward": -1.2, "right": 0.15 }
+      ]
+    },
+    {
+      "id": "usmc.fireTeam.file",
+      "name": "File",
+      "echelon": "fireTeam",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-11 without the stagger: one behind another.",
+      "mirror": false,
+      "slots": [
+        { "roles": ["rifleman"], "forward": 1.2, "right": 0 },
+        { "roles": ["fireTeamLeader"], "forward": 0.4, "right": 0 },
+        { "roles": ["automaticRifleman"], "forward": -0.4, "right": 0 },
+        { "roles": ["assistantAutomaticRifleman", "grenadier"], "forward": -1.2, "right": 0 }
+      ]
+    },
+    {
+      "id": "usmc.fireTeam.skirmishers",
+      "name": "Skirmishers",
+      "echelon": "fireTeam",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-13; MCWP 3-11.2 Fig 3-3: a staggered line (the fire teams of a squad line).",
+      "slots": [
+        { "roles": ["rifleman"], "forward": 0.15, "right": -1.5 },
+        { "roles": ["fireTeamLeader"], "forward": -0.15, "right": -0.5 },
+        { "roles": ["automaticRifleman"], "forward": 0.15, "right": 0.5 },
+        { "roles": ["assistantAutomaticRifleman", "grenadier"], "forward": -0.15, "right": 1.5 }
+      ]
+    },
+    {
+      "id": "army.fireTeam.wedge",
+      "name": "Wedge (US Army)",
+      "echelon": "fireTeam",
+      "doctrine": "ATP 3-21.8 (2024) paras 3-46, 3-47, Fig 3-2; FM 3-21.8 (2007) para 3-34: team leader at the point, automatic rifleman and grenadier echeloned behind either side, rifleman at the rear; interval normally 10 m.",
+      "slots": [
+        { "roles": ["fireTeamLeader"], "forward": 0.7, "right": 0 },
+        { "roles": ["automaticRifleman"], "forward": 0, "right": -0.7 },
+        { "roles": ["assistantAutomaticRifleman", "grenadier"], "forward": 0, "right": 0.7 },
+        { "roles": ["rifleman"], "forward": -0.7, "right": 0 }
+      ]
+    },
+    {
+      "id": "element3.wedge",
+      "name": "Wedge",
+      "echelon": "fireTeam",
+      "members": 3,
+      "doctrine": "A three-Marine wedge: the leader at the point, the others echeloned behind either side (after the fire-team wedge, ATP 3-21.8 Fig 3-2).",
+      "slots": [
+        { "roles": ["fireTeamLeader"], "forward": 0.5, "right": 0 },
+        { "roles": ["automaticRifleman"], "forward": -0.5, "right": -0.7 },
+        { "roles": ["rifleman"], "forward": -0.5, "right": 0.7 }
+      ]
+    },
+    {
+      "id": "element3.file",
+      "name": "File",
+      "echelon": "fireTeam",
+      "members": 3,
+      "mirror": false,
+      "doctrine": "One behind another, the leader first.",
+      "slots": [
+        { "roles": ["fireTeamLeader"], "forward": 0.8, "right": 0 },
+        { "roles": ["automaticRifleman"], "forward": 0, "right": 0 },
+        { "roles": ["rifleman"], "forward": -0.8, "right": 0 }
+      ]
+    },
+    {
+      "id": "usmc.squad.wedge",
+      "name": "Wedge",
+      "echelon": "squad",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-16: 1st team at the point, the squad leader just behind it, 2nd and 3rd teams behind on the left and right; teams in wedge.",
+      "slots": [{ "roles": ["squadLeader"], "forward": -0.6, "right": 0 }],
+      "elements": [
+        { "forward": 0, "right": 0, "formation": "usmc.fireTeam.wedge" },
+        { "forward": -1, "right": -1, "formation": "usmc.fireTeam.wedge" },
+        { "forward": -1, "right": 1, "formation": "usmc.fireTeam.wedge" }
+      ]
+    },
+    {
+      "id": "usmc.squad.column",
+      "name": "Column",
+      "echelon": "squad",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-15; MCWP 3-11.2: teams one behind another, the squad leader just behind the lead team; teams in column.",
+      "slots": [{ "roles": ["squadLeader"], "forward": 0.9, "right": 0 }],
+      "elements": [
+        { "forward": 1.8, "right": 0, "formation": "usmc.fireTeam.column" },
+        { "forward": 0, "right": 0, "formation": "usmc.fireTeam.column" },
+        { "forward": -1.8, "right": 0, "formation": "usmc.fireTeam.column" }
+      ]
+    },
+    {
+      "id": "usmc.squad.line",
+      "name": "Line",
+      "echelon": "squad",
+      "doctrine": "MCRP 3-10A.4 (2020) Fig 1-18: 3rd, 1st and 2nd teams abreast, left to right, the squad leader behind the centre; teams as skirmishers.",
+      "slots": [{ "roles": ["squadLeader"], "forward": -0.6, "right": 0 }],
+      "elements": [
+        { "forward": 0, "right": 0, "formation": "usmc.fireTeam.skirmishers" },
+        { "forward": 0, "right": 2, "formation": "usmc.fireTeam.skirmishers" },
+        { "forward": 0, "right": -2, "formation": "usmc.fireTeam.skirmishers" }
+      ]
+    },
+    {
+      "id": "usmc.squad.file",
+      "name": "File",
+      "echelon": "squad",
+      "doctrine": "The squad in single file (MCRP 3-10A.4 squad column with teams in file): 1st team, the squad leader, 2nd team, 3rd team.",
+      "slots": [{ "roles": ["squadLeader"], "forward": 0.9, "right": 0 }],
+      "elements": [
+        { "forward": 1.8, "right": 0, "formation": "usmc.fireTeam.file" },
+        { "forward": 0, "right": 0, "formation": "usmc.fireTeam.file" },
+        { "forward": -1.8, "right": 0, "formation": "usmc.fireTeam.file" }
+      ]
+    }
+  ]
+}

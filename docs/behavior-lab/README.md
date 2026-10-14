@@ -6,7 +6,7 @@ Its first behaviour is **MOVE_IN_FORMATION**: noncombat movement in formation to
 
 These documents are the research and the proposal (approved at `2da3386`).
 
-**Status:** milestone M1 (kernel foundations) is implemented: [ADR 0053](../adr/0053-unit-tasks-and-formation-movement.md), and the [implementation notes](implementation.md) (departures, parameters, measurements).
+**Status:** milestones M1 (kernel foundations) and M2 (formation templates, movement laws, metrics, scenarios 1–5) are implemented: [ADR 0053](../adr/0053-unit-tasks-and-formation-movement.md), and the [implementation notes](implementation.md) (departures, parameters, measurements).
 
 | Document                                                    | Contents                                                                                                                                           |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

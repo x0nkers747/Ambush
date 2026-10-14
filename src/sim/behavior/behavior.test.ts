@@ -348,6 +348,65 @@ function scripted(rate: number, seconds: number): Simulation {
   return sim;
 }
 
+describe('disturbAgent', () => {
+  it('holds a Marine, releases him, sends him away; he rejoins; soldiers no task steers are refused', () => {
+    const sim = squadSim();
+    sim.submit({ type: 'orderUnit', tick: 0, unitId: SQD, order: order({ x: 0, y: 400 }) });
+    sim.submit({
+      type: 'disturbAgent',
+      tick: 0,
+      soldierId: soldierId('M09'),
+      disturbance: { kind: 'hold' },
+    });
+    const first = run(sim, 1 / 30);
+    // Not yet steered when the command applied (the order applies first, in submission order).
+    expect(first.some((e) => e.type === 'commandRejected')).toBe(false);
+    run(sim, 30);
+    const m09 = () => sim.state.soldiers.find((s) => s.id === 'M09')?.position;
+    const held = { ...m09() };
+    run(sim, 5);
+    expect(m09()).toEqual(held);
+    sim.submit({
+      type: 'disturbAgent',
+      tick: sim.tick,
+      soldierId: soldierId('M09'),
+      disturbance: null,
+    });
+    run(sim, 40);
+    const d = behaviorDiagnostics(sim.state, sim.world, sim.timeSeconds);
+    expect(d.agents.find((a) => a.soldierId === 'M09')?.desire.error).toBeLessThan(5);
+    // Sent 40 m to the side: he walks there, then rejoins on his own.
+    const at = { ...(m09() ?? { x: 0, y: 0 }) };
+    sim.submit({
+      type: 'disturbAgent',
+      tick: sim.tick,
+      soldierId: soldierId('M09'),
+      disturbance: { kind: 'goTo', x: at.x + 40, y: at.y },
+    });
+    run(sim, 1);
+    expect(sim.state.behavior?.agents.find((a) => a.soldierId === 'M09')?.override).toEqual({
+      kind: 'goTo',
+      x: at.x + 40,
+      y: at.y,
+    });
+    run(sim, 120);
+    expect(sim.state.behavior?.agents.find((a) => a.soldierId === 'M09')?.override).toBeNull();
+    const back = behaviorDiagnostics(sim.state, sim.world, sim.timeSeconds);
+    expect(back.agents.find((a) => a.soldierId === 'M09')?.desire.error).toBeLessThan(5);
+    // A soldier no task steers.
+    const lone = createSimulation({ tickRateHz: 30, seed: 1 }, squadScenario());
+    lone.submit({
+      type: 'disturbAgent',
+      tick: 0,
+      soldierId: soldierId('M02'),
+      disturbance: { kind: 'hold' },
+    });
+    expect(lone.step()).toContainEqual(
+      expect.objectContaining({ type: 'commandRejected', reason: 'notSteered' }),
+    );
+  }, 30_000);
+});
+
 describe('unit movement determinism', () => {
   it('repeats exactly', () => {
     expect(hashSimState(scripted(30, 120).state)).toBe(hashSimState(scripted(30, 120).state));

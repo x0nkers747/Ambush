@@ -1,5 +1,6 @@
 import type { DeepReadonly, SimState, Soldier } from '../state';
 import type { SimWorld } from '../world';
+import { createCrowd, fillCrowd, separation } from './crowd';
 import { routeAt, routePoint } from './route';
 import { slotTarget, slotTargetAt, taskFrame } from './slots';
 import { behaviorParams, desire, taskPace, type Desire, type TaskPace } from './system';
@@ -40,6 +41,11 @@ export interface AgentDiagnostics {
   readonly taskId: string;
   readonly slotId: string;
   readonly latched: boolean;
+  readonly straggling: boolean;
+  readonly stuck: boolean;
+  readonly override: AgentState['override'];
+  /** Easing apart from neighbours too close (m/s). */
+  readonly separation: { readonly x: number; readonly y: number };
   readonly speed: number;
   readonly wantedSpeed: number;
   readonly desire: Desire;
@@ -64,6 +70,11 @@ export function behaviorDiagnostics(
   );
   const agents = behavior.agents as readonly AgentState[];
   const tasks: TaskDiagnostics[] = [];
+  const crowd = createCrowd(state.soldiers.length, params.personalSpace);
+  fillCrowd(crowd, state.soldiers);
+  const index = new Map<string, number>(
+    (state.soldiers as readonly Soldier[]).map((s, i) => [s.id, i]),
+  );
   const out: AgentDiagnostics[] = [];
   for (const task of behavior.tasks) {
     const frame = taskFrame(task, agents, seconds, params);
@@ -90,12 +101,23 @@ export function behaviorDiagnostics(
       if (agent.taskId !== task.id) continue;
       const soldier = soldiers.get(agent.soldierId);
       if (!soldier) continue;
-      const d = desire(agent, soldier, frame, params);
+      const push = separation(
+        crowd,
+        index.get(agent.soldierId) ?? -1,
+        params.personalSpace,
+        params.separationSpeed,
+        { x: 0, y: 0 },
+      );
+      const d = desire(agent, soldier, frame, params, slotTarget(), push);
       out.push({
         soldierId: agent.soldierId,
         taskId: task.id,
         slotId: agent.slotId,
         latched: agent.latched,
+        straggling: agent.straggling,
+        stuck: agent.stuck,
+        override: agent.override,
+        separation: { x: push.x, y: push.y },
         speed: Math.sqrt(agent.vx * agent.vx + agent.vy * agent.vy),
         wantedSpeed: Math.sqrt(d.wx * d.wx + d.wy * d.wy),
         desire: d,

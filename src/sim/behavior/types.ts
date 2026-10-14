@@ -121,7 +121,24 @@ export interface AgentState {
   vy: number;
   /** In position at the destination and stopping (completion hysteresis). */
   latched: boolean;
+  /**
+   * A disturbance (the Behavior Lab's `disturbAgent`): held where he is, or
+   * sent to a point, after which he rejoins his slot. `null`: none.
+   */
+  override: AgentOverride | null;
+  /** Since when he has been out of contact (beyond `contactRadius`), or `null`. */
+  farSince: number | null;
+  /** Out of contact for `stragglerSeconds`: the pace law no longer waits for him. */
+  straggling: boolean;
+  /** Stuck detection: his error at the start of the current window, and when it began. */
+  checkError: number;
+  checkAt: number;
+  /** Made less than `stuckProgress` m of progress toward his slot over a window. */
+  stuck: boolean;
 }
+
+export type AgentOverride =
+  { readonly kind: 'hold' } | { readonly kind: 'goTo'; readonly x: number; readonly y: number };
 
 export interface BehaviorState {
   /** Tasks in order of issue. Ended tasks stay (for review) until no agent refers to them. */

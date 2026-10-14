@@ -3,12 +3,19 @@ import { azimuthOf, type Vec2 } from '../geometry';
 import { planPath, pointProblem } from '../navigation';
 import { canonicalEncode, clonePlainData } from '../plain-data';
 import { nextUint32 } from '../rng';
-import type { OrgUnitId, SimState } from '../state';
+import type { OrgUnitId, SimState, SoldierId } from '../state';
 import type { SimWorld } from '../world';
 import { flattenFormation, validateFormationSpec } from './formation-spec';
 import { behaviorParams, endTask, releaseAgent } from './system';
 import { buildGroupRoute, routeAt, routePoint } from './route';
-import type { AgentState, BehaviorState, GroupRoute, UnitOrder, UnitTask } from './types';
+import type {
+  AgentOverride,
+  AgentState,
+  BehaviorState,
+  GroupRoute,
+  UnitOrder,
+  UnitTask,
+} from './types';
 
 // Unit orders (docs/behavior-lab/03 §4.2): `orderUnit` gives an organization
 // one task. Its Marines stop following individual orders and are steered by
@@ -23,6 +30,52 @@ export interface OrderUnitCommand {
   readonly tick: number;
   readonly unitId: OrgUnitId;
   readonly order: UnitOrder | null;
+}
+
+/**
+ * Disturbs a Marine steered by a unit task, for testing how a formation
+ * recovers (the Behavior Lab): `hold` keeps him where he stands, `goTo`
+ * sends him to a point, after which he rejoins his slot; `null` releases a
+ * hold or recalls him at once. Rejected (`notSteered`) for a soldier no task steers.
+ */
+export interface DisturbAgentCommand {
+  readonly type: 'disturbAgent';
+  readonly tick: number;
+  readonly soldierId: SoldierId;
+  readonly disturbance: AgentOverride | null;
+}
+
+/** Throws a RangeError for a malformed disturbance. */
+export function validateDisturbance(disturbance: AgentOverride | null): void {
+  if (disturbance === null) return;
+  const kind: string = disturbance.kind;
+  if (kind === 'hold') return;
+  if (kind !== 'goTo') throw new RangeError(`unknown disturbance kind "${kind}"`);
+  if (
+    disturbance.kind === 'goTo' &&
+    (!Number.isFinite(disturbance.x) || !Number.isFinite(disturbance.y))
+  ) {
+    throw new RangeError('disturbance point must be finite');
+  }
+}
+
+/** Applies a disturbance at the start of its tick. */
+export function applyDisturbAgent(
+  state: SimState,
+  command: DisturbAgentCommand,
+  events: SimEvent[],
+): void {
+  const agent = state.behavior?.agents.find((a) => a.soldierId === command.soldierId);
+  if (!agent) {
+    events.push({ type: 'commandRejected', tick: state.tick, command, reason: 'notSteered' });
+    return;
+  }
+  agent.override = command.disturbance && { ...command.disturbance };
+  agent.latched = false;
+  // A disturbance is not a stall: restart the contact and progress windows.
+  agent.farSince = null;
+  agent.straggling = false;
+  agent.stuck = false;
 }
 
 export type OrderUnitRejection =
@@ -154,11 +207,21 @@ export function applyOrderUnit(
     halfWidth = Math.max(halfWidth, Math.abs((flat.right[i] ?? 0) - rc));
     behind = Math.max(behind, (flat.back[i] ?? 0) - bc);
   }
+  // Continuing, the new route keeps the old one from just behind the rear
+  // Marine through to the old destination, and turns there: Marines ahead
+  // of the anchor keep their slots (turning at the anchor would swing them
+  // round the corner), and the corner is rounded like any route point.
   let tail: Vec2[] = [];
   let start: Vec2;
+  let anchorPoint: Vec2 | null = null;
+  let anchorWithin = 0;
   if (previous) {
-    tail = routeStretch(previous.route, previous.anchorS - behind - 10, previous.anchorS);
+    const from = Math.max(0, previous.anchorS - behind - 10);
+    tail = routeStretch(previous.route, from, previous.route.length);
     start = tail.pop() ?? { x: 0, y: 0 };
+    const at = routeAt(previous.route, previous.anchorS, routePoint());
+    anchorPoint = { x: at.x, y: at.y };
+    anchorWithin = previous.route.length - from + 1;
   } else {
     let cx = 0;
     let cy = 0;
@@ -218,7 +281,7 @@ export function applyOrderUnit(
   });
   const last = route.x.length - 1;
   const finalFacing = order.finalFacing ?? azimuthOf(route.tx[last] ?? 0, route.ty[last] ?? 1);
-  const anchorS = previous ? nearestArcLength(route, start) : 0;
+  const anchorS = anchorPoint ? nearestArcLength(route, anchorPoint, anchorWithin) : 0;
 
   const task: UnitTask = {
     id: `${command.unitId}#${String(behavior.nextTaskSeq)}`,
@@ -249,6 +312,12 @@ export function applyOrderUnit(
       vx: carried.get(soldier.id)?.vx ?? 0,
       vy: carried.get(soldier.id)?.vy ?? 0,
       latched: false,
+      override: null,
+      farSince: null,
+      straggling: false,
+      checkError: 0,
+      checkAt: startSeconds,
+      stuck: false,
     };
     insertAgent(soldierIndex, behavior, agent);
   }
@@ -324,11 +393,11 @@ function routeStretch(route: GroupRoute, s0: number, s1: number): Vec2[] {
   return out;
 }
 
-/** Arc length of the point of `route` nearest `p`. */
-function nearestArcLength(route: GroupRoute, p: Vec2): number {
+/** Arc length of the point of `route` nearest `p`, among its first `within` metres. */
+function nearestArcLength(route: GroupRoute, p: Vec2, within: number): number {
   let best = 0;
   let bestD = Infinity;
-  for (let i = 0; i + 1 < route.cum.length; i += 1) {
+  for (let i = 0; i + 1 < route.cum.length && (route.cum[i] ?? 0) <= within; i += 1) {
     const ax = route.x[i] ?? 0;
     const ay = route.y[i] ?? 0;
     const dx = (route.x[i + 1] ?? ax) - ax;

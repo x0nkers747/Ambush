@@ -6,6 +6,7 @@ import type { SimState, Soldier } from '../state';
 import type { SimWorld } from '../world';
 import { flattenFormation } from './formation-spec';
 import { DEFAULT_BEHAVIOR_PARAMS, type BehaviorParams } from './params';
+import { createCrowd, fillCrowd, separation, type Crowd } from './crowd';
 import { maxCurvature } from './route';
 import { slotTarget, slotTargetAt, taskFrame, type SlotTarget, type TaskFrame } from './slots';
 import type { AgentState, BehaviorState, TaskOutcome, TaskPhase, UnitTask } from './types';
@@ -39,6 +40,8 @@ export function substeps(
 }
 
 const target = slotTarget();
+const pushed = { x: 0, y: 0 };
+const NO_PUSH = Object.freeze({ x: 0, y: 0 });
 
 /**
  * Moves every soldier steered by a unit task through the tick and returns
@@ -56,7 +59,7 @@ export function updateBehavior(
   const path: PathSegment[] = [];
 
   // Soldiers who were given individual orders (or fell) leave their tasks.
-  const soldiers = new Map<string, Soldier>(state.soldiers.map((s) => [s.id, s]));
+  const { soldiers, index, crowd } = lookups(state.soldiers, params.personalSpace);
   for (let i = behavior.agents.length - 1; i >= 0; i -= 1) {
     const agent = behavior.agents[i];
     if (!agent) continue;
@@ -83,8 +86,9 @@ export function updateBehavior(
     // Substep times from whole substep counts, so they are the same numbers at every exact rate.
     const t = exact ? (time.tick * n + k) / params.substepHz : time.startSeconds + k * h;
     const tEnd = exact ? (time.tick * n + k + 1) / params.substepHz : t + h;
-    active.forEach((task, j) => {
-      if (!isRunning(task)) return;
+    for (let j = 0; j < active.length; j += 1) {
+      const task = active[j];
+      if (!task || !isRunning(task)) continue;
       const agents = members[j] ?? [];
       stepTask(
         task,
@@ -98,9 +102,12 @@ export function updateBehavior(
         time.tick,
         events,
       );
-    });
-    for (const [j, task] of active.entries()) {
-      if (!isRunning(task)) continue;
+    }
+    // Everyone's positions at the start of the substep: who steps first changes nothing.
+    fillCrowd(crowd, state.soldiers);
+    for (let j = 0; j < active.length; j += 1) {
+      const task = active[j];
+      if (!task || !isRunning(task)) continue;
       const agents = members[j] ?? [];
       const frame = taskFrame(task, agents, tEnd, params);
       for (const agent of agents) {
@@ -108,7 +115,17 @@ export function updateBehavior(
         if (!soldier) continue;
         const fromX = soldier.position.x;
         const fromY = soldier.position.y;
-        stepAgent(agent, soldier, frame, world, params, h);
+        stepAgent(
+          agent,
+          soldier,
+          frame,
+          world,
+          params,
+          h,
+          crowd,
+          index.get(soldier.id) ?? -1,
+          tEnd,
+        );
         if (soldier.position.x !== fromX || soldier.position.y !== fromY) {
           path.push({
             soldierId: soldier.id,
@@ -122,6 +139,30 @@ export function updateBehavior(
     }
   }
   return path;
+}
+
+/**
+ * Soldiers by id, their indices, and a crowd buffer, kept per soldiers array
+ * (soldiers are never added or removed during a simulation; a restored state
+ * has a new array, and so new lookups). Derived data only, never state.
+ */
+const lookupCache = new WeakMap<
+  readonly Soldier[],
+  { soldiers: Map<string, Soldier>; index: Map<string, number>; crowd: Crowd; space: number }
+>();
+
+function lookups(all: readonly Soldier[], space: number) {
+  let known = lookupCache.get(all);
+  if (known?.space !== space || known.soldiers.size !== all.length) {
+    known = {
+      soldiers: new Map(all.map((s) => [s.id as string, s])),
+      index: new Map(all.map((s, i) => [s.id as string, i])),
+      crowd: createCrowd(all.length, space),
+      space,
+    };
+    lookupCache.set(all, known);
+  }
+  return known;
 }
 
 function isRunning(task: UnitTask): boolean {
@@ -178,6 +219,11 @@ export function taskPace(
     slotTargetAt(frame, i, target);
     const ex = target.x - soldier.position.x;
     const ey = target.y - soldier.position.y;
+    members += 1;
+    if (agent.latched) latched += 1;
+    if (agent.vx === 0 && agent.vy === 0) stopped += 1;
+    // A straggler or a stuck Marine no longer holds the others back.
+    if (agent.straggling || agent.stuck) continue;
     worstDistance = Math.max(worstDistance, Math.sqrt(ex * ex + ey * ey));
     const lag = ex * target.tx + ey * target.ty;
     if (lag > worstLag) {
@@ -187,9 +233,6 @@ export function taskPace(
     const right = Math.abs((flat.right[i] ?? 0) - frame.rightCentre);
     const sSlot = task.anchorS - ((flat.back[i] ?? 0) - frame.backCentre);
     bend = Math.max(bend, 1 + maxCurvature(task.route, sSlot, sSlot + lookAhead) * right);
-    members += 1;
-    if (agent.latched) latched += 1;
-    if (agent.vx === 0 && agent.vy === 0) stopped += 1;
   }
   const span = (params.lagStop - params.lagStart) * d;
   const keep = Math.min(1, Math.max(0, 1 - (worstLag - params.lagStart * d) / span));
@@ -288,7 +331,14 @@ export interface Desire {
   readonly cap: number;
   readonly turnFactor: number;
   readonly state:
-    'inPosition' | 'onStation' | 'correcting' | 'catchingUp' | 'easingOff' | 'arriving';
+    | 'inPosition'
+    | 'onStation'
+    | 'correcting'
+    | 'catchingUp'
+    | 'easingOff'
+    | 'arriving'
+    | 'held'
+    | 'displaced';
 }
 
 /**
@@ -304,6 +354,7 @@ export function desire(
   frame: TaskFrame,
   params: BehaviorParams,
   into: SlotTarget = slotTarget(),
+  push: Readonly<{ x: number; y: number }> = NO_PUSH,
 ): Desire {
   const { task, flat } = frame;
   const i = flat.indexOf.get(agent.slotId) ?? 0;
@@ -316,18 +367,19 @@ export function desire(
   const settling = task.phase === 'settling' || task.phase === 'complete';
   const band = settling ? 0 : params.deadBand * task.order.formation.interval;
   let cap = params.maxSpeedFactor * task.pace;
-  if (agent.latched) {
+  if (agent.latched) return standing(t, e, along, across, band, cap, 'inPosition');
+  if (agent.override?.kind === 'hold') return standing(t, e, along, across, band, cap, 'held');
+  if (agent.override?.kind === 'goTo') {
+    // Sent elsewhere: walk there at pace, stopping on the point.
+    const gx = agent.override.x - soldier.position.x;
+    const gy = agent.override.y - soldier.position.y;
+    const g = Math.sqrt(gx * gx + gy * gy);
+    const v = Math.min(task.pace, Math.sqrt(2 * params.decel * 0.25 * g));
+    const f = g > 1e-9 ? v / g : 0;
     return {
-      target: t,
-      error: e,
-      along,
-      across,
-      wx: 0,
-      wy: 0,
-      band,
-      cap,
-      turnFactor: 1,
-      state: 'inPosition',
+      ...standing(t, e, along, across, band, cap, 'displaced'),
+      wx: gx * f + push.x,
+      wy: gy * f + push.y,
     };
   }
   // Correction speed: K·(e − band/2) beyond the band; inside it a gentle
@@ -340,8 +392,8 @@ export function desire(
         ? (params.trackingGain * e * e) / (2 * band)
         : 0;
   const gain = e > 1e-9 ? correction / e : 0;
-  let wx = t.vx + ex * gain;
-  let wy = t.vy + ey * gain;
+  let wx = t.vx + ex * gain + push.x;
+  let wy = t.vy + ey * gain + push.y;
   if (settling) cap = Math.min(cap, Math.sqrt(2 * params.decel * 0.25 * e));
   let w = Math.sqrt(wx * wx + wy * wy);
   if (w > cap) {
@@ -370,6 +422,19 @@ export function desire(
   return { target: t, error: e, along, across, wx, wy, band, cap, turnFactor, state };
 }
 
+/** A wanted velocity of zero (in position, or held). */
+function standing(
+  target: Readonly<SlotTarget>,
+  error: number,
+  along: number,
+  across: number,
+  band: number,
+  cap: number,
+  state: Desire['state'],
+): Desire {
+  return { target, error, along, across, wx: 0, wy: 0, band, cap, turnFactor: 1, state };
+}
+
 /**
  * One substep of a Marine: latching in position while settling, then his
  * velocity toward the wanted one within the acceleration, braking and
@@ -383,21 +448,32 @@ function stepAgent(
   world: SimWorld,
   params: BehaviorParams,
   h: number,
+  crowd: Crowd,
+  me: number,
+  t: number,
 ): void {
   const { task } = frame;
-  if (task.phase === 'settling') {
+  if (task.phase === 'settling' && agent.override === null) {
     const i = frame.flat.indexOf.get(agent.slotId) ?? 0;
     slotTargetAt(frame, i, target);
     const ex = target.x - soldier.position.x;
     const ey = target.y - soldier.position.y;
     const e = Math.sqrt(ex * ex + ey * ey);
-    if (!agent.latched && e <= params.latchRadius && speedOf(agent) <= params.latchSpeed) {
+    if (
+      !agent.latched &&
+      frame.settle >= 1 &&
+      e <= params.latchRadius &&
+      speedOf(agent) <= params.latchSpeed
+    ) {
       agent.latched = true;
     } else if (agent.latched && e > params.unlatchRadius) {
       agent.latched = false;
     }
   }
-  const { wx, wy } = desire(agent, soldier, frame, params, target);
+  const push =
+    me >= 0 ? separation(crowd, me, params.personalSpace, params.separationSpeed, pushed) : NO_PUSH;
+  const wanted = desire(agent, soldier, frame, params, target, push);
+  const { wx, wy } = wanted;
 
   // Velocity toward the wanted one within the limits: along the current
   // direction (accelerate, brake) and across it (turn).
@@ -451,6 +527,33 @@ function stepAgent(
     soldier.azimuth = turnToward(soldier.azimuth, azimuthOf(wx, wy), turn);
   } else if (agent.latched && azimuthDelta(soldier.azimuth, task.finalFacing) !== 0) {
     soldier.azimuth = turnToward(soldier.azimuth, task.finalFacing, turn);
+  }
+
+  // A Marine sent elsewhere rejoins once there.
+  if (agent.override?.kind === 'goTo') {
+    const gx = agent.override.x - soldier.position.x;
+    const gy = agent.override.y - soldier.position.y;
+    if (gx * gx + gy * gy <= 1 && speed <= params.latchSpeed) agent.override = null;
+  }
+  // Out of contact for long enough: a straggler.
+  const d = task.order.formation.interval;
+  const e = wanted.error;
+  if (e > Math.max(params.contactRadius * d, params.contactMinimum)) {
+    agent.farSince ??= t;
+    agent.straggling = t - agent.farSince >= params.stragglerSeconds;
+  } else {
+    agent.farSince = null;
+    agent.straggling = false;
+  }
+  // Stuck: over each window, too little progress toward a slot he is not near.
+  if (t - agent.checkAt >= params.stuckSeconds) {
+    agent.stuck =
+      agent.override === null &&
+      !agent.latched &&
+      e > 2 * wanted.band + params.latchRadius &&
+      agent.checkError - e < params.stuckProgress;
+    agent.checkError = e;
+    agent.checkAt = t;
   }
 }
 

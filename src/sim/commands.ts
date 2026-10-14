@@ -1,5 +1,12 @@
 import type { PathPoint } from './bridge-navigation';
-import { applyOrderUnit, validateUnitOrder, type OrderUnitCommand } from './behavior/orders';
+import {
+  applyDisturbAgent,
+  applyOrderUnit,
+  validateDisturbance,
+  validateUnitOrder,
+  type DisturbAgentCommand,
+  type OrderUnitCommand,
+} from './behavior/orders';
 import { releaseAgent } from './behavior/system';
 import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
@@ -53,7 +60,11 @@ export interface BeginEngagementCommand {
 }
 
 export type SimCommand =
-  SetOrdersCommand | SetEngagementAreaCommand | BeginEngagementCommand | OrderUnitCommand;
+  | SetOrdersCommand
+  | SetEngagementAreaCommand
+  | BeginEngagementCommand
+  | OrderUnitCommand
+  | DisturbAgentCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -92,6 +103,9 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
         throw new RangeError('orderUnit unitId must be a non-empty string');
       }
       validateUnitOrder(command.order);
+      return;
+    case 'disturbAgent':
+      validateDisturbance(command.disturbance);
       return;
   }
 }
@@ -138,6 +152,9 @@ export function applyCommands(
         break;
       case 'orderUnit':
         applyOrderUnit(state, world, command, startSeconds, events);
+        break;
+      case 'disturbAgent':
+        applyDisturbAgent(state, command, events);
         break;
     }
   }

@@ -1,5 +1,6 @@
 import type { BehaviorParams } from './params';
 import { flattenFormation, type FlatFormation } from './formation-spec';
+import { smoothNoise } from './noise';
 import { routeAt, routePoint } from './route';
 import type { AgentState, UnitTask } from './types';
 
@@ -42,6 +43,11 @@ export interface TaskFrame {
   readonly rightCentre: number;
   /** 0 → 1 while settling into the final layout. */
   readonly settle: number;
+  /** Time (s), for personal drift. */
+  readonly t: number;
+  /** Personal drift: largest offset per axis (m) and how often it changes course (s). */
+  readonly drift: number;
+  readonly driftSeconds: number;
 }
 
 /** The frame of `task` at time `t`, for its current agents (those with `taskId` = task's). */
@@ -69,7 +75,16 @@ export function taskFrame(
       ? Math.min(1, Math.max(0, (t - task.phaseSince) / params.settleBlend))
       : 1
     : 0;
-  return { task, flat, backCentre: n > 0 ? b / n : 0, rightCentre: n > 0 ? r / n : 0, settle };
+  return {
+    task,
+    flat,
+    backCentre: n > 0 ? b / n : 0,
+    rightCentre: n > 0 ? r / n : 0,
+    settle,
+    t,
+    drift: params.driftRadius * task.order.formation.interval * Math.SQRT1_2,
+    driftSeconds: params.driftSeconds,
+  };
 }
 
 const p = routePoint();
@@ -77,8 +92,13 @@ const p = routePoint();
 /** The target of slot `i` of the frame's formation, written into `out`. */
 export function slotTargetAt(frame: TaskFrame, i: number, out: SlotTarget): SlotTarget {
   const { task, flat } = frame;
-  const back = (flat.back[i] ?? 0) - frame.backCentre;
+  // Each Marine drifts about his slot (seeded, smooth): a formation, not a rigid shape.
+  let back = (flat.back[i] ?? 0) - frame.backCentre;
   let right = (flat.right[i] ?? 0) - frame.rightCentre;
+  if (frame.drift > 0) {
+    back += smoothNoise(task.seed, i, 0, frame.t, frame.driftSeconds) * frame.drift;
+    right += smoothNoise(task.seed, i, 1, frame.t, frame.driftSeconds) * frame.drift;
+  }
   routeAt(task.route, task.anchorS - back, p);
   // Inside a bend tighter than the offset, keep within 90 % of its radius.
   if (p.k * right > 0.9) right = 0.9 / p.k;

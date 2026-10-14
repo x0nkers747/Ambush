@@ -44,6 +44,27 @@ export interface BehaviorParams {
   readonly cornerMargin: number;
   /** Facing follows the direction of travel above this speed (m/s). */
   readonly facingSpeed: number;
+  /**
+   * Personal variation: each Marine's slot drifts within `driftRadius`
+   * intervals, changing course every `driftSeconds` (seeded, smooth), so the
+   * formation is never a rigid shape. It fades out while settling.
+   */
+  readonly driftRadius: number;
+  readonly driftSeconds: number;
+  /** Personal space (m): Marines closer than this ease apart, up to `separationSpeed` m/s. */
+  readonly personalSpace: number;
+  readonly separationSpeed: number;
+  /**
+   * Out of contact: farther than `contactRadius` intervals (at least
+   * `contactMinimum` m) from his slot; after `stragglerSeconds` the pace law
+   * stops waiting for him.
+   */
+  readonly contactRadius: number;
+  readonly contactMinimum: number;
+  readonly stragglerSeconds: number;
+  /** Stuck: less than `stuckProgress` m nearer his slot over `stuckSeconds`, while not near it. */
+  readonly stuckProgress: number;
+  readonly stuckSeconds: number;
 }
 
 export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
@@ -60,7 +81,7 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   accel: 1.0,
   decel: 2.0,
   lateralAccel: 1.5,
-  formingBand: 0.5,
+  formingBand: 0.25,
   formingTimeout: 20,
   settleBlend: 3,
   latchRadius: 1.0,
@@ -69,6 +90,15 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   settleTimeout: 60,
   cornerMargin: 2,
   facingSpeed: 0.3,
+  driftRadius: 0.1,
+  driftSeconds: 8,
+  personalSpace: 1.2,
+  separationSpeed: 0.8,
+  contactRadius: 3,
+  contactMinimum: 30,
+  stragglerSeconds: 10,
+  stuckProgress: 0.5,
+  stuckSeconds: 10,
 });
 
 /** Throws a RangeError naming the first invalid parameter. */

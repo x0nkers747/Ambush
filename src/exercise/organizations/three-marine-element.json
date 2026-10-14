@@ -1,0 +1,78 @@
+{
+  "schema": "ambush.organization-template",
+  "schemaVersion": 2,
+  "id": "three-marine-element",
+  "version": "1.0.0",
+  "name": "3-Marine element (Behavior Lab)",
+  "source": {
+    "kind": "synthetic",
+    "title": "3-Marine element",
+    "notes": "For Behavior Lab experiments: a team of three (team leader, automatic rifleman, rifleman), the smallest element that moves in formation. It resembles the three-Marine fire teams of the 12-Marine squad announced in 2018 and not adopted; it represents no current organization."
+  },
+  "conventions": ["The unit id TM, the roles and the labels are Ambush! choices."],
+  "roles": [
+    {
+      "id": "fireTeamLeader",
+      "name": "Fire team leader / grenadier",
+      "abbreviation": "FTL",
+      "grade": "Corporal",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "m203-grenade-launcher", "bayonet-knife"]
+      },
+      "defaultIcon": "fireTeamLeader"
+    },
+    {
+      "id": "automaticRifleman",
+      "name": "Automatic rifleman",
+      "abbreviation": "AR",
+      "grade": "Lance corporal",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["squad-automatic-weapon", "combat-knife"]
+      },
+      "defaultIcon": "automaticRifleman"
+    },
+    {
+      "id": "rifleman",
+      "name": "Rifleman",
+      "abbreviation": "R",
+      "grade": "Private or private first class",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "bayonet-knife"]
+      },
+      "defaultIcon": "rifleman"
+    }
+  ],
+  "units": [
+    {
+      "id": "TM",
+      "name": "3-Marine element",
+      "abbreviation": "TM",
+      "echelon": "fireTeam",
+      "parentId": null,
+      "leaderSlotId": "TM.FTL",
+      "symbology": {
+        "sidc": "10031000111211000000"
+      }
+    }
+  ],
+  "slots": [
+    {
+      "id": "TM.FTL",
+      "unitId": "TM",
+      "roleId": "fireTeamLeader",
+      "label": "TL"
+    },
+    {
+      "id": "TM.AR",
+      "unitId": "TM",
+      "roleId": "automaticRifleman",
+      "label": "AR"
+    },
+    {
+      "id": "TM.R",
+      "unitId": "TM",
+      "roleId": "rifleman",
+      "label": "R"
+    }
+  ]
+}

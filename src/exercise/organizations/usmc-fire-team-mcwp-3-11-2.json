@@ -1,0 +1,117 @@
+{
+  "schema": "ambush.organization-template",
+  "schemaVersion": 2,
+  "id": "usmc-fire-team-mcwp-3-11-2",
+  "version": "1.0.0",
+  "name": "USMC fire team (MCWP 3-11.2, 4 Marines)",
+  "source": {
+    "kind": "doctrine",
+    "designation": "MCWP 3-11.2 (formerly FMFM 6-5)",
+    "title": "Marine Rifle Squad",
+    "publisher": "Headquarters, U.S. Marine Corps (Marine Corps Combat Development Command)",
+    "date": "1991-12-02",
+    "identifier": "PCN 143 000112 00",
+    "amendments": [
+      {
+        "designation": "Change 1 to FMFM 6-5",
+        "date": "1997-07-24",
+        "summary": "Replaced mine-warfare pages; the organization chapter is unchanged."
+      },
+      {
+        "designation": "Erratum to MCWP 3-11.2",
+        "date": "2002-11-27",
+        "summary": "Re-identified FMFM 6-5 as MCWP 3-11.2."
+      }
+    ],
+    "references": [
+      "para 1003, Composition of the Rifle Squad",
+      "Figure 1-1, Marine Rifle Squad",
+      "para 1004a, Organic Weapons"
+    ],
+    "status": "Historical. Later Marine Corps publications (MCIP 3-10A.4i, 2019; MCRP 3-10A.4, 2020) supersede this manual and are not represented by this template. It describes the 1991 squad only and is not a statement of current USMC organization."
+  },
+  "conventions": [
+    "One fire team of the 13-Marine rifle squad template (usmc-rifle-squad-mcwp-3-11-2), on its own, for the Behavior Lab. The unit id FT and the abbreviations are Ambush! conventions."
+  ],
+  "roles": [
+    {
+      "id": "fireTeamLeader",
+      "name": "Fire team leader / grenadier",
+      "abbreviation": "FTL",
+      "grade": "Corporal",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "m203-grenade-launcher", "bayonet-knife"]
+      },
+      "defaultIcon": "fireTeamLeader"
+    },
+    {
+      "id": "automaticRifleman",
+      "name": "Automatic rifleman",
+      "abbreviation": "AR",
+      "grade": "Lance corporal",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["squad-automatic-weapon", "combat-knife"]
+      },
+      "defaultIcon": "automaticRifleman"
+    },
+    {
+      "id": "assistantAutomaticRifleman",
+      "name": "Assistant automatic rifleman",
+      "abbreviation": "AAR",
+      "grade": "Lance corporal",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "bayonet-knife"]
+      },
+      "defaultIcon": "rifleman"
+    },
+    {
+      "id": "rifleman",
+      "name": "Rifleman",
+      "abbreviation": "R",
+      "grade": "Private or private first class",
+      "defaultLoadout": {
+        "weaponProfileRefs": ["m16-rifle", "bayonet-knife"]
+      },
+      "defaultIcon": "rifleman"
+    }
+  ],
+  "units": [
+    {
+      "id": "FT",
+      "name": "Fire team",
+      "abbreviation": "FT",
+      "echelon": "fireTeam",
+      "parentId": null,
+      "leaderSlotId": "FT.FTL",
+      "symbology": {
+        "sidc": "10031000111211000000"
+      }
+    }
+  ],
+  "slots": [
+    {
+      "id": "FT.FTL",
+      "unitId": "FT",
+      "roleId": "fireTeamLeader",
+      "label": "FTL"
+    },
+    {
+      "id": "FT.AR",
+      "unitId": "FT",
+      "roleId": "automaticRifleman",
+      "label": "AR"
+    },
+    {
+      "id": "FT.AAR",
+      "unitId": "FT",
+      "roleId": "assistantAutomaticRifleman",
+      "label": "AAR"
+    },
+    {
+      "id": "FT.R",
+      "unitId": "FT",
+      "roleId": "rifleman",
+      "label": "R"
+    }
+  ]
+}
