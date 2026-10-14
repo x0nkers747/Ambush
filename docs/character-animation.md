@@ -90,7 +90,10 @@ speed is never changed to suit a clip.
 | anything else                       | no weapon drawn                                                                   |
 
 Each model has sockets in the weapon frame (`weapons.ts`), measured from side views: butt,
-pistol grip, handguard, eye (behind the rear sight) and muzzle. Shots stay on the 2D overlay
+pistol grip, handguard, eye (behind the rear sight) and muzzle. The hold puts every weapon's
+pistol grip where the M16's goes: a rifle with a shorter stock (the AK-47's grip is 8 cm nearer
+its butt) sits that much further forward, so the firing hand stays clear of the chest and vest
+in every carry and posture (`holdFor` in `character.ts`). Shots stay on the 2D overlay
 (tracer lines). The muzzle flash is drawn at the posed muzzle.
 
 ## 4. Terrain and bridges

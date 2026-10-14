@@ -168,6 +168,15 @@ const smooth = (t: number) => t * t * (3 - 2 * t);
 /** Torso twist when holding a rifle at the shoulder (left shoulder forward). */
 const BLADE_RAD = 0.78;
 const UP = new THREE.Vector3(0, 1, 0);
+/**
+ * Where the hold puts the firing hand: the M16's pistol grip (in its weapon
+ * frame), and how far along the bore it lies ahead of the butt. A weapon with
+ * a shorter stock (the AK-47's grip is 8 cm nearer its butt) goes forward by
+ * the difference, so the hand stays where it is on the M16, clear of the
+ * chest and vest, instead of folding back into them.
+ */
+const HOLD_GRIP = new THREE.Vector3(0, -0.075, -0.016);
+const HOLD_REACH = 0.344;
 
 interface Hold {
   pos: THREE.Vector3;
@@ -233,7 +242,11 @@ function holdFor(
   x.normalize();
   const y = new THREE.Vector3().crossVectors(z, x);
   const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
-  const pos = anchorIsGrip ? anchor : anchor.sub(w.profile.butt.clone().applyQuaternion(quat));
+  const pos = anchorIsGrip
+    ? anchor.add(HOLD_GRIP.clone().sub(w.profile.grip.point).applyQuaternion(quat))
+    : anchor
+        .sub(w.profile.butt.clone().applyQuaternion(quat))
+        .addScaledVector(z, Math.max(0, HOLD_REACH - (w.profile.grip.point.z - w.profile.butt.z)));
   // Aiming (not prone): the butt stays in the shoulder pocket along the aim,
   // and the weapon goes up or down so its sight line passes through the
   // right eye, as when looking down the sights.
