@@ -1,5 +1,6 @@
 import type { Azimuth, Vec2, Vec3 } from './geometry';
 import type { RngState } from './rng';
+import type { BehaviorState } from './behavior/types';
 import type { PathPoint } from './bridge-navigation';
 
 // Mutable simulation state (docs/adr/0004). Plain data only: no classes,
@@ -238,6 +239,11 @@ export interface SimState {
    * before then, so states without combat encode and hash as before it existed.
    */
   engagement?: EngagementState;
+  /**
+   * Unit tasks and the Marines they steer (docs/behavior-lab/03). Absent
+   * until the first unit order, so states without one hash as before.
+   */
+  behavior?: BehaviorState;
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

@@ -1,3 +1,4 @@
+import type { BehaviorParams } from './behavior/params';
 import type { CombatConfig } from './combat-config';
 import type { TerrainDataset } from './terrain';
 
@@ -18,6 +19,8 @@ export interface SimWorld {
   readonly movement: MovementParams;
   /** The combat model; absent in worlds without combat (docs/adr/0019). */
   readonly combat?: CombatSetup;
+  /** Unit-movement tuning (docs/behavior-lab/03); absent: `DEFAULT_BEHAVIOR_PARAMS`. */
+  readonly behavior?: BehaviorParams;
 }
 
 /**

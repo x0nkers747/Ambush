@@ -16,6 +16,7 @@ import {
   type Soldier,
 } from './state';
 import { isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
+import { validateBehaviorParams, type BehaviorParams } from './behavior/params';
 import {
   validateMovementParams,
   type CombatSetup,
@@ -53,6 +54,8 @@ export interface Scenario {
   readonly soldiers: readonly ScenarioSoldier[];
   /** The combat model, for scenarios that can fight (docs/adr/0019). */
   readonly combat?: CombatSetup;
+  /** Unit-movement tuning (docs/behavior-lab/03); absent: the defaults. */
+  readonly behavior?: BehaviorParams;
 }
 
 /** Builds the tick-0 simulation state. Throws an Error describing the first invalid entry. */
@@ -64,6 +67,7 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
   try {
     validateTerrain(terrain);
     validateMovementParams(scenario.movement);
+    if (scenario.behavior) validateBehaviorParams(scenario.behavior);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -181,7 +185,11 @@ export function createWorld(scenario: Scenario): SimWorld {
   };
   // Without combat the world has no `combat` property at all, so its
   // fingerprint is what it was before combat existed.
-  return Object.freeze(
-    scenario.combat ? { ...world, combat: deepFreeze(clonePlainData(scenario.combat)) } : world,
-  );
+  // Likewise unit-movement parameters (docs/behavior-lab/03): absent unless
+  // the scenario overrides the defaults.
+  return Object.freeze({
+    ...world,
+    ...(scenario.combat ? { combat: deepFreeze(clonePlainData(scenario.combat)) } : {}),
+    ...(scenario.behavior ? { behavior: deepFreeze(clonePlainData(scenario.behavior)) } : {}),
+  });
 }

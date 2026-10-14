@@ -301,6 +301,7 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 50. [Tree cover from canopy heights](docs/adr/0050-tree-cover-from-canopy-heights.md)
 51. [Realistic trees](docs/adr/0051-realistic-trees.md)
 52. [Animated soldiers in the 3D view](docs/adr/0052-animated-soldiers.md) ([how it works](docs/character-animation.md))
+53. [Unit tasks and formation movement in the simulation kernel](docs/adr/0053-unit-tasks-and-formation-movement.md) ([Behavior Lab](docs/behavior-lab/README.md))
 
 Animated 3D soldiers: background to ADR 0052 —
 [framework evaluation](docs/character-animation-framework-evaluation.md) (recommendation),
@@ -313,7 +314,7 @@ Animated 3D soldiers: background to ADR 0052 —
 [roadmap](docs/character-animation-roadmap.md). The comparison prototype is in
 [`prototypes/character-animation`](prototypes/character-animation/) (not part of the game build).
 
-Behavior Lab (proposed, not implemented): research and architecture for hierarchical,
+Behavior Lab (in development: [implementation notes](docs/behavior-lab/implementation.md)): research and architecture for hierarchical,
 order-driven formation movement — [overview](docs/behavior-lab/README.md),
 [existing architecture](docs/behavior-lab/01-existing-architecture.md),
 [research survey](docs/behavior-lab/02-research-survey.md),

@@ -1,3 +1,4 @@
+import type { TaskOutcome, TaskPhase } from './behavior/types';
 import type { SimCommand } from './commands';
 import type { Vec2 } from './geometry';
 import type {
@@ -5,6 +6,7 @@ import type {
   EngagementAreaId,
   EngagementEndReason,
   Orders,
+  OrgUnitId,
   Side,
   SoldierId,
   WaypointId,
@@ -37,7 +39,13 @@ export interface CommandRejectedEvent {
     | 'waypointUnreachable'
     | 'areaOffTerrain'
     | 'noCombatModel'
-    | 'engagementAlreadyBegun';
+    | 'engagementAlreadyBegun'
+    | 'unknownUnit'
+    | 'formationMismatch'
+    | 'noActiveMembers'
+    | 'destinationOffTerrain'
+    | 'destinationBlocked'
+    | 'destinationUnreachable';
 }
 
 /** A soldier arrived at one of its waypoints. */
@@ -143,6 +151,50 @@ export interface EngagementEndedEvent {
   readonly reason: EngagementEndReason;
 }
 
+/**
+ * An organization was given a task (docs/behavior-lab/03 §4.2): its
+ * participating Marines are now steered by it.
+ */
+export interface UnitOrderedEvent {
+  readonly type: 'unitOrdered';
+  readonly tick: number;
+  readonly unitId: OrgUnitId;
+  readonly taskId: string;
+  readonly memberIds: readonly SoldierId[];
+}
+
+/** A unit task entered a new phase. */
+export interface UnitPhaseChangedEvent {
+  readonly type: 'unitPhaseChanged';
+  readonly tick: number;
+  readonly taskId: string;
+  readonly unitId: OrgUnitId;
+  readonly phase: TaskPhase;
+  readonly atSeconds: number;
+}
+
+/** A unit task ended: arrived, gave up waiting, was cancelled, or lost all its members. */
+export interface UnitTaskEndedEvent {
+  readonly type: 'unitTaskEnded';
+  readonly tick: number;
+  readonly taskId: string;
+  readonly unitId: OrgUnitId;
+  readonly outcome: TaskOutcome;
+  readonly atSeconds: number;
+}
+
+/**
+ * A Marine stopped being steered by a task: given another unit order or
+ * individual orders, incapacitated, or the task was cancelled.
+ */
+export interface MemberReleasedEvent {
+  readonly type: 'memberReleased';
+  readonly tick: number;
+  readonly taskId: string;
+  readonly soldierId: SoldierId;
+  readonly reason: 'reordered' | 'individualOrders' | 'incapacitated' | 'cancelled';
+}
+
 export type SimEvent =
   | OrdersChangedEvent
   | CommandRejectedEvent
@@ -155,4 +207,8 @@ export type SimEvent =
   | ShotFiredEvent
   | SoldierIncapacitatedEvent
   | SoldierEscapedEvent
-  | EngagementEndedEvent;
+  | EngagementEndedEvent
+  | UnitOrderedEvent
+  | UnitPhaseChangedEvent
+  | UnitTaskEndedEvent
+  | MemberReleasedEvent;

@@ -1,3 +1,4 @@
+import { updateBehavior } from './behavior/system';
 import { resolveCombat } from './combat';
 import { applyCommands, type SimCommand } from './commands';
 import { monitorEngagementAreas } from './engagement-areas';
@@ -34,8 +35,11 @@ export function stepState(
   //    in ticks, so behavior does not depend on the tick rate (docs/adr/0003).
   //    Combat resolves the tick's firing opportunities against the positions
   //    soldiers reached by its end (docs/adr/0019).
+  //    Marines steered by unit tasks move first (docs/behavior-lab/03 §4.3);
+  //    `moveSoldiers` moves those following individual orders.
+  const steered = updateBehavior(state, world, time, events);
   const path = moveSoldiers(state, world, time, events);
-  monitorEngagementAreas(state, path, time, events);
+  monitorEngagementAreas(state, steered.length > 0 ? [...steered, ...path] : path, time, events);
   resolveCombat(state, world, time, events);
 
   // 3. Advance the clock.

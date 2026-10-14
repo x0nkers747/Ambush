@@ -156,6 +156,12 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
       case 'shotFired':
         // Too many for the log; counted in the engagement panel and drawn on the map.
         return undefined;
+      case 'unitOrdered':
+      case 'unitPhaseChanged':
+      case 'unitTaskEnded':
+      case 'memberReleased':
+        // Unit orders (docs/behavior-lab) are not given in the exercise.
+        return undefined;
     }
   };
 

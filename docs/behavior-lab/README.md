@@ -4,7 +4,9 @@ This initiative moves Ambush! from controlling individual soldiers to giving ord
 
 Its first behaviour is **MOVE_IN_FORMATION**: noncombat movement in formation to a single waypoint.
 
-These documents are the research and the proposal. **Nothing is implemented yet**, and implementation waits for approval.
+These documents are the research and the proposal (approved at `2da3386`).
+
+**Status:** milestone M1 (kernel foundations) is implemented: [ADR 0053](../adr/0053-unit-tasks-and-formation-movement.md), and the [implementation notes](implementation.md) (departures, parameters, measurements).
 
 | Document                                                    | Contents                                                                                                                                           |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

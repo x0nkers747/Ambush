@@ -1,4 +1,6 @@
 import type { PathPoint } from './bridge-navigation';
+import { applyOrderUnit, validateUnitOrder, type OrderUnitCommand } from './behavior/orders';
+import { releaseAgent } from './behavior/system';
 import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
@@ -50,7 +52,8 @@ export interface BeginEngagementCommand {
   readonly tick: number;
 }
 
-export type SimCommand = SetOrdersCommand | SetEngagementAreaCommand | BeginEngagementCommand;
+export type SimCommand =
+  SetOrdersCommand | SetEngagementAreaCommand | BeginEngagementCommand | OrderUnitCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -83,6 +86,12 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
       return;
     }
     case 'beginEngagement':
+      return;
+    case 'orderUnit':
+      if (typeof command.unitId !== 'string' || command.unitId === '') {
+        throw new RangeError('orderUnit unitId must be a non-empty string');
+      }
+      validateUnitOrder(command.order);
       return;
   }
 }
@@ -119,13 +128,16 @@ export function applyCommands(
   for (const command of commands) {
     switch (command.type) {
       case 'setOrders':
-        applySetOrders(state, world, command, events);
+        applySetOrders(state, world, command, startSeconds, events);
         break;
       case 'setEngagementArea':
         applySetEngagementArea(state, world, command, events);
         break;
       case 'beginEngagement':
         beginEngagement(state, world, command, startSeconds, events);
+        break;
+      case 'orderUnit':
+        applyOrderUnit(state, world, command, startSeconds, events);
         break;
     }
   }
@@ -135,6 +147,7 @@ function applySetOrders(
   state: SimState,
   world: SimWorld,
   command: SetOrdersCommand,
+  startSeconds: number,
   events: SimEvent[],
 ): void {
   const soldier = findSoldier(state, command.soldierId);
@@ -142,8 +155,17 @@ function applySetOrders(
     events.push({ type: 'commandRejected', tick: state.tick, command, reason: 'unknownSoldier' });
     return;
   }
+  // Individual orders take a Marine out of his unit's task (docs/behavior-lab/07 Q10).
+  const release = () => {
+    const agents = state.behavior?.agents;
+    const index = agents?.findIndex((a) => a.soldierId === soldier.id) ?? -1;
+    if (state.behavior && index >= 0) {
+      releaseAgent(state.behavior, index, 'individualOrders', state.tick, startSeconds, events);
+    }
+  };
   const { orders } = command;
   if (orders === null) {
+    release();
     soldier.orders = null;
     events.push({ type: 'ordersChanged', tick: state.tick, soldierId: soldier.id, orders });
     return;
@@ -170,6 +192,7 @@ function applySetOrders(
     );
     from = waypoint;
   }
+  release();
   soldier.orders = {
     orders: clonePlainData(orders),
     nextWaypointIndex: 0,
