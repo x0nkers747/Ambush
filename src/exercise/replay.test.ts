@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { clonePlainData, hashSimState, soldierId, type Vec2 } from '#sim';
 import { DEMO_SCENARIO } from './demo-scenario';
 import { createExercise, ExerciseError, type Exercise } from './exercise';
-import { frameAt, frameSeconds, type ReplayRecording } from './replay';
+import { frameAt, frameSeconds, type ReplayRecording, sinceTrigger } from './replay';
 
 // The After Action Review's recording and replay views (docs/adr/0026).
 
@@ -24,8 +24,12 @@ function playedDemo(seed: number) {
   exercise.execute();
   exercise.advance(1 / 30);
   if (!exercise.startOpfor().ok) throw new Error('START OPFOR refused');
-  for (let i = 0; i < 30 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1)
+  // The approach, state by state (the recording's lead-in comes from its end).
+  const approach = [clonePlainData(exercise.simulation.state)];
+  for (let i = 0; i < 30 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1) {
     exercise.advance(1 / 30);
+    approach.push(clonePlainData(exercise.simulation.state));
+  }
   const atTrigger = clonePlainData(exercise.simulation.state);
   if (!exercise.triggerAmbush().ok) throw new Error('TRIGGER AMBUSH refused');
   const live = [atTrigger];
@@ -34,7 +38,9 @@ function playedDemo(seed: number) {
     live.push(clonePlainData(exercise.simulation.state));
   }
   if (exercise.phase !== 'engagementComplete') throw new Error('the engagement did not end');
-  return { exercise, live, recording: recordingOf(exercise) };
+  // The approach's states before the trigger tick, the last 5 s of them.
+  const lead = approach.filter((st) => st.tick < atTrigger.tick).slice(-150);
+  return { exercise, live, lead, recording: recordingOf(exercise) };
 }
 const recordingOf = (exercise: Exercise): ReplayRecording => {
   const recording = exercise.recording;
@@ -58,42 +64,61 @@ const shown = (view: Exercise) =>
 const PLAYED = playedDemo(7);
 
 describe('the recording', () => {
-  it('starts at the trigger, with the state at that moment', () => {
-    const { exercise, live, recording } = PLAYED;
+  it('starts 5 s before the trigger, with the approach as it was, then the state at the trigger', () => {
+    const { exercise, live, lead, recording } = PLAYED;
     const trigger = exercise.trigger;
     expect(recording.triggerTick).toBe(trigger?.tick);
     expect(recording.triggerSeconds).toBe(trigger?.atSeconds);
-    expect(recording.frames[0]?.tick).toBe(trigger?.tick);
+    // The demo's approach is longer than 5 s: a full lead-in.
+    expect(lead).toHaveLength(150);
+    expect(recording.leadInFrames).toBe(150);
+    expect(recording.frames[0]?.tick).toBe((trigger?.tick ?? 0) - 150);
+    recording.frames.slice(0, 150).forEach((frame, k) => {
+      expect(frame).toEqual(lead[k]);
+    });
     // Exactly the live state at the trigger: before the engagement begins.
-    expect(recording.frames[0]).toEqual(live[0]);
-    expect(recording.frames[0]?.engagement).toBeUndefined();
-    const first = exercise.replayAt(0);
+    const atTrigger = recording.frames[150];
+    expect(atTrigger?.tick).toBe(trigger?.tick);
+    expect(atTrigger).toEqual(live[0]);
+    expect(atTrigger?.engagement).toBeUndefined();
+    const before = exercise.replayAt(0);
+    expect(before.phase).toBe('opforApproach');
+    expect(before.triggerState).toBe('available');
+    expect(before.combatLog).toEqual([]);
+    expect(before.timeline.some((e) => e.type === 'ambushTriggered')).toBe(false);
+    const first = exercise.replayAt(150);
     expect(first.phase).toBe('opforApproach');
     expect(first.triggerState).toBe('queued');
     expect(first.combatLog).toEqual([]);
     expect(first.timeline.at(-1)?.type).toBe('ambushTriggered');
     expect(first.simulation.timeSeconds).toBe(trigger?.atSeconds);
+    // Replay time T+0 is the trigger.
+    expect(sinceTrigger(recording, frameSeconds(recording, 150))).toBe(0);
+    expect(sinceTrigger(recording, 0)).toBe(-5);
   });
 
   it('holds the exact state of every tick to the end of the engagement', () => {
-    const { exercise, live, recording } = PLAYED;
+    const { exercise, live, lead, recording } = PLAYED;
     expect(recording.complete).toBe(true);
-    expect(recording.frames).toHaveLength(live.length);
-    recording.frames.forEach((frame, k) => {
+    expect(recording.frames).toHaveLength(lead.length + live.length);
+    recording.frames.slice(lead.length).forEach((frame, k) => {
       expect(frame).toEqual(live[k]);
     });
     // The final frame is the final simulation state.
     expect(recording.frames.at(-1)).toEqual(clonePlainData(exercise.simulation.state));
-    expect(recording.durationSeconds).toBeCloseTo((live.length - 1) / 30);
+    expect(recording.durationSeconds).toBeCloseTo((lead.length + live.length - 1) / 30);
     const last = exercise.replayAt(recording.frames.length - 1);
     expect(last.phase).toBe('engagementComplete');
     expect(last.combatLog).toEqual(exercise.combatLog);
     expect(last.engagementResult).toEqual(exercise.engagementResult);
-    // Same-tick events are not lost: everything of the trigger tick comes with frame 1.
+    // Same-tick events are not lost: everything of the trigger tick comes with the frame after it.
     const triggerTick = recording.triggerTick;
+    const after = recording.leadInFrames + 1;
     const sameTick = exercise.combatLog.filter((e) => e.tick === triggerTick);
-    expect(exercise.replayAt(1).combatLog.filter((e) => e.tick === triggerTick)).toEqual(sameTick);
-    expect(exercise.replayAt(1).timeline.some((e) => e.type === 'ambushTriggered')).toBe(true);
+    expect(exercise.replayAt(after).combatLog.filter((e) => e.tick === triggerTick)).toEqual(
+      sameTick,
+    );
+    expect(exercise.replayAt(after).timeline.some((e) => e.type === 'ambushTriggered')).toBe(true);
   });
 
   it('shows the combat events of each frame as they had happened by then', () => {

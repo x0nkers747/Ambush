@@ -226,8 +226,8 @@ The hands are measured from any five-fingered rig (`hands.ts`). Sighting needs e
 
 ## 9. Known limitations
 
-- **The review starts at TRIGGER AMBUSH.** It covers the engagement only, which in this combat
-  model often lasts a few seconds.
+- **The review starts 5 s before TRIGGER AMBUSH.** It covers the approach's last seconds and
+  the engagement, which in this combat model often lasts a few seconds.
 - **No transition clips.** Posture changes and the start of a fall are crossfades: no openly
   licensed transition clips exist.
 - **No aim target in the simulation.** Aim follows the facing, and the pitch is level.

@@ -29,7 +29,7 @@ import {
   type Viewshed,
 } from '#sim';
 import { createMotionRecorder, type MotionLog } from './motion-log';
-import { createStateRecorder, type ReplayRecording } from './replay';
+import { createStateRecorder, REPLAY_LEAD_IN_SECONDS, type ReplayRecording } from './replay';
 import {
   validateOpforRoutes,
   validateTraineeSetup,
@@ -408,8 +408,9 @@ export interface Exercise {
   readonly timeline: readonly ExerciseEvent[];
   /**
    * The After Action Review's recording (docs/adr/0026): the simulation state
-   * at every tick from TRIGGER AMBUSH on; `null` before the trigger. Complete
-   * once the engagement has ended.
+   * at every tick from 5 s before TRIGGER AMBUSH (`REPLAY_LEAD_IN_SECONDS`; or
+   * from the start of the OPFOR approach, if later) on; `null` before the
+   * trigger. Complete once the engagement has ended.
    */
   readonly recording: ReplayRecording | null;
   /**
@@ -821,9 +822,24 @@ export function createExercise({
 
   /** The recording's frames, from the trigger on (docs/adr/0026); `null` before it. */
   let frames: DeepReadonly<SimState>[] | null = null;
+  /** How many of `frames` come before the trigger (the lead-in). */
+  let leadInCount = 0;
   /** The simulation events of every tick from the trigger on (docs/adr/0026). */
   let recordedEvents: SimEvent[] = [];
   const record = createStateRecorder();
+  /**
+   * The approach's latest states, until the trigger: the recording's lead-in
+   * (`REPLAY_LEAD_IN_SECONDS`). Recorded like the frames; nothing else reads it.
+   */
+  let leadIn: DeepReadonly<SimState>[] = [];
+  const leadInTicks = Math.round(REPLAY_LEAD_IN_SECONDS * config.tickRateHz);
+  const keepLeadIn = () => {
+    const last = leadIn[leadIn.length - 1];
+    if (last?.tick === sim.state.tick) leadIn.pop();
+    leadIn.push(record(sim.state));
+    // The ticks before the current one, and the current one (the trigger's, if it comes now).
+    if (leadIn.length > leadInTicks + 1) leadIn.splice(0, leadIn.length - leadInTicks - 1);
+  };
 
   const stepped: SimEvent[] = [];
   const stepper = {
@@ -839,7 +855,7 @@ export function createExercise({
       if (frames && trigger) {
         frames.push(record(sim.state));
         recordedEvents.push(...events);
-      }
+      } else if (phase === 'opforApproach') keepLeadIn();
     },
   };
   let runner: FixedStepRunner = createFixedStepRunner(stepper);
@@ -1480,6 +1496,8 @@ export function createExercise({
       });
       opforStart = start;
       phase = 'opforApproach';
+      leadIn = [];
+      keepLeadIn();
       run();
       timeline.push({ type: 'opforStarted', ...now(), start });
       return { ok: true, start };
@@ -1505,8 +1523,12 @@ export function createExercise({
         opforPositions,
       });
       timeline.push({ type: 'ambushTriggered', ...now(), trigger });
-      // The recording starts with the state at the trigger itself.
-      frames = [record(sim.state)];
+      // The recording starts with the approach's last moments, then the state
+      // at the trigger itself.
+      const before = leadIn.filter((s) => s.tick < sim.tick);
+      frames = [...before, record(sim.state)];
+      leadInCount = before.length;
+      leadIn = [];
       recordedEvents = [];
       return { ok: true, trigger };
     },
@@ -1525,6 +1547,7 @@ export function createExercise({
         tickRateHz: config.tickRateHz,
         triggerTick: trigger.tick,
         triggerSeconds: trigger.atSeconds,
+        leadInFrames: leadInCount,
         frames,
         events: recordedEvents,
         complete,
@@ -1606,7 +1629,10 @@ export function createExercise({
       ['paused', false],
       ['canEditPlans', false],
       ['hasUncommittedChanges', false],
-      ['triggerState', engagement ? 'triggered' : 'queued'],
+      [
+        'triggerState',
+        engagement ? 'triggered' : tick < (trigger?.tick ?? 0) ? 'available' : 'queued',
+      ],
       ['combatLog', upTo(combatLog, tick, false)],
       ['timeline', upTo(timeline, tick, true)],
       ['droppedSeconds', 0],

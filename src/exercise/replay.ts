@@ -1,14 +1,20 @@
 import { clonePlainData, type DeepReadonly, type SimEvent, type SimState } from '#sim';
 
 // The After Action Review's recording (docs/adr/0026): the authoritative
-// simulation state at every tick from the trainee's TRIGGER AMBUSH to the end
-// of the engagement. A replay shows these states; it never steps the
+// simulation state at every tick from `REPLAY_LEAD_IN_SECONDS` before the
+// trainee's TRIGGER AMBUSH (or the start of the OPFOR approach, if that was
+// later) to the end of the engagement. A replay shows these states; it never steps the
 // simulation, draws a random number or resolves a shot.
 
+/** How long the recording runs before the trigger, at most (s). */
+export const REPLAY_LEAD_IN_SECONDS = 5;
+
 /**
- * What happened from the trigger on. `frames[0]` is the state at the start of
- * the trigger tick (the moment the ambush was sprung, before the engagement
- * begins); `frames[k]` the state after `k` more ticks. The combat events and
+ * What happened from just before the trigger on. `frames[leadInFrames]` is
+ * the state at the start of the trigger tick (the moment the ambush was
+ * sprung, before the engagement begins), the frames before it the approach
+ * leading up to it, one per tick; `frames[k]` is the state `k` ticks after
+ * `frames[0]`. The combat events and
  * timeline that go with it are the exercise's own (`combatLog`, `timeline`):
  * a replay view shows those up to its frame.
  */
@@ -17,6 +23,8 @@ export interface ReplayRecording {
   /** The tick and simulation time of the trigger: replay time T+0. */
   readonly triggerTick: number;
   readonly triggerSeconds: number;
+  /** Frames before the trigger's (up to `REPLAY_LEAD_IN_SECONDS` of them). */
+  readonly leadInFrames: number;
   readonly frames: readonly DeepReadonly<SimState>[];
   /**
    * Every simulation event from the trigger tick on, in order: a tick's
@@ -25,13 +33,18 @@ export interface ReplayRecording {
   readonly events: readonly SimEvent[];
   /** Whether the engagement has ended, so no more frames will come. */
   readonly complete: boolean;
-  /** Replay time of the last frame, in simulation seconds since the trigger. */
+  /** Replay time of the last frame, in simulation seconds since the first frame. */
   readonly durationSeconds: number;
 }
 
-/** Replay seconds since the trigger of `frame`. */
+/** Replay seconds (since the first frame) of `frame`. */
 export function frameSeconds(recording: ReplayRecording, frame: number): number {
   return frame / recording.tickRateHz;
+}
+
+/** Seconds from the trigger (T+, negative before it) of a replay time. */
+export function sinceTrigger(recording: ReplayRecording, seconds: number): number {
+  return seconds - recording.leadInFrames / recording.tickRateHz;
 }
 
 /**

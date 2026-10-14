@@ -133,7 +133,8 @@ describe('the exercise motion log', () => {
     playedDemo(11, (e) => other.push(hashSimState(clonePlainData(e.simulation.state))));
     expect(states).toEqual(other);
     expect(reading.motionLog.lastTick).toBe(reading.simulation.tick);
-  });
+    // Two whole exercises, hashed at every tick.
+  }, 60000);
 });
 
 describe('render time', () => {

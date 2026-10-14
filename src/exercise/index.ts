@@ -155,7 +155,14 @@ export {
   type FixedStepRunnerOptions,
   type Steppable,
 } from './runner';
-export { createStateRecorder, frameAt, frameSeconds, type ReplayRecording } from './replay';
+export {
+  createStateRecorder,
+  frameAt,
+  frameSeconds,
+  REPLAY_LEAD_IN_SECONDS,
+  type ReplayRecording,
+  sinceTrigger,
+} from './replay';
 export {
   createMotionRecorder,
   emptyMotionSample,

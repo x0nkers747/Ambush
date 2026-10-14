@@ -6,6 +6,7 @@ import {
   frameAt,
   gradeOf,
   frameSeconds,
+  sinceTrigger,
   NO_KILL_ZONE,
   OPFOR_FORCES,
   scoreEngagement,
@@ -226,7 +227,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       <div data-stage="aar" class="replay">
         <div class="replay-time">
           <span class="clock" data-ui="replay-time">T+ 00:00.0</span>
-          <span class="muted">of <span data-ui="replay-duration">00:00.0</span></span>
+          <span class="muted">to T+ <span data-ui="replay-duration">00:00.0</span></span>
         </div>
         <input type="range" class="replay-scrub" data-ui="replay-scrub" min="0" max="0" step="1" value="0" aria-label="Replay timeline: time since the ambush was triggered">
         <div class="replay-buttons" role="group" aria-label="Replay">
@@ -904,8 +905,9 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
             return {
               log: exercise.motionLog,
               combatLog: exercise.combatLog,
+              // The first frame's time (the lead-in's start) plus the replay time.
               seconds:
-                recording.triggerSeconds +
+                (recording.frames[0]?.tick ?? recording.triggerTick) / recording.tickRateHz +
                 Math.max(0, Math.min(replay.seconds, recording.durationSeconds)),
               ended: replay.seconds >= recording.durationSeconds,
             };
@@ -1268,8 +1270,13 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     if (!recording || !view) return;
     const frame = replayFrame();
     const last = recording.frames.length - 1;
-    setText(ui('replay-time'), `T+ ${clock(frameSeconds(recording, frame))}`);
-    setText(ui('replay-duration'), clock(recording.durationSeconds));
+    // T− before the trigger (the recording's lead-in), T+ from it.
+    const t = sinceTrigger(recording, frameSeconds(recording, frame));
+    setText(ui('replay-time'), `T${t < -1e-9 ? '−' : '+'} ${clock(Math.abs(t))}`);
+    setText(
+      ui('replay-duration'),
+      clock(Math.max(0, sinceTrigger(recording, recording.durationSeconds))),
+    );
     const scrub = ui('replay-scrub') as HTMLInputElement;
     if (scrub.max !== String(last)) scrub.max = String(last);
     if (scrub.value !== String(frame)) scrub.value = String(frame);

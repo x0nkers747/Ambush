@@ -77,8 +77,8 @@ describe('returning to planning', () => {
     expect(recording?.complete).toBe(true);
     expect(recording).not.toBe(first.recording);
     expect(JSON.stringify(recording?.frames)).not.toBe(firstFrames);
-    // Its own frames start at its own trigger; the first run's are unchanged.
-    expect(recording?.frames[0]?.tick).toBe(second.trigger?.tick);
+    // Its own frames lead up to its own trigger; the first run's are unchanged.
+    expect(recording?.frames[recording.leadInFrames]?.tick).toBe(second.trigger?.tick);
     expect(JSON.stringify(first.recording?.frames)).toBe(firstFrames);
   });
 });

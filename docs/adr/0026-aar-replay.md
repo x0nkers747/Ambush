@@ -101,10 +101,19 @@ The three kinds of state stay apart:
 - The same plan run again with the same seed (`?seed=N`, default 1) gives the same engagement.
 - OPFOR soldiers cannot be selected (as in planning), so the per-soldier panel covers Marines.
 
+**Amendment (2026-10-14): a 5-second lead-in.** The recording now starts
+`REPLAY_LEAD_IN_SECONDS` (5 s) before the trigger, or at the start of the OPFOR approach if
+that was later:
+
+- During the approach, the exercise keeps its last 5 s of states, recorded as frames are.
+- At the trigger they become the recording's first frames (`leadInFrames`).
+- The review's clock reads T− before the trigger and T+ from it (`sinceTrigger`).
+- A lead-in frame's view shows the trigger as still available, with no combat yet.
+
 ## Verification
 
-- `src/exercise/replay.test.ts`: the recording starts at the trigger with the state at that
-  moment; every frame equals the live state of its tick and the last the final state; same-tick
+- `src/exercise/replay.test.ts`: the recording starts 5 s before the trigger with the approach's
+  states, then the state at the trigger; every frame equals the live state of its tick and the last the final state; same-tick
   events are kept; views of a frame are identical however reached (forward, backward, repeated);
   playback speed does not change which frame a time shows; views never step the simulation or
   change its state, and refuse every change; plans are untouched.

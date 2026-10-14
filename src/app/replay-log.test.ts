@@ -17,7 +17,7 @@ const KILL_ZONE: Vec2[] = [
 const lines = (html: string) => [...html.matchAll(/<li>(.*?)<\/li>/g)].map((m) => m[1] ?? '');
 
 describe('the replay’s event log', () => {
-  it('is empty at the trigger and then reads as the live log did, tick by tick', () => {
+  it('is empty before and at the trigger, then reads as the live log did, tick by tick', () => {
     const exercise = createExercise({
       config: { tickRateHz: 30, seed: 7 },
       scenario: DEMO_SCENARIO,
@@ -46,10 +46,14 @@ describe('the replay’s event log', () => {
       session: createSession,
       map,
     });
-    expect(exercise.recording?.frames).toHaveLength(logs.length);
-    expect(lines(replay.replayEventsHtml())).toEqual([]);
-    for (frame = 0; frame < logs.length; frame += 1) {
-      expect(lines(replay.replayEventsHtml())).toEqual(logs[frame]);
+    // The lead-in (the approach before the trigger) comes first.
+    const lead = exercise.recording?.leadInFrames ?? 0;
+    expect(lead).toBeGreaterThan(0);
+    expect(exercise.recording?.frames).toHaveLength(lead + logs.length);
+    for (frame = 0; frame <= lead; frame += 1) expect(lines(replay.replayEventsHtml())).toEqual([]);
+    for (let k = 0; k < logs.length; k += 1) {
+      frame = lead + k;
+      expect(lines(replay.replayEventsHtml())).toEqual(logs[k]);
     }
     // Something was logged, and the trigger came first.
     expect(logs.at(-1)?.length).toBeGreaterThan(1);
