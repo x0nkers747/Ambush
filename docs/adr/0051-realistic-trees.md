@@ -166,9 +166,15 @@ At about a kilometre the impostors are near the full models' tone, a little gree
 smoother (a tuning knob: a colour correction in the impostor shader). Draw calls and
 triangles are unchanged or lower (two triangles a tree instead of about twenty).
 
+**Step 3: pines** (forms `pine`, `scrubPine`). A loblolly was a bare pole with a few tufts on
+sticks at the top. Now its branches grow in 8 whorls of 3 (a Virginia pine's, 26, at random
+heights), lower ones level or drooping and upper ones rising, each with two side branches; the
+needle tufts grow along the outer 60% of every branch, worked out at every level as for the
+broadleaves. Cards: loblolly 190 (was 120), Virginia pine 170 (was 120); near models 976 and 884
+triangles. The red cedar (`cone`), already a dense cone, is unchanged.
+
 ### Phase 3: still to do
 
-- The conifers (`pine`, `scrubPine`, `cone`): whorled branches and tufts at the tips, as above.
 - Trunk taper, root flare and a bark per species.
 - Forest density matched to a closed canopy where the woods are mapped as closed.
 

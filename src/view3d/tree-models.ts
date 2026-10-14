@@ -175,7 +175,7 @@ export const SPECIES = {
     leaf: Cell.needles,
     bark: Cell.barkPine,
     card: 1.9,
-    cards: 120,
+    cards: 190,
     trunk: 0.38,
     leafTint: [1, 1, 1],
     barkTint: [1, 1, 1],
@@ -190,7 +190,7 @@ export const SPECIES = {
     leaf: Cell.needles,
     bark: Cell.barkPine,
     card: 1.6,
-    cards: 120,
+    cards: 170,
     trunk: 0.24,
     leafTint: [0.85, 0.92, 0.8],
     barkTint: [0.8, 0.75, 0.75],
@@ -728,34 +728,67 @@ function buildLevel(spec: Species, seed: number, lod: number): TreeGeometry {
     }
     case 'pine':
     case 'scrubPine': {
-      const branches = spec.form === 'pine' ? 14 : 18;
       const top: V3 = spec.form === 'pine' ? trunkTop : [lean[0] * 0.5, H * 0.95, lean[2] * 0.5];
-      const tips: { c: V3; out: V3; t: number }[] = [];
-      for (let k = 0; k < branches; k += 1) {
-        const t = spec.form === 'pine' ? k / branches : r();
-        const y = base + t * (H - base) * 0.9;
-        const ang = k * 2.39996 + r() * 0.5;
-        const len = R * (0.45 + 0.55 * r()) * (spec.form === 'pine' ? 1 - 0.55 * t : 1 - 0.3 * t);
-        const rise = spec.form === 'pine' ? 0.15 + 0.35 * r() : (r() - 0.3) * 0.6;
+      // Branches in whorls up the crown (a scrub pine's at random heights),
+      // each with two side branches; needle tufts grow along the outer part of
+      // every branch, not only at its end. The branches have their own random
+      // numbers and are worked out at every level (drawn near), so the tufts
+      // are in the same places at every level.
+      const pr = rng(seed ^ 0x9e37);
+      interface Twig {
+        readonly from: V3;
+        readonly to: V3;
+        readonly t: number;
+      }
+      const twigs: Twig[] = [];
+      const whorls = spec.form === 'pine' ? 8 : 0;
+      const branchCount = spec.form === 'pine' ? whorls * 3 : 26;
+      for (let k = 0; k < branchCount; k += 1) {
+        const t =
+          spec.form === 'pine' ? (Math.floor(k / 3) + 0.3 * pr()) / whorls : Math.pow(pr(), 0.8);
+        const y = base + t * (H - base) * 0.92;
+        const ang =
+          spec.form === 'pine'
+            ? (k % 3) * 2.09 + Math.floor(k / 3) * 0.7 + pr() * 0.5
+            : pr() * Math.PI * 2;
+        const len =
+          R *
+          (0.6 + 0.4 * pr()) *
+          (spec.form === 'pine' ? 1 - 0.5 * t * t : (1 - 0.35 * t) * (0.6 + 0.4 * pr()));
+        // Lower branches level or drooping, upper ones rising.
+        const rise = spec.form === 'pine' ? -0.15 + 0.6 * t + 0.15 * pr() : (pr() - 0.3) * 0.7;
         const from: V3 = [top[0] * (y / H), y, top[2] * (y / H)];
         const dir = norm([Math.cos(ang), rise, Math.sin(ang)]);
         const to = add(from, mul(dir, len));
         if (L.limbs)
-          b.limb(from, to, spec.trunk * 0.22, spec.trunk * 0.06, 3, spec.bark, bark, 0.3);
-        tips.push({ c: to, out: dir, t });
+          b.limb(from, to, spec.trunk * 0.24, spec.trunk * 0.07, 3, spec.bark, bark, 0.3);
+        twigs.push({ from, to, t });
+        for (let f = 0; f < 2; f += 1) {
+          const at = add(from, mul(sub(to, from), 0.45 + 0.4 * pr()));
+          const side = f === 0 ? 1 : -1;
+          const sdir = norm(
+            add(dir, [-dir[2] * side * 0.9, 0.25 + 0.2 * pr(), dir[0] * side * 0.9]),
+          );
+          const sto = add(at, mul(sdir, len * (0.3 + 0.2 * pr())));
+          if (L.limbs)
+            b.limb(at, sto, spec.trunk * 0.08, spec.trunk * 0.03, 3, spec.bark, bark, 0.35);
+          twigs.push({ from: at, to: sto, t });
+        }
       }
-      tips.push({ c: [top[0], H * 0.97, top[2]], out: [0, 1, 0], t: 1 });
+      // The leader's tuft.
+      twigs.push({ from: [top[0], H * 0.88, top[2]], to: [top[0], H * 0.99, top[2]], t: 1 });
       for (let i = 0; i < nCards; i += 1) {
-        const tip = tips[i % tips.length];
-        if (!tip) continue;
-        // Tufts along the branch's outer half, mostly at its end.
-        const back = r() * 0.45;
-        const p = add(sub(tip.c, mul(tip.out, back * R * 0.5)), [
-          (r() - 0.5) * 0.6,
-          (r() - 0.3) * 0.5,
-          (r() - 0.5) * 0.6,
+        const tw = twigs[i % twigs.length];
+        if (!tw) continue;
+        // Along the twig's outer 60%, more towards its end.
+        const u = 0.4 + 0.6 * Math.sqrt(r());
+        const out = norm(sub(tw.to, tw.from));
+        const p = add(add(tw.from, mul(sub(tw.to, tw.from), u)), [
+          (r() - 0.5) * 0.5,
+          (r() - 0.3) * 0.4,
+          (r() - 0.5) * 0.5,
         ]);
-        emit(p, add(tip.out, [0, 0.6, 0]), 0.5 + 0.5 * (1 - back), tip.t);
+        emit(p, add(out, [0, 0.6, 0]), 0.45 + 0.55 * u, tw.t);
       }
       break;
     }
