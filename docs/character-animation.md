@@ -205,9 +205,6 @@ The hands are measured from any five-fingered rig (`hands.ts`). Sighting needs e
 
 ## 9. Known limitations
 
-- **Instant occupation.** BLUEFOR's occupation is stepped through within the Move click (the
-  existing, temporary `INSTANT_MOVE` in `app/workspace.ts`), so the Marines are not seen walking
-  live. The motion log has the walk.
 - **The review starts at TRIGGER AMBUSH.** It covers the engagement only, which in this combat
   model often lasts a few seconds.
 - **No transition clips.** Posture changes and the start of a fall are crossfades: no openly

@@ -134,14 +134,6 @@ function seedFromAddress(): number {
   return Number.isInteger(seed) && seed >= 0 && seed <= MAX_SEED ? seed : 1;
 }
 
-/**
- * TEMPORARY, for testing: Move puts BLUEFOR in position at once, by stepping
- * the simulation until every Marine has arrived and turned (instead of
- * playing the occupation out in real time). Set to `false` (or delete it and
- * its use below) to restore the normal Move.
- */
-const INSTANT_MOVE = true as boolean;
-
 const PLANNING_TOOLS: readonly { tool: 'deploy' | 'killZone'; label: string; key: string }[] = [
   { tool: 'deploy', label: 'Waypoints', key: 'P' },
   { tool: 'killZone', label: 'Kill zone', key: 'K' },
@@ -627,12 +619,6 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   ui('execute').addEventListener('click', () => {
     if (stage !== 'bluefor') return;
     exerciseStage.execute();
-    // TEMPORARY (INSTANT_MOVE): the occupation is stepped through within the click.
-    const e = exercise;
-    if (INSTANT_MOVE && e) {
-      for (let i = 0; i < 30 * 900 && e.phase === 'bluforOccupation' && !e.paused; i += 1)
-        exerciseStage.collect(e.advance(1 / 30));
-    }
   });
   ui('pause').addEventListener('click', () => {
     if (stage === 'bluefor' || stage === 'opfor') exerciseStage.pause();
