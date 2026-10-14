@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { flattenFormation, hashSimState, type SimEvent } from '#sim';
+import { flattenFormation, hashSimState, orgUnitId, type SimEvent } from '#sim';
 import { buildFormationSpec, formationsFor, FORMATION_TEMPLATES } from '../formations/formations';
+import { createMetrics } from './metrics';
 import { rosterTree } from '../organization';
 import { createLabRun, LAB_ORGANIZATIONS, type LabOrganization } from './run';
 import { runScenario, scenarioSpec, type ScenarioOptions } from './scenarios';
@@ -185,6 +186,71 @@ describe('falling in: the leader steps off, the others fall in on the move', () 
     expect(moved ?? Infinity).toBeLessThanOrEqual(5);
     expect(closest).toBeGreaterThan(0.6);
     expect(run.sim.state.behavior?.tasks[0]?.outcome).toBe('arrived');
+  }, 60_000);
+});
+
+describe('changing formation', () => {
+  const change = (from: string, to: string, atSeconds: number, destination = { x: 0, y: 400 }) => {
+    const run = createLabRun({
+      ...scenarioSpec('s1-straight', { organization: 'squad', formation: from }),
+      waypoints: [destination],
+    });
+    const metrics = createMetrics(run.sim, run.unitId);
+    const events: SimEvent[] = [];
+    let closest = Infinity;
+    for (let i = 0; i < 30 * 900 && (!run.done || run.sim.tick <= atSeconds * 30); i += 1) {
+      if (run.sim.tick === atSeconds * 30) {
+        run.submit({
+          type: 'orderUnit',
+          tick: run.sim.tick,
+          unitId: orgUnitId('SQD'),
+          order: {
+            kind: 'moveInFormation',
+            destination,
+            formation: buildFormationSpec(run.organization, 'SQD', to),
+            pace: 1.4,
+          },
+        });
+      }
+      const step = run.step();
+      events.push(...step);
+      metrics.sample(step);
+      if (run.sim.tick > atSeconds * 30) {
+        const s = run.sim.state.soldiers;
+        for (let a = 0; a < s.length; a += 1) {
+          for (let b = a + 1; b < s.length; b += 1) {
+            const pa = s[a]?.position;
+            const pb = s[b]?.position;
+            if (pa && pb) closest = Math.min(closest, Math.hypot(pa.x - pb.x, pa.y - pb.y));
+          }
+        }
+      }
+    }
+    return { run, metrics: metrics.result(), events, closest };
+  };
+
+  it('on the move: carries on without stopping and re-forms on the move (wedge to column)', () => {
+    const { run, metrics, events, closest } = change('usmc.squad.wedge', 'usmc.squad.column', 60);
+    const ends = events.flatMap((e) => (e.type === 'unitTaskEnded' ? [e.outcome] : []));
+    expect(ends).toEqual(['superseded', 'arrived']);
+    expect(metrics.longestStop).toBe(0);
+    expect(metrics.stuck).toBe(0);
+    expect(closest).toBeGreaterThan(0.6);
+    // The column is what it ends in.
+    const last = run.sim.state.behavior?.tasks.at(-1);
+    expect(last?.order.formation.root.children[0]?.slots.length).toBe(4);
+    expect(flattenFormation(last?.formation ?? run.formation).slotIds).toHaveLength(13);
+    expect(run.sim.state.behavior?.agents.every((a) => a.joined)).toBe(true);
+  }, 60_000);
+
+  it('at rest: re-forms where it stands', () => {
+    const { metrics, events } = change('usmc.squad.wedge', 'usmc.squad.line', 300, {
+      x: 0,
+      y: 150,
+    });
+    const ends = events.flatMap((e) => (e.type === 'unitTaskEnded' ? [e.outcome] : []));
+    expect(ends).toEqual(['arrived', 'arrived']);
+    expect(metrics.stuck).toBe(0);
   }, 60_000);
 });
 

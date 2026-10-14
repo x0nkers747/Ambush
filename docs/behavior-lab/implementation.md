@@ -368,3 +368,49 @@ Scenarios 1–5 are unchanged in substance. They start already roughly in format
 **Browser** (`#behavior-lab?scenario=fall-in`). The leader steps off at once. At T+4 s, 11 Marines are still falling in and the unit moves at 1.05 m/s ("joining"); at T+10 s, 4; at T+30 s, all, and the unit is at full pace (1.4 m/s).
 
 **Parameters replaced:** `formingBand` and `formingTimeout` are replaced by `joinBand` 0.25, `joinPace` 0.75 and `joinTimeout` 60 s. `separationSpeed` is now 1.2 (was 0.8).
+
+## After review: changing formation on the move
+
+**Review note** (2026-10-14): "if I change formation using the formation drop down box while the squad is moving, it should adopt the new formation (using behavior similar to the new 'fall in' behavior) to adopt the new formation over time."
+
+**What changed.**
+
+1. **Kernel (`orders.ts`).** A new order to a unit that is moving or settling now continues it whatever the formation.
+   - The new route keeps the stretch of the old one the Marines occupy, and the anchor keeps its place and speed.
+   - **In a new formation:**
+     - the Marines have not fallen in (`joined: false`) and make for their new slots on the move;
+     - the unit keeps the falling-in pace (0.75 × pace) until they have, as in scenario 6;
+     - the new formation is arranged (which team leads, mirrored or not) round the Marines' centre, facing along the route at the anchor, to ask the least walking.
+   - **In the same formation:** unchanged (consecutive waypoints keep the arrangement, and the Marines stay fallen in).
+2. **Lab.** The formation drop-down is an order once the unit has been ordered: the same destination, the new formation, without stopping.
+   - At rest after arriving, the unit re-forms where it stands.
+   - After **Halt**, the next order uses the new formation.
+   - Before any order, the run starts again in it.
+   - The scenario script's later waypoints keep the formation last commanded (`LabRun.formation` reads it from the state, so replays reproduce it).
+
+**Measurements** (headless, the change ordered at T+60 s on a 400 m straight; `closest` is the least distance between two Marines after the change):
+
+| Organization | Change         | All in the new formation after | Closest | Outcome          |
+| ------------ | -------------- | -----------------------------: | ------: | ---------------- |
+| squad        | wedge → column |                         31.8 s |  3.16 m | arrived, no stop |
+| squad        | wedge → file   |                         31.5 s |  0.92 m | arrived, no stop |
+| squad        | column → line  |                           96 s |  3.23 m | arrived, no stop |
+| squad        | line → wedge   |                         27.6 s |  0.95 m | arrived, no stop |
+| fire team    | wedge → file   |                          7.6 s |  4.07 m | arrived, no stop |
+| element      | file → wedge   |                          6.9 s |  6.77 m | arrived, no stop |
+
+- Nobody was stuck in any change. Top speed was 1.3 × pace, and sideways speed at most 0.40 m/s.
+- **Column → line** is the slowest: the rear team of a 100 m column comes 60–70 m forward and 40 m out, closing at 0.77 m/s (1.82 m/s against the unit's 1.05 m/s).
+  - After 60 s the unit returns to full pace, and the last two Marines close the remaining distance at 0.4 m/s.
+  - A squad shaking out from column into line does take time. Whether the unit should slow more for large changes is open for your review.
+
+**Tests:**
+
+- wedge to column on the move: the old task ends `superseded`, the new one `arrived`; the unit never stops; nobody is stuck; nobody comes within 0.6 m; everyone ends fallen in;
+- wedge to line at rest: re-forms where it stands.
+
+**Browser.**
+
+- The drop-down mid-move replaced the task with a continuing one. The column formed over about 30 s while the squad kept walking.
+- The run arrived with no collisions, nobody stuck and no stop.
+- **Replay & verify** matched all 233 seconds.

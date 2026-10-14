@@ -89,6 +89,7 @@ export interface LabRun {
   readonly organization: TraineeOrganization;
   /** The ordered unit's simulation id. */
   readonly unitId: string;
+  /** The formation last commanded (the spec's, until an order changes it). */
   readonly formation: FormationSpec;
   /** Every command submitted, in order (with any added later by the lab). */
   readonly commands: SimCommand[];
@@ -195,6 +196,10 @@ export function createLabRun(
   const origins: CommandOrigin[] = [];
   const slotHolder = new Map(instance.members.map((m) => [m.slotId, m.soldierId]));
   let next = 0;
+  /** The formation last ordered to the unit (later legs keep it), else the spec's. */
+  const commanded = (): FormationSpec =>
+    sim.state.behavior?.tasks.filter((t) => t.unitId === unitId).at(-1)?.order.formation ??
+    formation;
 
   const submit = (command: SimCommand, origin: CommandOrigin = 'user') => {
     sim.submit(command);
@@ -213,7 +218,7 @@ export function createLabRun(
           kind: 'moveInFormation',
           destination,
           ...(next === 0 && spec.via ? { via: spec.via } : {}),
-          formation,
+          formation: commanded(),
           pace: spec.pace,
         },
       },
@@ -250,7 +255,9 @@ export function createLabRun(
     sim,
     organization,
     unitId,
-    formation,
+    get formation() {
+      return commanded();
+    },
     commands,
     origins,
     soldierOf: (slotId) => slotHolder.get(slotId),

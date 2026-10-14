@@ -1,6 +1,7 @@
 import { resolveSlot, rosterTree, type RosterUnit } from '#exercise';
 import {
   acceptanceFailures,
+  buildFormationSpec,
   DEFAULT_FORMATION,
   formationsFor,
   formationTemplate,
@@ -257,6 +258,15 @@ export function startBehaviorLab(root: HTMLElement): () => void {
   };
   let weaponMap = weapons();
 
+  /** The formation chosen in the controls, built for this run's organization and spacing. */
+  const commandedFormation = () => {
+    const org = session.head.organization;
+    const root = org.template.units.find((u) => u.parentId === null)?.id ?? '';
+    return buildFormationSpec(org, root, settings.formation, {
+      interval: session.spec.interval,
+      elementSpacing: session.spec.elementSpacing,
+    });
+  };
   const order = (point: MapPoint) => {
     session.submit({
       type: 'orderUnit',
@@ -265,7 +275,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       order: {
         kind: 'moveInFormation',
         destination: point,
-        formation: session.head.formation,
+        formation: commandedFormation(),
         pace: session.spec.pace,
       },
     });
@@ -337,10 +347,39 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       settings.formation = DEFAULT_FORMATION[settings.organization];
     });
   });
+  // A new formation is an order: once the unit has been ordered, it goes on
+  // to the same destination in the new formation, without stopping, its
+  // Marines making for their new slots on the move (at rest, it re-forms
+  // where it stands). Before any order, the run starts again in it.
   input('formation').addEventListener('change', (e) => {
-    changed(() => {
-      settings.formation = (e.target as HTMLSelectElement).value;
+    const id = (e.target as HTMLSelectElement).value;
+    const last = session.head.sim.state.behavior?.tasks.filter((t) => t.unitId === unitId()).at(-1);
+    if (last?.outcome === 'cancelled') {
+      // Halted: the next order uses it.
+      settings.formation = id;
+      return;
+    }
+    if (!last) {
+      changed(() => {
+        settings.formation = id;
+      });
+      return;
+    }
+    settings.formation = id;
+    const formation = commandedFormation();
+    session.submit({
+      type: 'orderUnit',
+      tick: 0,
+      unitId: orgUnitId(unitId()),
+      order: {
+        kind: 'moveInFormation',
+        destination: last.order.destination,
+        formation,
+        pace: last.order.pace ?? session.spec.pace,
+        ...(last.order.finalFacing === undefined ? {} : { finalFacing: last.order.finalFacing }),
+      },
     });
+    playing = true;
   });
   for (const [name, key] of [
     ['interval', 'interval'],
@@ -629,7 +668,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     const p = task.pace;
     detail.innerHTML = `<h2>UNIT ${escape(task.unitId)} · TASK ${escape(task.taskId)}</h2><dl>
       <dt>Phase</dt><dd>${task.phase}${task.outcome ? ` (${task.outcome})` : ''}</dd>
-      <dt>Formation</dt><dd>${escape(formationTemplate(session.spec.formation).name)} · d ${String(session.spec.interval)} m</dd>
+      <dt>Formation</dt><dd>${escape(formationTemplate(settings.formation).name)} · d ${String(session.spec.interval)} m</dd>
       <dt>Anchor</dt><dd>${task.anchorS.toFixed(1)} / ${task.routeLength.toFixed(1)} m · ${task.anchorSpeed.toFixed(2)} m/s</dd>
       <dt>Pace law</dt><dd>wants ${p.want.toFixed(2)} m/s, limited by ${p.limitedBy}</dd>
       <dt>Worst lag</dt><dd>${p.worstLag.toFixed(2)} m ${p.worstLagId ? `(${escape(p.worstLagId)})` : ''}</dd>

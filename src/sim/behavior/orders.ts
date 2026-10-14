@@ -11,6 +11,7 @@ import { arrangeFormation } from './arrange';
 import { buildGroupRoute, routeAt, routePoint } from './route';
 import type {
   AgentOverride,
+  FormationSpec,
   AgentState,
   BehaviorState,
   GroupRoute,
@@ -184,17 +185,18 @@ export function applyOrderUnit(
     }
   }
 
-  // A unit already on the move in the same formation goes straight on to
-  // the new destination (consecutive waypoints without stopping): the new
-  // route begins with the stretch of the old one its Marines still occupy,
-  // so their slots do not jump, and the anchor keeps its place and speed.
-  const formationKey = canonicalEncode(order.formation);
+  // A unit already on the move goes straight on (consecutive waypoints, or
+  // a new formation, without stopping): the new route begins with the
+  // stretch of the old one its Marines still occupy, and the anchor keeps
+  // its place and speed. In the same formation the Marines keep their
+  // slots; in a new one they make for their new slots on the move, as when
+  // falling in.
   const previous = state.behavior?.tasks.find(
-    (t) =>
-      t.unitId === command.unitId &&
-      (t.phase === 'moving' || t.phase === 'settling') &&
-      canonicalEncode(t.order.formation) === formationKey,
+    (t) => t.unitId === command.unitId && (t.phase === 'moving' || t.phase === 'settling'),
   );
+  const sameFormation =
+    previous !== undefined &&
+    canonicalEncode(previous.order.formation) === canonicalEncode(order.formation);
   // The unit's leader, when he takes part, steps off first; the formation is
   // arranged (which team leads, which side) to ask the least walking of the
   // rest from where they stand. A continued order keeps its arrangement.
@@ -216,14 +218,20 @@ export function applyOrderUnit(
   const facing = leader?.azimuth ?? members[0]?.azimuth ?? 0;
   const heading =
     hl > 1e-6 ? { x: hx / hl, y: hy / hl } : { x: Math.sin(facing), y: Math.cos(facing) };
-  const formation =
-    previous?.formation ??
-    arrangeFormation(
-      order.formation,
-      new Map(members.map((s) => [s.id as string, { x: s.position.x, y: s.position.y }])),
-      heading,
-      leader?.id ?? null,
-    );
+  const positions = new Map(
+    members.map((s) => [s.id as string, { x: s.position.x, y: s.position.y }]),
+  );
+  let formation: FormationSpec;
+  if (previous && sameFormation) {
+    formation = previous.formation;
+  } else if (previous) {
+    // A new formation on the move: arranged round the Marines' centre,
+    // facing along the route where the anchor is.
+    const along = routeAt(previous.route, previous.anchorS, routePoint());
+    formation = arrangeFormation(order.formation, positions, { x: along.tx, y: along.ty }, null);
+  } else {
+    formation = arrangeFormation(order.formation, positions, heading, leader?.id ?? null);
+  }
   const laid = flattenFormation(formation);
   let rc = 0;
   let bc = 0;
@@ -368,7 +376,7 @@ export function applyOrderUnit(
       vy: carried.get(soldier.id)?.vy ?? 0,
       latched: false,
       // Marines already in formation (a continued order) have fallen in.
-      joined: carried.has(soldier.id),
+      joined: sameFormation && carried.has(soldier.id),
       override: null,
       farSince: null,
       straggling: false,
