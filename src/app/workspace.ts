@@ -156,6 +156,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         </div>
         <div class="sim-row">
           <button class="action" data-ui="execute" title="Commit the BLUEFOR plans and move into position">Move</button>
+          <button data-ui="execute-instant" title="Put BLUEFOR in position at once: the move is simulated in full, without waiting for it">Instant</button>
           <button data-ui="pause" title="Pause (Space)">Pause</button>
           <button data-ui="resume" title="Commit changed plans and continue (Space)">Resume</button>
         </div>
@@ -619,6 +620,15 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   ui('execute').addEventListener('click', () => {
     if (stage !== 'bluefor') return;
     exerciseStage.execute();
+  });
+  // Instant: the occupation is stepped through within the click (every tick
+  // simulated and recorded, as a normal Move), from planning or mid-move.
+  ui('execute-instant').addEventListener('click', () => {
+    const e = exercise;
+    if (stage !== 'bluefor' || !e) return;
+    if (e.phase === 'bluforPlanning') exerciseStage.execute();
+    for (let i = 0; i < 30 * 900 && e.phase === 'bluforOccupation' && !e.paused; i += 1)
+      exerciseStage.collect(e.advance(1 / 30));
   });
   ui('pause').addEventListener('click', () => {
     if (stage === 'bluefor' || stage === 'opfor') exerciseStage.pause();
@@ -1302,6 +1312,11 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     ui('execute').hidden = stage !== 'bluefor';
     disable(button('execute'), e.phase !== 'bluforPlanning');
     ui('execute').classList.toggle('ready', e.phase === 'bluforPlanning');
+    ui('execute-instant').hidden = stage !== 'bluefor';
+    disable(
+      button('execute-instant'),
+      !(e.phase === 'bluforPlanning' || (e.phase === 'bluforOccupation' && !e.paused)),
+    );
     disable(button('pause'), !live || !exerciseStage.isRunning());
     disable(button('resume'), !live || !exerciseStage.canResume());
     for (const { scale, b } of speedButtons) {
