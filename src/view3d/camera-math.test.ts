@@ -68,7 +68,9 @@ describe('camera constraints', () => {
   it('keep the camera above the ground', () => {
     const g = ground(100, -200) ?? 0;
     expect(keepAboveGround({ x: 100, y: g - 50, z: -200 }, ground).y).toBe(g + GROUND_CLEARANCE_M);
-    expect(keepAboveGround({ x: 100, y: g + 1, z: -200 }, ground).y).toBe(g + GROUND_CLEARANCE_M);
+    expect(keepAboveGround({ x: 100, y: g + GROUND_CLEARANCE_M / 2, z: -200 }, ground).y).toBe(
+      g + GROUND_CLEARANCE_M,
+    );
     expect(keepAboveGround({ x: 100, y: g + 300, z: -200 }, ground).y).toBe(g + 300);
     // Off the battlefield there is no ground to keep above.
     expect(keepAboveGround({ x: 9000, y: -5, z: 0 }, ground).y).toBe(-5);

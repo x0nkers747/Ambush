@@ -33,14 +33,14 @@ export interface BattlefieldExtent {
   readonly maxY: number;
 }
 
-/** The camera never comes closer to the ground than this, in metres. */
-export const GROUND_CLEARANCE_M = 2;
+/** The camera never comes closer to the ground than this, in metres (about eye level when kneeling). */
+export const GROUND_CLEARANCE_M = 0.5;
 /** The camera's elevation angle in the default view: 40° below the horizon, looking north. */
 export const DEFAULT_PITCH_DEG = 40;
 /** The orbit never goes past this angle from straight down, so the view never flips under the ground. */
 export const MAX_POLAR_DEG = 88;
-/** Closest zoom to the focus point, in metres. */
-export const MIN_DISTANCE_M = 15;
+/** Closest zoom to the focus point, in metres: close enough to see a soldier's hands. */
+export const MIN_DISTANCE_M = 2;
 
 /** The farthest zoom: 2.5 battlefield widths. */
 export function maxDistance(extent: BattlefieldExtent): number {
