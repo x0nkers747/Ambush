@@ -125,9 +125,16 @@ function surfaceOf(road: Road, urban: boolean): RoadSurface {
     case 'track':
       return RoadSurface.Track;
     case 'path':
-      return urban ? RoadSurface.Paving : RoadSurface.Dirt;
+      // Without a surface tag: pavements and crossings (footways) and cycleways are
+      // made up; a `highway=path` is a trail, paved only in towns.
+      if (road.highway === 'cycleway') return RoadSurface.Asphalt;
+      if (urban || PAVED_PATHS.has(road.highway ?? '')) return RoadSurface.Paving;
+      return RoadSurface.Dirt;
   }
 }
+
+/** Paths that are made up unless tagged otherwise. */
+const PAVED_PATHS: ReadonlySet<string> = new Set(['footway', 'pedestrian', 'steps', 'corridor']);
 
 export interface RoadStamp {
   readonly index: number;

@@ -1,3 +1,4 @@
+import { PAVED_AREA_SURFACE } from '#sim/terrain-field';
 import { MATERIAL_TILE_M, MATERIALS } from './ground-textures';
 
 /** Shoulder or pavement widths beside a carriageway, metres: urban, rural asphalt, other surfaces. */
@@ -309,24 +310,27 @@ void labMaterial() {
   if (surf != 0) {
     float e = roadE;
     // Tracks and dirt paths: a slightly softer edge.
-    float soft = surf >= 4 ? 0.12 : 0.02;
+    float soft = surf == 4 || surf == 5 ? 0.12 : 0.02;
     road = 1.0 - smoothstep(-soft, soft, e);
+    // A mapped paved area (car park, square): its paving to its outline, no shoulder or verge.
+    bool area = surf == ${String(PAVED_AREA_SURFACE)};
     float shW = urban ? ${SHOULDER_M.urban.toFixed(2)} : (surf == 1 ? ${SHOULDER_M.asphalt.toFixed(2)} : ${SHOULDER_M.other.toFixed(2)});
-    float shoulder = (1.0 - road) * (1.0 - smoothstep(shW - soft, shW + soft, e));
+    float shoulder = area ? 0.0 : (1.0 - road) * (1.0 - smoothstep(shW - soft, shW + soft, e));
     hard = road + shoulder;
-    float verge = (1.0 - road - shoulder) * (1.0 - smoothstep(0.0, 1.6, e - shW + (n2 - 0.5) * 0.8));
+    float verge = area ? 0.0 : (1.0 - road - shoulder) * (1.0 - smoothstep(0.0, 1.6, e - shW + (n2 - 0.5) * 0.8));
     float keep = 1.0 - road - shoulder;
     for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= keep;
     float swSum = 0.0;
-    for (int i = 1; i < 6; i++) {
+    for (int i = 1; i < 7; i++) {
       sw[i] = smoothstep(0.2, 0.8, sw[i]);
       swSum += sw[i];
     }
-    for (int i = 1; i < 6; i++) sw[i] = swSum > 0.0 ? sw[i] / swSum : (i == surf ? 1.0 : 0.0);
+    for (int i = 1; i < 7; i++) sw[i] = swSum > 0.0 ? sw[i] / swSum : (i == surf ? 1.0 : 0.0);
     w[0] += road * sw[1];
     w[8] += road * sw[2];
     w[1] += road * sw[3];
     w[2] += road * sw[5];
+    w[8] += road * sw[${String(PAVED_AREA_SURFACE)}];
     // Track: grass down the middle, earth in the wheel ruts.
     float mid = 1.0 - smoothstep(-1.05, -0.8, roadE + (n1 - 0.5) * 0.2);
     w[3] += road * sw[4] * mid;
@@ -334,9 +338,10 @@ void labMaterial() {
     w[1] += road * sw[4] * (1.0 - mid) * 0.2;
     // Shoulders: paving in towns, gravel beside asphalt and gravel roads, earth otherwise.
     float paved = sw[1] + sw[2] + sw[3];
-    w[8] += shoulder * (urban ? paved : 0.0);
+    // (Paved paths are edged with paving everywhere.)
+    w[8] += shoulder * (urban ? paved : sw[2]);
     w[1] += shoulder * (urban ? 0.0 : sw[1] + sw[3]);
-    w[2] += shoulder * (sw[4] + sw[5] + (urban ? 0.0 : sw[2]));
+    w[2] += shoulder * (sw[4] + sw[5]);
     w[2] += verge * 0.2;
     w[1] += verge * 0.1 * sw[1];
   }

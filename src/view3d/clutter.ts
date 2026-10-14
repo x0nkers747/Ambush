@@ -23,6 +23,7 @@ import {
   type TerrainSurface,
 } from '#sim/terrain-field';
 import { ROCK_FROM, SHOULDER_M } from './terrain-shader';
+import { PAVED_AREA_SURFACE } from '#sim/terrain-field';
 
 // Near-field ground clutter (research §5.4): grass clumps, weeds, pebbles and
 // leaf litter, GPU-instanced (one draw call per kind), placed per 4 m cell
@@ -317,14 +318,18 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
           if (f.shore < 0.15 || f.building < 0.5) continue;
           // The carriageway and its shoulder, as wide as the ground's shader
           // draws them (and a little more).
+          // A mapped paved area has no shoulder or verge.
+          const area = f.surf === PAVED_AREA_SURFACE;
           const bare =
             f.surf === RoadSurface.None
               ? -99
-              : (f.urban
-                  ? SHOULDER_M.urban
-                  : f.surf === RoadSurface.Asphalt
-                    ? SHOULDER_M.asphalt
-                    : SHOULDER_M.other) + 0.15;
+              : area
+                ? 0.1
+                : (f.urban
+                    ? SHOULDER_M.urban
+                    : f.surf === RoadSurface.Asphalt
+                      ? SHOULDER_M.asphalt
+                      : SHOULDER_M.other) + 0.15;
           const onRoad = f.road < bare;
           const roll = hash01(c * 131 + i, r, 3);
           const z = surface.heightAt(x, y);
@@ -334,7 +339,7 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
             // Track centres grow grass; carriageways and pavements nothing; shoulders some pebbles.
             if (f.surf === RoadSurface.Track && f.road < -1.0 && roll < 0.7)
               put(kinds.grass[i % 3] ?? kinds.weed, x, y, z, 0.6 + 0.4 * roll, yaw);
-            else if (f.road > -0.2 && f.surf !== RoadSurface.Paving && roll < 0.25)
+            else if (f.road > -0.2 && f.surf !== RoadSurface.Paving && !area && roll < 0.25)
               put(
                 kinds.pebble,
                 x,
@@ -348,7 +353,7 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
             continue;
           }
           // Thinner on the worn verge beside a road; none where slopes show rock.
-          const verge = bare < 0 ? 1 : Math.min(1, (f.road - bare) / 1.6);
+          const verge = bare < 0 || area ? 1 : Math.min(1, (f.road - bare) / 1.6);
           let grassy =
             f.grass *
             (1 - f.wet * 0.5) *

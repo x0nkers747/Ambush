@@ -35,6 +35,7 @@ export {
   createSurface,
   generateTile,
   MATERIAL_BYTES,
+  PAVED_AREA_SURFACE,
   ROAD_EDGE_RANGE,
   SHORE_RANGE,
   TILE_M,

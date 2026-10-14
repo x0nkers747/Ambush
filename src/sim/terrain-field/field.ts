@@ -7,6 +7,7 @@ import { channelEffect, channelLevelAt, channelStamps, type ChannelStamp } from 
 import { DECK_FADE_M, deckHalfWidth, deckHold, deckNear, type DeckAt } from './decks';
 import { coverLookAt, coverMap, RELIEF_WAVELENGTHS, type CoverMap } from './landcover';
 import { gradientNoise, smax, smin } from './noise';
+import { PAVED_REACH_M, pavedAreas, pavedDistance } from './paved';
 import {
   roadLevel,
   roadEffect,
@@ -69,6 +70,8 @@ export interface FieldSample {
   urban: number;
   /** 1 where the ground is paved (towns' streets and yards, mapped hard ground), else 0. */
   paved: number;
+  /** Signed distance to the nearest mapped paved area's edge (negative in it), metres; 99 when none near. */
+  pavedEdge: number;
 }
 
 export function emptySample(): FieldSample {
@@ -85,6 +88,7 @@ export function emptySample(): FieldSample {
     wet: 0,
     urban: 0,
     paved: 0,
+    pavedEdge: 99,
   };
 }
 
@@ -198,6 +202,7 @@ export function compileField(
   lap('pads');
   const channels = channelStamps(input.features.waterways ?? [], base, water);
   lap('channels');
+  const paving = pavedAreas(input.features);
 
   // Buckets: (kind, index, segment) triples of everything reaching each 32 m cell.
   const bc = Math.ceil((bounds.maxX - bounds.minX) / BUCKET_M) + 1;
@@ -244,6 +249,10 @@ export function compileField(
   channels.forEach((c, i) => {
     addLine(2, i, c.xy, c.extent);
   });
+  paving.forEach((p, i) => {
+    const r = PAVED_REACH_M;
+    add(4, i, 0, p.minX - r, p.minY - r, p.maxX + r, p.maxY + r);
+  });
   const buckets = lists.map((l) => Int32Array.from(l));
   let entries = 0;
   for (const b of buckets) entries += b.length / 3;
@@ -287,6 +296,7 @@ export function compileField(
     out.shore = 99;
     out.shoreKind = 0;
     out.building = 99;
+    out.pavedEdge = 99;
     out.grass = look[4] ?? 0;
     out.soil = look[5] ?? 0;
     out.litter = look[6] ?? 0;
@@ -404,6 +414,21 @@ export function compileField(
             apply(-1e9, hold.hi, hold.w, PRI.deck);
           continue;
         }
+        if (kind === 4) {
+          if (curKind !== -1) finish();
+          const area = paving[index];
+          if (
+            !area ||
+            x < area.minX - PAVED_REACH_M ||
+            x > area.maxX + PAVED_REACH_M ||
+            y < area.minY - PAVED_REACH_M ||
+            y > area.maxY + PAVED_REACH_M
+          )
+            continue;
+          const d = pavedDistance(area, x, y);
+          if (d < out.pavedEdge) out.pavedEdge = d;
+          continue;
+        }
         if (kind === 1) {
           if (curKind !== -1) finish();
           const pad = pads[index];
@@ -510,8 +535,10 @@ export function compileField(
     // walls, with gardens and lawns behind.
     const paved = look[8] ?? 0;
     const town = paved > 0 && paved < 0.999;
+    // Mapped hard ground by its outline (exact edges); the cover raster's 2 m
+    // cells only for towns' frontage.
     out.paved =
-      paved >= 0.999 ||
+      out.pavedEdge < 0 ||
       (town && paved > 0.35 && (out.roadEdge < FRONTAGE_M || out.building < PATIO_M))
         ? 1
         : 0;

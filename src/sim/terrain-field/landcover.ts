@@ -103,8 +103,10 @@ export const COVER_LOOK: Readonly<Record<Cover, CoverLook>> = {
     litter: 0.3,
     paved: 0,
   },
-  // Car parks, squares, pedestrian areas, mapped carriageways and footways.
-  [Cover.Paved]: { relief: [0, 0, 0, 0], grass: 0, soil: 0, litter: 0, paved: 1 },
+  // Car parks, squares, pedestrian areas, mapped carriageways and footways: flat.
+  // Their paving comes from their exact outlines (paved.ts), not from these 2 m
+  // cells (whose edges are steps): here, grass as open ground.
+  [Cover.Paved]: { relief: [0, 0, 0, 0], grass: 0.95, soil: 0.05, litter: 0, paved: 0 },
 };
 
 const LAND_USE_COVER: Readonly<Record<LandUseKind, Cover>> = {

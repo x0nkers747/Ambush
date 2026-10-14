@@ -54,3 +54,10 @@ in detail, especially in the Netherlands:
   - gardens, lawns and open ground green behind the frontage;
   - mapped hard ground as paving;
   - parks, lawns and grass as grass.
+- **Exact outlines** (2026-10-13). Mapped hard ground is drawn to its outline, not to the land
+  cover's 2 m cells (whose edges showed as steps): the field gives each ground sample its signed
+  distance to the nearest mapped paved area (`terrain-field/paved.ts`), and off the carriageways
+  the nearer of that and the road edge is stored in the road edge channel, with surface code 6
+  (`PAVED_AREA_SURFACE`): paving with no shoulder or verge. Footways, pedestrian ways, steps and
+  corridors without a surface tag are paved everywhere (crossings showed as dirt outside towns);
+  a `highway=path` stays dirt outside towns, and cycleways are asphalt.

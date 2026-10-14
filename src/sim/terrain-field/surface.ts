@@ -98,12 +98,16 @@ const enc = (v: number, lo: number, hi: number) => {
 export const ROAD_EDGE_RANGE = [-4, 12] as const;
 export const SHORE_RANGE = [-6, 10] as const;
 export const BUILDING_RANGE = [0, 8] as const;
+/** The surface code of mapped paved areas (after the road surfaces, 1–5). */
+export const PAVED_AREA_SURFACE = 6;
 
 /**
  * Generates one tile: every sample is `field.sample` at its lattice point.
  * Material bytes per sample: road edge distance, shore distance, building
  * distance, surface codes (road surface | shore kind << 3 | urban 64 | paved 128), grass, soil,
- * litter, wetness.
+ * litter, wetness. Off the carriageways, a mapped paved area nearer than the
+ * road edge takes the road edge's place, with surface `PAVED_AREA_SURFACE`
+ * (its outline exact, as a road's); the paved flag is then for towns' frontage.
  */
 export function generateTile(
   field: TerrainField,
@@ -141,11 +145,15 @@ export function generateTile(
         if (h > max) max = h;
       }
       const m = i * MATERIAL_BYTES;
-      material[m] = enc(s.roadEdge, ROAD_EDGE_RANGE[0], ROAD_EDGE_RANGE[1]);
+      const area = s.roadEdge >= 0 && s.pavedEdge < s.roadEdge;
+      material[m] = enc(area ? s.pavedEdge : s.roadEdge, ROAD_EDGE_RANGE[0], ROAD_EDGE_RANGE[1]);
       material[m + 1] = enc(s.shore, SHORE_RANGE[0], SHORE_RANGE[1]);
       material[m + 2] = enc(s.building, BUILDING_RANGE[0], BUILDING_RANGE[1]);
       material[m + 3] =
-        s.roadSurface | (s.shoreKind << 3) | (s.urban > 0.5 ? 64 : 0) | (s.paved > 0 ? 128 : 0);
+        (area ? PAVED_AREA_SURFACE : s.roadSurface) |
+        (s.shoreKind << 3) |
+        (s.urban > 0.5 ? 64 : 0) |
+        (s.paved > 0 && s.pavedEdge >= 0 ? 128 : 0);
       material[m + 4] = enc(s.grass, 0, 1);
       material[m + 5] = enc(s.soil, 0, 1);
       material[m + 6] = enc(s.litter, 0, 1);

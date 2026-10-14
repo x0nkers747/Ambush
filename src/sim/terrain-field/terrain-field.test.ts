@@ -19,7 +19,9 @@ import {
   generateTile,
   gradientNoise,
   levelAt,
+  MATERIAL_BYTES,
   nearestOnRoad,
+  PAVED_AREA_SURFACE,
   RoadSurface,
   tileHash,
   type TerrainField,
@@ -549,4 +551,81 @@ describe('terrain field: the sampled surface', () => {
       });
     });
   }
+});
+
+describe('mapped paved areas and footways', () => {
+  // A car park with a slanting edge, and a footway in open country.
+  const lot: Vec2[] = [
+    { x: -40, y: -40 },
+    { x: 37, y: -40 },
+    { x: 13, y: 40 },
+    { x: -40, y: 40 },
+  ];
+  const own: EnvironmentFeatures = {
+    roads: [
+      {
+        id: 'footway',
+        roadClass: 'path',
+        highway: 'footway',
+        widthMeters: 1.5,
+        centerline: [
+          { x: 100, y: -150 },
+          { x: 100, y: 150 },
+        ],
+      },
+      {
+        id: 'trail',
+        roadClass: 'path',
+        highway: 'path',
+        widthMeters: 1,
+        centerline: [
+          { x: 150, y: -150 },
+          { x: 150, y: 150 },
+        ],
+      },
+    ],
+    buildings: [],
+    vegetation: [],
+    landUse: [{ id: 'lot', kind: 'paved', boundary: lot }],
+  };
+  const terrain = createSyntheticTerrain(
+    { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
+    () => 50,
+    own,
+  );
+  const f = compileField(
+    { heightfield: terrain.heightfield, features: terrain.features, water: null },
+    { seed: 1, relief: 0 },
+  );
+  const s = emptySample();
+
+  it('gives the exact distance to a paved area’s outline, so its edges are straight', () => {
+    // Along the slanting edge (x = 37 - 0.3 y), half a metre out: the same distance anywhere.
+    const n = Math.hypot(1, 0.3);
+    for (const y of [-31.3, -7.9, 12.6, 29.1]) {
+      const x = 37 - 0.3 * (y + 40) + 0.5 * (1 / n);
+      f.sample(x, y + 0.5 * (0.3 / n), s);
+      expect(s.pavedEdge).toBeCloseTo(0.5, 6);
+      expect(s.paved).toBe(0);
+    }
+    f.sample(0, 0, s);
+    expect(s.pavedEdge).toBeLessThan(-10);
+    expect(s.paved).toBe(1);
+  });
+
+  it('stores a paved area in the road edge channel, as its own surface', () => {
+    // Tile (3, 3) starts at map -200 + 3 × 64 = -8; lattice (9, 9) (one padding sample) is (0, 0).
+    const tile = generateTile(f, 1, -200, -200, 0, 3, 3);
+    const stride = Math.sqrt(tile.heights.length);
+    const m = (9 * stride + 9) * MATERIAL_BYTES;
+    expect((tile.material[m + 3] ?? 0) & 7).toBe(PAVED_AREA_SURFACE);
+    expect((tile.material[m + 3] ?? 0) & 128).toBe(0);
+  });
+
+  it('paves footways but not trails, without a surface tag', () => {
+    f.sample(100, 0, s);
+    expect(s.roadSurface).toBe(RoadSurface.Paving);
+    f.sample(150, 0, s);
+    expect(s.roadSurface).toBe(RoadSurface.Dirt);
+  });
 });
