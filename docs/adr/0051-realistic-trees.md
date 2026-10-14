@@ -137,10 +137,37 @@ across, so some floated free of any branch, and each clump was sparse. Now:
 Cost: a near broadleaf tree is 760–990 triangles (was 570–720), a medium one 190–240 (was
 140–190). A Quantico wood view drew 3.72 million triangles (was 3.55), with the same draw calls.
 
+**Step 2: impostors for the far level** (`tree-impostors.ts`). The far level's few cards showed
+each leaf cluster at four times its size, so a distant wood looked like giant yellow-green
+leaves (the speckled woods seen from a kilometre or more). Near and medium levels looked alike at
+400 m and 1,000 m; only the far level differed.
+
+1. **Photographs.** Each species present (variant 0, near level) is photographed from
+   `IMPOSTOR_GRID`² = 36 directions over the upper half-sphere (a hemi-octahedral grid), at
+   `IMPOSTOR_PX` = 48 px, into one layer of a half-float texture array (linear light, before
+   tone mapping). About 0.9 MB of video memory per species, with mipmaps (17 MB for all 19).
+2. **Lit as in the game.** The sun does not move, so the photographs are lit by the scene's sun
+   and sky with the foliage material (light through leaves included) and its own shadows.
+   Each tree is photographed among invisible copies of itself that only cast shadows
+   (`NEIGHBOUR_SPACING_M` 6.5 m out to `NEIGHBOUR_REACH_M` 30 m): alone in the sun, the
+   impostors were about twice as bright as a near wood.
+3. **No holes.** Each photograph is drawn `SUPERSAMPLE` = 4 times larger and averaged down
+   (premultiplied), so leaves give partial coverage. Point-sampled, a crown came out as
+   scattered dots.
+4. **Drawn** as one quad per tree facing the camera, scaled by the tree's height and (widened)
+   width, blending the four nearest photographs; fog, tone mapping and the tree's tint apply.
+   Pixels under `IMPOSTOR_CUT` = 0.22 coverage are not drawn (0.32 left woods thin; 0.18
+   brightened crown edges). Far trees keep one orientation (their photographs are lit for it),
+   and cast no shadow, as before.
+5. **When.** Baked once the leaves' photographs are in (about 20 ms per species). If the bake
+   fails, the far level's cards stay. The view passes its renderer and lights to the forest.
+
+At about a kilometre the impostors are near the full models' tone, a little greener and
+smoother (a tuning knob: a colour correction in the impostor shader). Draw calls and
+triangles are unchanged or lower (two triangles a tree instead of about twenty).
+
 ### Phase 3: still to do
 
-- Impostors (pictures of the near models) for distant trees, so the mid-distance and air views
-  keep the near trees' look.
 - The conifers (`pine`, `scrubPine`, `cone`): whorled branches and tufts at the tips, as above.
 - Trunk taper, root flare and a bark per species.
 - Forest density matched to a closed canopy where the woods are mapped as closed.

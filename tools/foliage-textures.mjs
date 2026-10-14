@@ -2,6 +2,7 @@
 // from ambientCG 2K-JPG downloads (each set unzipped into <dir>/<AssetId>/), in Chrome
 // (for JPEG decoding). Playwright is not a dependency of the game: run it with one installed,
 //   node tools/foliage-textures.mjs <ambientCG dir> src/view3d/textures/foliage
+// then format the JSON: npx prettier --write src/view3d/textures/foliage/leaves.json
 // Leaves: each set's leaves cut out by its opacity map, turned with the long axis along +x
 // (stalk at x = 0), colour-matched to the species' colour, packed into one sprite sheet
 // (leaves.png + leaves.json). Barks: colour and OpenGL normal maps at 512 px.

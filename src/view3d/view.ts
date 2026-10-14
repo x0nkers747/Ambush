@@ -437,6 +437,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
           surface,
           settings: quality.vegetation,
           shadows: vegetationShadows(quality),
+          impostors: { renderer, lighting: { sunDirection, sun, ambient } },
         });
         generation.applyMs = performance.now() - applying;
         // Compile their shaders without blocking (where the browser can),

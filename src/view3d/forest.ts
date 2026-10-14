@@ -13,6 +13,7 @@ import {
   ShaderChunk,
   Vector3,
   type PerspectiveCamera,
+  type WebGLRenderer,
 } from 'three';
 import type { TerrainField, TerrainSurface } from '#sim/terrain-field';
 import { fromThree } from './axes';
@@ -27,7 +28,14 @@ import {
   createFoliageTextures,
   type FoliageTextures,
 } from './foliage-atlas';
-import { SPECIES, treeModels, type SpeciesName, type TreeModel } from './tree-models';
+import {
+  SPECIES,
+  treeModels,
+  type SpeciesName,
+  type TreeGeometry,
+  type TreeModel,
+} from './tree-models';
+import { bakeTreeImpostors, type ImpostorLighting, type TreeImpostors } from './tree-impostors';
 
 // The vegetation (docs/adr/0049, research §5.5). Where trees and shrubs
 // stand is the placement's (vegetation-placement.ts: spacing, stands, forest
@@ -291,6 +299,23 @@ export interface ForestOptions {
   readonly surface: TerrainSurface;
   readonly settings: LodSettings;
   readonly shadows: { cast: boolean; receive: boolean };
+  /**
+   * Distant trees as impostors (tree-impostors.ts), photographed with this
+   * renderer and lighting once the leaves' photographs are in. Without it,
+   * the far level's cards are drawn.
+   */
+  readonly impostors?: { readonly renderer: WebGLRenderer; readonly lighting: ImpostorLighting };
+}
+
+/** A tree model's level as a geometry for the foliage material. */
+function treeGeometry(g: TreeGeometry): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(g.positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(g.normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(g.uvs, 2));
+  geometry.setAttribute('color', new BufferAttribute(g.colors, 3));
+  geometry.setAttribute('sway', new BufferAttribute(g.sway, 1));
+  return geometry;
 }
 
 export function createForest(o: ForestOptions): VegetationLayer & {
@@ -421,15 +446,8 @@ export function createForest(o: ForestOptions): VegetationLayer & {
       // Buffers start small and grow as needed: updating part of a large
       // buffer the GPU is drawing from can cost a copy of all of it.
       const capacity = Math.max(1, Math.min(limit, INITIAL_CAPACITY));
-      const geometry = new BufferGeometry();
-      if (tree) {
-        const g = tree.lods[band] ?? tree.lods[0];
-        geometry.setAttribute('position', new BufferAttribute(g.positions, 3));
-        geometry.setAttribute('normal', new BufferAttribute(g.normals, 3));
-        geometry.setAttribute('uv', new BufferAttribute(g.uvs, 2));
-        geometry.setAttribute('color', new BufferAttribute(g.colors, 3));
-        geometry.setAttribute('sway', new BufferAttribute(g.sway, 1));
-      } else if (prop !== undefined) {
+      const geometry = tree ? treeGeometry(tree.lods[band] ?? tree.lods[0]) : new BufferGeometry();
+      if (!tree && prop !== undefined) {
         const data = props[prop]?.lods[band];
         if (data) {
           geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
@@ -484,6 +502,60 @@ export function createForest(o: ForestOptions): VegetationLayer & {
       new Vector3(x0 + tiles.size + m, (tiles.zMax[t] ?? 0) + 15, -(y0 - m)),
     );
   });
+
+  // Distant trees: once the leaves' photographs are in, each species drawn
+  // here is photographed (variant 0, near level) and its far meshes draw the
+  // impostors instead of the far level's cards.
+  let impostors: TreeImpostors | null = null;
+  let disposed = false;
+  const useImpostors = o.impostors;
+  if (useImpostors)
+    void atlas.loaded.then(() => {
+      if (disposed) return;
+      const present = new Set<SpeciesName>();
+      trees.forEach((t, mi) => {
+        if ((counts[mi] ?? 0) > 0) present.add(t.species);
+      });
+      const species = [...present];
+      const sources = species.map((name) => {
+        const t =
+          trees.find((m) => m.species === name && m.variant === 0) ??
+          trees.find((m) => m.species === name);
+        return treeGeometry(
+          t?.lods[0] ?? {
+            positions: new Float32Array(0),
+            normals: new Float32Array(0),
+            uvs: new Float32Array(0),
+            colors: new Float32Array(0),
+            sway: new Float32Array(0),
+            triangles: 0,
+          },
+        );
+      });
+      try {
+        const baked = bakeTreeImpostors(
+          useImpostors.renderer,
+          sources,
+          foliage,
+          useImpostors.lighting,
+        );
+        impostors = baked;
+        trees.forEach((t, mi) => {
+          const k = species.indexOf(t.species);
+          const mesh = models[mi]?.meshes[LOD_LEVELS - 1];
+          const model = baked.models[k];
+          if (!mesh || !model) return;
+          mesh.geometry.dispose();
+          mesh.geometry = baked.geometry;
+          mesh.material = baked.material(model);
+          mesh.castShadow = false;
+        });
+      } catch (error: unknown) {
+        console.warn('Distant trees are drawn without impostors.', error);
+      } finally {
+        for (const g of sources) g.dispose();
+      }
+    });
 
   let settings = forestBands(o.settings);
   const applyShadows = (s: { cast: boolean; receive: boolean }) => {
@@ -865,6 +937,8 @@ export function createForest(o: ForestOptions): VegetationLayer & {
         mesh.geometry.dispose();
         mesh.dispose();
       }
+      disposed = true;
+      impostors?.dispose();
       foliage.dispose();
       propMaterial.dispose();
       atlas.map.dispose();
