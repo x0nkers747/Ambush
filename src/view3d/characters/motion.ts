@@ -125,6 +125,8 @@ class Changes {
 interface CombatTimes {
   readonly shots: number[];
   downAt: number;
+  /** Who fired the shot that incapacitated the soldier, and when. */
+  hitBy: { readonly shooterId: string; readonly atSeconds: number } | null;
 }
 
 /**
@@ -144,7 +146,7 @@ export class SoldierMotion {
   private readonly posture: Changes;
   private readonly carry: Changes;
   private readonly status: Changes;
-  private combat: CombatTimes = { shots: [], downAt: -1 };
+  private combat: CombatTimes = { shots: [], downAt: -1, hitBy: null };
   private combatSeen = -1;
   private readonly id: string;
 
@@ -170,12 +172,14 @@ export class SoldierMotion {
   /** Brings the shot and incapacitation times up to date with the combat log (append-only). */
   updateCombat(combatLog: readonly CombatEvent[]): void {
     if (combatLog.length === this.combatSeen) return;
-    if (combatLog.length < this.combatSeen) this.combat = { shots: [], downAt: -1 };
+    if (combatLog.length < this.combatSeen) this.combat = { shots: [], downAt: -1, hitBy: null };
     for (let i = Math.max(0, this.combatSeen); i < combatLog.length; i += 1) {
       const e = combatLog[i];
       if (e?.type === 'shotFired' && e.shooterId === this.id) this.combat.shots.push(e.atSeconds);
       if (e?.type === 'soldierIncapacitated' && e.soldierId === this.id)
         this.combat.downAt = e.atSeconds;
+      if (e?.type === 'shotFired' && e.targetId === this.id && e.incapacitated)
+        this.combat.hitBy = { shooterId: e.shooterId, atSeconds: e.atSeconds };
     }
     this.combatSeen = combatLog.length;
   }
@@ -317,6 +321,19 @@ export class SoldierMotion {
       reloadT: -1,
       sinceDown: downAt >= 0 && te >= downAt - 1e-9 ? te - downAt : -1,
     };
+  }
+
+  /**
+   * Where the shot that incapacitated the soldier came from (map x, y), or
+   * null (no such shot in the combat log).
+   */
+  shooterPosition(): { x: number; y: number } | null {
+    const hit = this.combat.hitBy;
+    if (!hit) return null;
+    const i = this.log.indexOf(hit.shooterId);
+    if (i < 0) return null;
+    const s = this.log.read(i, Math.floor(hit.atSeconds * this.rate), this.e);
+    return { x: s.x, y: s.y };
   }
 
   /** Ground speed and travel angle at a tick (for the gait clock). */

@@ -4,6 +4,7 @@ import type { UnitMarker } from '../unit-markers';
 import { fingerprint, type PoseFingerprint } from './fingerprint';
 import { dressSoldier, loadSoldierAssets, type SoldierAssets } from './load';
 import { Puppet } from './puppet';
+import { useSoldierShadow } from './shadow';
 import { makeWeapon, weaponKindOf } from './weapon-map';
 import type { WeaponKind } from './weapons';
 
@@ -30,7 +31,7 @@ export interface AnimationClock {
 }
 
 /** How long the animation runs on after the timeline has ended (s). */
-export const AFTERMATH_SECONDS = 2;
+export const AFTERMATH_SECONDS = 3;
 
 /**
  * The aftermath clock: how far past an ended timeline the soldiers are
@@ -203,6 +204,8 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
       u.affiliation === 'friendly' ? a.materials.friendly : a.materials.enemy,
     );
     puppet.view.root.name = `soldier ${u.id}`;
+    useSoldierShadow(puppet.view.root);
+    if (puppet.view.weapon) useSoldierShadow(puppet.view.weapon.object);
     const indicator = new THREE.Mesh(indicatorGeometry, materials.friendly);
     indicator.renderOrder = 20;
     indicator.name = `indicator ${u.id}`;

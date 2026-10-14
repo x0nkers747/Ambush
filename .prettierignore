@@ -8,3 +8,4 @@ prototypes/*/dist/
 prototypes/*/results/
 prototypes/*/screenshots/
 public/characters/
+assets/reference/*.json

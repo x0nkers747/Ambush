@@ -47,7 +47,7 @@ sim (30 Hz ticks)  ──►  exercise: motion log (every tick)  ──►  view
    them. It never accumulates frame time. It blends:
    - locomotion: speed and direction blend space, crossfaded between postures;
    - the upper-body layer (the idle clip's calm upper body under the procedural hold);
-   - the incapacitation fall.
+   - the incapacitation (from the moment of the hit, the ragdoll: below).
 5. **Procedural layer** (`characters/character.ts`, `hands.ts`, `ik.ts`), as approved in the
    prototype:
    - feet on the ground (foot IK);
@@ -74,7 +74,7 @@ sim (30 Hz ticks)  ──►  exercise: motion log (every tick)  ──►  view
 | Engaging, or fired in the last 4 s             | Aimed: butt in the shoulder, sight line through the right eye, cheek on the stock                                                                |
 | Moving otherwise                               | Patrol carry, weapon across the body                                                                                                             |
 | A shot (combat log, exact time)                | Recoil (closed-form decay), muzzle flash for 45 ms                                                                                               |
-| Incapacitated (combat log or status)           | Weapon dropped; the death clip's collapse (from 1.55 s, sped up) completes in 1.2 s; lying still after                                           |
+| Incapacitated (combat log or status)           | Weapon dropped; the body falls as a ragdoll from its pose at the hit, pushed away from the shooter, onto the ground (`ragdoll.ts`)               |
 
 The gait phase advances by the distance covered divided by the blend's cycle distance, tick by
 tick (`gait.ts`, memoised), so the feet keep pace with the ground at any speed. The simulation's
@@ -138,10 +138,28 @@ Two three.js details had to be handled for exactness (both in `animator.ts`):
   backward. Before each update, the accumulator is reset to the original value.
 
 **Aftermath.** When the timeline has ended, the view lets the soldiers' animation run on for
-up to 2 s, so a fall under way finishes. Positions stay at the last tick. The timeline ends
+up to 3 s, so a fall under way finishes. Positions stay at the last tick. The timeline ends
 when the engagement is complete (the simulation stops a few hundredths of a second after the
 last casualty), or when the review is at its end. This is the only use of real time, and it
 applies past the end of the recorded timeline only.
+
+**Ragdoll** (`ragdoll.ts`). An incapacitated soldier falls as a ragdoll:
+
+- **The body:** 18 points (pelvis, hips, chest, shoulders, head, elbows, wrists, knees, ankles,
+  toes) joined by fixed-length bones, with a rigid torso and simple joint limits (no folding
+  flat, no splits).
+- **The start:** his pose at the moment of the hit, and his velocity just before it. The shot
+  pushes the upper body away from the shooter, and the feet slightly the other way, so the body
+  topples rather than folding in place.
+- **The fall:** gravity, onto `surfaceHeightAt` under each point (each point keeps its radius
+  above it), with friction. The bones are posed from the points.
+- **Determinism:** a fixed step (1/120 s) for 3 s from the hit, every step memoised. The body at
+  a time is the same however the time is reached: the replay tests are exact through falls.
+
+**Shadows** (`shadow.ts`). The sun's shadow has a 0.4 m normal bias, against speckled
+self-shadowing of the terrain. The ground therefore showed the shadow cast on a plane 0.4 m up,
+and a soldier's lowest 0.4 m cast none, so his shadow came loose from his feet. The soldiers are
+drawn into the shadow map 0.4 m higher, which puts their whole shadow at their feet.
 
 ## 6. Assets
 
@@ -215,7 +233,5 @@ The hands are measured from any five-fingered rig (`hands.ts`). Sighting needs e
 - **Walk blend.** The walk clip's measured speed (0.74 m/s on this rig) is below the game's
   1.5 m/s pace, so walking blends in 21 % of the jog. The feet stay synchronised through the
   gait phase.
-- **Casualty pose.** Fallen soldiers lie in the death clip's final pose, which does not adapt to
-  the slope.
 - **Draw calls.** About 38 draw calls per soldier. Above about 50 soldiers on this GPU, frame
   rate drops below 60; instancing is the next step.

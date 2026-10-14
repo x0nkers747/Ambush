@@ -49,6 +49,7 @@ import {
 import { emptyMotionSample } from '#exercise';
 import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
+import { SUN_NORMAL_BIAS } from './characters/shadow';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -301,7 +302,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   // with it: enough for the trees and buildings near where one is looking.
   sun.castShadow = quality.shadows !== null;
   sun.shadow.bias = -0.0005;
-  sun.shadow.normalBias = 0.4;
+  sun.shadow.normalBias = SUN_NORMAL_BIAS;
   const generator = createGenerator();
   const ambient = new HemisphereLight(0xd6e4f0, 0x6f7062, 1.0);
   scene.add(ambient);

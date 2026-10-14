@@ -1,4 +1,4 @@
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { CombatEvent, MotionLog } from '#exercise';
 import { Animator } from './animator';
 import type { CharacterAsset } from './asset';
@@ -12,6 +12,7 @@ import {
 import { GaitClock } from './gait';
 import { cycleDistanceFor } from './locomotion';
 import { type PoseInput, SoldierMotion } from './motion';
+import { Ragdoll } from './ragdoll';
 import type { WeaponInstance } from './weapons';
 
 // One soldier on screen (docs/character-animation.md): the model, its weapon
@@ -52,6 +53,8 @@ export class Puppet {
   private epoch: number;
   /** The last pose input (after `pose`). */
   input: PoseInput | null = null;
+  /** The fall, once the soldier is down (from the moment of the hit). */
+  private ragdoll: Ragdoll | null = null;
 
   constructor(asset: CharacterAsset, id: string, weapon: WeaponInstance | null, log: MotionLog) {
     this.id = id;
@@ -98,14 +101,45 @@ export class Puppet {
       this.epoch = log.epoch;
       this.motion = new SoldierMotion(log, this.id);
       this.animator = this.makeAnimator();
+      this.ragdoll = null;
     }
     this.motion.updateCombat(combatLog);
-    const input = this.motion.at(seconds);
+    let input = this.motion.at(seconds);
+    if (input.sinceDown >= 0) {
+      const downAt = input.time - input.sinceDown;
+      if (this.ragdoll?.downAt !== downAt) this.ragdoll = this.fall(downAt, surfaceAt);
+      input = this.motion.at(seconds);
+    }
+    this.posed(input, surfaceAt);
+    // Down: the body is the ragdoll's (the weapon falls as the hold lets go).
+    if (input.sinceDown >= 0) this.ragdoll?.pose(this.view, input.sinceDown);
+    this.input = input;
+    return input;
+  }
+
+  /** The animated pose for `input`: clips, then the procedural layer. */
+  private posed(input: PoseInput, surfaceAt: (x: number, y: number) => number): void {
     placeSoldier(this.view, input);
     this.animator.update(input);
     postProcess(this.view, input, POST, surfaceAt);
-    this.input = input;
-    return input;
+  }
+
+  /**
+   * The ragdoll for a hit at `downAt`: from the pose just before it (and
+   * 1/60 s earlier, for the body's velocity), pushed away from the shooter.
+   * A function of the logs alone, so it is the same however it is reached.
+   */
+  private fall(downAt: number, surfaceAt: (x: number, y: number) => number): Ragdoll {
+    const just = (dt: number) => {
+      this.posed(this.motion.at(downAt - dt), surfaceAt);
+      return Ragdoll.points(this.view);
+    };
+    const before = just(1 / 60 + 1e-6);
+    just(1e-6);
+    const from = this.motion.shooterPosition();
+    const at = this.view.root.position;
+    const push = from ? new THREE.Vector3(at.x - from.x, 0, at.z + from.y) : null;
+    return new Ragdoll(this.view, before, push, surfaceAt, downAt);
   }
 
   /** The playing clips' weights and times (for checks). */
