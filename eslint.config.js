@@ -60,7 +60,8 @@ const DETERMINISM_GLOBALS = [
 }));
 
 export default defineConfig(
-  { ignores: ['dist/', '.tsbuild/', 'node_modules/'] },
+  // tools/*.mjs: asset preparation scripts run outside the game (with Playwright, not a dependency).
+  { ignores: ['dist/', '.tsbuild/', 'node_modules/', 'tools/*.mjs'] },
 
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

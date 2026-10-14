@@ -2,10 +2,12 @@ import {
   DataTexture,
   LinearFilter,
   LinearMipmapLinearFilter,
+  NoColorSpace,
   RGBAFormat,
   SRGBColorSpace,
   UnsignedByteType,
 } from 'three';
+import leafSheet from './textures/foliage/leaves.json';
 
 // The vegetation's texture (docs/adr/0049, research §5.5): one atlas, drawn in the
 // browser at start-up (no files), of leaf clusters, needle tufts and sprays,
@@ -16,6 +18,12 @@ import {
 // picture: a cluster drawn on a twig framework, leaves shaded by depth.
 // Transparent texels take their cell's mean colour so mipmaps do not darken
 // the leaves' edges.
+//
+// Photographs (docs/adr/0051, textures/foliage/CREDITS.md) replace the drawn
+// leaves and barks once loaded: each cluster is laid out as before, with
+// photographed leaves of the species (or the nearest available) along its
+// twigs, and barks are tiling photographs with a normal map. Until then, or
+// if they cannot be loaded, the drawn atlas is used.
 
 export const ATLAS_PX = 2048;
 export const ATLAS_CELLS = 4;
@@ -194,7 +202,7 @@ function leafPath(ctx: Ctx, shape: Shape, len: number, wid: number, r: () => num
 }
 
 /** A leaf cluster: twigs from the centre, leaves along them, back ones darker. */
-function drawCluster(ctx: Ctx, look: Look, r: () => number) {
+function drawCluster(ctx: Ctx, look: Look, r: () => number, photos?: readonly LeafSprite[]) {
   const c = CELL / 2;
   const reach = CELL * 0.44;
   interface Leaf {
@@ -263,6 +271,18 @@ function drawCluster(ctx: Ctx, look: Look, r: () => number) {
       if (look.compound) {
         ctx.translate(leaf.len * t * 0.9, 0);
         ctx.rotate(side * 0.9);
+      }
+      const sprite = photos?.[Math.floor(r() * photos.length)];
+      if (sprite) {
+        // A photographed leaf, stalk at the twig, shaded by its depth in the cluster.
+        const k = Math.min(
+          SPRITE_SHADES.length - 1,
+          Math.max(0, Math.round(((shade - 0.7) / 0.45) * (SPRITE_SHADES.length - 1))),
+        );
+        const pic = sprite.shades[k];
+        if (pic) ctx.drawImage(pic, 0, (-len * sprite.aspect) / 2, len, len * sprite.aspect);
+        ctx.restore();
+        continue;
       }
       leafPath(ctx, look.shape, len, len * look.aspect * 0.5, r);
       const g = ctx.createLinearGradient(0, -len * 0.3, 0, len * 0.3);
@@ -475,8 +495,119 @@ function drawBark(ctx: Ctx, kind: 'rough' | 'smooth' | 'pine', r: () => number) 
   }
 }
 
+/** A photographed leaf (stalk at x = 0, along +x), pre-shaded from the cluster's back to front. */
+interface LeafSprite {
+  readonly shades: readonly OffscreenCanvas[];
+  /** Height over length. */
+  readonly aspect: number;
+}
+/** Brightness of a leaf by its depth in the cluster, back to front. */
+const SPRITE_SHADES = [0.72, 0.85, 0.98, 1.1, 1.22] as const;
+
+/** The photographs, decoded. */
+interface Photos {
+  readonly leaves: ReadonlyMap<Cell, readonly LeafSprite[]>;
+  readonly barks: ReadonlyMap<Cell, { readonly albedo: ImageBitmap; readonly normal: ImageBitmap }>;
+}
+
+/** The cedar's sprays, laid out as a cluster. */
+const CEDAR_SPRAYS: Look = {
+  shape: 'lance',
+  h: 110,
+  s: 30,
+  l: 27,
+  size: 0.3,
+  count: 70,
+  aspect: 0.3,
+};
+
+const BARK_FILES: readonly [Cell, string][] = [
+  [Cell.barkRough, 'rough'],
+  [Cell.barkSmooth, 'smooth'],
+  [Cell.barkPine, 'pine'],
+];
+
+async function bitmapOf(file: string): Promise<ImageBitmap> {
+  const res = await fetch(new URL(`./textures/foliage/${file}`, import.meta.url).href);
+  if (!res.ok) throw new Error(`${file}: HTTP ${String(res.status)}`);
+  return createImageBitmap(await res.blob());
+}
+
+/** Loads and decodes the photographs, and pre-shades the leaves. */
+async function loadPhotos(): Promise<Photos> {
+  const [sheet, ...barkMaps] = await Promise.all([
+    bitmapOf('leaves.png'),
+    ...BARK_FILES.flatMap(([, name]) => [
+      bitmapOf(`bark-${name}-albedo.jpg`),
+      bitmapOf(`bark-${name}-normal.jpg`),
+    ]),
+  ]);
+  const leaves = new Map<Cell, LeafSprite[]>();
+  for (const [name, rects] of Object.entries(leafSheet.sprites)) {
+    const cell = Cell[name as keyof typeof Cell];
+    const list: LeafSprite[] = [];
+    for (const [x, y, w, h] of rects) {
+      const shades = SPRITE_SHADES.map((b) => {
+        const c = new OffscreenCanvas(w, h);
+        const cx = c.getContext('2d');
+        if (cx) {
+          cx.filter = `brightness(${b.toFixed(2)})`;
+          cx.drawImage(sheet, x, y, w, h, 0, 0, w, h);
+        }
+        return c;
+      });
+      list.push({ shades, aspect: h / w });
+    }
+    leaves.set(cell, list);
+  }
+  const barks = new Map<Cell, { albedo: ImageBitmap; normal: ImageBitmap }>();
+  BARK_FILES.forEach(([cell], i) => {
+    const albedo = barkMaps[i * 2];
+    const normal = barkMaps[i * 2 + 1];
+    if (albedo && normal) barks.set(cell, { albedo, normal });
+  });
+  return { leaves, barks };
+}
+
+/** Repeats of a bark photograph across a cell's inner square (finer bark). */
+const BARK_REPEATS = 2;
+
+/**
+ * A tiling bark photograph over a whole cell: the inner square holds whole
+ * repeats and the margins continue them, so the trunk's texture wraps
+ * without a seam where its coordinates do.
+ */
+function drawPhotoBark(ctx: Ctx, img: ImageBitmap, x0: number, y0: number, cell: number) {
+  const m = cell * CELL_MARGIN;
+  const tile = (cell - 2 * m) / BARK_REPEATS;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, cell, cell);
+  ctx.clip();
+  for (let j = -1; j <= BARK_REPEATS; j += 1)
+    for (let i = -1; i <= BARK_REPEATS; i += 1)
+      ctx.drawImage(img, x0 + m + i * tile, y0 + m + j * tile, tile, tile);
+  ctx.restore();
+}
+
+/** Size of the normal atlas (the barks' normals; leaves are flat). */
+const NORMAL_PX = ATLAS_PX / 2;
+
+/** Draws the normal atlas: flat, with the barks' normal maps (RGBA, rows top first). */
+function drawNormals(photos: Photos): Uint8ClampedArray {
+  const canvas = new OffscreenCanvas(NORMAL_PX, NORMAL_PX);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2D canvas');
+  ctx.fillStyle = 'rgb(128, 128, 255)';
+  ctx.fillRect(0, 0, NORMAL_PX, NORMAL_PX);
+  const cell = NORMAL_PX / ATLAS_CELLS;
+  for (const [c, { normal }] of photos.barks)
+    drawPhotoBark(ctx, normal, (c % ATLAS_CELLS) * cell, Math.floor(c / ATLAS_CELLS) * cell, cell);
+  return ctx.getImageData(0, 0, NORMAL_PX, NORMAL_PX).data;
+}
+
 /** Draws the atlas: RGBA bytes, rows top first. */
-function drawAtlas(): Uint8ClampedArray {
+function drawAtlas(photos: Photos | null): Uint8ClampedArray {
   const canvas = new OffscreenCanvas(ATLAS_PX, ATLAS_PX);
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('no 2D canvas');
@@ -484,6 +615,12 @@ function drawAtlas(): Uint8ClampedArray {
     const col = cell % ATLAS_CELLS;
     const row = Math.floor(cell / ATLAS_CELLS);
     const r = rng(0x9e3779b1 ^ (cell * 7919));
+    const bark = photos?.barks.get(cell as Cell);
+    if (bark) {
+      drawPhotoBark(ctx, bark.albedo, col * CELL, row * CELL, CELL);
+      continue;
+    }
+    const sprites = photos?.leaves.get(cell as Cell);
     ctx.save();
     ctx.translate(col * CELL, row * CELL);
     ctx.beginPath();
@@ -499,8 +636,9 @@ function drawAtlas(): Uint8ClampedArray {
     ctx.translate(m, m);
     ctx.scale(1 - 2 * CELL_MARGIN, 1 - 2 * CELL_MARGIN);
     const look = LOOKS[cell as Cell];
-    if (look) drawCluster(ctx, look, r);
+    if (look) drawCluster(ctx, look, r, sprites);
     else if (cell === Cell.needles) drawNeedles(ctx, r);
+    else if (cell === Cell.cedar && sprites) drawCluster(ctx, CEDAR_SPRAYS, r, sprites);
     else if (cell === Cell.cedar) drawCedar(ctx, r);
     else if (cell === Cell.fern) drawFern(ctx, r);
     else if (cell === Cell.twigs) drawTwigs(ctx, r);
@@ -513,12 +651,12 @@ function drawAtlas(): Uint8ClampedArray {
 }
 
 /**
- * The atlas as a mipmapped sRGB texture. Texels left transparent take their
- * cell's mean leaf colour (still transparent), so filtering at a distance
- * keeps leaves their colour instead of fading them to black.
+ * The atlas's texels, rows flipped (the texture's first row is the image's
+ * last). Texels left transparent take their cell's mean leaf colour (still
+ * transparent), so filtering at a distance keeps leaves their colour instead
+ * of fading them to black.
  */
-export function createFoliageAtlas(): DataTexture {
-  const src = drawAtlas();
+function atlasTexels(src: Uint8ClampedArray): Uint8Array {
   const out = new Uint8Array(ATLAS_PX * ATLAS_PX * 4);
   for (let cell = 0; cell < ATLAS_CELLS * ATLAS_CELLS; cell += 1) {
     const x0 = (cell % ATLAS_CELLS) * CELL;
@@ -542,7 +680,6 @@ export function createFoliageAtlas(): DataTexture {
     for (let y = y0; y < y0 + CELL; y += 1)
       for (let x = x0; x < x0 + CELL; x += 1) {
         const o = (y * ATLAS_PX + x) * 4;
-        // Flipped: the texture's first row is the image's last.
         const t = ((ATLAS_PX - 1 - y) * ATLAS_PX + x) * 4;
         const a = src[o + 3] ?? 0;
         if (a < 8) {
@@ -558,15 +695,83 @@ export function createFoliageAtlas(): DataTexture {
         }
       }
   }
-  const tex = new DataTexture(out, ATLAS_PX, ATLAS_PX, RGBAFormat, UnsignedByteType);
-  tex.mipmaps = coverageMipmaps(out);
-  tex.colorSpace = SRGBColorSpace;
-  tex.generateMipmaps = false;
-  tex.minFilter = LinearMipmapLinearFilter;
-  tex.magFilter = LinearFilter;
-  tex.anisotropy = 8;
-  tex.needsUpdate = true;
-  return tex;
+  return out;
+}
+
+/** Rows flipped, as `atlasTexels`. */
+function flipRows(src: Uint8ClampedArray, size: number): Uint8Array {
+  const out = new Uint8Array(size * size * 4);
+  const row = size * 4;
+  for (let y = 0; y < size; y += 1)
+    out.set(src.subarray(y * row, (y + 1) * row), (size - 1 - y) * row);
+  return out;
+}
+
+export interface FoliageTextures {
+  /** The leaves and barks (sRGB, with coverage-keeping mipmaps). */
+  readonly map: DataTexture;
+  /** The barks' normal maps; flat elsewhere. */
+  readonly normalMap: DataTexture;
+  /** Settles when the photographs are in (or could not be loaded: the drawn atlas stays). */
+  readonly loaded: Promise<boolean>;
+}
+
+/**
+ * The foliage's textures: the drawn atlas at once, then the photographs'
+ * when they are loaded (same size, so the textures are updated in place).
+ */
+export function createFoliageTextures(): FoliageTextures {
+  const texels = atlasTexels(drawAtlas(null));
+  const map = new DataTexture(texels, ATLAS_PX, ATLAS_PX, RGBAFormat, UnsignedByteType);
+  map.mipmaps = coverageMipmaps(texels);
+  map.colorSpace = SRGBColorSpace;
+  map.generateMipmaps = false;
+  map.minFilter = LinearMipmapLinearFilter;
+  map.magFilter = LinearFilter;
+  map.anisotropy = 8;
+  map.needsUpdate = true;
+  const flat = new Uint8Array(NORMAL_PX * NORMAL_PX * 4);
+  for (let i = 0; i < flat.length; i += 4) flat.set([128, 128, 255, 255], i);
+  const normalMap = new DataTexture(flat, NORMAL_PX, NORMAL_PX, RGBAFormat, UnsignedByteType);
+  normalMap.colorSpace = NoColorSpace;
+  normalMap.generateMipmaps = true;
+  normalMap.minFilter = LinearMipmapLinearFilter;
+  normalMap.magFilter = LinearFilter;
+  normalMap.needsUpdate = true;
+  const loaded = loadPhotos()
+    .then((photos) => {
+      const next = atlasTexels(drawAtlas(photos));
+      map.image = { data: next, width: ATLAS_PX, height: ATLAS_PX };
+      map.mipmaps = coverageMipmaps(next);
+      map.needsUpdate = true;
+      normalMap.image = {
+        data: flipRows(drawNormals(photos), NORMAL_PX),
+        width: NORMAL_PX,
+        height: NORMAL_PX,
+      };
+      normalMap.needsUpdate = true;
+      return true;
+    })
+    .catch((error: unknown) => {
+      console.warn('Foliage photographs not loaded; using the drawn leaves.', error);
+      return false;
+    });
+  return { map, normalMap, loaded };
+}
+
+/**
+ * GLSL: whether texture coordinates `uv` fall in a bark cell (no leaf
+ * shading there: no card normals, no light through).
+ */
+export function barkUvTest(uv: string): string {
+  const cells = BARK_FILES.map(([c]) => c);
+  const corners = cells.flatMap((c) => [cellUv(c, 0, 0), cellUv(c, 1, 1)]);
+  const u0 = Math.min(...corners.map((p) => p[0])) - 0.01;
+  const u1 = Math.max(...corners.map((p) => p[0])) + 0.01;
+  const v0 = Math.min(...corners.map((p) => p[1])) - 0.01;
+  const v1 = Math.max(...corners.map((p) => p[1])) + 0.01;
+  const f = (n: number) => n.toFixed(4);
+  return `(${uv}.x > ${f(u0)} && ${uv}.x < ${f(u1)} && ${uv}.y > ${f(v0)} && ${uv}.y < ${f(v1)})`;
 }
 
 /** The alpha that cards are cut at (the material's `alphaTest`). */

@@ -1,6 +1,6 @@
 # ADR 0051: Realistic trees
 
-- Status: Accepted (phase 1, shading; phase 2, photographic textures, in progress)
+- Status: Accepted (phase 1, shading; phase 2, photographic textures; phase 3, structure, to do)
 - Date: 2026-10-13
 - Builds on: [ADR 0049](0049-terrain-field-ground-and-renderer.md) (the procedural trees and
   their foliage atlas)
@@ -71,9 +71,61 @@ Ideas not yet tried: a per-species translucency (thin leaves such as maple and b
 than oak; needles little), a wrap term on the sunlit side, and a slight blue shift for
 shadowed leaves (sky fill).
 
+## Decision: phase 2, photographic textures
+
+The atlas keeps its layout and its procedural clusters; photographs replace what is drawn in
+them (`foliage-atlas.ts`; sources in `view3d/textures/foliage/CREDITS.md`, prepared by
+`tools/foliage-textures.mjs`).
+
+1. **Leaves.** A sprite sheet of single photographed leaves (CC0, ambientCG), cut out by their
+   opacity maps, turned stalk-first, colour-matched per leaf to the species' colour. Each
+   cluster is laid out as before (twigs, leaves along them, back ones darker), stamping a
+   random leaf of its species. Each leaf is pre-shaded in five steps,
+   `SPRITE_SHADES` = 0.72–1.22, back to front. At 0.66–1.14 the woods were darker than the
+   drawn leaves and glowed less when backlit. The cedar's sprays are laid out the same way
+   (`CEDAR_SPRAYS`). Pine needles, holly, ferns and twigs stay drawn: no suitable CC0
+   photographs.
+2. **Barks.** Tiling photographs with OpenGL normal maps, `BARK_REPEATS` = 2 per cell. Each
+   bark cell's margins continue the tiling, so the texture wraps without a seam. The drawn
+   barks did not tile: every 3 m trunk segment showed a joint.
+3. **Normal map.** A second atlas (1024 px) of the barks' normals, flat on the leaves, as the
+   foliage material's `normalMap`. The tangent frame is rebuilt round the chosen normal
+   (Three.js builds it before the crown/card normal replaces it). Bark cells take neither the
+   card normals nor light through leaves (`barkUvTest`).
+4. **Loading.** The drawn atlas is shown at once. The photographs (about 1.7 MB) replace it
+   when decoded, updating the same textures in place. If they cannot be loaded, the drawn
+   atlas stays and a warning is logged.
+
+### Phase 2: what it changed
+
+- **Trunks:** much better. Furrowed bark with relief, and no joints.
+- **Leaves:** more natural shapes and colour within each cluster, mostly visible within about
+  20 m.
+- **Mid-distance and overhead:** almost unchanged. There a crown's shape and density dominate,
+  not its leaves: that is phase 3.
+
+### Tuning later (phase 2)
+
+- Leaf sets, colours, sprite length (160 px): `LEAVES` and `SPRITE_LEN` in
+  `tools/foliage-textures.mjs`, then rerun it (ambientCG 2K-JPG zips unzipped per asset).
+- Brightness of leaves in a cluster: `SPRITE_SHADES`.
+- Bark scale: `BARK_REPEATS` (and the trunk's own texture coordinates in `tree-models.ts`,
+  which map one cell round the trunk and down each segment whatever its girth).
+- Not yet tried: leaf normal maps (they would need rotating with each stamped leaf), and a
+  per-species bark (only three barks for all the species now).
+
+## Phase 3: structure (to do)
+
+Denser, clumped crowns on a branch structure; trunk taper, root flare and bark variety; forest
+density matched to a closed canopy; impostors (pictures of the near models) for distant
+trees. An open-source Three.js tree generator (e.g. EZ-Tree) is to be evaluated first,
+licence and performance included.
+
 ## Consequences
 
 - Woods seen towards the sun glow where the sun reaches; crowns show their clusters and depth.
+- Trunks show photographed bark. The game downloads about 1.7 MB more, once, and draws the
+  atlas a second time at start-up when the photographs arrive.
 - The brighter exposure changes every 3D picture a little (ground, water, buildings).
 - A change in Three.js's light loop chunk makes `foliageLights()` throw at shader compile,
   rather than silently dropping the translucency.

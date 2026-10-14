@@ -21,7 +21,7 @@ import type { VegetationLayer, VegetationStats } from './vegetation-layer';
 import { keepFraction, lodBand, type LodSettings } from './vegetation-lod';
 import type { VegetationInstances } from './vegetation-placement';
 import { groundFieldsAt } from './clutter';
-import { ALPHA_CUT, createFoliageAtlas } from './foliage-atlas';
+import { ALPHA_CUT, barkUvTest, createFoliageTextures } from './foliage-atlas';
 import { SPECIES, treeModels, type SpeciesName, type TreeModel } from './tree-models';
 
 // The vegetation (docs/adr/0049, research §5.5). Where trees and shrubs
@@ -67,7 +67,7 @@ function foliageLights(): string {
 			float vegBack = saturate( dot( -geometryNormal, directLight.direction ) );
 			reflectedLight.directDiffuse += directLight.color * diffuseColor.rgb
 				* vec3( ${t.tint.map((v) => v.toFixed(2)).join(', ')} )
-				* ( ${t.through.toFixed(2)} * vegThrough + ${t.back.toFixed(2)} * vegBack );
+				* ( ${t.through.toFixed(2)} * vegThrough + ${t.back.toFixed(2)} * vegBack ) * vegLeaf;
 		}`;
   return chunk.slice(0, at) + added + chunk.slice(at + call.length);
 }
@@ -227,10 +227,12 @@ export function createForest(o: ForestOptions): VegetationLayer & {
   const { instances: inst, field } = o;
   const group = new Group();
   group.name = 'vegetation';
-  const atlas = createFoliageAtlas();
+  const atlas = createFoliageTextures();
   const time = { value: 0 };
   const foliage = new MeshStandardMaterial({
-    map: atlas,
+    map: atlas.map,
+    // The barks' relief (flat on leaves).
+    normalMap: atlas.normalMap,
     vertexColors: true,
     alphaTest: ALPHA_CUT,
     alphaToCoverage: true,
@@ -267,10 +269,14 @@ uniform float vegTime;`,
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
+  // Leaves 1, bark 0: bark keeps its own (round) normals and lets no light through.
+  float vegLeaf = ${barkUvTest('vMapUv')} ? 0.0 : 1.0;
   vec3 vegCrown = normalize(vNormal);
   vec3 vegCard = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
   if (dot(vegCard, vegCrown) < 0.0) vegCard = -vegCard;
-  normal = normalize(mix(vegCrown, vegCard, ${CARD_NORMAL_SHARE.toFixed(2)}));`,
+  normal = normalize(mix(vegCrown, vegCard, ${CARD_NORMAL_SHARE.toFixed(2)} * vegLeaf));
+  // The normal map's frame round the normal just chosen.
+  tbn = getTangentFrame(-vViewPosition, normal, vNormalMapUv);`,
       )
       .replace('#include <lights_fragment_begin>', foliageLights());
   };
@@ -842,7 +848,8 @@ uniform float vegTime;`,
       }
       foliage.dispose();
       propMaterial.dispose();
-      atlas.dispose();
+      atlas.map.dispose();
+      atlas.normalMap.dispose();
       group.clear();
     },
   };
