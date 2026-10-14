@@ -86,7 +86,7 @@ speed is never changed to suit a clip.
 | ----------------------------------- | --------------------------------------------------------------------------------- |
 | `m16-rifle`                         | "Assault Rifle West" (CC0, AR-15 pattern), scaled to 1.0 m                        |
 | `squad-automatic-weapon`            | **Placeholder** M249 built from boxes, with its own sockets; the rifle's handling |
-| `ak-assault-rifle`                  | Quaternius AK (CC0), scaled to 0.88 m                                             |
+| `ak-assault-rifle`                  | AK-47: "Assault Rifle" by Zsky (CC BY 3.0, credited in the 3D view), 0.88 m       |
 | anything else                       | no weapon drawn                                                                   |
 
 Each model has sockets in the weapon frame (`weapons.ts`), measured from side views: butt,
