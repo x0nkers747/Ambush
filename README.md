@@ -300,3 +300,9 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 49. [The terrain field is the game's ground and its 3D terrain](docs/adr/0049-terrain-field-ground-and-renderer.md)
 50. [Tree cover from canopy heights](docs/adr/0050-tree-cover-from-canopy-heights.md)
 51. [Realistic trees](docs/adr/0051-realistic-trees.md)
+
+Proposals awaiting a decision: animated 3D soldiers (no ADR yet) —
+[research](docs/character-animation-research.md),
+[architecture](docs/character-animation-architecture.md),
+[asset evaluation](docs/character-asset-evaluation.md) and
+[roadmap](docs/character-animation-roadmap.md).
