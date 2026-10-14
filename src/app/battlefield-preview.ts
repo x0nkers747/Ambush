@@ -84,6 +84,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   const stop3d = () => {
     surface3d?.detach();
     surface3d = null;
+    if (map) map.canvas.style.visibility = '';
     if (!view3d) return;
     view3d.canvas.remove();
     view3d.overlay.remove();
@@ -141,6 +142,9 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       view3d.canvas.hidden = viewMode !== '3d';
       view3d.overlay.hidden = viewMode !== '3d';
     }
+    // The 2D map is hidden under the 3D view: on some displays it showed
+    // through it. Hidden, not removed, so it keeps its size (carryFocus reads it).
+    if (map) map.canvas.style.visibility = viewMode === '3d' && view3d ? 'hidden' : '';
     const fit = el('preview-fit');
     fit.title = viewMode === '3d' ? 'Back to the overhead view' : 'Fit the whole map';
     fit.textContent = viewMode === '3d' ? 'Reset view' : 'Fit map';

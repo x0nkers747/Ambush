@@ -874,6 +874,9 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       view3d.canvas.hidden = viewMode !== '3d';
       view3d.overlay.hidden = viewMode !== '3d';
     }
+    // The 2D map is hidden under the 3D view: on some displays it showed
+    // through it. Hidden, not removed, so it keeps its size (carryFocus reads it).
+    map.canvas.style.visibility = viewMode === '3d' && view3d ? 'hidden' : '';
     app.dataset['view'] = viewMode;
     ui('fit').title = viewMode === '3d' ? 'Back to the overhead view (F)' : 'Fit the whole map (F)';
     setText(ui('fit'), viewMode === '3d' ? 'Reset view' : 'Fit map');
@@ -1536,6 +1539,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
     stopped = true;
     view3d?.dispose();
     view3d = null;
+    map.canvas.style.visibility = '';
     cancelAnimationFrame(frameId);
     window.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('visibilitychange', onVisibilityChange);
