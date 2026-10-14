@@ -312,3 +312,13 @@ Animated 3D soldiers: background to ADR 0052 —
 [asset evaluation](docs/character-asset-evaluation.md) and
 [roadmap](docs/character-animation-roadmap.md). The comparison prototype is in
 [`prototypes/character-animation`](prototypes/character-animation/) (not part of the game build).
+
+Behavior Lab (proposed, not implemented): research and architecture for hierarchical,
+order-driven formation movement — [overview](docs/behavior-lab/README.md),
+[existing architecture](docs/behavior-lab/01-existing-architecture.md),
+[research survey](docs/behavior-lab/02-research-survey.md),
+[architecture proposal](docs/behavior-lab/03-architecture-proposal.md),
+[lab design](docs/behavior-lab/04-behavior-lab-design.md),
+[test plan](docs/behavior-lab/05-test-and-benchmark-plan.md),
+[roadmap](docs/behavior-lab/06-implementation-roadmap.md),
+[open questions](docs/behavior-lab/07-open-questions.md).
