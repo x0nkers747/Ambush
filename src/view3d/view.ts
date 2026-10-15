@@ -49,6 +49,7 @@ import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
 import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
 import { createImpactLayer } from './impacts';
+import { createTracerLayer } from './tracers';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -314,6 +315,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   if (characters) scene.add(characters.group);
   const impacts = createImpactLayer();
   scene.add(impacts.group);
+  const tracers = createTracerLayer();
+  scene.add(tracers.group);
   const aftermath = createAftermath();
   /** A stand-in crowd for measuring (`ambushBenchCharacters`), replacing the soldiers while set. */
   let bench: { crowd: BenchCrowd; startMs: number } | null = null;
@@ -782,10 +785,20 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         });
         markers.update([], eye, height);
       } else markers.update(units, eye, height);
-      // Grenade bursts, on the battle's clock.
-      if (figures && !bench)
-        impacts.update(figures.clock.combatLog, figures.clock.seconds, surfaceAt);
-      else impacts.update([], 0, surfaceAt);
+      // Tracers and grenade explosions, on the battle's clock.
+      if (figures && !bench) {
+        impacts.update(figures.clock.combatLog, figures.clock.seconds, surfaceAt, eye.position);
+        tracers.update(
+          figures.clock.log,
+          figures.clock.combatLog,
+          figures.clock.seconds,
+          surfaceAt,
+          eye.position,
+        );
+      } else {
+        impacts.update([], 0, surfaceAt, eye.position);
+        tracers.update(NO_SOLDIERS.log, [], 0, surfaceAt, eye.position);
+      }
       const drawing = performance.now();
       renderer.render(scene, eye);
       if (overlayContext) {
@@ -864,6 +877,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       sun.shadow.dispose();
       markers.dispose();
       impacts.dispose();
+      tracers.dispose();
       characters?.dispose();
       sky.geometry.dispose();
       sky.material.dispose();
@@ -1005,6 +1019,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         })(),
         bounds: current?.extent ?? null,
         markers: markers.group.children.length,
+        tracers: tracers.inFlight,
+        explosions: impacts.active,
         characters: characters?.stats() ?? null,
         clearance:
           pose && current

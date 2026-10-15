@@ -45,7 +45,8 @@ export interface MapEditor {
   /** A left click (no drag) at a point. */
   click(point: Vec2, screen: Vec2): void;
   /** Drawing on top of the map, in canvas pixels. */
-  draw?(ctx: CanvasRenderingContext2D, toScreen: (p: Vec2) => Vec2): void;
+  /** Draws over the map; `perspective`: over the 3D view (through a surface), not the 2D map. */
+  draw?(ctx: CanvasRenderingContext2D, toScreen: (p: Vec2) => Vec2, perspective?: boolean): void;
   /** Cursor over a point, or `null` for the map's own. */
   cursor?(point: Vec2, screen: Vec2): string | null;
 }
@@ -280,7 +281,7 @@ export function createTacticalMap({
     const editor = binding.editor;
     if (editor?.draw) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      editor.draw(ctx, (p) => worldToScreen(camera, viewport, p));
+      editor.draw(ctx, (p) => worldToScreen(camera, viewport, p), false);
     }
   };
 
@@ -356,7 +357,7 @@ export function createTacticalMap({
       draw(ctx) {
         const s = surfaceScene();
         drawOverlays(ctx, s, layer);
-        binding.editor?.draw?.(ctx, (p) => s.projection.toScreen(p));
+        binding.editor?.draw?.(ctx, (p) => s.projection.toScreen(p), s.projection.perspective);
       },
       detach() {
         editorDrag = undefined;

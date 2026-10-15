@@ -148,9 +148,17 @@ New events: `fofReload` (`started`/`completed`, weapon, rounds), `fofGrenade`,
 and lab logs; a battle's review re-simulates from tick 0 with the same seed and
 inputs, verified tick-second by second against the battle fought (hashes cover
 all weapon state), so it shows the same bursts, reloads and grenades; nothing
-is re-drawn differently. The 2D map draws grenade arcs and their effect
-circles; the 3D view shows the burst (a brief flash and ring) at its impact;
-the selected squad's panel lists its ammunition by weapon and who is
+is re-drawn differently. **The 2D map** draws each burst as a line from the shooter to his aim point
+(solid aimed, dashed area fire), each grenade as an arc to its burst with its
+effect circle. **The 3D view** shows the fight as it might look: every round
+of every burst flies as a tracer from the shooter's muzzle (red BLUEFOR,
+green OPFOR, as US and Warsaw Pact tracer ammunition), into its target when
+the burst hit, otherwise scattered round the aim point and on past it;
+grenades are not traced, their bursts show as a fireball, a ring of dust and a
+cloud of smoke. Tracers and explosions are purely visual, derived from the
+events and the battle's clock (`src/view3d/tracers.ts`, `impacts.ts`), so the
+review shows the same ones at the same moments; the 3D view draws no fire
+lines. The selected squad's panel lists its ammunition by weapon and who is
 reloading.
 
 ## 6. Validation

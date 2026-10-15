@@ -14,6 +14,10 @@ export interface ShotFiredEvent {
   readonly weaponProfileRef: string;
   /** Horizontal distance from shooter to target, in metres. */
   readonly rangeM: number;
+  /** Rounds in the burst, where it was aimed, and how (at a soldier seen, or at an area). */
+  readonly rounds: number;
+  readonly aimPoint: { readonly x: number; readonly y: number };
+  readonly aimed: boolean;
   readonly hitProbability: number;
   readonly hit: boolean;
   readonly incapacitated: boolean;
@@ -51,6 +55,9 @@ export function combatEventOf(event: SimEvent): CombatEvent | null {
     targetId: event.targetId,
     weaponProfileRef: event.weapon,
     rangeM: event.rangeM,
+    rounds: event.rounds,
+    aimPoint: event.aimPoint,
+    aimed: event.kind === 'aimed',
     hitProbability: event.hitProbability,
     hit: event.hit,
     incapacitated: event.incapacitated,

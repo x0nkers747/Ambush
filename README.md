@@ -137,7 +137,9 @@ Next says what is missing, and the side panel says the same next to the stage's 
    weapons' doctrinal rates: riflemen in short aimed bursts, automatic riflemen in 6–9-round
    bursts, reloading when a magazine or belt runs dry; fire team leaders sometimes fire their M203
    grenade launchers ([docs](docs/behavior-lab/force-on-force/06-weapons-and-ammunition.md)).
-   The selected squad's panel shows its rounds by weapon.
+   The selected squad's panel shows its rounds by weapon. The 2D map draws each burst as a line to
+   where it was aimed; the 3D view shows the fight as tracers flying between the squads (red
+   BLUEFOR, green OPFOR) and grenade explosions.
 5. **After-Action Review** ([docs/constructive-simulation/05](docs/constructive-simulation/05-after-action-review.md)).
    The battle is replayed from its start by re-simulation and every second verified against the
    battle fought. Play, pause, ±5 s, jump to markers (contact, casualties, squads combat

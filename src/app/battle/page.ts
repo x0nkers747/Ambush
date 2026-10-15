@@ -300,7 +300,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       current().click(point, screen);
     },
     cursor: (point, screen) => current().cursor?.(point, screen) ?? null,
-    draw: (ctx, toScreen) => current().draw?.(ctx, toScreen),
+    draw: (ctx, toScreen, perspective) => current().draw?.(ctx, toScreen, perspective),
   };
   /** The page's gates: the planner's, and the battle's own (it ends only when the user ends it). */
   const rules: WorkflowRules = {

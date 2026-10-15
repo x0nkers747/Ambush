@@ -124,7 +124,7 @@ export function createCombatMapEditor(
       if (hit && !(ui.tool !== null && selected && hit.side !== selected.side)) return 'pointer';
       return ui.tool === null ? null : 'crosshair';
     },
-    draw(ctx, toScreen) {
+    draw(ctx, toScreen, perspective = false) {
       project = toScreen;
       const c = combat();
       if (!c) return;
@@ -188,9 +188,10 @@ export function createCombatMapEditor(
         ctx.globalAlpha = 1;
       }
 
-      // Bursts of the last moments: shooter to aim point.
+      // Bursts of the last moments: shooter to aim point (2D only: the 3D view
+      // shows them as tracers, and grenades as explosions).
       const now = c.renderSeconds;
-      const log = c.events;
+      const log = perspective ? [] : c.events;
       for (let i = log.length - 1; i >= 0; i -= 1) {
         const e = log[i];
         if (!e) continue;
