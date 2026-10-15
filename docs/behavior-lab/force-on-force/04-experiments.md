@@ -183,6 +183,34 @@ The runs are headless in Node, one at a time, at 30 Hz, on the development machi
   another run (a run of the earlier code overlapped the first minutes). The 988-soldier
   run had the machine to itself.
 
+**In the browser.** `#force-on-force?experiment=scale` (experiment 14) runs the
+988-soldier battle in the lab. In Chrome on the development machine the page draws at
+about 4 frames a second, and the battle plays at about 0.4–0.5× real time.
+
+- Drawing is the limit, not the simulation. Rendering is 57 % of the time (the soldiers
+  drawn one by one, and again for shadows), posing the soldiers 22 %, and the
+  simulation 17 %.
+- **Two lab changes for runs this large:**
+  - The page steps the simulation for at most 40 ms a frame, so it keeps drawing.
+    Before, at 32× a single frame took seconds.
+  - Keyframes for scrubbing are taken every 5 s per 100 soldiers begun: every 50 s at 988.
+- The motion log keeps every soldier's position at every tick, about 1 MB per
+  simulated second at this size. A whole battle is about 1 GB in the page.
+
+**The simulation alone in the browser:**
+`#force-on-force?experiment=scale&soldiers=dots`. `soldiers=dots` draws soldiers as
+dots on the overlay instead of animated characters. It is temporary, until the
+characters get levels of detail. In Chrome, playing at 32× (as fast as it goes):
+
+| Simulated time                          | Simulated seconds per second | Frames per second | Heap       |
+| --------------------------------------- | ---------------------------: | ----------------: | ---------- |
+| 0–60 s (approach, far apart)            |                    1.4 – 2.8 |                14 | 200–340 MB |
+| 60–230 s (closing, all in view)         |                   0.65 – 1.3 |            6 – 13 | 210–600 MB |
+| 230–300 s (contact; bounding by squads) |                   0.75 – 1.0 |            7 – 10 | 460–730 MB |
+
+The slowest stretch, just before contact, runs at 0.65× real time. Chrome's engine ran
+it faster than Node did headless.
+
 **Found and fixed: sight lines traced for nothing.** A pair can only detect while its
 P∞ exceeds its threshold (drawn at the start). Every look traced its three sight
 lines before that test, so most looks at long range traced for nothing. A look now

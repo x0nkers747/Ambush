@@ -23,7 +23,8 @@ export type FofExperimentId =
   | 'bounded-stalemate'
   | 'mutual-disengagement'
   | 'replay-restore'
-  | 'actions-on';
+  | 'actions-on'
+  | 'scale';
 
 export interface FofVariant {
   readonly label: string;
@@ -254,6 +255,27 @@ export const FOF_EXPERIMENTS: readonly FofExperiment[] = [
           },
         };
       }),
+  },
+  {
+    id: 'scale',
+    name: '14. Scalability: 38 squads a side (988 soldiers)',
+    description:
+      'Two forces of 38 rifle squads each (494 soldiers a side), in blocks 1 km apart on open ground, each ordered to the other’s start; both attack on contact, by fire and movement, a squad bounding at a time. Slow: about 1.8 s of simulation per simulated second before contact, and drawing ~1,000 characters is slower still: open it with &soldiers=dots in the address to see the simulation alone. Scrubbing back re-simulates up to 50 s.',
+    variants: (seed, rate = 30) => {
+      const force = {
+        ...SQUAD,
+        count: 38,
+        groupSpacingM: 60,
+        actionsOn: 'attack' as const,
+      };
+      return one('988 soldiers', {
+        blufor: { ...force, start: { x: 0, y: -500 }, destination: { x: 0, y: 500 } },
+        opfor: { ...force, start: { x: 0, y: 500 }, destination: { x: 0, y: -500 } },
+        terrain: 'open',
+        seed,
+        tickRateHz: rate,
+      });
+    },
   },
 ];
 

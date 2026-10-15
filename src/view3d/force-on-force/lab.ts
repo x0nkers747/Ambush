@@ -148,6 +148,9 @@ function settingsFor(id: FofExperimentId, seed: number, tickRateHz: number): Set
   };
 }
 
+/** Simulation stepping per animation frame at most (ms), beyond one tick. */
+const FRAME_STEP_MS = 40;
+
 /** Starts the lab in `root`; returns a function that stops it. */
 export function startForceOnForceLab(root: HTMLElement): () => void {
   const style = document.createElement('style');
@@ -279,7 +282,10 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
 
   const scene = createLabScene(canvas, HALF_M, ELEVATION_M);
   const characters = createCharacterLayer(new URL('characters/', document.baseURI).href);
-  scene.scene.add(characters.group);
+  // `soldiers=dots` in the address: soldiers as dots on the overlay instead of
+  // animated characters, to measure the simulation without their rendering.
+  const dots = new URLSearchParams(location.hash.split('?')[1] ?? '').get('soldiers') === 'dots';
+  if (!dots) scene.scene.add(characters.group);
   let ground: { terrain: unknown; city: CityLayer; woods: WoodsLayer } | null = null;
   const showGround = () => {
     const terrain = session.view.sim.world.terrain;
@@ -1044,8 +1050,11 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
     if (playing && !over()) {
       pending += dt * speed * session.spec.tickRateHz;
       const budget = Math.max(1, Math.ceil(0.1 * speed * session.spec.tickRateHz));
+      // At most FRAME_STEP_MS of stepping a frame (and at least one tick): a
+      // large run plays below the speed asked for, but the page keeps drawing.
+      const until = performance.now() + FRAME_STEP_MS;
       let stepped = 0;
-      while (pending >= 1 && stepped < budget) {
+      while (pending >= 1 && stepped < budget && (stepped === 0 || performance.now() < until)) {
         if (over()) break;
         session.step();
         pending -= 1;
@@ -1073,7 +1082,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         status: s.status,
         selected: selected === s.id,
       }));
-    if (characters.ready) {
+    if (characters.ready && !dots) {
       characters.update({
         units,
         clock: {
@@ -1087,7 +1096,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         viewportHeightPx: size.height,
       });
     }
-    output('loading').hidden = characters.ready;
+    output('loading').hidden = characters.ready || dots;
     showGround();
     scene.render();
     const ctx = overlay.getContext('2d');
@@ -1121,9 +1130,22 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
           ? [{ at: spec.opfor.destination, label: 'OPFOR destination', colour: SIDE_COLOUR.OPFOR }]
           : []),
       ].filter((m) => perspective === 'observer' || m.label.startsWith(perspective));
+      const projection = groundProjection(scene.camera.camera, scene.groundAt, size, ELEVATION_M);
+      if (dots) {
+        const sides = new Map(state.soldiers.map((x) => [x.id as string, x.side]));
+        for (const u of units) {
+          const p = projection.toScreen(u.position, 1);
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+          const side = sides.get(u.id) ?? 'BLUEFOR';
+          ctx.fillStyle = u.status === 'active' ? SIDE_COLOUR[side] : '#6b7280';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, u.selected ? 5 : 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       drawFofOverlays({
         ctx,
-        projection: groundProjection(scene.camera.camera, scene.groundAt, size, ELEVATION_M),
+        projection,
         state,
         log: session.motion,
         tick: Math.max(0, tick),

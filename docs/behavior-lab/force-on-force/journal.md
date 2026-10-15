@@ -436,6 +436,15 @@ against the pair's threshold only after tracing.
 At 988 soldiers, detection is still 85 % of the time. The next steps for larger forces
 are in 04 §5.1.
 
+**In the lab:** experiment 14, at `#force-on-force?experiment=scale`.
+
+- In Chrome it draws at about 4 fps and plays at about 0.4–0.5× real time.
+- Rendering about 1,000 animated soldiers, not the simulation, is the limit.
+- The page now steps at most 40 ms a frame (it froze before), and keyframes are spaced
+  by size.
+- **`&soldiers=dots`** (temporary) draws dots instead of characters. That isolates the
+  behaviours' cost: 0.65–2.8× real time at 6–14 fps, slowest just before contact.
+
 ## Known limitations
 
 **Detection.**

@@ -42,6 +42,7 @@ export interface TimedEvent {
   readonly event: SimEvent;
 }
 
+/** Seconds between keyframes, per 100 soldiers begun (a snapshot of a large run is large). */
 const KEYFRAME_SECONDS = 5;
 const HISTORY_SECONDS = 2;
 const CPU_SAMPLES = 300;
@@ -107,6 +108,8 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
     ? { commands: recording.commands, origins: recording.origins }
     : undefined;
   let head = createFofRun(spec, undefined, replay);
+  const keyframeSeconds =
+    KEYFRAME_SECONDS * Math.max(1, Math.ceil(head.sim.state.soldiers.length / 100));
   let view = head;
   let motion = createMotionRecorder(rate);
   let metrics: FofMetricsRecorder = createFofMetrics(head.sim);
@@ -136,7 +139,7 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
         };
       }
     }
-    if (sim.tick % (KEYFRAME_SECONDS * rate) === 0) keyframes.set(sim.tick, sim.snapshot());
+    if (sim.tick % (keyframeSeconds * rate) === 0) keyframes.set(sim.tick, sim.snapshot());
   };
   motion.record(head.sim.state);
   atTick();

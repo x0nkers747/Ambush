@@ -6,8 +6,8 @@ import { createFofRun } from './run';
 // to their outcomes over several seeds, are tools/fof-experiments.test.ts).
 
 describe('force-on-force experiments', () => {
-  it('has the default demonstration and the thirteen experiments', () => {
-    expect(FOF_EXPERIMENTS.map((e) => e.id)).toHaveLength(14);
+  it('has the default demonstration and the fourteen experiments', () => {
+    expect(FOF_EXPERIMENTS.map((e) => e.id)).toHaveLength(15);
     expect(FOF_EXPERIMENTS[0]?.id).toBe('demo');
   });
 
@@ -16,7 +16,9 @@ describe('force-on-force experiments', () => {
       for (const v of experiment.variants(1)) {
         const run = createFofRun(v.spec);
         const rejected = [];
-        for (let i = 0; i < 30 * 20; i += 1) {
+        // 20 s (the scalability experiment, 988 soldiers: 2 s).
+        const seconds = experiment.id === 'scale' ? 2 : 20;
+        for (let i = 0; i < 30 * seconds; i += 1) {
           rejected.push(...run.step().filter((e) => e.type === 'commandRejected'));
         }
         expect(rejected).toEqual([]);
