@@ -56,8 +56,7 @@ describe('the experimental configuration', () => {
 
 describe('detection in the open', () => {
   const run = createFofRun(headOn('open', 1));
-  const events = runFor(run, 450);
-  // (Ran once at collection: about 5 s.)
+  const events = runFor(run, 700);
   const contacts = observed(events);
 
   it('both sides detect each other: possible, then confirmed, then identified, closer each time', () => {
@@ -172,11 +171,11 @@ describe('determinism', () => {
 
   it('is bit-identical at 10, 30, 60 and 120 Hz', () => {
     const exact = (rate: number) => {
-      const run = at(headOn('open', 6, rate), 200);
+      const run = at(headOn('open', 6, rate), 300);
       return JSON.stringify({ s: run.sim.state.soldiers, f: run.sim.state.fof });
     };
     const reference = exact(120);
-    expect(reference).toContain('"detected"');
+    expect(reference).toContain('"confirmed":true');
     for (const rate of [10, 30, 60]) expect(exact(rate)).toBe(reference);
   }, 120_000);
 

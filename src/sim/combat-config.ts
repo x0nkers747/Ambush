@@ -302,7 +302,10 @@ export function weaponCombatProfile(
  * the last point's value from there out to the maximum engagement range, and
  * 0 beyond it (where the weapon is never fired).
  */
-export function hitProbabilityAt(weapon: WeaponCombatProfile, rangeM: number): number {
+export function hitProbabilityAt(
+  weapon: Pick<WeaponCombatProfile, 'hitProbabilityByRange' | 'maxEngagementRangeM'>,
+  rangeM: number,
+): number {
   if (!(rangeM >= 0) || rangeM > weapon.maxEngagementRangeM) return 0;
   const curve = weapon.hitProbabilityByRange;
   for (let i = 1; i < curve.length; i += 1) {

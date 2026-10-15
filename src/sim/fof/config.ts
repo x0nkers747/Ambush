@@ -109,7 +109,7 @@ export interface FireConfig {
   readonly cadenceJitter: { readonly min: number; readonly max: number };
   /** Leaders fire this much less often (they observe and command). */
   readonly leaderCadenceFactor: number;
-  /** Least track level a soldier fires at: `detected` or `identified`. */
+  /** Rules of engagement: fire at confirmed contacts (`detected`) or only at identified ones (`identified`). */
   readonly engageLevel: 'detected' | 'identified';
   /** Fire at a contact's last known position while it is out of view, for this long after it was last seen (s); 0: never. */
   readonly areaFireMemorySeconds: number;
@@ -138,6 +138,14 @@ export interface ForceBehaviorConfig {
   readonly reactionDelay: UniformSeconds;
   /** On a possible contact the force halts and observes this long before carrying on (s). */
   readonly possibleContactHoldSeconds: number;
+  /**
+   * A confirmed contact this close (m) brings the force into contact: it halts,
+   * takes up a defensive posture and engages. Farther, it observes as for a
+   * possible contact, then carries on, alert.
+   */
+  readonly engageRangeM: number;
+  /** After observing and carrying on, a new possible or distant contact halts the force again only after this long (s). */
+  readonly reobserveSeconds: number;
   /** In contact with no confirmed contact and no fire for this long, the force holds (s); then resumes after `resumeAfterSeconds`. */
   readonly contactLostSeconds: number;
   readonly resumeAfterSeconds: number;
@@ -491,6 +499,8 @@ export function validateFofConfig(data: unknown): FofConfig {
   const fb = object(root['force'], '.force', [
     'reactionDelay',
     'possibleContactHoldSeconds',
+    'engageRangeM',
+    'reobserveSeconds',
     'contactLostSeconds',
     'resumeAfterSeconds',
     'resumeEffectiveness',
@@ -507,6 +517,8 @@ export function validateFofConfig(data: unknown): FofConfig {
   number(delay['maxSeconds'], '.force.reactionDelay.maxSeconds', dmin);
   numbers(fb, '.force', {
     possibleContactHoldSeconds: [0],
+    engageRangeM: [0],
+    reobserveSeconds: [0],
     contactLostSeconds: [0],
     resumeAfterSeconds: [0],
     resumeEffectiveness: [0, 1],

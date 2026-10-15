@@ -47,7 +47,8 @@ export interface CommandRejectedEvent {
     | 'destinationOffTerrain'
     | 'destinationBlocked'
     | 'destinationUnreachable'
-    | 'notSteered';
+    | 'notSteered'
+    | 'unitInContact';
 }
 
 /** A soldier arrived at one of its waypoints. */

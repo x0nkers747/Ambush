@@ -1,4 +1,5 @@
 import type { ScenarioSoldier, ScenarioUnit } from '../scenario';
+import type { SimState } from '../state';
 import { fofWeapon, validateFofConfig, VISIBILITY_CLASSES } from './config';
 import type { FofSetup } from './types';
 
@@ -57,4 +58,24 @@ export function forceMembers(
     }
   }
   return soldiers.filter((s) => inUnit.has(s.unitId)).map((s) => s.id);
+}
+
+/**
+ * Whether `unitId` belongs to a force-on-force force that its contact
+ * behaviour is driving (halted in contact or withdrawing): outside unit
+ * orders to it are rejected. Always `false` without a force-on-force state.
+ */
+export function unitInContact(state: SimState, unitId: string): boolean {
+  const fof = state.fof;
+  if (!fof) return false;
+  // The unit's root.
+  let id: string | null = unitId;
+  let root = unitId;
+  while (id !== null) {
+    root = id;
+    const parent: string | null = state.units.find((u) => u.id === id)?.parentId ?? null;
+    id = parent;
+  }
+  const force = fof.forces.find((f) => f.unitId === root);
+  return force !== undefined && force.phase !== 'moving' && force.phase !== 'atObjective';
 }

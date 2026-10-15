@@ -116,6 +116,10 @@ export interface FofForce {
   suppressedSince: number | null;
   /** Times it entered contact (a regained contact after holding counts again). */
   contactCycles: number;
+  /** Hostile intent established: it has identified an enemy or been fired on (rules of engagement). */
+  hostile: boolean;
+  /** Possible contacts first seen before this have been observed (no new halt for them). */
+  observedUntil: number;
   /** Times of the first possible, confirmed and identified contact, first burst, and when it became terminal. */
   firstPossibleAt: number | null;
   firstDetectedAt: number | null;
@@ -149,6 +153,8 @@ export interface FofSoldier {
   nextFireAt: number | null;
   /** When he takes up his contact posture (after his reaction delay), or `null`. */
   reactAt: number | null;
+  /** Has taken up the posture of his force's halt. */
+  reacted: boolean;
   suppression: number;
   level: SuppressionLevel;
   /** His last burst (`null`: none yet), for the firing signature. */

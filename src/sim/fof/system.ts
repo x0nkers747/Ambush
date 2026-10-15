@@ -5,7 +5,8 @@ import type { SimState, Soldier, SoldierId } from '../state';
 import type { SimWorld } from '../world';
 import { fofWeapon } from './config';
 import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, sight, ttpf } from './detection';
-import { updateForces } from './force';
+import { resolveFire, updateSuppression } from './fire';
+import { updateEffectiveness, updateForces } from './force';
 import { forceMembers } from './setup';
 import type { FofForce, FofSetup, FofSoldier, FofState, FofTrack, ObservationLevel } from './types';
 
@@ -108,6 +109,8 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       lastFiredUponAt: null,
       suppressedSince: null,
       contactCycles: 0,
+      hostile: false,
+      observedUntil: 0,
       firstPossibleAt: null,
       firstDetectedAt: null,
       firstIdentifiedAt: null,
@@ -136,6 +139,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       rounds: weapon ? (fofWeapon(setup.config, weapon)?.basicLoadRounds ?? 0) : 0,
       nextFireAt: null,
       reactAt: null,
+      reacted: false,
       suppression: 0,
       level: 'none',
       lastFiredAt: null,
@@ -197,9 +201,12 @@ export function soldierOf(context: FofContext, member: FofSoldier): Soldier {
 
 function decide(context: FofContext): void {
   updateMotion(context);
+  updateSuppression(context);
   scan(context);
   updateTracks(context);
   updateForces(context);
+  resolveFire(context);
+  updateEffectiveness(context);
 }
 
 /** Each member's ground speed since the previous decision. */

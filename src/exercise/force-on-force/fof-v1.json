@@ -192,6 +192,8 @@
       "maxSeconds": 2
     },
     "possibleContactHoldSeconds": 20,
+    "engageRangeM": 300,
+    "reobserveSeconds": 120,
     "contactLostSeconds": 40,
     "resumeAfterSeconds": 20,
     "resumeEffectiveness": 0.6,

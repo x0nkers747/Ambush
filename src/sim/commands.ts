@@ -8,6 +8,7 @@ import {
   type OrderUnitCommand,
 } from './behavior/orders';
 import { releaseAgent } from './behavior/system';
+import { unitInContact } from './fof/setup';
 import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
@@ -151,6 +152,17 @@ export function applyCommands(
         beginEngagement(state, world, command, startSeconds, events);
         break;
       case 'orderUnit':
+        // A force in a force-on-force experiment is driven by its contact
+        // behaviour while in contact: no outside order may conflict with it.
+        if (unitInContact(state, command.unitId)) {
+          events.push({
+            type: 'commandRejected',
+            tick: state.tick,
+            command,
+            reason: 'unitInContact',
+          });
+          break;
+        }
         applyOrderUnit(state, world, command, startSeconds, events);
         break;
       case 'disturbAgent':
