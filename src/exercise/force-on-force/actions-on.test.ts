@@ -52,7 +52,7 @@ const gap = (run: FofRun) => {
 
 describe('actions on contact: attack', () => {
   for (const terrain of ['open', 'urban'] as const) {
-    it(`${terrain}: returns fire, then assaults the enemy's believed position, closing and firing on the move`, () => {
+    it(`${terrain}: returns fire, then assaults the enemy's believed position, closing under its own covering fire`, () => {
       const run = createFofRun(spec(terrain, 1, 'attack', 'continue'));
       const at: { assault: number | null } = { assault: null };
       let closest = Infinity;
@@ -131,6 +131,82 @@ describe('actions on contact: attack', () => {
     }
     expect(checked).toBeGreaterThan(0);
   }, 300_000);
+});
+
+describe('actions on contact: attack by fire and movement', () => {
+  for (const terrain of ['open', 'urban'] as const) {
+    it(`${terrain}: one fire team (with the squad leader) rushes at a time, not firing, while the others fire from the ground`, () => {
+      const run = createFofRun(spec(terrain, 1, 'attack', 'continue'));
+      const teams = new Map<string, number>();
+      let order: string[] = [];
+      let lastUnit: string | null = null;
+      let coverFire = 0;
+      let boundTicks = 0;
+      let fastest = 0;
+      const before = new Map<string, { x: number; y: number }>();
+      finish(run, (stepped) => {
+        const blue = run.sim.state.fof?.forces[0];
+        if (blue?.phase !== 'assaulting') return;
+        const bounding = new Set<string>(blue.bounding);
+        for (const e of stepped) {
+          if (e.type !== 'fofFire' || e.side !== 'BLUEFOR') continue;
+          // Bounding soldiers do not fire; the base of fire does.
+          expect(bounding.has(e.shooterId)).toBe(false);
+          if (bounding.size > 0) coverFire += 1;
+        }
+        if (bounding.size === 0) {
+          lastUnit = null;
+          return;
+        }
+        boundTicks += 1;
+        // One element at a time: a fire team and the squad leader.
+        expect(bounding.size).toBeLessThanOrEqual(5);
+        const units = new Set(
+          run.sim.state.soldiers.filter((s) => bounding.has(s.id)).map((s) => s.unitId),
+        );
+        expect([...units].filter((u) => u.includes('-FT')).length).toBeLessThanOrEqual(1);
+        if (blue.boundUnit !== lastUnit && blue.boundUnit) {
+          order = [...order, blue.boundUnit];
+          teams.set(blue.boundUnit, (teams.get(blue.boundUnit) ?? 0) + 1);
+        }
+        lastUnit = blue.boundUnit;
+        // Rushing: faster than a walk.
+        for (const s of run.sim.state.soldiers) {
+          if (!bounding.has(s.id) || s.status !== 'active') continue;
+          const was = before.get(s.id);
+          if (was) {
+            fastest = Math.max(
+              fastest,
+              Math.hypot(s.position.x - was.x, s.position.y - was.y) * run.spec.tickRateHz,
+            );
+          }
+          before.set(s.id, { x: s.position.x, y: s.position.y });
+        }
+      });
+      // Several bounds, by different teams in turn.
+      expect(order.length).toBeGreaterThanOrEqual(2);
+      expect(teams.size).toBeGreaterThanOrEqual(2);
+      for (let k = 1; k < order.length; k += 1) expect(order[k]).not.toBe(order[k - 1]);
+      expect(boundTicks).toBeGreaterThan(0);
+      expect(coverFire).toBeGreaterThan(0);
+      expect(fastest).toBeGreaterThan(2);
+    }, 120_000);
+  }
+
+  it('a fire team (no subordinate units) bounds in two halves', () => {
+    const base = spec('open', 1, 'attack', 'continue');
+    const run = createFofRun({
+      ...base,
+      blufor: { ...base.blufor, organization: 'fireTeam', formation: 'usmc.fireTeam.wedge' },
+    });
+    const sizes = new Set<number>();
+    finish(run, () => {
+      const blue = run.sim.state.fof?.forces[0];
+      if (blue?.phase === 'assaulting' && blue.bounding.length > 0) sizes.add(blue.bounding.length);
+    });
+    expect(sizes.size).toBeGreaterThan(0);
+    expect([...sizes].every((n) => n <= 2)).toBe(true);
+  }, 120_000);
 });
 
 describe('actions on contact: withdraw', () => {

@@ -285,6 +285,67 @@ disengagement) takes the first of seeds 1–4 that ends in one.
 Fire and movement (one element suppressing while another moves) would change this
 most; it is not modelled.
 
+## Fire and movement (2026-10-15)
+
+**Asked for.** The attack walked the whole squad at the enemy, upright and in
+formation, firing on the move. It now attacks by fire and movement
+([03 §2.2](03-model.md)).
+
+**How it works.**
+
+- One fire team, with the squad leader, rushes 40 m at 3 m/s toward the believed enemy
+  position, not firing.
+- The other teams stay down and fire, as the base of fire.
+- 6 s after a team is down and firing, the next team bounds, in turn.
+- A fire team or element without subordinate units bounds in two halves.
+- Each bound is a movement-engine order to the squad with a reduced formation: the
+  squad leader's slot and one team's subtree. The other Marines have no task and stay
+  where they are.
+
+**Built.**
+
+- **Configuration:** `boundLengthM`, `boundPaceMps`, `boundRestSeconds` (experimental).
+- **Force state:** `bounding`, `boundUnit`, `boundElement`, `boundSince` on the force.
+- **The lab:** the force label names the bounding team, and the inspector says whether
+  a soldier is bounding or in the base of fire.
+- **Assaulting soldiers** no longer fire on the move; withdrawing ones still do.
+
+**Validation.**
+
+- **New tests:**
+  - one team (with the squad leader) bounds at a time, by different teams in turn;
+  - bounding soldiers never fire, while the base of fire does;
+  - the rushes are faster than a walk (open and urban);
+  - a fire team bounds in halves of at most two.
+- **The force-on-force suite** passes.
+- **Experiment 13** passes.
+- **The default (`continue`) runs are unchanged.** Open and urban seeds 1–3 give
+  bit-identical simulation states and outcomes before and after, so the F5 sweeps
+  stand.
+- **In Chrome** (experiment 13, seed 1): B-FT1 bounded first, then B-FT2. The label
+  showed the bounding team, and the other teams stayed prone behind.
+
+**Seeds 1–5 compared** (BLUEFOR attacks; outcomes, not tuned):
+
+| Against          | Open                                 | Wooded                                  | Urban                                              |
+| ---------------- | ------------------------------------ | --------------------------------------- | -------------------------------------------------- |
+| OPFOR `continue` | BLUEFOR 1 victory, OPFOR 4 victories | OPFOR 4 victories, 1 BLUEFOR withdrawal | OPFOR 2 victories, 1 mutual, 2 BLUEFOR withdrawals |
+| OPFOR `attack`   | BLUEFOR 3, OPFOR 2                   | BLUEFOR 3, OPFOR 2                      | BLUEFOR 3, OPFOR 2                                 |
+| OPFOR `withdraw` | BLUEFOR 5                            | BLUEFOR 5                               | BLUEFOR 5                                          |
+
+- **Compared with the walk-in assault:**
+  - against a halted defender, the attacker now inflicts 2–8 casualties (before, 0–3);
+  - in town, the attack no longer always breaks.
+- **Against a prone defender in the open, the attack still usually fails.** It has 300 m
+  of open ground to cross, bounding at the enemy's front with no cover.
+
+**Limitations.**
+
+- The base of fire does not choose a position. In town it is often out of sight behind
+  a building, with only area fire or none.
+- There is no flanking, and no individual rushes within a team.
+- The force does not assault through; it closes to 30 m and fights.
+
 ## Known limitations
 
 **Detection.**
@@ -297,8 +358,8 @@ most; it is not modelled.
 
 **Behaviour.**
 
-- A force fights where it halts, or (attacking) walks straight at the enemy in
-  formation. There is no cover-seeking, fire and movement, bounding or flanking.
+- A force fights where it halts, or (attacking) bounds straight at the enemy. There
+  is no cover-seeking or choice of firing positions, and no flanking.
 - A withdrawal is one 250 m move away from the known threat. In town it can fail (no
   reachable point); the force then fights on and retries.
 - One force per side; the adjudicator assumes two.

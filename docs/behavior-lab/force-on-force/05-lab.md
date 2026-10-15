@@ -40,17 +40,17 @@ character layer:
 
 ## Overlays
 
-| Overlay                      | Shows                                                                                                                           | Information        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| Starts, destinations, orders | Markers and the forces' current routes (dashed)                                                                                 | each side its own  |
-| Geometric visibility         | Sight lines from the selected soldier (or the leaders) to every enemy in range: green by share in sight, grey dashed if blocked | **observer truth** |
-| Detection confidence         | A bar under each track's last known position                                                                                    | the side's picture |
-| Known contacts               | Tracks at their last known positions: `?` possible, `!` detected, `✕` identified, `○` lost                                      | the side's picture |
-| Organizational state         | Each force's state, effectiveness, strength and suppression over its centre; an assaulting force's objective as a dashed arrow  | each side its own  |
-| Engagement (fire)            | Tracers from shooter to aim point for 0.8 s: aimed solid, area dashed, hits white                                               | each side its own  |
-| Suppression                  | Rings: faint while recovering, yellow suppressed, red pinned                                                                    | each side its own  |
-| Casualty status              | A red cross on each casualty                                                                                                    | each side its own  |
-| Simulation events            | Pulses where a contact is confirmed, a soldier falls or is pinned                                                               | each side its own  |
+| Overlay                      | Shows                                                                                                                                                         | Information        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Starts, destinations, orders | Markers and the forces' current routes (dashed)                                                                                                               | each side its own  |
+| Geometric visibility         | Sight lines from the selected soldier (or the leaders) to every enemy in range: green by share in sight, grey dashed if blocked                               | **observer truth** |
+| Detection confidence         | A bar under each track's last known position                                                                                                                  | the side's picture |
+| Known contacts               | Tracks at their last known positions: `?` possible, `!` detected, `✕` identified, `○` lost                                                                    | the side's picture |
+| Organizational state         | Each force's state, effectiveness, strength and suppression over its centre; an assaulting force's objective as a dashed arrow, and which element is bounding | each side its own  |
+| Engagement (fire)            | Tracers from shooter to aim point for 0.8 s: aimed solid, area dashed, hits white                                                                             | each side its own  |
+| Suppression                  | Rings: faint while recovering, yellow suppressed, red pinned                                                                                                  | each side its own  |
+| Casualty status              | A red cross on each casualty                                                                                                                                  | each side its own  |
+| Simulation events            | Pulses where a contact is confirmed, a soldier falls or is pinned                                                                                             | each side its own  |
 
 ## The event timeline
 

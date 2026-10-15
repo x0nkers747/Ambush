@@ -71,8 +71,8 @@ holding ─ resumeAfterSeconds, effective enough ─▶ moving (its mission)
   an outside unit order to it is rejected (`commandRejected: unitInContact`). Its
   contact behaviour is the only thing moving it, so no soldier is ever under two
   conflicting movement controls.
-- **Not modelled:** cover-seeking, flanking, bounding, or choosing firing positions.
-  The force fights where it halted, or (attacking) assaults straight at the enemy.
+- **Not modelled:** cover-seeking, flanking, or choosing firing positions. The force
+  fights where it halted, or (attacking) bounds straight at the enemy (§2.2).
 
 ### 2.1 Actions on contact
 
@@ -81,33 +81,63 @@ the lab's **Actions on contact** list). "Contact" is the same for all three: a
 confirmed contact within `engageRangeM`, or fire on the force. Possible and distant
 contacts still halt it to observe, as above.
 
-| Action               | On contact                                                                                                                                                                                                                          | Afterwards                                                                                                                                                                                                                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `continue` (default) | Halts, goes prone and returns fire where it is (the states above)                                                                                                                                                                   | Contact lost: holds, then resumes its movement order. It may meet the enemy again further on                                                                                                                                                                                                   |
-| `attack`             | Halts and returns fire, as `continue`. After `assaultAfterSeconds` (8 s) to locate the enemy, it **assaults**: a movement order, in its formation, to where it believes the enemy is (the centre of its current confirmed contacts) | It follows the believed position as it moves. Within `assaultRetargetM` (30 m) of it, or on the objective with the enemy still seen, it halts and fights, and assaults again if the enemy is seen elsewhere. On the objective with no contact: holds, then resumes its original movement order |
-| `withdraw`           | Breaks contact **at once**, without halting first: a movement order back to where it started (its start point in the setup)                                                                                                         | Withdrawn as below. With no way back it halts to fight, and tries again every 10 s                                                                                                                                                                                                             |
+| Action               | On contact                                                                                                                                                                                                                  | Afterwards                                                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `continue` (default) | Halts, goes prone and returns fire where it is (the states above)                                                                                                                                                           | Contact lost: holds, then resumes its movement order. It may meet the enemy again further on                                                                                                                                                    |
+| `attack`             | Halts and returns fire, as `continue`. After `assaultAfterSeconds` (8 s) to locate the enemy, it **assaults** where it believes the enemy is (the centre of its current confirmed contacts) **by fire and movement** (§2.2) | It follows the believed position as it moves. Within `assaultRetargetM` (30 m) of it, it halts and fights, and assaults again if the enemy is seen elsewhere. On the objective with no contact: holds, then resumes its original movement order |
+| `withdraw`           | Breaks contact **at once**, without halting first: a movement order back to where it started (its start point in the setup)                                                                                                 | Withdrawn as below. With no way back it halts to fight, and tries again every 10 s                                                                                                                                                              |
 
 ```
 attack:   contact ─ assaultAfterSeconds, enemy located, farther than assaultRetargetM ─▶ assaulting
-          assaulting ─ within assaultRetargetM, or on the objective with contact ─▶ contact
+          assaulting ─ within assaultRetargetM of the enemy (or no element can move) ─▶ contact
           assaulting ─ on the objective, no contact ─▶ holding ─▶ moving (original order)
 withdraw: moving / atObjective / possibleContact / holding ─ contact ─▶ withdrawing (to its start)
 ```
 
-- **Assaulting and withdrawing soldiers fire on the move** at what they can see
-  (× 0.3 accuracy while moving; standing, so easier to see and hit). Only a withdrawing
-  soldier keeps his last rounds.
+- **Withdrawing soldiers fire on the move** at what they can see (× 0.3 accuracy while
+  moving; standing, so easier to see and hit), keeping their last rounds.
 - **Pinned soldiers** of a moving force are held where they are until they recover,
   as on any move.
 - **The spent-force rules of §7 still apply.** An attack that loses half its
   effectiveness, or stays suppressed, breaks off and withdraws (an attacker away from
   the threat; a `withdraw` force back to its start). "Continue" is not "regardless of
   losses".
-- **Not modelled:** fire and movement (a base of fire suppressing while an element
-  moves), bounding, flanking and assaulting through. The whole force walks at the enemy
-  in formation, firing on the move. Against a halted, prone defender in the open this
-  is costly; see [04 §2](04-experiments.md).
 - **Outside orders** are rejected while a force is assaulting, as in contact.
+
+### 2.2 Fire and movement
+
+An attacking force assaults by **bounding**: one element moves while the rest of the
+force stays down and fires (the base of fire); then the next element moves, in turn.
+
+- **Elements.**
+  - A force with two or more subordinate units (a squad): each fire team is an
+    element. The squad leader moves with each bound, a little behind the team.
+  - A force without subordinate units (a fire team, a 3-Marine element): its
+    soldiers in two halves, in formation order, the leader with the first.
+  - A single soldier: no fire and movement; he moves alone.
+- **A bound.**
+  - The next element, in turn, rushes `boundLengthM` (40 m) at `boundPaceMps`
+    (3 m/s) toward where the force believes the enemy is. It never goes closer than
+    half of `assaultRetargetM`. It moves in its own part of the force's formation,
+    through the movement engine.
+  - Bounding soldiers do not fire. They are standing and moving, so easier to see
+    and hit.
+  - Everyone else is halted in contact: down, facing the enemy, firing aimed or
+    area fire at what the force knows.
+  - The bound ends when the element arrives, or (held up, say by a pinned soldier)
+    after twice its expected time plus 5 s. Its soldiers then go down and, after
+    their reaction delays, fire.
+  - The next element bounds once the last has been down `boundRestSeconds` (6 s),
+    so that its fire is established.
+- **An element that cannot move** (all of it down, already close, or no way) is
+  skipped for the next. If none can, the force halts and fights where it is.
+- **Not modelled:**
+  - choosing firing positions or cover for the base of fire (in town, it often has no
+    sight line and can give only area fire, or none);
+  - flanking, individual rushes within a team, and assaulting through the position.
+- **What it changes** (seeds 1–5, [the journal](journal.md)): against a halted,
+  prone defender the attack still usually fails in the open, but it now inflicts real
+  casualties. Attacking a withdrawing force wins every seed.
 
 ## 3. Soldiers
 

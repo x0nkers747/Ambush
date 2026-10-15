@@ -723,7 +723,9 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
             : force.phase === 'possibleContact'
               ? 'His force has halted to observe a possible or distant contact: kneeling, watching.'
               : force.phase === 'assaulting'
-                ? 'His force is attacking: moving in formation on where it believes the enemy is, firing on the move at what he can see.'
+                ? force.bounding.includes(soldier.id)
+                  ? 'His element is bounding: rushing toward where his force believes the enemy is, not firing, while the rest of the force covers it with fire.'
+                  : 'Base of fire: down, facing the enemy and firing to cover the element bounding forward; his element bounds in its turn.'
                 : force.phase === 'withdrawing'
                   ? 'His force is breaking contact: moving back in formation, firing on the move at what he can see.'
                   : force.phase === 'holding'

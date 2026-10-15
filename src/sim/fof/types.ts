@@ -14,8 +14,9 @@ import type { FofConfig, VisibilityClass } from './config';
  * the engagement range, or fire on it):
  *
  * - `attack`: halts to return fire and locate the enemy, then assaults the
- *   enemy's believed position in formation, firing on the move; once contact
- *   is gone it returns to its original movement order;
+ *   enemy's believed position by fire and movement (one element bounds
+ *   forward while the rest cover it with fire, in turn); once contact is
+ *   gone it returns to its original movement order;
  * - `withdraw`: disengages at once and moves back to where it started,
  *   firing on the move at what it can see;
  * - `continue`: halts to fight where it is, and resumes its movement order
@@ -80,7 +81,7 @@ export interface FofTrack {
  * - `contact`: a confirmed contact, or under fire: halted in a defensive posture;
  * - `engaged`: exchanging fire;
  * - `holding`: contact lost; holding before resuming its mission;
- * - `assaulting`: attacking, moving in formation on the enemy's believed position;
+ * - `assaulting`: attacking the enemy's believed position by fire and movement;
  * - `withdrawing`: breaking contact, moving away from the threat;
  * - `atObjective`: arrived, observing (reacts to contact as before);
  * - `withdrawn`, `ineffective`: terminal.
@@ -122,9 +123,17 @@ export interface FofForce {
   readonly start: Vec2;
   /** Attacking: when it assaults (after returning fire and locating the enemy), or `null`. */
   assaultAt: number | null;
-  /** Assaulting: the position it is assaulting and when it was set. */
+  /** Assaulting: the position it is assaulting (where it believes the enemy is) and when it was set. */
   objective: Vec2 | null;
   objectiveAt: number;
+  /** Assaulting: the soldiers of the element bounding now (empty: all down, firing). */
+  bounding: readonly SoldierId[];
+  /** Assaulting: the unit of the element bounding now (for display), or `null`. */
+  boundUnit: string | null;
+  /** Assaulting: the element to bound next (index into the force's elements). */
+  boundElement: number;
+  /** Assaulting: when the current bound began, or the last one ended. */
+  boundSince: number;
   /** Members in soldier order. */
   readonly memberIds: readonly SoldierId[];
   readonly leaderIds: readonly SoldierId[];

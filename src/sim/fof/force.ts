@@ -4,8 +4,8 @@ import { azimuthOf, normalizeAzimuth, type Vec2 } from '../geometry';
 import { navArea } from '../navigation';
 import { nextFloat } from '../rng';
 import { isOnTerrain } from '../terrain';
-import { orgUnitId, type Soldier } from '../state';
-import type { UnitOrder } from '../behavior/types';
+import { orgUnitId, type Soldier, type SoldierId } from '../state';
+import type { FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
 import { fofWeapon } from './config';
 import { confidenceAt } from './detection';
 import type { FofContext } from './system';
@@ -30,8 +30,9 @@ import type { FofForce, ForcePhase, ObservationLevel } from './types';
 //
 //   continue: as above, it fights where it halts and resumes its mission;
 //   attack:   contact ─ assaultAfterSeconds, enemy located ─▶ assaulting (on
-//             the enemy's believed position, firing on the move);
-//             assaulting ─ on the objective, enemy still there ─▶ contact;
+//             the enemy's believed position, by fire and movement: one
+//             element bounds while the others fire, in turn);
+//             assaulting ─ closed with the enemy ─▶ contact;
 //                        ─ on the objective, no contact ─▶ holding ─▶ mission;
 //   withdraw: contact ─▶ withdrawing (back to where it started) at once.
 //
@@ -56,6 +57,11 @@ export function halted(phase: ForcePhase): boolean {
 
 /** Phases in which the force moves under fire, its soldiers firing on the move. */
 export function firingOnTheMove(phase: ForcePhase): boolean {
+  return phase === 'withdrawing';
+}
+
+/** Phases in which the force's movement is its own (contact behaviour), not its mission. */
+function ownMovement(phase: ForcePhase): boolean {
   return phase === 'withdrawing' || phase === 'assaulting';
 }
 
@@ -232,8 +238,10 @@ export function halt(
 ): void {
   const { state, t } = context;
   const task = runningTask(context, force);
-  if (task && !firingOnTheMove(force.phase)) force.mission = task.order;
+  if (task && !ownMovement(force.phase)) force.mission = task.order;
   cancelTask(context, force);
+  force.bounding = [];
+  force.boundUnit = null;
   const entering =
     phase === 'contact' &&
     force.phase !== 'contact' &&
@@ -291,8 +299,8 @@ function onContact(context: FofContext, force: FofForce, reason: string): void {
 /**
  * Attacking, halted in contact: once it has returned fire and located the
  * enemy (`assaultAfterSeconds`), it assaults where it believes the enemy is,
- * in formation (facing the enemy), firing on the move. A believed position
- * within `assaultRetargetM` it fights from where it is.
+ * by fire and movement. A believed position within `assaultRetargetM` it
+ * fights from where it is.
  */
 function beginAssault(context: FofContext, force: FofForce, enemy: Vec2 | null): void {
   const { t } = context;
@@ -302,80 +310,221 @@ function beginAssault(context: FofContext, force: FofForce, enemy: Vec2 | null):
   if (!centre || Math.hypot(enemy.x - centre.x, enemy.y - centre.y) <= behavior.assaultRetargetM) {
     return;
   }
-  if (!moveTo(context, force, enemy)) {
-    // No way there now: it fights on where it is and tries again later.
+  force.objective = enemy;
+  force.objectiveAt = t;
+  if (!bound(context, force, enemy)) {
+    // No element can move now: it fights on where it is and tries again later.
+    force.objective = null;
     force.assaultAt = t + behavior.assaultAfterSeconds;
     return;
   }
-  standUp(context, force);
   force.assaultAt = null;
-  force.objective = enemy;
-  force.objectiveAt = t;
   enter(context, force, 'assaulting', 'actions on contact: attack');
 }
 
 /**
- * Assaulting: it follows the enemy's believed position as it moves, closes
- * to fight from `assaultRetargetM`, and on the objective fights the enemy
- * still there or, with no contact, holds before resuming its mission.
+ * Assaulting, by fire and movement: one element bounds (rushes) toward
+ * where the force believes the enemy is while the others stay down and
+ * fire; when it arrives it goes down, and once it has been firing for
+ * `boundRestSeconds`, the next element bounds. Within `assaultRetargetM`
+ * of the enemy it halts and fights; on the objective with no contact it
+ * holds, then resumes its mission.
  */
 function updateAssault(context: FofContext, force: FofForce, enemy: Vec2 | null): void {
   const { t } = context;
   const behavior = context.setup.config.force;
-  const centre = centreOf(context, force);
-  const near =
-    enemy !== null &&
-    centre !== null &&
-    Math.hypot(enemy.x - centre.x, enemy.y - centre.y) <= behavior.assaultRetargetM;
-  if (near || (enemy && !runningTask(context, force))) {
-    force.objective = null;
-    halt(context, force, 'contact', near ? 'closed with the enemy' : 'on the objective');
-    force.assaultAt = t + behavior.assaultAfterSeconds;
-    return;
-  }
-  if (!runningTask(context, force)) {
-    force.objective = null;
-    halt(context, force, 'holding', 'on the objective: no contact');
-    return;
-  }
-  const objective = force.objective;
-  if (
-    enemy &&
-    objective &&
-    Math.hypot(enemy.x - objective.x, enemy.y - objective.y) >= behavior.assaultRetargetM &&
-    t - force.objectiveAt >= behavior.assaultAfterSeconds - 1e-9 &&
-    moveTo(context, force, enemy)
-  ) {
+  if (enemy) {
     force.objective = enemy;
     force.objectiveAt = t;
   }
+  if (force.bounding.length > 0) {
+    // A bound ends when the element arrives (or, held up, after twice its expected time).
+    const expected = behavior.boundLengthM / behavior.boundPaceMps;
+    if (runningTask(context, force) && t - force.boundSince < 2 * expected + 5 - 1e-9) return;
+    endBound(context, force);
+    return;
+  }
+  const target = force.objective;
+  const centre = centreOf(context, force);
+  if (!target || !centre) return;
+  if (Math.hypot(target.x - centre.x, target.y - centre.y) <= behavior.assaultRetargetM) {
+    force.objective = null;
+    if (enemy) {
+      halt(context, force, 'contact', 'closed with the enemy');
+      force.assaultAt = t + behavior.assaultAfterSeconds;
+    } else {
+      halt(context, force, 'holding', 'on the objective: no contact');
+    }
+    return;
+  }
+  if (t - force.boundSince < behavior.boundRestSeconds - 1e-9) return;
+  if (!bound(context, force, target)) {
+    // No element can move (all close, or no way): it fights where it is.
+    force.objective = null;
+    halt(context, force, 'contact', enemy ? 'closed with the enemy' : 'no way forward');
+    force.assaultAt = t + behavior.assaultAfterSeconds;
+  }
+}
+
+/** One element of a force for fire and movement: its formation and soldiers. */
+interface Element {
+  readonly unitId: string;
+  readonly formation: FormationSpec;
+  readonly memberIds: readonly SoldierId[];
 }
 
 /**
- * Orders the force, in its formation, to the reachable point nearest `to`
- * (in the navigation area of its centre, where the movement engine plans
- * from). Returns whether the order took.
+ * The force's elements for fire and movement, from its formation: each
+ * subordinate unit (with the force's own leader and headquarters moving
+ * with it, a little behind) when it has two or more; else its soldiers in
+ * two halves, in formation order (the leader with the first).
  */
-function moveTo(context: FofContext, force: FofForce, to: Vec2): boolean {
-  const { world } = context;
-  const area = forceArea(context, force);
+export function elementsOf(context: FofContext, force: FofForce): Element[] {
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
   const formation = force.mission?.formation ?? forceSetup?.formation;
-  if (area === 0 || !formation || !isOnTerrain(world.terrain, to.x, to.y)) return false;
+  if (!formation) return [];
+  const root = formation.root;
+  const soldiersOf = (n: FormationNode): SoldierId[] => [
+    ...n.slots.map((s) => s.soldierId),
+    ...n.children.flatMap(soldiersOf),
+  ];
+  if (root.children.length >= 2) {
+    const behind = Math.max(0, ...root.children.flatMap((c) => c.slots.map((s) => s.back)));
+    const headquarters = root.slots.map((s) => ({ ...s, back: s.back + behind }));
+    return root.children.map((child) => ({
+      unitId: child.unitId,
+      formation: {
+        interval: formation.interval,
+        root: { ...root, slots: headquarters, children: [{ ...child, back: 0, right: 0 }] },
+      },
+      memberIds: [...headquarters.map((s) => s.soldierId), ...soldiersOf(child)],
+    }));
+  }
+  const slots = root.slots;
+  if (slots.length < 2 || root.children.length > 0) {
+    return [{ unitId: root.unitId, formation, memberIds: soldiersOf(root) }];
+  }
+  const half = Math.ceil(slots.length / 2);
+  return [slots.slice(0, half), slots.slice(half)].map((part) => ({
+    unitId: root.unitId,
+    formation: { interval: formation.interval, root: { ...root, slots: part, children: [] } },
+    memberIds: part.map((s) => s.soldierId),
+  }));
+}
+
+/**
+ * Starts the next bound: the first element, from `boundElement` on, that
+ * has soldiers up and is not already close, rushes `boundLengthM` toward
+ * `target`. Returns whether one did.
+ */
+function bound(context: FofContext, force: FofForce, target: Vec2): boolean {
+  const { t } = context;
+  const behavior = context.setup.config.force;
+  const elements = elementsOf(context, force);
+  for (let k = 0; k < elements.length; k += 1) {
+    const index = (force.boundElement + k) % elements.length;
+    const element = elements[index];
+    if (!element) continue;
+    const up = element.memberIds.filter(
+      (id) => context.state.soldiers[context.soldierIndex.get(id) ?? -1]?.status === 'active',
+    );
+    const at = centreOfSoldiers(context, up);
+    if (!at) continue;
+    const d = Math.hypot(target.x - at.x, target.y - at.y);
+    const step = Math.min(behavior.boundLengthM, d - behavior.assaultRetargetM / 2);
+    if (step < 5) continue;
+    const to = {
+      x: at.x + ((target.x - at.x) / d) * step,
+      y: at.y + ((target.y - at.y) / d) * step,
+    };
+    if (!moveTo(context, force, to, element.formation, behavior.boundPaceMps, at)) continue;
+    // The bounding soldiers get up and go; the others stay down, firing.
+    for (const id of up) {
+      const member = context.fof.soldiers[context.memberIndex.get(id) ?? -1];
+      const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
+      if (!member || !soldier) continue;
+      member.reactAt = null;
+      member.reacted = false;
+      member.nextFireAt = null;
+      soldier.posture = 'standing';
+    }
+    force.bounding = up;
+    force.boundUnit = element.unitId;
+    force.boundElement = (index + 1) % elements.length;
+    force.boundSince = t;
+    return true;
+  }
+  return false;
+}
+
+/** The bounding element arrives (or is held up): it goes down and, after its reaction delays, fires. */
+function endBound(context: FofContext, force: FofForce): void {
+  const { state, t } = context;
+  cancelTask(context, force);
+  const delay = context.setup.config.force.reactionDelay;
+  for (const id of force.bounding) {
+    const member = context.fof.soldiers[context.memberIndex.get(id) ?? -1];
+    const soldier = state.soldiers[context.soldierIndex.get(id) ?? -1];
+    if (!member || soldier?.status !== 'active') continue;
+    member.reactAt =
+      t + delay.minSeconds + nextFloat(state.rng) * (delay.maxSeconds - delay.minSeconds);
+    member.reacted = false;
+    member.nextFireAt = null;
+  }
+  force.bounding = [];
+  force.boundUnit = null;
+  force.boundSince = t;
+}
+
+/** Where some soldiers (those still up) are on average, or `null`. */
+function centreOfSoldiers(context: FofContext, ids: readonly SoldierId[]): Vec2 | null {
+  let x = 0;
+  let y = 0;
+  let n = 0;
+  for (const id of ids) {
+    const s = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
+    if (s?.status !== 'active') continue;
+    x += s.position.x;
+    y += s.position.y;
+    n += 1;
+  }
+  return n > 0 ? { x: x / n, y: y / n } : null;
+}
+
+/**
+ * Orders the force, in its formation (or `formation`, an element's), to the
+ * reachable point nearest `to` (in the navigation area of `from`, by
+ * default its centre, where the movement engine plans from). Returns whether
+ * the order took.
+ */
+function moveTo(
+  context: FofContext,
+  force: FofForce,
+  to: Vec2,
+  formation?: FormationSpec,
+  pace?: number,
+  from?: Vec2,
+): boolean {
+  const { world } = context;
+  const area = forceArea(context, force, from);
+  const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
+  const shape = formation ?? force.mission?.formation ?? forceSetup?.formation;
+  if (area === 0 || !shape || !isOnTerrain(world.terrain, to.x, to.y)) return false;
   const point = nearestInArea(world.terrain, to, area);
   if (!point) return false;
+  const speed = pace ?? forceSetup?.pace;
   return issue(context, force, {
     kind: 'moveInFormation',
     destination: point,
-    formation,
-    ...(forceSetup?.pace !== undefined ? { pace: forceSetup.pace } : {}),
+    formation: shape,
+    ...(speed !== undefined ? { pace: speed } : {}),
   });
 }
 
-/** The navigation area the force's route is planned from: its centre's, else a member's on routable ground (0: none). */
-function forceArea(context: FofContext, force: FofForce): number {
+/** The navigation area the force's route is planned from: `from`'s (default its centre), else a member's on routable ground (0: none). */
+function forceArea(context: FofContext, force: FofForce, from?: Vec2): number {
   const terrain = context.world.terrain;
-  const centre = centreOf(context, force);
+  const centre = from ?? centreOf(context, force);
   if (!centre) return 0;
   let area = navArea(terrain, centre);
   for (const id of area > 0 ? [] : force.memberIds) {
@@ -405,11 +554,13 @@ export function withdraw(
   if (!centre) return false;
   // The movement order it is on (if any) stays its mission.
   const task = runningTask(context, force);
-  if (task && !firingOnTheMove(force.phase)) force.mission = task.order;
+  if (task && !ownMovement(force.phase)) force.mission = task.order;
   const going = (): true => {
     standUp(context, force);
     force.objective = null;
     force.assaultAt = null;
+    force.bounding = [];
+    force.boundUnit = null;
     enter(context, force, 'withdrawing', reason);
     force.withdrawRetryAt = null;
     return true;
@@ -452,6 +603,8 @@ export function releaseHolds(context: FofContext, force: FofForce): void {
 export function resume(context: FofContext, force: FofForce, reason: string): void {
   force.objective = null;
   force.assaultAt = null;
+  force.bounding = [];
+  force.boundUnit = null;
   standUp(context, force);
   if (force.mission && issue(context, force, force.mission)) {
     enter(context, force, 'moving', reason);
@@ -496,15 +649,19 @@ export function standUp(context: FofContext, force: FofForce): void {
  * posture once his reaction delay is over (kneeling to observe; prone in
  * contact, leaders kneeling to see and command; pinned soldiers prone), faces
  * the nearest contact he knows of, and (in contact) begins to fire. On the
- * move, a pinned soldier is held where he is until he recovers.
+ * move, a pinned soldier is held where he is until he recovers. Assaulting,
+ * the bounding element rushes without firing and the others are halted, in
+ * contact (the base of fire).
  */
 function carryOut(context: FofContext, force: FofForce): void {
   const { t, fof } = context;
-  const stopped = halted(force.phase);
+  const assaulting = force.phase === 'assaulting';
   for (const id of force.memberIds) {
     const member = fof.soldiers[context.memberIndex.get(id) ?? -1];
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
     if (!member || soldier?.status !== 'active') continue;
+    // Assaulting, the bounding element moves; the rest are down, firing (the base of fire).
+    const stopped = halted(force.phase) || (assaulting && !force.bounding.includes(id));
     hold(context, soldier, !stopped && member.level === 'pinned');
     if (!stopped) {
       // Assaulting or breaking contact, he fires on the move at what he can see
@@ -542,7 +699,7 @@ function carryOut(context: FofContext, force: FofForce): void {
           : 'prone';
     // Contact phases that began before he reacted: fire once reacted.
     if (
-      (force.phase === 'contact' || force.phase === 'engaged') &&
+      (force.phase === 'contact' || force.phase === 'engaged' || assaulting) &&
       member.nextFireAt === null &&
       member.weapon !== null &&
       member.rounds > 0

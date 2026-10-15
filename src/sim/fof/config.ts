@@ -172,6 +172,15 @@ export interface ForceBehaviorConfig {
    * believed position has shifted this far.
    */
   readonly assaultRetargetM: number;
+  /**
+   * Fire and movement: one element (a fire team with the leader; half a
+   * team without subordinate units) rushes this far (m) toward the enemy at
+   * `boundPaceMps`, then goes down and fires; once it has been down
+   * `boundRestSeconds`, the next element bounds.
+   */
+  readonly boundLengthM: number;
+  readonly boundPaceMps: number;
+  readonly boundRestSeconds: number;
 }
 
 export interface EffectivenessConfig {
@@ -521,6 +530,9 @@ export function validateFofConfig(data: unknown): FofConfig {
     'ineffectiveEffectiveness',
     'assaultAfterSeconds',
     'assaultRetargetM',
+    'boundLengthM',
+    'boundPaceMps',
+    'boundRestSeconds',
   ]);
   const delay = object(fb['reactionDelay'], '.force.reactionDelay', ['minSeconds', 'maxSeconds']);
   const dmin = number(delay['minSeconds'], '.force.reactionDelay.minSeconds', 0);
@@ -541,6 +553,9 @@ export function validateFofConfig(data: unknown): FofConfig {
     ineffectiveEffectiveness: [0, 1],
     assaultAfterSeconds: [0],
     assaultRetargetM: [0],
+    boundLengthM: [1],
+    boundPaceMps: [0.1],
+    boundRestSeconds: [0],
   });
   if ((fb['ineffectiveEffectiveness'] as number) > (fb['withdrawEffectiveness'] as number)) {
     fail('.force.ineffectiveEffectiveness', 'must not exceed withdrawEffectiveness');

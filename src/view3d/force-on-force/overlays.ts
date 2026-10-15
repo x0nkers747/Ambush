@@ -78,7 +78,7 @@ export const PHASE_TEXT: Readonly<Record<FofForce['phase'], string>> = {
   contact: 'CONTACT: halted, defensive posture',
   engaged: 'ENGAGED: exchanging fire',
   holding: 'contact lost: holding',
-  assaulting: 'ASSAULTING: attacking the enemy position',
+  assaulting: 'ASSAULTING: fire and movement',
   withdrawing: 'WITHDRAWING: breaking contact',
   atObjective: 'at objective',
   withdrawn: 'WITHDRAWN',
@@ -336,7 +336,7 @@ export function drawFofOverlays(f: FofOverlayFrame): void {
       const active = force.memberIds.filter(
         (id) => state.soldiers.find((s) => s.id === id)?.status === 'active',
       ).length;
-      const line1 = `${force.side} · ${PHASE_TEXT[force.phase]}`;
+      const line1 = `${force.side} · ${PHASE_TEXT[force.phase]}${force.boundUnit ? ` · ${force.boundUnit} bounding` : ''}`;
       const line2 = `effectiveness ${(force.effectiveness * 100).toFixed(0)} % · ${String(active)}/${String(force.memberIds.length)} up · suppression ${(force.meanSuppression * 100).toFixed(0)} %`;
       ctx.font = '600 12px system-ui, sans-serif';
       const w = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 12;

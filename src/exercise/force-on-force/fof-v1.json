@@ -205,7 +205,10 @@
     "withdrawnClearSeconds": 30,
     "ineffectiveEffectiveness": 0.3,
     "assaultAfterSeconds": 8,
-    "assaultRetargetM": 30
+    "assaultRetargetM": 30,
+    "boundLengthM": 40,
+    "boundPaceMps": 3,
+    "boundRestSeconds": 6
   },
   "effectiveness": {
     "suppressionWeight": 0.5,
