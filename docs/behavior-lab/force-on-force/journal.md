@@ -210,6 +210,81 @@ The page is isolated from the game: loaded lazily only at its address, checked b
   - 15 of 15 determinism re-runs identical.
 - **The full repository check** passes.
 
+## Actions on contact (2026-10-15)
+
+**Asked for.** In the urban approach, the squads engaged, took losses, then walked on
+toward their waypoints, met again and engaged again, over and over. Each force now has
+**actions on contact**, chosen per side in the lab ([03 §2.1](03-model.md)):
+
+- **attack:** halt and return fire, then (after 8 s) assault where it believes the enemy
+  is, in formation, firing on the move. Once contact is gone, back to its original
+  waypoint.
+- **withdraw:** break contact at once and go back to its start.
+- **continue:** the behaviour so far (and the default).
+
+**Built.**
+
+- **Kernel** (`src/sim/fof`):
+  - `actionsOn` and `start` on each force's setup;
+  - a new force phase, `assaulting`, with its objective;
+  - the assault (start, follow the believed position, close, arrive);
+  - withdrawal to the start;
+  - fire on the move while assaulting.
+- **The forces carry on after the outcome.** Survivors resume their original movement
+  orders and withdrawing forces go on. The lab plays on until they stop (`settled`).
+- **The lab:**
+  - an **Actions on contact** list per side;
+  - a dashed arrow to an assault's objective;
+  - experiment 13 (four variants in town).
+- **Configuration:** `force.assaultAfterSeconds` (8 s) and `force.assaultRetargetM`
+  (30 m), both experimental.
+
+**Found and fixed: withdrawal orders went at the wrong heading.** The force checked
+that a movement order had taken by counting the movement engine's tasks. Issuing an
+order prunes finished tasks, so the count could fall even though the order had
+succeeded. The force then took the order as refused and issued it again at the next
+heading (±30°, …). The check is now whether the force has a running task. This changes
+some withdrawals, and so some outcomes of the default runs. The F5 sweeps were re-run
+([04 §3](04-experiments.md)):
+
+- detection figures are identical;
+- open-ground outcomes moved from 25/21/4 to 24/20/3 plus 3 withdrawals.
+
+One lifecycle test that needed a combat-ineffective outcome on seed 1 (now a mutual
+disengagement) takes the first of seeds 1–4 that ends in one.
+
+**Validation.**
+
+- **New tests** (`actions-on.test.ts`):
+  - an attack returns fire first, then assaults, closes and fires on the move (open
+    and urban);
+  - the winner of an attack goes back to its original order and reaches it, with no
+    fire after the outcome;
+  - a withdrawal goes at once, to the start;
+  - `continue` is the default and never assaults;
+  - repeats are bit-identical, with the same outcome at 30 and 120 Hz;
+  - an unknown action is rejected.
+- **The thirteen experiments** all pass.
+- **The sweeps** (150 runs): all ended by a rule, with 0 invalid, 0 invariant failures
+  and 0 rejected commands; 15/15 re-runs were identical.
+- **In Chrome** (experiment 13, seed 1): BLUEFOR assaulted (seen at 10:39, arrow drawn), was
+  broken in the street (OPFOR victory at 12:47.7), and OPFOR then walked on to its
+  waypoint. Play stopped once it arrived. With the list set to withdraw, BLUEFOR broke
+  contact at 10:23 and withdrew (BLUEFOR withdrawal at 12:14.6).
+
+**What the runs show (not tuned).** An attack is costly:
+
+- It walks upright and in formation at a halted, prone enemy, firing at × 0.3 accuracy
+  on the move.
+- Against `continue`, the attacker lost in 3/3 urban seeds, and in 3/3 open seeds of a
+  probe.
+- Attack against attack is even.
+- Withdrawing in the open under fire from 300 m was destroyed in 3/3 probe seeds. In
+  town, streets break sight lines and it got away (3/3).
+
+Fire and movement (one element suppressing while another moves) would change this
+most; it is not modelled.
+
 ## Known limitations
 
 **Detection.**
@@ -222,8 +297,8 @@ The page is isolated from the game: loaded lazily only at its address, checked b
 
 **Behaviour.**
 
-- A force fights where it halts. There is no cover-seeking, bounding, flanking or
-  pursuit (out of scope by design).
+- A force fights where it halts, or (attacking) walks straight at the enemy in
+  formation. There is no cover-seeking, fire and movement, bounding or flanking.
 - A withdrawal is one 250 m move away from the known threat. In town it can fail (no
   reachable point); the force then fights on and retries.
 - One force per side; the adjudicator assumes two.

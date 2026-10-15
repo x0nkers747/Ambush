@@ -71,8 +71,43 @@ holding ─ resumeAfterSeconds, effective enough ─▶ moving (its mission)
   an outside unit order to it is rejected (`commandRejected: unitInContact`). Its
   contact behaviour is the only thing moving it, so no soldier is ever under two
   conflicting movement controls.
-- **Not modelled:** cover-seeking, flanking, pursuit, bounding, or choosing firing
-  positions. The force fights where it halted.
+- **Not modelled:** cover-seeking, flanking, bounding, or choosing firing positions.
+  The force fights where it halted, or (attacking) assaults straight at the enemy.
+
+### 2.1 Actions on contact
+
+Each force is given what it does when it comes into contact (`actionsOn` in its setup;
+the lab's **Actions on contact** list). "Contact" is the same for all three: a
+confirmed contact within `engageRangeM`, or fire on the force. Possible and distant
+contacts still halt it to observe, as above.
+
+| Action               | On contact                                                                                                                                                                                                                          | Afterwards                                                                                                                                                                                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `continue` (default) | Halts, goes prone and returns fire where it is (the states above)                                                                                                                                                                   | Contact lost: holds, then resumes its movement order. It may meet the enemy again further on                                                                                                                                                                                                   |
+| `attack`             | Halts and returns fire, as `continue`. After `assaultAfterSeconds` (8 s) to locate the enemy, it **assaults**: a movement order, in its formation, to where it believes the enemy is (the centre of its current confirmed contacts) | It follows the believed position as it moves. Within `assaultRetargetM` (30 m) of it, or on the objective with the enemy still seen, it halts and fights, and assaults again if the enemy is seen elsewhere. On the objective with no contact: holds, then resumes its original movement order |
+| `withdraw`           | Breaks contact **at once**, without halting first: a movement order back to where it started (its start point in the setup)                                                                                                         | Withdrawn as below. With no way back it halts to fight, and tries again every 10 s                                                                                                                                                                                                             |
+
+```
+attack:   contact ─ assaultAfterSeconds, enemy located, farther than assaultRetargetM ─▶ assaulting
+          assaulting ─ within assaultRetargetM, or on the objective with contact ─▶ contact
+          assaulting ─ on the objective, no contact ─▶ holding ─▶ moving (original order)
+withdraw: moving / atObjective / possibleContact / holding ─ contact ─▶ withdrawing (to its start)
+```
+
+- **Assaulting and withdrawing soldiers fire on the move** at what they can see
+  (× 0.3 accuracy while moving; standing, so easier to see and hit). Only a withdrawing
+  soldier keeps his last rounds.
+- **Pinned soldiers** of a moving force are held where they are until they recover,
+  as on any move.
+- **The spent-force rules of §7 still apply.** An attack that loses half its
+  effectiveness, or stays suppressed, breaks off and withdraws (an attacker away from
+  the threat; a `withdraw` force back to its start). "Continue" is not "regardless of
+  losses".
+- **Not modelled:** fire and movement (a base of fire suppressing while an element
+  moves), bounding, flanking and assaulting through. The whole force walks at the enemy
+  in formation, firing on the move. Against a halted, prone defender in the open this
+  is costly; see [04 §2](04-experiments.md).
+- **Outside orders** are rejected while a force is assaulting, as in contact.
 
 ## 3. Soldiers
 
@@ -180,9 +215,10 @@ these hold:
 - mean suppression has stayed at 0.55 or above for 45 s;
 - ammunition is below 15 % of the basic load.
 
-It is ordered `withdrawDistanceM` (250 m) away from the threat it knows of, through
-the movement engine, in its formation. It takes the first heading of 0°, ±30°, ±60°,
-±90° from straight away that has reachable ground. While withdrawing, its soldiers fire on the move at what they can see (× 0.3 accuracy
+It is ordered `withdrawDistanceM` (250 m) away from the threat it knows of (a force
+whose actions on contact are `withdraw`: back to its start), through the movement
+engine, in its formation. It takes the first heading of 0°, ±30°, ±60°, ±90° from
+straight away that has reachable ground. While withdrawing, its soldiers fire on the move at what they can see (× 0.3 accuracy
 on the move). They keep their last rounds: no fire below the withdrawal share of their
 load. A pinned soldier is held until he recovers.
 
@@ -219,6 +255,12 @@ ends the experiment):
   decide an experiment.
 - **The outcome record** holds the real casualty counts and both effectivenesses.
   After it, nothing fires and nothing is observed.
+- **The forces carry on after the outcome.** A force still in the field resumes its
+  original movement order (an attacker goes back to the waypoint it had before
+  contact). A withdrawing force goes on to its withdrawal point (or start). A combat
+  ineffective force stays down. The lab plays on until they have stopped (at most
+  600 s after the outcome); headless runs, the experiments and the sweeps stop at the
+  outcome.
 - **Bounded.** Every run ends by rule 8 at the latest. Rule 1 turns any broken
   invariant into an explicit, named end, not a hang.
 

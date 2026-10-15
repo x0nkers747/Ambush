@@ -15,6 +15,7 @@ import {
   orgUnitId,
   sight,
   surfaceHeightAt,
+  type ActionsOn,
   type FofConfig,
   type FofForce,
   type Side,
@@ -162,6 +163,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         .map(([k, v]) => `<option value="${k}">${escape(v)}</option>`)
         .join('')}</select><span></span></label>
       <label class="row">Formation <select data-i="${side}-formation"></select><span></span></label>
+      <label class="row" title="What the force does when it comes into contact">Actions on contact <select data-i="${side}-actions"><option value="attack">Attack</option><option value="withdraw">Withdraw</option><option value="continue">Continue</option></select><span></span></label>
       <label class="row">Posture <select data-i="${side}-posture"><option value="standing">Standing</option><option value="kneeling">Kneeling</option><option value="prone">Prone</option></select><span></span></label>
       <div class="buttons">
         <button data-a="${side}-start" title="Then click the ground">Set start</button>
@@ -348,6 +350,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         .join('');
       input(`${side}-formation`).value = f.formation;
       input(`${side}-posture`).value = f.posture ?? 'standing';
+      input(`${side}-actions`).value = f.actionsOn ?? 'continue';
     }
     input('rules').value = settings.rules;
     input('engage').value = String(settings.engageRangeM);
@@ -420,6 +423,11 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
     input(`${side}-formation`).addEventListener('change', (e) => {
       changed(() => {
         setForce(side, { formation: (e.target as HTMLSelectElement).value });
+      });
+    });
+    input(`${side}-actions`).addEventListener('change', (e) => {
+      changed(() => {
+        setForce(side, { actionsOn: (e.target as HTMLSelectElement).value as ActionsOn });
       });
     });
     input(`${side}-posture`).addEventListener('change', (e) => {
@@ -714,11 +722,13 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
               : 'His force has halted in contact: he is taking up his position (reaction delay).'
             : force.phase === 'possibleContact'
               ? 'His force has halted to observe a possible or distant contact: kneeling, watching.'
-              : force.phase === 'withdrawing'
-                ? 'His force is breaking contact: moving back in formation, firing on the move at what he can see.'
-                : force.phase === 'holding'
-                  ? 'Contact lost: holding in position before the force resumes its mission.'
-                  : `${PHASE_TEXT[force.phase]}: on his unit's movement order.`;
+              : force.phase === 'assaulting'
+                ? 'His force is attacking: moving in formation on where it believes the enemy is, firing on the move at what he can see.'
+                : force.phase === 'withdrawing'
+                  ? 'His force is breaking contact: moving back in formation, firing on the move at what he can see.'
+                  : force.phase === 'holding'
+                    ? 'Contact lost: holding in position before the force resumes its mission.'
+                    : `${PHASE_TEXT[force.phase]}: on his unit's movement order.`;
     detail.innerHTML = `<h2>${escape(soldier.side)} ${escape(soldier.id)}</h2><dl>
       <dt>Unit</dt><dd>${escape(soldier.unitId)}${member.leader ? ' · leader' : ''}</dd>
       <dt>Status · posture</dt><dd>${soldier.status} · ${soldier.posture}</dd>
@@ -1020,13 +1030,16 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   observer.observe(canvas);
   resize();
 
-  /** Whether the experiment has its outcome (read afresh: stepping changes it). */
-  const over = () => session.head.done;
+  /**
+   * Whether the run is over (read afresh: stepping changes it): the
+   * experiment has its outcome and the forces have finished carrying on.
+   */
+  const over = () => session.head.settled;
   const frame = (now: number) => {
     if (disposed) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    if (playing && !session.head.done) {
+    if (playing && !over()) {
       pending += dt * speed * session.spec.tickRateHz;
       const budget = Math.max(1, Math.ceil(0.1 * speed * session.spec.tickRateHz));
       let stepped = 0;
@@ -1037,8 +1050,8 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         stepped += 1;
       }
       if (pending >= 1) pending = pending % 1;
-    } else if (session.head.done && !session.scrubbed) {
-      // The experiment has an outcome: the run is over (nothing more happens).
+    } else if (over() && !session.scrubbed) {
+      // The experiment has an outcome and the forces have stopped: the run is over.
       playing = false;
     }
     const tick = renderTick();

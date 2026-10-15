@@ -1,9 +1,15 @@
-import { nearestInArea } from '../behavior/slots';
-import { azimuthOf, normalizeAzimuth, type Vec2 } from '../geometry';
-import { navArea } from '../navigation';
-import { isOnTerrain } from '../terrain';
 import type { Side } from '../state';
-import { cancelTask, centreOf, enter, halted, issue, runningTask, standUp } from './force';
+import {
+  cancelTask,
+  enter,
+  halted,
+  releaseHolds,
+  resume,
+  runningTask,
+  standUp,
+  withdraw,
+  WITHDRAW_RETRY_S,
+} from './force';
 import type { FofContext } from './system';
 import { forceActive, soldierOf } from './system';
 import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
@@ -12,11 +18,6 @@ import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
 // force breaks contact or is spent, and how every experiment ends. Every run
 // ends, by the stated rules, within `maxDurationSeconds`; no hit or casualty
 // is ever invented to end it.
-
-/** Headings tried for a withdrawal, in degrees from straight away from the threat. */
-const WITHDRAW_OFFSETS_DEG: readonly number[] = [0, 30, -30, 60, -60, 90, -90];
-/** After a withdrawal found no way, how long before trying again (s). */
-const WITHDRAW_RETRY_S = 10;
 
 /** Each force's lifecycle decision: withdraw, withdrawn, ineffective. */
 export function updateLifecycle(context: FofContext): void {
@@ -47,13 +48,18 @@ export function updateLifecycle(context: FofContext): void {
       const quiet =
         force.lastFiredUponAt === null ||
         t - force.lastFiredUponAt >= behavior.withdrawnClearSeconds - 1e-9;
+      // Withdrawn (it carries on to its withdrawal point: the outcome is decided).
       if (!task || (clear && quiet)) {
-        if (task) halt(context, force);
         enter(context, force, 'withdrawn', task ? 'broke contact' : 'reached its withdrawal point');
       }
       return;
     }
-    if (!halted(force.phase) || force.phase === 'possibleContact') return;
+    if (
+      (!halted(force.phase) && force.phase !== 'assaulting') ||
+      force.phase === 'possibleContact'
+    ) {
+      return;
+    }
     const ammunition = ammunitionShare(context, force);
     const reason =
       force.effectiveness < behavior.withdrawEffectiveness
@@ -66,7 +72,15 @@ export function updateLifecycle(context: FofContext): void {
             : null;
     if (reason && (force.withdrawRetryAt === null || t >= force.withdrawRetryAt - 1e-9)) {
       // Nowhere to go now: it fights on where it is and tries again later.
-      if (!withdraw(context, force, reason)) force.withdrawRetryAt = t + WITHDRAW_RETRY_S;
+      const home = force.actionsOn === 'withdraw' ? force.start : null;
+      if (!withdraw(context, force, reason, home)) {
+        force.withdrawRetryAt = t + WITHDRAW_RETRY_S;
+        // An assault that cannot break off halts to fight where it is.
+        if (force.phase === 'assaulting') {
+          cancelTask(context, force);
+          enter(context, force, 'contact', 'no way to break contact');
+        }
+      }
     }
   });
 }
@@ -98,61 +112,6 @@ function ineffective(context: FofContext, force: FofForce, reason: string): void
     soldier.posture = 'prone';
   }
   enter(context, force, 'ineffective', reason);
-}
-
-/**
- * Breaks contact: orders the force `withdrawDistanceM` away from the threat
- * it knows of (the first heading of `WITHDRAW_OFFSETS_DEG` with ground it
- * can reach), in its formation, through the movement engine. With nowhere
- * to go it stays where it is (returns `false`).
- */
-function withdraw(context: FofContext, force: FofForce, reason: string): boolean {
-  const { world, setup } = context;
-  const centre = centreOf(context, force);
-  if (!centre) return false;
-  const forceSetup = setup.forces.find((f) => f.unitId === force.unitId);
-  const formation = force.mission?.formation ?? forceSetup?.formation;
-  if (!formation) return false;
-  // The withdrawal must be reachable from where the movement engine plans the
-  // route (the force's centre), or else from a member on routable ground.
-  let area = navArea(world.terrain, centre);
-  for (const id of area > 0 ? [] : force.memberIds) {
-    const s = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
-    if (s?.status !== 'active') continue;
-    area = navArea(world.terrain, s.position);
-    if (area > 0) break;
-  }
-  if (area === 0) return false;
-  // Away from the threat it knows of; without one, back the way it faces.
-  const threat = force.threat;
-  const facing = context.state.soldiers[context.soldierIndex.get(force.memberIds[0] ?? '') ?? -1];
-  const away =
-    threat && (threat.x !== centre.x || threat.y !== centre.y)
-      ? azimuthOf(centre.x - threat.x, centre.y - threat.y)
-      : normalizeAzimuth((facing?.azimuth ?? 0) + Math.PI);
-  const distance = setup.config.force.withdrawDistanceM;
-  for (const offset of WITHDRAW_OFFSETS_DEG) {
-    const heading = away + (offset * Math.PI) / 180;
-    const to: Vec2 = {
-      x: centre.x + Math.sin(heading) * distance,
-      y: centre.y + Math.cos(heading) * distance,
-    };
-    if (!isOnTerrain(world.terrain, to.x, to.y)) continue;
-    const point = nearestInArea(world.terrain, to, area);
-    if (!point) continue;
-    standUp(context, force);
-    const ok = issue(context, force, {
-      kind: 'moveInFormation',
-      destination: point,
-      formation,
-      ...(forceSetup?.pace !== undefined ? { pace: forceSetup.pace } : {}),
-    });
-    if (!ok) continue;
-    enter(context, force, 'withdrawing', reason);
-    force.withdrawRetryAt = null;
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -379,5 +338,29 @@ function end(
   };
   fof.outcome = record;
   for (const member of fof.soldiers) member.nextFireAt = null;
+  carryOn(context);
   context.events.push({ type: 'fofEnded', tick, atSeconds: t, outcome: record });
+}
+
+/**
+ * The outcome decided, the forces carry on (no longer looking or firing):
+ * a force withdrawing goes on to its withdrawal point; a force still in the
+ * field resumes its movement order (an attacker, the one it had before
+ * contact); a combat-ineffective force stays down.
+ */
+function carryOn(context: FofContext): void {
+  for (const force of context.fof.forces) {
+    releaseHolds(context, force);
+    if (force.phase === 'ineffective') continue;
+    if (force.phase === 'withdrawing' || force.phase === 'withdrawn') {
+      standUp(context, force);
+      continue;
+    }
+    if (force.phase === 'moving' || force.phase === 'atObjective') {
+      standUp(context, force);
+      continue;
+    }
+    cancelTask(context, force);
+    resume(context, force, 'outcome decided: resuming its movement order');
+  }
 }

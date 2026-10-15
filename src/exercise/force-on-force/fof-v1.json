@@ -203,7 +203,9 @@
     "withdrawAmmunitionFraction": 0.15,
     "withdrawDistanceM": 250,
     "withdrawnClearSeconds": 30,
-    "ineffectiveEffectiveness": 0.3
+    "ineffectiveEffectiveness": 0.3,
+    "assaultAfterSeconds": 8,
+    "assaultRetargetM": 30
   },
   "effectiveness": {
     "suppressionWeight": 0.5,

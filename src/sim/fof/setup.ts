@@ -1,7 +1,10 @@
 import type { ScenarioSoldier, ScenarioUnit } from '../scenario';
 import type { SimState } from '../state';
 import { fofWeapon, validateFofConfig, VISIBILITY_CLASSES } from './config';
-import type { FofSetup } from './types';
+import type { ActionsOn, FofSetup } from './types';
+
+/** The actions on contact a force can be given. */
+export const ACTIONS_ON: readonly ActionsOn[] = ['attack', 'withdraw', 'continue'];
 
 /** Throws an Error naming the first problem of a force-on-force setup for these units and soldiers. */
 export function validateFofSetup(
@@ -38,6 +41,9 @@ export function validateFofSetup(
     }
     if (force.pace !== undefined && !(force.pace > 0))
       fail(`force "${force.unitId}" pace must be > 0`);
+    if (force.actionsOn !== undefined && !ACTIONS_ON.includes(force.actionsOn)) {
+      fail(`force "${force.unitId}" has unknown actions on contact "${force.actionsOn}"`);
+    }
   }
 }
 

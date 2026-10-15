@@ -27,5 +27,5 @@ export {
   vegetationTransmission,
   type Sighting,
 } from './detection';
-export { forceMembers, validateFofSetup } from './setup';
+export { ACTIONS_ON, forceMembers, validateFofSetup } from './setup';
 export type * from './types';

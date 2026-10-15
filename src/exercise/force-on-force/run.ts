@@ -1,4 +1,5 @@
 import {
+  type ActionsOn,
   azimuthFromDegrees,
   azimuthOf,
   createSimulation,
@@ -43,6 +44,9 @@ import { woodsFeatures } from './woods';
 // the same spec gives the same run. Headless: the lab page, the experiments
 // and the sweeps all use it.
 
+/** How long the lab plays on after the outcome while the forces carry on moving (s). */
+export const CARRY_ON_SECONDS = 600;
+
 /** The default experimental configuration (validated). */
 export const FOF_DEFAULT_CONFIG: FofConfig = validateFofConfig(defaultConfig);
 
@@ -64,6 +68,8 @@ export interface FofForceSpec {
   readonly elementSpacing: number;
   /** Start in this posture (default standing). */
   readonly posture?: 'standing' | 'kneeling' | 'prone';
+  /** What it does on contact (default `continue`). */
+  readonly actionsOn?: ActionsOn;
 }
 
 export interface FofRunSpec {
@@ -103,6 +109,11 @@ export interface FofRun {
   step(): readonly SimEvent[];
   /** The experiment has an outcome. */
   readonly done: boolean;
+  /**
+   * The experiment has an outcome and the forces have finished carrying on
+   * (no movement order running), or `CARRY_ON_SECONDS` have passed since.
+   */
+  readonly settled: boolean;
   readonly outcome: FofOutcome | null;
 }
 
@@ -180,6 +191,8 @@ export function createFofRun(
     weapons: f.force.weapons,
     formation: f.force.formation,
     pace: f.spec.pace,
+    ...(f.spec.actionsOn !== undefined ? { actionsOn: f.spec.actionsOn } : {}),
+    start: f.spec.start,
   }));
   const scenario: Scenario = {
     id: 'force-on-force-lab',
@@ -233,6 +246,12 @@ export function createFofRun(
     step: () => sim.step(),
     get done() {
       return sim.state.fof?.outcome != null;
+    },
+    get settled() {
+      const outcome = sim.state.fof?.outcome;
+      if (!outcome) return false;
+      const moving = sim.state.behavior?.tasks.some((t) => t.outcome === null) ?? false;
+      return !moving || sim.timeSeconds >= outcome.atSeconds + CARRY_ON_SECONDS;
     },
     get outcome() {
       return sim.state.fof?.outcome ?? null;

@@ -6,8 +6,8 @@ import { createFofRun } from './run';
 // to their outcomes over several seeds, are tools/fof-experiments.test.ts).
 
 describe('force-on-force experiments', () => {
-  it('has the default demonstration and the twelve experiments', () => {
-    expect(FOF_EXPERIMENTS.map((e) => e.id)).toHaveLength(13);
+  it('has the default demonstration and the thirteen experiments', () => {
+    expect(FOF_EXPERIMENTS.map((e) => e.id)).toHaveLength(14);
     expect(FOF_EXPERIMENTS[0]?.id).toBe('demo');
   });
 

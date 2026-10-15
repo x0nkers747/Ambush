@@ -6,9 +6,9 @@ import {
   type FofExperimentId,
   type FofRunResult,
 } from '#exercise/force-on-force';
-import { hashSimState } from '#sim';
+import { hashSimState, type SimEvent } from '#sim';
 
-// The Force-on-Force Lab's twelve experiments, automated
+// The Force-on-Force Lab's thirteen experiments, automated
 // (docs/behavior-lab/force-on-force/04 §2):
 //   AMBUSH_FOF_EXPERIMENTS=1 npx vitest run tools/fof-experiments.test.ts --silent=false
 // Each runs over seeds 1–3 and checks the property the experiment is about,
@@ -206,4 +206,53 @@ describe.skipIf(!on)('Force-on-Force experiments', () => {
       expect(fast.outcome).toEqual({ ...whole.outcome, tick: (whole.outcome?.tick ?? 0) * 4 + 3 });
     }
   }, 900_000);
+
+  it('13. actions on contact: attackers assault, withdrawing forces go back at once', () => {
+    const outcomes: string[] = [];
+    for (const seed of SEEDS) {
+      for (const v of fofExperiment('actions-on').variants(seed)) {
+        const r = createFofRun(v.spec);
+        const events: SimEvent[] = [];
+        let rejected = 0;
+        while (!r.done) {
+          for (const e of r.step()) {
+            if (e.type === 'commandRejected') rejected += 1;
+            if (e.type === 'forcePhaseChanged') events.push(e);
+          }
+        }
+        expect(rejected).toBe(0);
+        expect(r.outcome?.basis).not.toBe('invalid');
+        outcomes.push(`${String(seed)} ${v.label}: ${r.outcome?.outcome ?? '-'}`);
+        for (const side of ['BLUEFOR', 'OPFOR'] as const) {
+          const spec = side === 'BLUEFOR' ? v.spec.blufor : v.spec.opfor;
+          const phases = events.flatMap((e) =>
+            e.type === 'forcePhaseChanged' && e.side === side ? [e] : [],
+          );
+          const engaged = phases.findIndex(
+            (e) => e.to === 'contact' || e.to === 'withdrawing' || e.to === 'assaulting',
+          );
+          if (engaged < 0) continue;
+          if (spec.actionsOn === 'withdraw') {
+            // At once, by its actions on contact, never by halting to fight first.
+            expect(phases[engaged]?.to).toBe('withdrawing');
+            expect(phases[engaged]?.reason).toMatch(/^actions on contact: withdraw/);
+          }
+          if (spec.actionsOn !== 'attack') {
+            expect(phases.some((e) => e.to === 'assaulting')).toBe(false);
+          }
+        }
+        // BLUEFOR attacks: it assaults, unless broken or out of contact before it could.
+        if (v.spec.blufor.actionsOn === 'attack') {
+          const blue = events.filter((e) => e.type === 'forcePhaseChanged' && e.side === 'BLUEFOR');
+          const contact = blue.some((e) => e.type === 'forcePhaseChanged' && e.to === 'contact');
+          if (contact) {
+            expect(blue.some((e) => e.type === 'forcePhaseChanged' && e.to === 'assaulting')).toBe(
+              true,
+            );
+          }
+        }
+      }
+    }
+    console.log(`13: ${outcomes.join('; ')}`);
+  }, 1_800_000);
 });

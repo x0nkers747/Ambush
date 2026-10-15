@@ -6,14 +6,14 @@ import { sightLineTracer } from '../sight-tracer';
 import type { Soldier } from '../state';
 import { fofWeapon, type FofWeapon } from './config';
 import { vegetationTransmission } from './detection';
-import { enter, underFire } from './force';
+import { enter, firingOnTheMove, underFire } from './force';
 import type { FofContext } from './system';
 import { soldierOf } from './system';
 import type { FofSoldier, FofTrack, SuppressionLevel } from './types';
 
 // Abstract fire (docs/behavior-lab/force-on-force/03 §5): a burst is a fire
-// event, not a bullet. A soldier whose force is in contact (or breaking
-// contact, firing on the move at what he can see) fires when his
+// event, not a bullet. A soldier whose force is in contact (or assaulting or
+// breaking contact, firing on the move at what he can see) fires when his
 // next burst is due: aimed, at the nearest contact of his force he can see
 // (within his weapon's range and the rules of engagement), or else area fire
 // at the last known position of a contact seen recently. One draw decides
@@ -77,7 +77,11 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
 /** Phases in which a force's soldiers fire. */
 function firing(phase: string): boolean {
   return (
-    phase === 'contact' || phase === 'engaged' || phase === 'holding' || phase === 'withdrawing'
+    phase === 'contact' ||
+    phase === 'engaged' ||
+    phase === 'holding' ||
+    phase === 'withdrawing' ||
+    phase === 'assaulting'
   );
 }
 
@@ -108,7 +112,7 @@ export function resolveFire(context: FofContext): void {
       shooter.status !== 'active' ||
       !force ||
       !firing(force.phase) ||
-      (!member.reacted && force.phase !== 'withdrawing')
+      (!member.reacted && !firingOnTheMove(force.phase))
     ) {
       member.nextFireAt = null;
       return;

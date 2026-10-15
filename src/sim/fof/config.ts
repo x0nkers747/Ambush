@@ -164,6 +164,14 @@ export interface ForceBehaviorConfig {
   readonly withdrawnClearSeconds: number;
   /** Below this effectiveness the force is combat ineffective (terminal). */
   readonly ineffectiveEffectiveness: number;
+  /** Attacking: seconds in contact (returning fire, locating the enemy) before it assaults. */
+  readonly assaultAfterSeconds: number;
+  /**
+   * Attacking: it assaults a believed enemy position only farther than this
+   * (m; closer, it fights where it is), and moves its objective when the
+   * believed position has shifted this far.
+   */
+  readonly assaultRetargetM: number;
 }
 
 export interface EffectivenessConfig {
@@ -511,6 +519,8 @@ export function validateFofConfig(data: unknown): FofConfig {
     'withdrawDistanceM',
     'withdrawnClearSeconds',
     'ineffectiveEffectiveness',
+    'assaultAfterSeconds',
+    'assaultRetargetM',
   ]);
   const delay = object(fb['reactionDelay'], '.force.reactionDelay', ['minSeconds', 'maxSeconds']);
   const dmin = number(delay['minSeconds'], '.force.reactionDelay.minSeconds', 0);
@@ -529,6 +539,8 @@ export function validateFofConfig(data: unknown): FofConfig {
     withdrawDistanceM: [0],
     withdrawnClearSeconds: [0],
     ineffectiveEffectiveness: [0, 1],
+    assaultAfterSeconds: [0],
+    assaultRetargetM: [0],
   });
   if ((fb['ineffectiveEffectiveness'] as number) > (fb['withdrawEffectiveness'] as number)) {
     fail('.force.ineffectiveEffectiveness', 'must not exceed withdrawEffectiveness');

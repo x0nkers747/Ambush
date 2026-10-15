@@ -100,9 +100,15 @@ describe('every engagement ends', () => {
 
 describe('combat ineffectiveness and withdrawal', () => {
   it('a force broken by losses withdraws or is combat ineffective, and then fires no more', () => {
-    const run = createFofRun(headOn('open', 1));
-    const events = finish(run);
-    const outcome = checkEnded(run, events);
+    // The first of seeds 1–4 to end with a force combat ineffective (some end in withdrawal).
+    let run = createFofRun(headOn('open', 1));
+    let events = finish(run);
+    let outcome = checkEnded(run, events);
+    for (let seed = 2; seed <= 4 && !outcome.outcome.endsWith('Victory'); seed += 1) {
+      run = createFofRun(headOn('open', seed));
+      events = finish(run);
+      outcome = checkEnded(run, events);
+    }
     expect(['blueforVictory', 'opforVictory']).toContain(outcome.outcome);
     const loser = outcome.outcome === 'blueforVictory' ? 'OPFOR' : 'BLUEFOR';
     const out = phasesOf(events).find((e) => e.side === loser && e.to === 'ineffective');

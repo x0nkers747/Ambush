@@ -89,6 +89,15 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
     const leaderIds = state.units.flatMap((u) =>
       inForce.has(u.id) && u.leaderId !== null ? [u.leaderId] : [],
     );
+    let sx = 0;
+    let sy = 0;
+    for (const id of ids) {
+      const s = state.soldiers.find((x) => x.id === id);
+      sx += s?.position.x ?? 0;
+      sy += s?.position.y ?? 0;
+    }
+    const start =
+      f.start ?? (ids.length > 0 ? { x: sx / ids.length, y: sy / ids.length } : { x: 0, y: 0 });
     const initialRounds = ids.reduce((sum, id) => {
       const w = f.weapons[id];
       return sum + (w ? (fofWeapon(setup.config, w)?.basicLoadRounds ?? 0) : 0);
@@ -98,6 +107,11 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       side: f.side,
       phase: 'moving',
       phaseSince: 0,
+      actionsOn: f.actionsOn ?? 'continue',
+      start,
+      assaultAt: null,
+      objective: null,
+      objectiveAt: 0,
       memberIds: ids,
       leaderIds: [...new Set(leaderIds)],
       initialRounds,

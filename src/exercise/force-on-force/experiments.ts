@@ -22,7 +22,8 @@ export type FofExperimentId =
   | 'ammunition-exhaustion'
   | 'bounded-stalemate'
   | 'mutual-disengagement'
-  | 'replay-restore';
+  | 'replay-restore'
+  | 'actions-on';
 
 export interface FofVariant {
   readonly label: string;
@@ -228,6 +229,31 @@ export const FOF_EXPERIMENTS: readonly FofExperiment[] = [
     description:
       'The default approach: snapshot during the firefight, restore and continue; replay the whole run from its commands. Both must match the original to the bit.',
     variants: (seed, rate = 30) => one('open', headOn('open', seed, rate)),
+  },
+  {
+    id: 'actions-on',
+    name: '13. Actions on contact in the urban district',
+    description:
+      'The urban approach with the forces given different actions on contact: BLUEFOR attacks (returns fire, then assaults where it believes OPFOR is) or withdraws (back to its start at once); OPFOR continues, attacks or withdraws.',
+    variants: (seed, rate = 30) =>
+      (
+        [
+          ['attack', 'continue'],
+          ['withdraw', 'continue'],
+          ['attack', 'attack'],
+          ['attack', 'withdraw'],
+        ] as const
+      ).map(([blue, red]) => {
+        const base = headOn('urban', seed, rate);
+        return {
+          label: `${blue} vs ${red}`,
+          spec: {
+            ...base,
+            blufor: { ...base.blufor, actionsOn: blue },
+            opfor: { ...base.opfor, actionsOn: red },
+          },
+        };
+      }),
   },
 ];
 

@@ -78,6 +78,7 @@ export const PHASE_TEXT: Readonly<Record<FofForce['phase'], string>> = {
   contact: 'CONTACT: halted, defensive posture',
   engaged: 'ENGAGED: exchanging fire',
   holding: 'contact lost: holding',
+  assaulting: 'ASSAULTING: attacking the enemy position',
   withdrawing: 'WITHDRAWING: breaking contact',
   atObjective: 'at objective',
   withdrawn: 'WITHDRAWN',
@@ -314,6 +315,23 @@ export function drawFofOverlays(f: FofOverlayFrame): void {
         n += 1;
       }
       if (n === 0) continue;
+      // An assault: an arrow to the position it is attacking (where it believes the enemy is).
+      if (force.phase === 'assaulting' && force.objective) {
+        const from = projection.toScreen({ x: x / n, y: y / n }, 1);
+        const to = projection.toScreen(force.objective, 1);
+        ctx.strokeStyle = SIDE_COLOUR[force.side];
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 6]);
+        polyline(ctx, [from, to]);
+        ctx.setLineDash([]);
+        const a = Math.atan2(to.y - from.y, to.x - from.x);
+        ctx.beginPath();
+        ctx.moveTo(to.x, to.y);
+        ctx.lineTo(to.x - 12 * Math.cos(a - 0.4), to.y - 12 * Math.sin(a - 0.4));
+        ctx.moveTo(to.x, to.y);
+        ctx.lineTo(to.x - 12 * Math.cos(a + 0.4), to.y - 12 * Math.sin(a + 0.4));
+        ctx.stroke();
+      }
       const p = projection.toScreen({ x: x / n, y: y / n }, 6);
       const active = force.memberIds.filter(
         (id) => state.soldiers.find((s) => s.id === id)?.status === 'active',
