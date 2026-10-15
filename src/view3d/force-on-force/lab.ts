@@ -1,3 +1,4 @@
+import { emptyMotionSample } from '#exercise';
 import {
   FOF_DEFAULT_CONFIG,
   FOF_EXPERIMENTS,
@@ -1026,11 +1027,34 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   let disposed = false;
   let last = performance.now();
   let lastPanels = 0;
-  /** The tick drawn: between the last two ticks of the head while playing (smooth at any rate). */
-  const renderTick = () =>
-    playing && !session.scrubbed
-      ? Math.min(session.headTick, Math.max(session.headTick - 1, wanted - 1))
-      : session.viewTick;
+  /**
+   * The tick drawn while playing: a clock that runs at the rate the head
+   * really advances (at most the speed chosen), a little behind it, so that
+   * motion is smooth however the ticks arrive (in batches from the worker, or
+   * slower than asked for). Drawing only: the simulation never sees it.
+   */
+  let shown = 0;
+  let headRate = 0;
+  let lastHeadTick = 0;
+  const updateShown = (dt: number) => {
+    const head = session.headTick;
+    const rate = session.spec.tickRateHz;
+    if (!playing || session.scrubbed || head < lastHeadTick) {
+      shown = session.viewTick;
+      headRate = 0;
+      lastHeadTick = head;
+      return;
+    }
+    if (dt > 0) headRate += ((head - lastHeadTick) / dt - headRate) * Math.min(1, dt * 2);
+    lastHeadTick = head;
+    // About 150 ms of the head's progress behind it (at least a tick).
+    const behind = Math.max(1, headRate * 0.15);
+    const pace = Math.min(speed * rate, headRate);
+    const next = shown + dt * pace + (head - behind - shown) * Math.min(1, dt * 3);
+    shown = Math.min(head, Math.max(shown, next));
+  };
+  const dotSample = emptyMotionSample();
+  const renderTick = () => (playing && !session.scrubbed ? shown : session.viewTick);
   const resize = () => {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -1067,6 +1091,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
       // The experiment has an outcome and the forces have stopped: the run is over.
       playing = false;
     }
+    updateShown(dt);
     const tick = renderTick();
     const rate = session.spec.tickRateHz;
     const state = session.view.sim.state;
@@ -1134,12 +1159,21 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
       ].filter((m) => perspective === 'observer' || m.label.startsWith(perspective));
       const projection = groundProjection(scene.camera.camera, scene.groundAt, size, ELEVATION_M);
       if (dots) {
+        // From the motion log at the tick drawn (interpolated), as the characters are.
         const sides = new Map(state.soldiers.map((x) => [x.id as string, x.side]));
+        const log = session.motion;
         for (const u of units) {
-          const p = projection.toScreen(u.position, 1);
+          const at = positionAt(log, u.id, Math.max(0, tick));
+          if (!at) continue;
+          const p = projection.toScreen(at, 1);
           if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
           const side = sides.get(u.id) ?? 'BLUEFOR';
-          ctx.fillStyle = u.status === 'active' ? SIDE_COLOUR[side] : '#6b7280';
+          const status = log.read(
+            log.indexOf(u.id),
+            Math.floor(Math.max(0, tick)),
+            dotSample,
+          ).status;
+          ctx.fillStyle = status === 'active' ? SIDE_COLOUR[side] : '#6b7280';
           ctx.beginPath();
           ctx.arc(p.x, p.y, u.selected ? 5 : 3, 0, Math.PI * 2);
           ctx.fill();
@@ -1257,6 +1291,8 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
       restart(recording);
     },
     characters: () => characters.stats(),
+    /** The tick drawn now (fractional while playing). */
+    renderTick: () => renderTick(),
   };
   (window as unknown as { ambushForceOnForceLab?: typeof hook }).ambushForceOnForceLab = hook;
   (root as HTMLElement & { ambushState?: () => unknown }).ambushState = () => ({

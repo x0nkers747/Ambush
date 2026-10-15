@@ -496,6 +496,25 @@ run the simulation in a worker, and make detection cheaper.
 - **Corrected:** part of the earlier figure was other load on the machine. Measured
   side by side, the shared walk is 1.8× faster before contact.
 
+## Smooth motion in the lab (2026-10-15)
+
+**Asked for.** The dots jumped as they moved.
+
+**Two causes, both in the drawing (the simulation is untouched).**
+
+- **The dots were drawn from the state.** The worker posts the state at most every
+  150 ms, so a dot moved only then. They are now drawn from the motion log (every tick),
+  interpolated to the moment drawn, as the characters are.
+- **The moment drawn jumped with each batch.** It followed the newest tick, so when the
+  worker was slower than the speed asked for, it moved only as batches arrived, several
+  ticks at a time. It is now a clock that runs at the rate the head really advances (at
+  most the speed chosen), about 150 ms of progress behind the newest tick, and catches
+  up smoothly.
+
+**Measured in Chrome** (988 soldiers, dots, 180 frames at 1×, 8× and 32×): the moment
+drawn advanced every frame, by 0.46–0.59 ticks on average (standard deviation
+0.07–0.10), and never stood still. The characters follow the same clock.
+
 ## Known limitations
 
 **Detection.**
