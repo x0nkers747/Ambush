@@ -78,9 +78,25 @@ function firing(phase: string): boolean {
   return phase === 'contact' || phase === 'engaged' || phase === 'holding';
 }
 
-/** The bursts due at this decision, in soldier order. */
+/**
+ * What the bursts of one decision do, applied together after all of them:
+ * fire within a decision is simultaneous, so the order soldiers are listed
+ * in gives no side the first shot.
+ */
+interface Volley {
+  /** Suppression to add, by member. */
+  readonly suppression: Map<FofSoldier, number>;
+  /** Soldiers incapacitated, by whom (in the order of the bursts). */
+  readonly down: Map<
+    string,
+    { readonly victim: Soldier; readonly by: Soldier; readonly force: number }
+  >;
+}
+
+/** The bursts due at this decision, in soldier order, resolved as simultaneous. */
 export function resolveFire(context: FofContext): void {
-  const { fof, t } = context;
+  const { fof, t, tick, events } = context;
+  const volley: Volley = { suppression: new Map(), down: new Map() };
   fof.soldiers.forEach((member) => {
     if (member.nextFireAt === null || member.nextFireAt > t + 1e-9) return;
     const shooter = soldierOf(context, member);
@@ -100,15 +116,38 @@ export function resolveFire(context: FofContext): void {
       member.nextFireAt = t + 1;
       return;
     }
-    if (aimedBurst(context, member, shooter, weapon)) return;
-    if (areaBurst(context, member, shooter, weapon)) return;
+    if (aimedBurst(context, volley, member, shooter, weapon)) return;
+    if (areaBurst(context, volley, member, shooter, weapon)) return;
     member.nextFireAt = t + 1;
   });
+  for (const member of fof.soldiers) {
+    const add = volley.suppression.get(member);
+    if (add !== undefined) member.suppression = Math.min(1, member.suppression + add);
+  }
+  for (const { victim, by, force } of volley.down.values()) {
+    victim.status = 'incapacitated';
+    victim.orders = null;
+    const victimMember = fof.soldiers[context.memberIndex.get(victim.id) ?? -1];
+    if (victimMember) {
+      victimMember.nextFireAt = null;
+      victimMember.reactAt = null;
+    }
+    const shooterForce = fof.forces[force];
+    if (shooterForce) shooterForce.stats.casualtiesInflicted += 1;
+    events.push({
+      type: 'soldierIncapacitated',
+      tick,
+      atSeconds: t,
+      soldierId: victim.id,
+      byId: by.id,
+    });
+  }
 }
 
 /** The nearest engageable contact the shooter can see, in range: fire at him. */
 function aimedBurst(
   context: FofContext,
+  volley: Volley,
   member: FofSoldier,
   shooter: Soldier,
   weapon: FofWeapon,
@@ -142,6 +181,7 @@ function aimedBurst(
       shooterFactor(context, member);
     burst(
       context,
+      volley,
       member,
       shooter,
       weapon,
@@ -160,6 +200,7 @@ function aimedBurst(
 /** Area fire at the last known position of an engageable contact seen recently, in range and in sight. */
 function areaBurst(
   context: FofContext,
+  volley: Volley,
   member: FofSoldier,
   shooter: Soldier,
   weapon: FofWeapon,
@@ -204,7 +245,7 @@ function areaBurst(
       : 0;
   const target = context.state.soldiers[context.soldierIndex.get(best.track.targetId) ?? -1];
   if (!target) return false;
-  burst(context, member, shooter, weapon, 'area', target, aim, best.range, pRound, near);
+  burst(context, volley, member, shooter, weapon, 'area', target, aim, best.range, pRound, near);
   return true;
 }
 
@@ -218,6 +259,7 @@ function shooterFactor(context: FofContext, member: FofSoldier): number {
 /** Resolves and records one burst. */
 function burst(
   context: FofContext,
+  volley: Volley,
   member: FofSoldier,
   shooter: Soldier,
   weapon: FofWeapon,
@@ -232,7 +274,9 @@ function burst(
   const rounds = Math.min(member.rounds, weapon.roundsPerBurst);
   const p = victim ? 1 - Math.pow(1 - Math.min(1, Math.max(0, pRound)), rounds) : 0;
   const hit = nextFloat(state.rng) < p;
-  const incapacitated = hit && nextFloat(state.rng) < weapon.incapacitationProbabilityOnHit;
+  const drawn = hit && nextFloat(state.rng) < weapon.incapacitationProbabilityOnHit;
+  // A soldier already struck down by an earlier burst of this volley falls only once.
+  const incapacitated = drawn && victim !== null && !volley.down.has(victim.id);
   member.rounds -= rounds;
   member.lastFiredAt = t;
   member.stats.bursts += 1;
@@ -288,29 +332,16 @@ function burst(
           : 0;
     if (share <= 0) continue;
     const prone = s.posture === 'prone' ? setup.config.suppression.proneSuppressionFactor : 1;
-    enemy.suppression = Math.min(1, enemy.suppression + weapon.suppressionPerBurst * share * prone);
+    volley.suppression.set(
+      enemy,
+      (volley.suppression.get(enemy) ?? 0) + weapon.suppressionPerBurst * share * prone,
+    );
   }
   if (hit && victim) {
     const victimMember = fof.soldiers[context.memberIndex.get(victim.id) ?? -1];
     if (victimMember) victimMember.stats.timesHit += 1;
   }
-  if (incapacitated && victim) {
-    victim.status = 'incapacitated';
-    victim.orders = null;
-    const victimMember = fof.soldiers[context.memberIndex.get(victim.id) ?? -1];
-    if (victimMember) {
-      victimMember.nextFireAt = null;
-      victimMember.reactAt = null;
-    }
-    if (force) force.stats.casualtiesInflicted += 1;
-    events.push({
-      type: 'soldierIncapacitated',
-      tick,
-      atSeconds: t,
-      soldierId: victim.id,
-      byId: shooter.id,
-    });
-  }
+  if (incapacitated) volley.down.set(victim.id, { victim, by: shooter, force: member.force });
   // The force fired on reacts to the fire, and learns roughly where it comes from.
   const targetForce = targetMember ? targetMember.force : -1;
   if (targetForce >= 0) underFire(context, targetForce, shooter);

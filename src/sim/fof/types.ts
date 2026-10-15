@@ -104,6 +104,8 @@ export interface FofForce {
   /** Effectiveness and mean suppression of the active members, as of the last decision. */
   effectiveness: number;
   meanSuppression: number;
+  /** Effectiveness without suppression (strength × ammunition × leadership): what lasts. */
+  lastingEffectiveness: number;
   /** The movement order it was on when contact interrupted it (resumed after contact). */
   mission: UnitOrder | null;
   /** Where it believes the threat is (centroid of its current tracks), or `null`. */
@@ -199,6 +201,7 @@ export interface FofOutcome {
 /** The stalemate window: what each force was at its start. */
 export interface FofWindow {
   startAt: number;
+  /** Lasting effectiveness of each force. */
   effectiveness: number[];
   casualties: number;
   hits: number;

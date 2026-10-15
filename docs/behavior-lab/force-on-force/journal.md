@@ -42,7 +42,7 @@
     detection.
 - **Cost:** about 10 ms of CPU per simulated second for two squads, open or urban.
 
-## F2: contact and engagement (2026-10-14)
+## F2: contact and engagement (2026-10-14) — `ef4f1bb`
 
 **Built** ([03 §2–6](03-model.md)):
 
@@ -82,3 +82,56 @@
 
 One run (open, seed 1): contact at 300 m at T+451 s; 1,564 bursts and 15 casualties
 over the next 7.5 min. About 5–6 ms of CPU per simulated second.
+
+## F3: engagement completion (2026-10-14)
+
+**Built** ([03 §7](03-model.md)):
+
+- withdrawal (away from the known threat, through the movement engine), withdrawn, and
+  combat ineffective;
+- the adjudicator: decisive, adjudicated and invalid outcomes, in a stated order;
+- stalemate windows on lasting effectiveness;
+- mutual disengagement;
+- ammunition exhaustion;
+- the time limit, and no contact;
+- invariant checks.
+
+**Found by running it.**
+
+- **First-shot bias.** Soldier order gave BLUEFOR the first shot within a decision.
+  Fire within a decision is now simultaneous.
+- **Stalemate window.** The window compared effectiveness including suppression, which
+  fluctuates. It now compares lasting effectiveness.
+- **Zero-hit configurations** end in withdrawal or ineffectiveness, not stalemate:
+  suppression alone breaks a force, and running dry makes it ineffective. These are
+  correct consequences of the model. The stalemate experiments switch those exits off
+  explicitly.
+
+**Validation.** Eleven new tests (`lifecycle.test.ts`). Each ended run is checked for:
+
+- an outcome before the time limit;
+- a stated reason;
+- the basis matching the outcome;
+- real casualty counts;
+- one `fofEnded` event;
+- no fire or observation afterwards.
+
+The cases covered:
+
+- open, wooded and urban, two seeds each;
+- ineffectiveness, then no fire;
+- withdrawal through a unit order, without fire while withdrawing;
+- a no-hit stalemate;
+- ammunition exhausted;
+- the time limit with the advantage rule;
+- no contact;
+- mutual disengagement;
+- a corrupted state ending as `invalid`.
+
+**Trial outcomes** (head-on squads, default parameters):
+
+| Terrain | Seeds | Victories            | Withdrawals        | Mutual disengagement | Stalemate | Time limit |
+| ------- | ----: | -------------------- | ------------------ | -------------------- | --------- | ---------- |
+| Open    |    30 | 17 BLUEFOR, 13 OPFOR | —                  | —                    | —         | —          |
+| Wooded  |    20 | 3 BLUEFOR, 3 OPFOR   | 4 BLUEFOR, 8 OPFOR | 1                    | 1         | —          |
+| Urban   |    12 | 4 BLUEFOR, 1 OPFOR   | 2 BLUEFOR, 2 OPFOR | 1                    | 1         | 1          |

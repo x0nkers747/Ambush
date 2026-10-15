@@ -1,6 +1,6 @@
 # Force-on-Force 03: the model
 
-- Status: F2 (contact and engagement); F3 adds the lifecycle and outcomes (§7)
+- Status: F3 (contact, engagement, lifecycle and outcomes)
 - Date: 2026-10-14
 - Part of: [Force-on-Force Lab](README.md)
 
@@ -173,4 +173,55 @@ low on ammunition, can be combat ineffective.
 
 ## 7. Lifecycle and outcomes
 
-(F3.)
+**Withdrawal.** A force in contact (or engaged, or holding) withdraws when any of
+these hold:
+
+- effectiveness is below 0.5;
+- mean suppression has stayed at 0.55 or above for 45 s;
+- ammunition is below 15 % of the basic load.
+
+It is ordered `withdrawDistanceM` (250 m) away from the threat it knows of, through
+the movement engine, in its formation. It takes the first heading of 0°, ±30°, ±60°,
+±90° from straight away that has reachable ground. It does not fire while withdrawing,
+and a pinned soldier is held until he recovers.
+
+It has **withdrawn** (terminal) when either:
+
+- it arrives;
+- for 30 s it has had no confirmed contact and has not been fired on.
+
+**Combat ineffective** (terminal): effectiveness below 0.3, or no soldier left. The
+force stops, its soldiers stay prone, and it fires no more.
+
+**Adjudication**, checked after every decision in this order (the first that holds
+ends the experiment):
+
+| #   | Condition                                                                                                                                                                                 | Outcome                                                | Basis                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------- |
+| 1   | An invariant broken: negative or fractional rounds, suppression out of [0, 1], a casualty with a burst due, non-finite effectiveness, a halted force with a movement task                 | `invalid` (naming it)                                  | invalid                |
+| 2   | Both forces combat ineffective                                                                                                                                                            | `mutualIneffective`                                    | decisive               |
+| 3   | One force combat ineffective                                                                                                                                                              | the other side's `…Victory`                            | decisive               |
+| 4   | Both withdrawn / one withdrawn                                                                                                                                                            | `mutualDisengagement` / `…Withdrawal`                  | decisive               |
+| 5   | After contact, neither in contact nor firing, no confirmed contact and no fire either way for `disengagementSeconds` (120 s)                                                              | `mutualDisengagement`                                  | decisive               |
+| 6   | After contact, both below 5 % of their ammunition                                                                                                                                         | `stalemate` (ammunition exhausted)                     | adjudicated            |
+| 7   | Over a 240 s window of contact: no casualties, lasting effectiveness unchanged (< 0.05), and either both forces suppressed (mean ≥ 0.45), no hits, or contact lost and regained ≥ 4 times | `stalemate`                                            | adjudicated            |
+| 8   | The maximum duration (1800 s)                                                                                                                                                             | `timeLimit`, or `noContact` if there never was contact | adjudicated / decisive |
+
+- **Stalemate is never "no casualties" alone** (rule 7 needs one of the other
+  conditions too).
+- **Lasting effectiveness** is strength × ammunition × leadership, without suppression.
+  Suppression comes and goes from moment to moment; with it in the measure, the window
+  never found "no change".
+- **Adjudicated outcomes** record an **advantage**: the side whose effectiveness leads
+  by at least 0.15, or none. No hit, casualty or effectiveness change is invented to
+  decide an experiment.
+- **The outcome record** holds the real casualty counts and both effectivenesses.
+  After it, nothing fires and nothing is observed.
+- **Bounded.** Every run ends by rule 8 at the latest. Rule 1 turns any broken
+  invariant into an explicit, named end, not a hang.
+
+**Fire within a decision is simultaneous.** Bursts are resolved in soldier order, but
+their suppression and casualties are applied after all of them, so the order
+soldiers are listed in gives no side the first shot. Before this, BLUEFOR (listed first)
+won 5 of 6 open-ground runs. After it, over 30 seeds: 17 BLUEFOR victories and 13 OPFOR
+(chance level); the first burst came from each side 15 times.

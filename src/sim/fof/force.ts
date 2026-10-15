@@ -187,15 +187,7 @@ export function halt(
   const { state, t } = context;
   const task = runningTask(context, force);
   if (task && force.phase !== 'withdrawing') force.mission = task.order;
-  if (task) {
-    applyOrderUnit(
-      state,
-      context.world,
-      { type: 'orderUnit', tick: state.tick, unitId: orgUnitId(force.unitId), order: null },
-      t,
-      context.events,
-    );
-  }
+  cancelTask(context, force);
   const entering = phase === 'contact' && force.phase !== 'contact' && force.phase !== 'engaged';
   if (entering) force.contactCycles += 1;
   enter(context, force, phase, reason);
@@ -210,6 +202,18 @@ export function halt(
     member.reacted = false;
     member.nextFireAt = null;
   }
+}
+
+/** Cancels the force's unit task, if it has one (the movement engine's own cancel). */
+export function cancelTask(context: FofContext, force: FofForce): void {
+  if (!runningTask(context, force)) return;
+  applyOrderUnit(
+    context.state,
+    context.world,
+    { type: 'orderUnit', tick: context.state.tick, unitId: orgUnitId(force.unitId), order: null },
+    context.t,
+    context.events,
+  );
 }
 
 /** Resumes the force's mission (or ends its halt where it is, without one). */
@@ -401,8 +405,9 @@ export function updateEffectiveness(context: FofContext): void {
       force.leaderIds.length > 0
         ? e.leaderlessFactor + (1 - e.leaderlessFactor) * (leadersUp / force.leaderIds.length)
         : 1;
+    force.lastingEffectiveness = strength * ammunition * leadership;
     force.effectiveness =
-      strength * (1 - e.suppressionWeight * force.meanSuppression) * ammunition * leadership;
+      force.lastingEffectiveness * (1 - e.suppressionWeight * force.meanSuppression);
   });
 }
 

@@ -7,6 +7,7 @@ import { fofWeapon } from './config';
 import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, sight, ttpf } from './detection';
 import { resolveFire, updateSuppression } from './fire';
 import { updateEffectiveness, updateForces } from './force';
+import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
 import type { FofForce, FofSetup, FofSoldier, FofState, FofTrack, ObservationLevel } from './types';
 
@@ -102,6 +103,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       initialRounds,
       effectiveness: 1,
       meanSuppression: 0,
+      lastingEffectiveness: 1,
       mission: null,
       threat: null,
       lastContactAt: null,
@@ -207,6 +209,8 @@ function decide(context: FofContext): void {
   updateForces(context);
   resolveFire(context);
   updateEffectiveness(context);
+  updateLifecycle(context);
+  adjudicate(context);
 }
 
 /** Each member's ground speed since the previous decision. */
