@@ -22,7 +22,8 @@ The path is the repository's name, and it is case-sensitive: `/Ambush/`, not `/a
 
 `.github/workflows/deploy-pages.yml` runs on every push to `main` and when started by hand:
 
-1. installs the dependencies from `package-lock.json` (`npm ci`, Node.js 24);
+1. installs the dependencies from `package-lock.json` (`npm ci`, Node.js 24), and the
+   character-animation prototype's, which the check lints;
 2. runs `npm run check`: typecheck, lint, all tests and the formatting check;
 3. builds the site (`npm run build`);
 4. uploads `dist/` and deploys it to Pages.

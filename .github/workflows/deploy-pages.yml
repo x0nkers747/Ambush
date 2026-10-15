@@ -34,6 +34,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The character-animation prototype has its own dependencies; the
+      # check lints it with the repository's rules, so it needs them too.
+      - name: Install the prototype's dependencies
+        run: npm ci --prefix prototypes/character-animation
+
       - name: Check (typecheck, lint, tests, formatting)
         run: npm run check
 
