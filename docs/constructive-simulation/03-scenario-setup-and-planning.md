@@ -143,6 +143,27 @@ is the battle's own starting state, recorded once and given to the view as
 - a destination that cannot be stood on, or cannot be walked to from the
   previous point of the plan (`planPath`, memoized between edits).
 
-Edits refuse only what is wrong in itself: a squad centre or destination
-that cannot be stood on. Anything else, such as a squad half in a building,
-is saved and reported, so work in progress is never lost.
+**Placing and moving squads.** A squad placed or dragged where it, or any
+of its soldiers, would stand in water or in a building is moved to the
+nearest clear ground instead (`clearSquadPosition`). The search goes outward
+in rings of 4 m, up to 200 m, until the centre and every soldier's start are
+clear. A message says how far the squad moved and what from, for example
+"1st Squad was moved 28 m, clear of the buildings". During a drag, the
+message appears once the squad is dropped.
+
+**Placing and moving destinations.** A destination placed in water or in a
+building is moved out of it in the same way (`nearestClearPoint`, up to
+200 m), with a message.
+
+**What is still refused:**
+
+- a point off the map;
+- a point with no clear ground within 200 m.
+
+**What is saved and reported instead:**
+
+- a squad turned or reorganized so that its soldiers reach into a building;
+- a scenario saved before this change, or imported;
+- an unreachable destination.
+
+Work in progress is never lost.

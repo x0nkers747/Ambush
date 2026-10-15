@@ -161,22 +161,60 @@ describe('squads', () => {
     expect(again.squads.at(-1)).toMatchObject({ id: 'B1', name: '1st Element' });
   });
 
-  it('cannot stand off the map or in a building', () => {
+  it('cannot be placed off the map', () => {
+    expect(
+      addSquad(built, newBattleScenario(built, 'bf'), 'BLUEFOR', 'squad', { x: 5000, y: 0 }),
+    ).toMatchObject({ ok: false, problem: 'A squad must be on the map.' });
+  });
+
+  it('placed or moved onto a building, are moved to the nearest clear ground, with a note', () => {
     const d = newBattleScenario(built, 'bf');
-    expect(addSquad(built, d, 'BLUEFOR', 'squad', { x: 5000, y: 0 })).toMatchObject({
-      ok: false,
-      problem: 'A squad must be on the map.',
-    });
-    expect(addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 200 })).toMatchObject({
-      ok: false,
-      problem: expect.stringMatching(/inside building house/) as unknown,
-    });
+    const onRoof = addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 200 }, 0);
+    if (!onRoof.ok) throw new Error(onRoof.problem);
+    expect(onRoof.note).toMatch(/^1st Squad was moved \d+ m, clear of the buildings\.$/);
+    const clear = (def: BattleScenarioDefinition) => {
+      const issues = scenarioIssues(built, def).filter((i) => i.squadId === 'B1');
+      expect(issues).toEqual([]);
+    };
+    clear(onRoof.definition);
+    // Out of the 40 m building, its 13 soldiers clear of it: not far beyond its wall.
+    const p = onRoof.definition.squads[0]?.position ?? { east: 0, north: 0 };
+    const off = Math.max(Math.abs(p.east - 200), Math.abs(p.north - 200));
+    expect(off).toBeGreaterThan(20);
+    expect(off).toBeLessThan(80);
+    // A squad whose centre is clear but whose soldiers would stand in it moves too.
+    const edge = addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 170 }, 0);
+    if (!edge.ok) throw new Error(edge.problem);
+    expect(edge.note).toMatch(/moved/);
+    clear(edge.definition);
+    // Moving one there is the same; moving it to clear ground moves it exactly there, without a note.
     const placed = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 0, y: 0 }));
-    expect(moveSquad(built, placed, 'B1', { x: 200, y: 200 }).ok).toBe(false);
-    expect(done(moveSquad(built, placed, 'B1', { x: 10, y: 20 })).squads[0]?.position).toEqual({
-      east: 10,
-      north: 20,
+    const moved = moveSquad(built, placed, 'B1', { x: 200, y: 200 });
+    if (!moved.ok) throw new Error(moved.problem);
+    expect(moved.note).toMatch(/moved/);
+    clear(moved.definition);
+    const exact = moveSquad(built, placed, 'B1', { x: 10, y: 20 });
+    if (!exact.ok) throw new Error(exact.problem);
+    expect(exact.note).toBeUndefined();
+    expect(exact.definition.squads[0]?.position).toEqual({ east: 10, north: 20 });
+  });
+
+  it('are refused only where there is no clear ground near', () => {
+    // A lake covering the whole lab ground but its margins.
+    const lake = labTerrain({
+      ...NO_FEATURES,
+      water: [{ id: 'lake', kind: 'water', boundary: rectangle(0, 0, 2000, 2000) }],
     });
+    const d = newBattleScenario(lake, 'bf');
+    expect(addSquad(lake, d, 'OPFOR', 'squad', { x: 0, y: 0 })).toMatchObject({
+      ok: false,
+      problem: expect.stringMatching(/no clear ground/) as unknown,
+    });
+    // Near the shore, it is moved out of the water.
+    const ashore = addSquad(lake, d, 'OPFOR', 'squad', { x: 980, y: 0 });
+    if (!ashore.ok) throw new Error(ashore.problem);
+    expect(ashore.note).toMatch(/moved \d+ m, out of the water/);
+    expect(ashore.definition.squads[0]?.position.east).toBeGreaterThan(1000);
   });
 
   it('are turned, renamed and reorganized', () => {
@@ -223,7 +261,7 @@ describe('plans', () => {
     expect(plan()).toEqual([]);
   });
 
-  it('refuse a destination off the map or in a building', () => {
+  it('refuse a destination off the map, and move one in a building out of it', () => {
     const d = done(
       addSquad(built, newBattleScenario(built, 'bf'), 'OPFOR', 'squad', { x: 0, y: 0 }),
     );
@@ -231,7 +269,15 @@ describe('plans', () => {
       ok: false,
       problem: 'A destination must be on the map.',
     });
-    expect(addOrder(built, d, 'O1', 'attack', { x: 200, y: 200 }).ok).toBe(false);
+    const inside = addOrder(built, d, 'O1', 'attack', { x: 200, y: 200 });
+    if (!inside.ok) throw new Error(inside.problem);
+    expect(inside.note).toMatch(/^The destination was moved \d+ m, clear of the buildings\.$/);
+    expect(scenarioIssues(built, inside.definition)).toEqual([
+      expect.objectContaining({ message: 'Place at least one BLUEFOR squad.' }),
+    ]);
+    const dragged = moveOrder(built, inside.definition, 'O1', 0, { x: 195, y: 205 });
+    if (!dragged.ok) throw new Error(dragged.problem);
+    expect(dragged.note).toMatch(/moved/);
   });
 });
 
@@ -248,15 +294,17 @@ describe('what stops a scenario from being played', () => {
 
   it('soldiers starting in a building, and a destination that became one', () => {
     let d = newBattleScenario(built, 'bf');
-    // The squad's centre is clear, but its formation reaches into the building.
-    d = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 170 }, 0));
+    d = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 0, y: 0 }, 0));
     d = done(addSquad(built, d, 'OPFOR', 'element3', { x: 0, y: 600 }));
+    // As a scenario saved before, or edited elsewhere, can be: the squad's
+    // centre is clear, but its formation reaches into the building, and a
+    // destination is inside it.
     d = {
       ...d,
       squads: d.squads.map((s) =>
         s.id === 'O1'
           ? { ...s, plan: [{ kind: 'move', destination: { east: 200, north: 200 } }] }
-          : s,
+          : { ...s, position: { east: 200, north: 170 } },
       ),
     };
     const issues = scenarioIssues(built, d);

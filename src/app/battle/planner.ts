@@ -156,6 +156,8 @@ export function createPlanner(o: PlannerOptions): Planner {
   let tool: PlannerTool = { kind: 'select' };
   let version = 0;
   let unsaved = false;
+  /** The note of the last edit of a drag, told when the drag ends. */
+  let pendingNote: string | null = null;
   const paths = new Map<string, string | null>();
   const changed = () => {
     version += 1;
@@ -223,8 +225,13 @@ export function createPlanner(o: PlannerOptions): Planner {
     }
     if (saving) {
       unsaved = false;
+      pendingNote = null;
       void o.save(definition);
-    } else unsaved = true;
+      if (result.note !== undefined) o.notify(result.note);
+    } else {
+      unsaved = true;
+      pendingNote = result.note ?? null;
+    }
     return true;
   };
 
@@ -280,6 +287,8 @@ export function createPlanner(o: PlannerOptions): Planner {
       if (!unsaved) return;
       unsaved = false;
       void o.save(definition);
+      if (pendingNote !== null) o.notify(pendingNote);
+      pendingNote = null;
     },
     click(point) {
       if (tool.kind === 'place') {

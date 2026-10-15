@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { labTerrain } from '#exercise/behavior-lab';
+import { NO_FEATURES, rectangle } from '#sim';
 import {
   addOrder,
   addSquad,
@@ -89,6 +90,32 @@ describe('Scenario Setup', () => {
     p.removeSquad('B1');
     expect(p.definition.squads.map((s) => s.id)).toEqual(['O1']);
     expect(p.selection.squadId).toBeNull();
+  });
+
+  it('moves a squad dragged onto a building off it, saying so when the drag ends', () => {
+    const built = labTerrain({
+      ...NO_FEATURES,
+      buildings: [{ id: 'house', footprint: rectangle(200, 200, 40, 40), heightMeters: 8 }],
+    });
+    let d = newBattleScenario(built, 'bf');
+    d = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 0, y: 0 }));
+    const notices: string[] = [];
+    const p = createPlanner({
+      terrain: built,
+      definition: d,
+      stage: 'scenario',
+      save: () => Promise.resolve(),
+      notify: (m) => notices.push(m),
+    });
+    expect(p.moveSquadTo('B1', { x: 200, y: 200 }, false)).toBe(true);
+    expect(notices).toEqual([]);
+    p.commit();
+    expect(notices).toEqual([
+      expect.stringMatching(/^1st Squad was moved \d+ m, clear of the buildings\.$/),
+    ]);
+    expect(p.issues()).toEqual([
+      expect.objectContaining({ message: 'Place at least one OPFOR squad.' }),
+    ]);
   });
 
   it('refuses an edit with its reason and changes nothing', () => {

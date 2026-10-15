@@ -14,6 +14,7 @@ import {
   type SimEvent,
   type Simulation,
   type TerrainDataset,
+  type Vec2,
   type VisibilityClass,
 } from '#sim';
 import {
@@ -137,6 +138,18 @@ function buildSquad(spec: SquadSpec, index: number, seed: number) {
   });
   const squad: BattleSquad = { ...built.force, spec, name: spec.name };
   return { squad, units: built.units, soldiers: built.soldiers, pace: layout.pace };
+}
+
+/**
+ * Where a squad's soldiers start, as a battle lays it out when it is squad
+ * `index` of the spec (the index varies the small jitter of the starts).
+ */
+export function squadSoldierStarts(
+  spec: SquadSpec,
+  index: number,
+  seed: number,
+): { readonly id: string; readonly position: Vec2 }[] {
+  return buildSquad(spec, index, seed).soldiers.map((s) => ({ id: s.id, position: s.position }));
 }
 
 /** The simulation scenario of a battle on `terrain`. */

@@ -1,6 +1,7 @@
 import {
   azimuthOf,
   isOnTerrain,
+  nearestClearPoint,
   ORDER_KINDS,
   planPath,
   pointProblem,
@@ -22,7 +23,7 @@ import {
   type ScenarioDefinition,
 } from '../scenario-definition';
 import type { MapPoint } from '../deployment';
-import { battleScenario, type BattleSpec } from './battle';
+import { battleScenario, squadSoldierStarts, type BattleSpec } from './battle';
 
 // Battle scenarios (docs/constructive-simulation/03): what Scenario Setup
 // and BLUEFOR Planning make on a battlefield. A scenario is any number of
@@ -34,7 +35,9 @@ import { battleScenario, type BattleSpec } from './battle';
 // stage runs.
 //
 // Edits return a new definition, or the reason they were refused (the
-// definition unchanged). `scenarioIssues` lists what still stops a
+// definition unchanged). A squad or destination placed in water or in a
+// building is moved to the nearest clear ground instead (with a note saying
+// so); only one with no clear ground near it is refused. `scenarioIssues` lists what still stops a
 // scenario from being played; edits never refuse what only that would
 // report, so work in progress can be saved.
 
@@ -76,7 +79,12 @@ export interface BattleScenarioDefinition {
 }
 
 export type BattleEdit =
-  | { readonly ok: true; readonly definition: BattleScenarioDefinition }
+  | {
+      readonly ok: true;
+      readonly definition: BattleScenarioDefinition;
+      /** What the edit did beyond what was asked (e.g. moved a squad out of a building), to tell the user. */
+      readonly note?: string;
+    }
   | { readonly ok: false; readonly problem: string };
 
 const ok = (definition: BattleScenarioDefinition): BattleEdit => ({ ok: true, definition });
@@ -320,6 +328,93 @@ export function squadPlacementProblem(terrain: TerrainDataset, point: Vec2): str
   return problem ? `A squad cannot stand there: it is ${describePathProblem(problem)}.` : null;
 }
 
+/** How far a placement is moved, at most, to clear water and buildings (m). */
+export const CLEARANCE_SEARCH_M = 200;
+
+/** The squad spec of `squad` standing at `point` (for laying out its soldiers). */
+const specAt = (squad: Omit<ScenarioSquad, 'position'>, point: Vec2) => ({
+  id: squad.id,
+  name: squad.name,
+  side: squad.side,
+  organization: squad.organization,
+  ...(squad.formation !== undefined ? { formation: squad.formation } : {}),
+  position: point,
+  facingDeg: squad.facingDeg,
+  plan: [],
+});
+
+/**
+ * The point nearest `point` where a squad (squad `index` of the scenario)
+ * stands clear: its centre and every soldier's start on the map and out of
+ * water and buildings. `point` itself when it is clear; `null` when there
+ * is no such point within `CLEARANCE_SEARCH_M` or `point` is off the map.
+ */
+export function clearSquadPosition(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  squad: Omit<ScenarioSquad, 'position'>,
+  index: number,
+  point: Vec2,
+): Vec2 | null {
+  if (!isOnTerrain(terrain, point.x, point.y)) return null;
+  const clear = (p: Vec2) =>
+    pointProblem(terrain, p) === null &&
+    squadSoldierStarts(specAt(squad, p), index, d.seed).every(
+      (m) => pointProblem(terrain, m.position) === null,
+    );
+  if (clear(point)) return point;
+  // Rings outward, nearest first; on each ring, round from the direction of the point's own obstacle-free side.
+  for (let r = 4; r <= CLEARANCE_SEARCH_M; r += 4) {
+    const n = Math.max(8, Math.ceil((2 * Math.PI * r) / 6));
+    for (let k = 0; k < n; k += 1) {
+      const a = (k / n) * 2 * Math.PI;
+      const p = { x: point.x + r * Math.sin(a), y: point.y + r * Math.cos(a) };
+      if (isOnTerrain(terrain, p.x, p.y) && clear(p)) return p;
+    }
+  }
+  return null;
+}
+
+/** What a placement moved off: "out of the water", "off the building". */
+function clearedWhat(terrain: TerrainDataset, points: readonly Vec2[]): string {
+  const kinds = new Set(points.map((p) => pointProblem(terrain, p)?.kind));
+  if (kinds.has('inWater'))
+    return kinds.has('insideBuilding') || kinds.has('tooCloseToBuilding')
+      ? 'out of water and away from buildings'
+      : 'out of the water';
+  return 'clear of the buildings';
+}
+
+/**
+ * Where a squad placed at `point` ends up, and a note when it was moved:
+ * `point` itself when the squad stands clear there, otherwise the nearest
+ * clear point (`clearSquadPosition`).
+ */
+function placeSquad(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  squad: Omit<ScenarioSquad, 'position'>,
+  index: number,
+  point: Vec2,
+): { readonly point: Vec2; readonly note?: string } | { readonly problem: string } {
+  if (!isOnTerrain(terrain, point.x, point.y)) return { problem: 'A squad must be on the map.' };
+  const placed = clearSquadPosition(terrain, d, squad, index, point);
+  if (!placed)
+    return {
+      problem: `There is no clear ground for ${squad.name} within ${String(CLEARANCE_SEARCH_M)} m of there: it would stand in water or in a building.`,
+    };
+  if (placed === point) return { point };
+  const blocked = [
+    point,
+    ...squadSoldierStarts(specAt(squad, point), index, d.seed).map((m) => m.position),
+  ];
+  const moved = Math.round(Math.hypot(placed.x - point.x, placed.y - point.y));
+  return {
+    point: placed,
+    note: `${squad.name} was moved ${String(moved)} m, ${clearedWhat(terrain, blocked)}.`,
+  };
+}
+
 /** Adds a squad at `point`, facing `facingDeg` (default: toward the nearest enemy squad, else north for BLUEFOR, south for OPFOR). */
 export function addSquad(
   terrain: TerrainDataset,
@@ -329,10 +424,8 @@ export function addSquad(
   point: Vec2,
   facingDeg?: number,
 ): BattleEdit & { readonly squadId?: string } {
-  const problem = squadPlacementProblem(terrain, point);
-  if (problem) return refused(problem);
+  if (!isOnTerrain(terrain, point.x, point.y)) return refused('A squad must be on the map.');
   const { id, name } = newSquadIdentity(d, side, organization);
-  const position = toPoint(point);
   const enemy = d.squads
     .filter((s) => s.side !== side)
     .sort(
@@ -340,18 +433,18 @@ export function addSquad(
         Math.hypot(a.position.east - point.x, a.position.north - point.y) -
         Math.hypot(b.position.east - point.x, b.position.north - point.y),
     )[0];
-  const facing =
-    facingDeg ?? (enemy ? degreesToward(position, enemy.position) : side === 'BLUEFOR' ? 0 : 180);
+  const facing = Math.round(
+    facingDeg ??
+      (enemy ? degreesToward(toPoint(point), enemy.position) : side === 'BLUEFOR' ? 0 : 180),
+  );
+  const squad = { id, name, side, organization, facingDeg: facing, plan: [] };
+  const placed = placeSquad(terrain, d, squad, d.squads.length, point);
+  if ('problem' in placed) return refused(placed.problem);
   return {
     ok: true,
     squadId: id,
-    definition: {
-      ...d,
-      squads: [
-        ...d.squads,
-        { id, name, side, organization, position, facingDeg: Math.round(facing), plan: [] },
-      ],
-    },
+    definition: { ...d, squads: [...d.squads, { ...squad, position: toPoint(placed.point) }] },
+    ...(placed.note !== undefined ? { note: placed.note } : {}),
   };
 }
 
@@ -361,10 +454,16 @@ export function moveSquad(
   id: string,
   point: Vec2,
 ): BattleEdit {
-  if (!squadOf(d, id)) return refused(`There is no squad ${id}.`);
-  const problem = squadPlacementProblem(terrain, point);
-  if (problem) return refused(problem);
-  return ok(withSquad(d, id, (s) => ({ ...s, position: toPoint(point) })));
+  const index = d.squads.findIndex((s) => s.id === id);
+  const squad = d.squads[index];
+  if (!squad) return refused(`There is no squad ${id}.`);
+  const placed = placeSquad(terrain, d, squad, index, point);
+  if ('problem' in placed) return refused(placed.problem);
+  return {
+    ok: true,
+    definition: withSquad(d, id, (s) => ({ ...s, position: toPoint(placed.point) })),
+    ...(placed.note !== undefined ? { note: placed.note } : {}),
+  };
 }
 
 /** Turns a squad to face `facingDeg` (degrees from north; kept in [0, 360)). */
@@ -440,6 +539,32 @@ export function destinationProblem(terrain: TerrainDataset, point: Vec2): string
   return problem ? `The destination is ${describePathProblem(problem)}.` : null;
 }
 
+/**
+ * Where a destination given at `point` ends up: `point` when a soldier can
+ * stand there, otherwise the nearest point out of the water or building
+ * (`nearestClearPoint`), with a note; or why there is none.
+ */
+function placeDestination(
+  terrain: TerrainDataset,
+  point: Vec2,
+): { readonly point: Vec2; readonly note?: string } | { readonly problem: string } {
+  if (!isOnTerrain(terrain, point.x, point.y))
+    return { problem: 'A destination must be on the map.' };
+  const problem = pointProblem(terrain, point);
+  if (!problem) return { point };
+  const clear = nearestClearPoint(terrain, point, undefined, CLEARANCE_SEARCH_M);
+  if (!clear)
+    return {
+      problem:
+        `${destinationProblem(terrain, point) ?? ''} There is no clear ground near it.`.trim(),
+    };
+  const moved = Math.round(Math.hypot(clear.x - point.x, clear.y - point.y));
+  return {
+    point: clear,
+    note: `The destination was moved ${String(moved)} m, ${clearedWhat(terrain, [point])}.`,
+  };
+}
+
 /** Adds an order to a squad's plan: at the end, or before order `index`. */
 export function addOrder(
   terrain: TerrainDataset,
@@ -451,14 +576,19 @@ export function addOrder(
 ): BattleEdit {
   const squad = squadOf(d, id);
   if (!squad) return refused(`There is no squad ${id}.`);
-  const problem = destinationProblem(terrain, point);
-  if (problem) return refused(problem);
+  const placed = placeDestination(terrain, point);
+  if ('problem' in placed) return refused(placed.problem);
   const at =
     index === undefined ? squad.plan.length : Math.max(0, Math.min(index, squad.plan.length));
-  const order: PlannedOrder = { kind, destination: toPoint(point) };
-  return ok(
-    withSquad(d, id, (s) => ({ ...s, plan: [...s.plan.slice(0, at), order, ...s.plan.slice(at)] })),
-  );
+  const order: PlannedOrder = { kind, destination: toPoint(placed.point) };
+  return {
+    ok: true,
+    definition: withSquad(d, id, (s) => ({
+      ...s,
+      plan: [...s.plan.slice(0, at), order, ...s.plan.slice(at)],
+    })),
+    ...(placed.note !== undefined ? { note: placed.note } : {}),
+  };
 }
 
 const orderAt = (d: BattleScenarioDefinition, id: string, index: number) =>
@@ -472,14 +602,16 @@ export function moveOrder(
   point: Vec2,
 ): BattleEdit {
   if (!orderAt(d, id, index)) return refused('There is no such order.');
-  const problem = destinationProblem(terrain, point);
-  if (problem) return refused(problem);
-  return ok(
-    withSquad(d, id, (s) => ({
+  const placed = placeDestination(terrain, point);
+  if ('problem' in placed) return refused(placed.problem);
+  return {
+    ok: true,
+    definition: withSquad(d, id, (s) => ({
       ...s,
-      plan: s.plan.map((o, k) => (k === index ? { ...o, destination: toPoint(point) } : o)),
+      plan: s.plan.map((o, k) => (k === index ? { ...o, destination: toPoint(placed.point) } : o)),
     })),
-  );
+    ...(placed.note !== undefined ? { note: placed.note } : {}),
+  };
 }
 
 export function setOrderKind(

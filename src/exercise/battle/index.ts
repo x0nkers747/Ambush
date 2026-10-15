@@ -4,6 +4,7 @@ export {
   battleScenario,
   createBattle,
   orderSquad,
+  squadSoldierStarts,
   validateBattleSpec,
   type Battle,
   type BattleCommandOrigin,
