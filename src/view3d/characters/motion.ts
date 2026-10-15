@@ -208,13 +208,11 @@ export class SoldierMotion {
     return Math.hypot(q.x - p.x, q.y - p.y) * this.rate;
   }
 
-  /** How the weapon is carried at `tick`: aimed when firing or engaging, lowered on the move. */
+  /** How the weapon is carried at `tick`: aimed after a shot, lowered on the move. */
   private carryAtTick(tick: number): Carry {
-    const s = this.read(tick, this.c);
     const t = tick / this.rate;
     const shot = this.lastShotBy(t);
     if (shot >= 0 && t - shot < AIM_HOLD_S) return 'aimed';
-    if (s.behavior === 'engaging') return 'aimed';
     if (this.tickSpeed(tick) > MOVING_MPS) return 'lowered';
     return 'ready';
   }

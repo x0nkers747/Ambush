@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createExercise, DEMO_SCENARIO } from '#exercise';
-import { createSession } from '#session';
+import { DEMO_TERRAIN } from '#exercise';
+import { createBattle } from '#exercise/battle';
 import {
   buildingRoofElevations,
   createSyntheticTerrain,
-  DEFAULT_TICK_RATE_HZ,
   gradeTerrain,
   groundFieldInput,
   heightAt,
@@ -17,7 +16,6 @@ import { buildingGeometry } from './building-geometry';
 import { MIN_WALL_M } from './roof-geometry';
 import { terrainGround } from './camera-math';
 import { random, triangles } from './test-helpers';
-import { unitMarkers } from './unit-markers';
 
 // The 3D view on the one authoritative terrain (docs/adr/0049): the ground
 // drawn from the field the simulation's ground is sampled from, the roads, the
@@ -85,7 +83,7 @@ describe('the 3D view on graded terrain', () => {
       ] as const) {
         expect(Math.abs(heightAt(graded, x, y) - heightAt(source, x, y))).toBeGreaterThan(0.3);
       }
-      expect(worstDifference(DEMO_SCENARIO.terrain, 2000)).toBeLessThan(REFINE_TOLERANCE_M * 2);
+      expect(worstDifference(DEMO_TERRAIN, 2000)).toBeLessThan(REFINE_TOLERANCE_M * 2);
     },
   );
 
@@ -117,15 +115,39 @@ describe('the 3D view on graded terrain', () => {
   });
 
   it('places every soldier on the ground', () => {
-    const exercise = createExercise({
-      config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 1 },
-      scenario: DEMO_SCENARIO,
-    });
-    const ground = terrainGround(exercise.simulation.world.terrain);
-    const markers = unitMarkers(exercise, createSession(), false);
-    expect(markers.length).toBeGreaterThan(10);
-    for (const m of markers) {
-      expect(Math.abs(m.position.z - (ground(m.position.x, -m.position.y) ?? NaN))).toBeLessThan(
+    // A battle's soldiers (what the 3D view is given to show), on the demo's hills.
+    const battle = createBattle(
+      {
+        seed: 1,
+        tickRateHz: 30,
+        squads: [
+          {
+            id: 'B1',
+            name: 'B1',
+            side: 'BLUEFOR',
+            organization: 'squad',
+            position: { x: 0, y: -150 },
+            facingDeg: 0,
+            plan: [],
+          },
+          {
+            id: 'O1',
+            name: 'O1',
+            side: 'OPFOR',
+            organization: 'fireTeam',
+            position: { x: 60, y: 120 },
+            facingDeg: 180,
+            plan: [],
+          },
+        ],
+      },
+      DEMO_TERRAIN,
+    );
+    const ground = terrainGround(battle.sim.world.terrain);
+    const soldiers = battle.sim.state.soldiers;
+    expect(soldiers.length).toBe(17);
+    for (const s of soldiers) {
+      expect(Math.abs(s.position.z - (ground(s.position.x, -s.position.y) ?? NaN))).toBeLessThan(
         TOLERANCE_M,
       );
     }

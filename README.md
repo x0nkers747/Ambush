@@ -160,11 +160,6 @@ sources, their resolution and accuracy, and the credits their licences require. 
 | `npm run check`        | typecheck + lint + test + format:check                  |
 | `npm run sim:headless` | Run headless, e.g. `-- --rate 30 --seconds 10 --seed 0` |
 
-Development tool: with `npm run dev` running, `/symbols.html` previews every individual soldier
-icon (all roles, affiliations, sizes and facings) and live tactical maps drawn by the production
-renderer, including crowded and mixed-affiliation decluttering
-([ADR 0013](docs/adr/0013-individual-soldier-icons.md)).
-
 ## Architecture
 
 The code is split into layers whose boundaries are enforced by the compiler and
@@ -173,12 +168,11 @@ ESLint. Other layers are imported only through their alias (`#sim`, `#exercise`,
 
 ```
 src/sim       simulation (no DOM, no Node, no Three.js, deterministic)
-src/exercise  phases, plans, revisions, runner, scenarios  -> sim
+src/exercise  battles, forces, organizations, scenarios    -> sim
 src/geo       geographic processing (pure: UTM, DEM, OSM)  -> sim
 src/acquire   geographic services, IndexedDB (browser)     -> sim, geo
-src/session   ephemeral UI state                           -> sim, exercise
-src/view2d    2D tactical view                             -> sim, exercise, session
-src/view3d    3D observer view (Three.js)                  -> sim, exercise, session, geo
+src/view2d    2D map: terrain, pan and zoom                -> sim, exercise
+src/view3d    3D observer view (Three.js)                  -> sim, exercise, geo
 src/app       composition root                             -> all
 tools         Node command-line tools                      -> sim, exercise, geo
 ```

@@ -144,14 +144,10 @@ describe('sight lines', () => {
 });
 
 describe('isolation', () => {
-  it('only force-on-force worlds have its state; its runs use none of the game engagement', () => {
+  it('only force-on-force worlds have its state', () => {
     const run = createFofRun(headOn('open', 3));
-    const events = runFor(run, 60);
+    runFor(run, 60);
     expect(run.sim.state.fof).toBeDefined();
-    expect(run.sim.state.engagement).toBeUndefined();
-    expect(events.some((e) => e.type === 'shotFired' || e.type === 'engagementStarted')).toBe(
-      false,
-    );
     expect(run.sim.world.fof?.config).toEqual(FOF_DEFAULT_CONFIG);
   });
 });

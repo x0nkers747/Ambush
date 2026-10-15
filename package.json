@@ -18,7 +18,6 @@
     "#geo": "./src/geo/index.ts",
     "#geo/fixtures": "./src/geo/test-data/fixtures.ts",
     "#acquire": "./src/acquire/index.ts",
-    "#session": "./src/session/index.ts",
     "#view2d": "./src/view2d/index.ts",
     "#view3d": "./src/view3d/index.ts",
     "#view3d/behavior-lab": "./src/view3d/behavior-lab/index.ts",
@@ -49,7 +48,6 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
-    "milsymbol": "3.0.4",
     "three": "0.186.1"
   }
 }

@@ -299,7 +299,7 @@ describe('movement around buildings', () => {
     ],
   };
 
-  it('follows the planned path, reporting only the trainee waypoint', () => {
+  it('follows the planned path, reporting only the ordered waypoint', () => {
     const sim = createSimulation({ tickRateHz: 10, seed: 0 }, scenario);
     sim.submit({
       type: 'setOrders',

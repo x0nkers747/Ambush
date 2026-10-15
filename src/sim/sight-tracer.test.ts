@@ -5,22 +5,18 @@ import {
   type EnvironmentFeatures,
   type VegetationArea,
 } from './environment';
+import { surfaceHeightAt } from './bridge-navigation';
 import type { Vec2, Vec3 } from './geometry';
-import { traceSightLine } from './los';
+import { STANDING_EYE_HEIGHT_M, STANDING_TARGET_HEIGHT_M, traceSightLine } from './los';
 import { createRngState, nextFloat } from './rng';
-import { noObstruction, sightLineTracer } from './sight-tracer';
+import { sightLineTracer } from './sight-tracer';
 import { createSyntheticTerrain, type ElevationFunction } from './synthetic-terrain';
 import { heightAt, type TerrainDataset } from './terrain';
-import {
-  computeViewshedRows,
-  computeViewshedRowsReference,
-  viewshedGrid,
-  type ViewshedGrid,
-} from './viewshed';
 
-// The fast viewshed (docs/adr/0020) must decide every cell exactly as the
-// reference, `traceSightLine` per cell, decides it. These tests compare the
-// two cell by cell, on terrain shapes, buildings and vegetation chosen to
+// The fast tracer (docs/adr/0020) must decide every sight line exactly as
+// the reference, `traceSightLine`, decides it. These tests compare the two
+// from an observer to every cell of a grid over the map (a standing target at
+// each cell centre), on terrain shapes, buildings and vegetation chosen to
 // exercise every rule of the trace, and observers placed where rounding is
 // most delicate: on grid vertices and lines, at cell centres, at the edges.
 
@@ -118,22 +114,36 @@ const FOREST: Partial<EnvironmentFeatures> = {
   ],
 };
 
+/** Compares the tracer with the reference from `observer` to every `cellSize` cell of the map. */
 function expectSameViewshed(t: TerrainDataset, observer: Vec2, cellSize = 4) {
-  const grid: ViewshedGrid = viewshedGrid(t, cellSize);
-  const fast = computeViewshedRows(t, observer, grid, 0, grid.rows);
-  const reference = computeViewshedRowsReference(t, observer, grid, 0, grid.rows);
+  const { originX, originY, cellSize: sample, columns, rows } = t.heightfield;
+  const gridColumns = Math.floor(((columns - 1) * sample) / cellSize);
+  const gridRows = Math.floor(((rows - 1) * sample) / cellSize);
+  const tracer = sightLineTracer(t);
+  const eye = {
+    x: observer.x,
+    y: observer.y,
+    z: surfaceHeightAt(t, observer.x, observer.y) + STANDING_EYE_HEIGHT_M,
+  };
   const differences: string[] = [];
-  for (let i = 0; i < fast.length; i += 1) {
-    if (fast[i] !== reference[i]) {
-      differences.push(`cell ${String(i % grid.columns)},${String(Math.floor(i / grid.columns))}`);
+  let visible = 0;
+  for (let r = 0; r < gridRows; r += 1) {
+    for (let c = 0; c < gridColumns; c += 1) {
+      const x = originX + (c + 0.5) * cellSize;
+      const y = originY + (r + 0.5) * cellSize;
+      if (x === eye.x && y === eye.y) continue;
+      const target = { x, y, z: heightAt(t, x, y) + STANDING_TARGET_HEIGHT_M };
+      const clear = traceSightLine(t, eye, target) === null;
+      if (tracer.blocked(eye, target) === clear) differences.push(`cell ${String(c)},${String(r)}`);
+      if (clear) visible += 1;
     }
   }
   expect(differences.slice(0, 5)).toEqual([]);
   // Both outcomes occur, so the comparison means something.
-  return { visible: reference.reduce((n, v) => n + v, 0), cells: reference.length };
+  return { visible, cells: gridColumns * gridRows };
 }
 
-describe('the fast viewshed equals the reference cell by cell', () => {
+describe('the fast tracer equals the reference on every cell of a grid', () => {
   for (const [name, shape] of Object.entries(SHAPES)) {
     it(`on ${name} terrain`, () => {
       const t = terrain(shape);
@@ -168,7 +178,7 @@ describe('the fast viewshed equals the reference cell by cell', () => {
     const t = terrain(SHAPES['rough'] ?? (() => 0), TOWN);
     expectSameViewshed(t, { x: 0, y: 0 }); // a terrain vertex
     expectSameViewshed(t, { x: 20, y: -33.3 }); // a vertical grid line
-    expectSameViewshed(t, { x: 2, y: 2 }); // on the 4 m viewshed grid's cell centre
+    expectSameViewshed(t, { x: 2, y: 2 }); // on the 4 m grid's cell centre
     expectSameViewshed(t, { x: -18, y: -18 }); // a diagonal
   });
 
@@ -180,7 +190,7 @@ describe('the fast viewshed equals the reference cell by cell', () => {
     expectSameViewshed(t, { x: 200, y: 200 });
   });
 
-  it('on a coarser preview grid', () => {
+  it('on a coarser grid', () => {
     const t = terrain(SHAPES['hilltop'] ?? (() => 0), { ...TOWN, ...FOREST });
     expectSameViewshed(t, { x: -30, y: 40 }, 8);
   });
@@ -278,28 +288,5 @@ describe('sightLineTracer', () => {
     for (const [a, b] of lines) {
       expect(tracer.blocked(a, b), JSON.stringify([a, b])).toBe(traceSightLine(t, a, b) !== null);
     }
-  });
-
-  it('never proves a clear sight line obstructed', () => {
-    const rng = createRngState(7);
-    const r = () => -199 + 398 * nextFloat(rng);
-    const eye = point(10, -30, 1.7);
-    let proofs = 0;
-    let previous = noObstruction();
-    for (let i = 0; i < 3000; i += 1) {
-      const target = point(r(), r(), 1.5);
-      const reference = traceSightLine(t, eye, target) !== null;
-      const proved =
-        tracer.provesQuickly(eye, target, previous) ||
-        tracer.provesByWalking(eye, target, previous);
-      if (proved) {
-        proofs += 1;
-        expect(reference, `proof for a clear line to ${JSON.stringify(target)}`).toBe(true);
-      }
-      const record = noObstruction();
-      tracer.blocked(eye, target, record);
-      if (record.kind !== 0) previous = record;
-    }
-    expect(proofs).toBeGreaterThan(100);
   });
 });

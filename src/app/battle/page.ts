@@ -1,10 +1,4 @@
-import {
-  buildPreviewScenario,
-  createExercise,
-  defaultScenarioDefinition,
-  emptyMotionSample,
-  type Exercise,
-} from '#exercise';
+import { emptyMotionSample } from '#exercise';
 import {
   battleScenarioId,
   clearPlan,
@@ -26,9 +20,7 @@ import {
   type ScenarioSquad,
   type SquadOrganization,
 } from '#exercise/battle';
-import { createSession, type Session } from '#session';
 import {
-  DEFAULT_TICK_RATE_HZ,
   ORDER_KINDS,
   soldierId,
   type OrderKind,
@@ -96,18 +88,6 @@ export interface BattlePageOptions {
   /** Back to terrain selection, handing the map over (the page has stopped by then). */
   readonly leave: (map: TacticalMap) => void;
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
-}
-
-/**
- * The map's own content on a battle's page: the terrain alone. The map
- * draws an exercise; a battle's squads and plans are the editor's drawing.
- */
-export function terrainOnlyExercise(terrain: TerrainDataset): Exercise {
-  const definition = defaultScenarioDefinition(terrain, 'terrain', undefined, { withOrp: false });
-  return createExercise({
-    config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 1 },
-    scenario: buildPreviewScenario(terrain, definition).scenario,
-  });
 }
 
 const PLACE_ORGANIZATIONS: readonly SquadOrganization[] = ['squad', 'fireTeam', 'element3'];
@@ -308,20 +288,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Map --------------------------------------------------------------
 
-  let session: Session = createSession();
   const placeholder = app.querySelector<HTMLCanvasElement>('#map');
   if (!placeholder) throw new Error('Missing map canvas');
-  const base = terrainOnlyExercise(o.terrain);
-  const binding: MapBinding = {
-    exercise: base,
-    getSession: () => session,
-    setSession: (next) => {
-      session = next;
-    },
-    notify,
-    editor: mapEditor,
-    hideTrainee: () => true,
-  };
+  // The map draws the terrain; the battle (its planner, or its combat and review) draws over it.
+  const binding: MapBinding = { editor: mapEditor };
   const adopt = (handed: TacticalMap): TacticalMap => {
     const canvas = handed.canvas;
     canvas.id = 'map';
@@ -331,7 +301,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     handed.attach(binding);
     return handed;
   };
-  const map = o.map ? adopt(o.map) : createTacticalMap({ canvas: placeholder, ...binding });
+  const map = o.map
+    ? adopt(o.map)
+    : createTacticalMap({ canvas: placeholder, terrain: o.terrain, ...binding });
 
   // --- 2D / 3D -----------------------------------------------------------
 
@@ -480,12 +452,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       .then(({ createBattlefieldView3d }) => {
         loading3d = false;
         if (stopped) return;
-        view3d = createBattlefieldView3d({
-          exercise: () => base,
-          session: () => session,
-          hideTrainee: () => true,
-          figures,
-        });
+        view3d = createBattlefieldView3d({ terrain: o.terrain, figures });
         ui('attribution').before(view3d.canvas, view3d.overlay);
         connect3d(view3d);
         viewMode = '3d';
@@ -1416,10 +1383,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     inCombat()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     inReview()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     lastFrameMs = nowMs;
-    if (viewMode === '3d' && view3d) {
-      map.update();
-      view3d.render();
-    } else map.render();
+    if (viewMode === '3d' && view3d) view3d.render();
+    else map.render();
     updatePanels();
     frameId = requestAnimationFrame(frame);
   };

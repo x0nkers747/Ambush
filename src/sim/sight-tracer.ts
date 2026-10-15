@@ -3,14 +3,14 @@ import { queryFeatures, type PreparedBuilding, type PreparedVegetation } from '.
 import type { TerrainDataset } from './terrain';
 import { isRefinedAt, refinementIndex, sampleSurface, typedSamples } from './terrain-surface';
 
-// A fast sight-line tracer for viewsheds (docs/adr/0020). It decides exactly
+// A fast sight-line tracer (docs/adr/0020). It decides exactly
 // what `traceSightLine` decides (obstructed or not) for every sight line: every
 // value a decision depends on is computed with the same floating-point
 // operations, in the same order. It does far less work:
 //
 // - It walks the line from the eye and stops at the first obstruction.
 //   `traceSightLine` computes and sorts every cut point of the whole line
-//   first; most viewshed cells are hidden, often close to the observer.
+//   first; most sight lines are obstructed, often close to the eye.
 // - Cut points come in increasing order without sorting: the terrain grid
 //   lines and diagonals are three arithmetic sequences, merged on the fly.
 // - Feature edges and features come from a bucket index, loaded only as the
@@ -20,8 +20,8 @@ import { isRefinedAt, refinementIndex, sampleSurface, typedSamples } from './ter
 //   contain the point (an index by horizontal band), which are the only edges
 //   that can change the reference's answer.
 //
-// `traceSightLine` stays the reference, and the only tracer combat uses. Tests
-// check that the two agree on every cell of full viewsheds.
+// `traceSightLine` stays the reference. Tests check that the two agree on
+// every sight line from an observer to every cell of a grid over the map.
 
 /** Bucket size of the feature and edge index, in metres. */
 const BUCKET_M = 32;
@@ -45,73 +45,19 @@ const RASTER_MARGIN_M = 0.25;
 /** Polygons whose box would need more raster cells than this use the band index only. */
 const RASTER_MAX_CELLS = 4_000_000;
 
-/**
- * Margin of an obstruction proof, in metres: how far the ground must rise above
- * the sight line, or how far inside a building and below its roof the line
- * must pass. Far larger than any rounding (around 1e-10 m on a 5 km map), so
- * a proof never depends on rounding.
- */
-export const PROOF_MARGIN_M = 0.01;
-
-/**
- * What obstructed a sight line, kept to prove neighbouring sight lines
- * obstructed without tracing them (`provesBlocked`). Mutable, reused.
- */
-export interface Obstruction {
-  /** 0 none (the line was clear), 1 terrain, 2 building, 3 vegetation. */
-  kind: 0 | 1 | 2 | 3;
-  /**
-   * Where the obstruction began: terrain, the deepest point of the ground
-   * above the line nearby; building, where the line entered it; vegetation,
-   * where the obscuration that ended the line began.
-   */
-  x: number;
-  y: number;
-  /** Where the line was found obstructed. */
-  hx: number;
-  hy: number;
-  /** Building: its index. */
-  building: number;
-}
-
-export const noObstruction = (): Obstruction => ({
-  kind: 0,
-  x: 0,
-  y: 0,
-  hx: 0,
-  hy: 0,
-  building: 0,
-});
-
 export interface SightLineTracer {
   /**
    * Whether the sight line from eye `a` to target `b` (as for
    * `traceSightLine`: map coordinates and elevations, distinct in X/Y) is
-   * obstructed. Always `traceSightLine(terrain, a, b) !== null`. When
-   * `obstruction` is given, records what obstructed it.
+   * obstructed. Always `traceSightLine(terrain, a, b) !== null`.
    */
-  blocked(a: Vec3, b: Vec3, obstruction?: Obstruction): boolean;
+  blocked(a: Vec3, b: Vec3): boolean;
   /**
    * How many of the sight lines from eye `a` to the points (`x`, `y`,
    * `zs[i]`) are clear: exactly the number of `zs` for which `blocked` is
    * false, in one walk of their common map path.
    */
   clearCount(a: Vec3, x: number, y: number, zs: readonly number[]): number;
-  /**
-   * Whether the terrain or building obstruction of another sight line proves
-   * this one obstructed too, at a glance: a point of this line where the
-   * ground stands at least `PROOF_MARGIN_M` above it, or where it passes that
-   * far inside the building and below its roof. Either makes
-   * `traceSightLine` report an obstruction there or earlier. `false` proves
-   * nothing.
-   */
-  provesQuickly(a: Vec3, b: Vec3, obstruction: Obstruction): boolean;
-  /**
-   * Whether walking this line through the stretch where another was
-   * obstructed finds an obstruction. The walk finds only obstructions the
-   * reference finds too (see `walk`). `false` proves nothing.
-   */
-  provesByWalking(a: Vec3, b: Vec3, obstruction: Obstruction): boolean;
 }
 
 const tracers = new WeakMap<TerrainDataset, SightLineTracer>();
@@ -288,24 +234,6 @@ function polygonTest(vertices: readonly Vec2[]): PolygonTest {
     }
     return exact(x, y);
   };
-}
-
-/** Whether (x, y) lies within `PROOF_MARGIN_M` of an edge of the polygon. */
-function nearEdge(polygon: readonly Vec2[], x: number, y: number): boolean {
-  for (let k = 0; k < polygon.length; k += 1) {
-    const p = polygon[k];
-    const q = polygon[(k + 1) % polygon.length];
-    if (!p || !q) continue;
-    const ex = q.x - p.x;
-    const ey = q.y - p.y;
-    const lengthSq = ex * ex + ey * ey;
-    const u =
-      lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((x - p.x) * ex + (y - p.y) * ey) / lengthSq));
-    const ox = p.x + u * ex - x;
-    const oy = p.y + u * ey - y;
-    if (ox * ox + oy * oy < PROOF_MARGIN_M * PROOF_MARGIN_M) return true;
-  }
-  return false;
 }
 
 interface Feature {
@@ -517,9 +445,9 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   };
 
   const pushPending = (t: number) => {
-    // A cut at or before the start of the walk changes nothing after it (a cut
-    // at 0 equals the first cut, which the reference skips).
-    if (!(t > tMin)) return;
+    // A cut at or before the eye changes nothing (a cut at 0 equals the first
+    // cut, which the reference skips).
+    if (!(t > 0)) return;
     if (tail === pending.length) {
       const live = pending.subarray(head, tail);
       const bigger = new Float64Array(Math.max(256, live.length * 2));
@@ -644,10 +572,7 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     }
   };
 
-  /** Cuts at or before this are not part of the current walk (0 for a whole line). */
-  let tMin = 0;
-
-  /** The next value of terrain sequence s strictly inside (tMin, 1), or Infinity. */
+  /** The next value of terrain sequence s strictly inside (0, 1), or Infinity. */
   const advance = (s: number) => {
     const v0 = v0s[s] ?? 0;
     const v1 = v1s[s] ?? 0;
@@ -664,7 +589,7 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       // (the reference's test, on the same point).
       if (s >= 3 && k % fineFactor === 0) continue;
       const t = (k - v0) / (v1 - v0);
-      if (t > tMin && t < 1) {
+      if (t > 0 && t < 1) {
         if (
           s >= 3 &&
           refinement &&
@@ -739,9 +664,6 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     return true;
   };
 
-  /** Where the obstruction is recorded during a walk, if anywhere. */
-  let record: Obstruction | undefined;
-  const buildingIndex = new Map(buildings.map((f, i) => [f, i]));
   // Sub-parts of a piece, sorted (the reference's `parts`).
   const parts = new Float64Array(64);
   let partCount = 0;
@@ -756,42 +678,17 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   };
 
   /**
-   * Records a terrain obstruction: the deepest point of the ground above the
-   * line among the next few cuts from piece start t0, the best proof for
-   * neighbouring lines.
+   * Starts a walk of the line (ax, ay, az)–(bx, by): the terrain cut
+   * sequences, the bucket traversal and the candidate lists. Depends on the
+   * line's map positions only, not on its heights.
    */
-  const recordTerrain = (rec: Obstruction, t0: number, c0: number) => {
-    let bestT = t0;
-    let best = c0;
-    for (let i = 0; i < 24; i += 1) {
-      const t = nextCut();
-      if (t === Infinity) break;
-      const c = az + t * dz - ground(ax + t * dx, ay + t * dy);
-      if (c < best) {
-        best = c;
-        bestT = t;
-      } else if (c > best + 2) break;
-    }
-    rec.kind = 1;
-    rec.x = ax + bestT * dx;
-    rec.y = ay + bestT * dy;
-    rec.hx = rec.x;
-    rec.hy = rec.y;
-  };
-
-  /**
-   * Starts a walk of the line (ax, ay, az)–(bx, by) from `tStart`: the
-   * terrain cut sequences, the bucket traversal and the candidate lists.
-   * Depends on the line's map positions only, not on its heights.
-   */
-  function begin(tStart: number): void {
+  function begin(): void {
     line += 1;
     if (line === 0x7fffffff) {
       featureStamp.fill(0);
       edgeStamp.fill(0);
       line = 1;
     }
-    tMin = tStart;
     head = 0;
     tail = 0;
     candCount = 0;
@@ -824,48 +721,32 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       if (v0 === v1) continue;
       const lo = Math.min(v0, v1);
       const hi = Math.max(v0, v1);
-      const vs = v0 + tStart * (v1 - v0);
       if (v1 > v0) {
         kStep[s] = 1;
-        kNext[s] = Math.max(Math.ceil(lo), Math.floor(vs) - 1);
+        kNext[s] = Math.max(Math.ceil(lo), Math.floor(v0) - 1);
         kLast[s] = Math.floor(hi);
       } else {
         kStep[s] = -1;
-        kNext[s] = Math.min(Math.floor(hi), Math.ceil(vs) + 1);
+        kNext[s] = Math.min(Math.floor(hi), Math.ceil(v0) + 1);
         kLast[s] = Math.ceil(lo);
       }
       advance(s);
     }
 
-    // Buckets along the line from the start point, in order (Amanatides–Woo).
-    const sx = ax + tStart * dx;
-    const sy = ay + tStart * dy;
-    bc = clampC(Math.floor((sx - originX) / BUCKET_M));
-    br = clampR(Math.floor((sy - originY) / BUCKET_M));
+    // Buckets along the line from the eye, in order (Amanatides–Woo).
+    bc = clampC(Math.floor((ax - originX) / BUCKET_M));
+    br = clampR(Math.floor((ay - originY) / BUCKET_M));
     stepC = dx > 0 ? 1 : dx < 0 ? -1 : 0;
     stepR = dy > 0 ? 1 : dy < 0 ? -1 : 0;
     tMaxC = stepC === 0 ? Infinity : (originX + (bc + (stepC > 0 ? 1 : 0)) * BUCKET_M - ax) / dx;
     tMaxR = stepR === 0 ? Infinity : (originY + (br + (stepR > 0 ? 1 : 0)) * BUCKET_M - ay) / dy;
     tDeltaC = stepC === 0 ? Infinity : BUCKET_M / Math.abs(dx);
     tDeltaR = stepR === 0 ? Infinity : BUCKET_M / Math.abs(dy);
-    nextBucketT = tStart;
+    nextBucketT = 0;
   }
 
-  /**
-   * Walks the line from `tStart` and returns 1 when it finds an obstruction, 0
-   * when it reaches the end clear, and -1 when it passes `tEnd` without one.
-   *
-   * From 0 this is exactly the reference's trace. From a later cut it is a
-   * proof: every piece that begins after the first cut past `tStart` is
-   * exactly the reference's piece (cuts and their order do not depend on
-   * where the walk starts), and is checked as the reference checks it. Earlier
-   * pieces are only walked through. Vegetation obscuration starts from 0
-   * instead of what the reference had gathered by then: since floating-point
-   * addition is monotonic, it never exceeds the reference's, so an
-   * obstruction found here is found by the reference at the same point or
-   * earlier. A walk from a later start proves obstruction, never clearness.
-   */
-  function walk(a: Vec3, b: Vec3, tStart: number, tEnd: number): number {
+  /** Walks the line from the eye: exactly the reference's trace. Whether it finds an obstruction. */
+  function walk(a: Vec3, b: Vec3): boolean {
     ax = a.x;
     ay = a.y;
     az = a.z;
@@ -875,21 +756,16 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     dy = by - ay;
     dz = b.z - az;
     const distance = Math.hypot(dx, dy);
-    begin(tStart);
+    begin();
 
-    // From 0 the first cut is 0 itself; feature cuts at 0 equal it and are skipped.
-    let previous = tStart;
-    let t0 = tStart;
+    // The first cut is 0 itself; feature cuts at 0 equal it and are skipped.
+    let previous = 0;
+    let t0 = 0;
     let c0 = az + t0 * dz - ground(ax + t0 * dx, ay + t0 * dy);
-    // Pieces beginning at or before `checkAfter` are walked through, not checked.
-    let checkAfter = tStart > 0 ? Number.NaN : -1;
     let obscuration = 0;
-    let obscuredFrom = -1;
     for (;;) {
       const t1 = nextCut();
-      if (t1 === Infinity) return 0;
-      if (t1 > tEnd) return -1;
-      if (Number.isNaN(checkAfter)) checkAfter = t1;
+      if (t1 === Infinity) return false;
       // Cuts closer than 1e-12 to the previous one are the same point.
       if (!(t1 - previous > 1e-12)) {
         previous = t1;
@@ -897,11 +773,6 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       }
       previous = t1;
       const c1 = az + t1 * dz - ground(ax + t1 * dx, ay + t1 * dy);
-      if (!(t0 > checkAfter)) {
-        t0 = t1;
-        c0 = c1;
-        continue;
-      }
       inBuildings.length = 0;
       inVegetation.length = 0;
       if (waiting.length + active.length > 0) {
@@ -954,46 +825,14 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
         if (s1 <= s0) continue;
         const sm = (s0 + s1) / 2;
         const clearance = cc0 + ((sm - ct0) / (t1 - ct0)) * (c1 - cc0);
-        if (clearance < 0) {
-          if (record) recordTerrain(record, t0, c0);
-          return 1;
-        }
+        if (clearance < 0) return true;
         const lineZ = az + sm * dz;
-        for (const f of inBuildings) {
-          if (lineZ < f.roofZ) {
-            if (record) {
-              record.kind = 2;
-              record.building = buildingIndex.get(f) ?? 0;
-              record.x = ax + s0 * dx;
-              record.y = ay + s0 * dy;
-              record.hx = record.x;
-              record.hy = record.y;
-            }
-            return 1;
-          }
-        }
+        for (const f of inBuildings) if (lineZ < f.roofZ) return true;
         if (inVegetation.length === 0) continue;
         let rate = 0;
-        let densest: PreparedVegetation | undefined;
-        for (const f of inVegetation) {
-          if (!(clearance < f.canopy)) continue;
-          const r = 1 / f.seeThrough;
-          rate += r;
-          const best = densest ? 1 / densest.seeThrough : -1;
-          if (!densest || r > best || (r === best && f.id < densest.id)) densest = f;
-        }
+        for (const f of inVegetation) if (clearance < f.canopy) rate += 1 / f.seeThrough;
         const length = (s1 - s0) * distance;
-        if (densest && rate > 0 && obscuredFrom < 0) obscuredFrom = s0;
-        if (densest && rate > 0 && obscuration + rate * length >= 1) {
-          if (record) {
-            record.kind = 3;
-            record.x = ax + obscuredFrom * dx;
-            record.y = ay + obscuredFrom * dy;
-            record.hx = ax + s0 * dx;
-            record.hy = ay + s0 * dy;
-          }
-          return 1;
-        }
+        if (rate > 0 && obscuration + rate * length >= 1) return true;
         obscuration += rate * length;
       }
       t0 = t1;
@@ -1001,134 +840,22 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     }
   }
 
-  // Scratch for building proofs.
-  const crossingParams = new Float64Array(64);
-
-  /** Whether some point of the line passes PROOF_MARGIN_M inside building i and below its roof. */
-  function passesThroughBuilding(a: Vec3, b: Vec3, i: number): boolean {
-    const f = buildings[i];
-    const test = features[i]?.test;
-    if (!f || !test) return false;
-    const lx = b.x - a.x;
-    const ly = b.y - a.y;
-    const lz = b.z - a.z;
-    // Quick rejection: the line must reach the footprint's box.
-    const { box } = f;
-    let lo = 0;
-    let hi = 1;
-    if (lx === 0) {
-      if (a.x < box.minX || a.x > box.maxX) return false;
-    } else {
-      const ta = (box.minX - a.x) / lx;
-      const tb = (box.maxX - a.x) / lx;
-      lo = Math.max(lo, Math.min(ta, tb));
-      hi = Math.min(hi, Math.max(ta, tb));
-    }
-    if (ly === 0) {
-      if (a.y < box.minY || a.y > box.maxY) return false;
-    } else {
-      const ta = (box.minY - a.y) / ly;
-      const tb = (box.maxY - a.y) / ly;
-      lo = Math.max(lo, Math.min(ta, tb));
-      hi = Math.min(hi, Math.max(ta, tb));
-    }
-    if (lo > hi) return false;
-    // Pieces of the line between its crossings of the footprint's edges.
-    let n = 0;
-    crossingParams[n++] = 0;
-    const polygon = f.polygon;
-    for (let k = 0; k < polygon.length && n < crossingParams.length - 1; k += 1) {
-      const p = polygon[k];
-      const q = polygon[(k + 1) % polygon.length];
-      if (!p || !q) continue;
-      const ex = q.x - p.x;
-      const ey = q.y - p.y;
-      const denom = lx * ey - ly * ex;
-      if (denom === 0) continue;
-      const s = ((p.x - a.x) * ey - (p.y - a.y) * ex) / denom;
-      if (!(s > 0 && s < 1)) continue;
-      let j = n;
-      while (j > 1 && (crossingParams[j - 1] ?? 0) > s) {
-        crossingParams[j] = crossingParams[j - 1] ?? 0;
-        j -= 1;
-      }
-      crossingParams[j] = s;
-      n += 1;
-    }
-    crossingParams[n++] = 1;
-    for (let j = 0; j + 1 < n; j += 1) {
-      const t = ((crossingParams[j] ?? 0) + (crossingParams[j + 1] ?? 0)) / 2;
-      if (!(a.z + t * lz < f.roofZ - PROOF_MARGIN_M)) continue;
-      const x = a.x + t * lx;
-      const y = a.y + t * ly;
-      if (test(x, y) && !nearEdge(polygon, x, y)) return true;
-    }
-    return false;
-  }
-
-  /** Window of a proof walk before and after the projected obstruction, in metres. */
-  const WINDOW_BEFORE_M = 16;
-  const WINDOW_AFTER_M = 48;
-
-  /** Parameter of the point of line a–b as far from the eye as (x, y). */
-  const along = (a: Vec3, b: Vec3, x: number, y: number) => {
-    const lx = b.x - a.x;
-    const ly = b.y - a.y;
-    const ex = x - a.x;
-    const ey = y - a.y;
-    return Math.sqrt((ex * ex + ey * ey) / (lx * lx + ly * ly));
-  };
-
-  function provesQuickly(a: Vec3, b: Vec3, obstruction: Obstruction): boolean {
-    if (obstruction.kind === 1) {
-      // The point of this line as far from the eye as the recorded point.
-      const t = along(a, b, obstruction.x, obstruction.y);
-      if (!(t > 0 && t < 1)) return false;
-      const x = a.x + t * (b.x - a.x);
-      const y = a.y + t * (b.y - a.y);
-      // Rounding can place a point a hair off the map: no proof there.
-      if (!(x >= originX && x <= maxX && y >= originY && y <= maxY)) return false;
-      return ground(x, y) - (a.z + t * (b.z - a.z)) > PROOF_MARGIN_M;
-    }
-    if (obstruction.kind === 2) return passesThroughBuilding(a, b, obstruction.building);
-    return false;
-  }
-
-  function provesByWalking(a: Vec3, b: Vec3, obstruction: Obstruction): boolean {
-    if (obstruction.kind === 0) return false;
-    // Walk this line through the stretch where the other was obstructed.
-    const length = Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
-    const from = Math.max(0, along(a, b, obstruction.x, obstruction.y) - WINDOW_BEFORE_M / length);
-    const to = along(a, b, obstruction.hx, obstruction.hy) + WINDOW_AFTER_M / length;
-    if (!(from < 1)) return false;
-    record = undefined;
-    return walk(a, b, from, to) === 1;
-  }
-
-  function blocked(a: Vec3, b: Vec3, obstruction?: Obstruction): boolean {
-    record = obstruction;
-    if (record) record.kind = 0;
-    // Open ground: proved clear without walking (nothing to record).
+  function blocked(a: Vec3, b: Vec3): boolean {
+    // Open ground: proved clear without walking.
     ax = a.x;
     ay = a.y;
     bx = b.x;
     by = b.y;
     dx = bx - ax;
     dy = by - ay;
-    if (provablyClear(Math.min(a.z, b.z))) {
-      record = undefined;
-      return false;
-    }
-    const result = walk(a, b, 0, Infinity);
-    record = undefined;
-    return result === 1;
+    if (provablyClear(Math.min(a.z, b.z))) return false;
+    return walk(a, b);
   }
 
   // Lanes of `clearCount`: one per target height.
   let laneDz = new Float64Array(4);
   let laneC0 = new Float64Array(4);
   let laneObscuration = new Float64Array(4);
-  let laneObscuredFrom = new Float64Array(4);
   let laneAlive = new Uint8Array(4);
   const laneParts = new Float64Array(64);
 
@@ -1181,7 +908,6 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       laneDz = new Float64Array(n);
       laneC0 = new Float64Array(n);
       laneObscuration = new Float64Array(n);
-      laneObscuredFrom = new Float64Array(n);
       laneAlive = new Uint8Array(n);
     }
     ax = a.x;
@@ -1197,7 +923,7 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     for (const z of zs) lowest = Math.min(lowest, z);
     if (provablyClear(lowest)) return n;
     const distance = Math.hypot(dx, dy);
-    begin(0);
+    begin();
     let previous = 0;
     let t0 = 0;
     const g0 = ground(ax + t0 * dx, ay + t0 * dy);
@@ -1206,7 +932,6 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       laneDz[i] = (zs[i] ?? 0) - az;
       laneC0[i] = az + t0 * (laneDz[i] ?? 0) - g0;
       laneObscuration[i] = 0;
-      laneObscuredFrom[i] = -1;
       laneAlive[i] = 1;
     }
     for (;;) {
@@ -1302,22 +1027,14 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
       for (const f of inBuildings) if (lineZ < f.roofZ) return true;
       if (inVegetation.length === 0) continue;
       let rate = 0;
-      let densest: PreparedVegetation | undefined;
-      for (const f of inVegetation) {
-        if (!(clearance < f.canopy)) continue;
-        const r = 1 / f.seeThrough;
-        rate += r;
-        const best = densest ? 1 / densest.seeThrough : -1;
-        if (!densest || r > best || (r === best && f.id < densest.id)) densest = f;
-      }
+      for (const f of inVegetation) if (clearance < f.canopy) rate += 1 / f.seeThrough;
       const length = (s1 - s0) * distance;
       const obscuration = laneObscuration[i] ?? 0;
-      if (densest && rate > 0 && (laneObscuredFrom[i] ?? -1) < 0) laneObscuredFrom[i] = s0;
-      if (densest && rate > 0 && obscuration + rate * length >= 1) return true;
+      if (rate > 0 && obscuration + rate * length >= 1) return true;
       laneObscuration[i] = obscuration + rate * length;
     }
     return false;
   }
 
-  return { blocked, clearCount, provesQuickly, provesByWalking };
+  return { blocked, clearCount };
 }

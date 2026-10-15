@@ -1,4 +1,4 @@
-import type { RangeProbability, UniformSeconds } from '../combat-config';
+import type { RangeProbability } from './hit-probability';
 import type { Posture } from '../state';
 
 // Force-on-force configuration (docs/behavior-lab/force-on-force): every
@@ -8,12 +8,15 @@ import type { Posture } from '../state';
 // layer (src/exercise/forces/fof-v1.json); the research note
 // (docs/behavior-lab/force-on-force/02-detection-research.md) says which are
 // taken from the literature and which are experimental.
-//
-// Separate from the game's combat configuration (combat-v1): the game's
-// ambush engagement never reads it, and this model never reads that one.
 
 export const FOF_CONFIG_SCHEMA = 'ambush.fof-config';
 export const FOF_CONFIG_SCHEMA_VERSION = 1;
+
+/** A uniformly distributed duration, in seconds: min ≤ value < max (or exactly min when equal). */
+export interface UniformSeconds {
+  readonly minSeconds: number;
+  readonly maxSeconds: number;
+}
 
 /** Broad observation conditions (experimental classes, not calibrated predictions). */
 export type VisibilityClass = 'open' | 'wooded' | 'urban' | 'restricted';
@@ -85,7 +88,7 @@ export interface DetectionConfig {
 export interface FofWeapon {
   readonly id: string;
   readonly label: string;
-  /** Hit probability of one round at a standing, fully visible target, by range (as combat-v1's curves). */
+  /** Hit probability of one round at a standing, fully visible target, by range (`hitProbabilityAt`). */
   readonly hitProbabilityByRange: readonly RangeProbability[];
   readonly maxEngagementRangeM: number;
   readonly roundsPerBurst: number;

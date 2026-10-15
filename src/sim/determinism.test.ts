@@ -253,6 +253,6 @@ describe('snapshot world compatibility', () => {
   });
 });
 
-const PINNED_INITIAL_HASH = '18235a8ab57f44c1';
-const PINNED_SCRIPTED_HASH = 'b8a396b56b4fa8c0';
+const PINNED_INITIAL_HASH = 'b404a3ad5a8eca80';
+const PINNED_SCRIPTED_HASH = '3906dc120511b339';
 const PINNED_TEST_WORLD_FINGERPRINT = '703a0d35e7aa6b71';

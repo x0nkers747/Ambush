@@ -9,20 +9,11 @@ import {
 } from './behavior/orders';
 import { releaseAgent } from './behavior/system';
 import { unitInContact } from './fof/setup';
-import { beginEngagement } from './combat';
 import type { SimEvent } from './events';
 import { clonePlainData } from './plain-data';
 import { planPath } from './navigation';
-import { isSimplePolygon } from './polygon';
-import {
-  findSoldier,
-  type EngagementArea,
-  type Orders,
-  type SimState,
-  type SoldierId,
-} from './state';
+import { findSoldier, type Orders, type SimState, type SoldierId } from './state';
 import type { Vec2 } from './geometry';
-import { isOnTerrain } from './terrain';
 import { applyOrderSquad, validateOrderSquad, type OrderSquadCommand } from './fof/orders';
 import type { SimWorld } from './world';
 
@@ -41,33 +32,8 @@ export interface SetOrdersCommand {
   readonly orders: Orders | null;
 }
 
-/**
- * Adds an engagement area, or replaces the one with the same id. Soldiers
- * already inside it when it is set have not entered it (docs/adr/0010).
- */
-export interface SetEngagementAreaCommand {
-  readonly type: 'setEngagementArea';
-  readonly tick: number;
-  readonly area: EngagementArea;
-}
-
-/**
- * Begins the engagement (docs/adr/0019): from this tick on, combat runs. The
- * exercise submits it when the ambush is sprung. Rejected in a world without
- * a combat model, or when an engagement has already begun.
- */
-export interface BeginEngagementCommand {
-  readonly type: 'beginEngagement';
-  readonly tick: number;
-}
-
 export type SimCommand =
-  | SetOrdersCommand
-  | SetEngagementAreaCommand
-  | BeginEngagementCommand
-  | OrderUnitCommand
-  | DisturbAgentCommand
-  | OrderSquadCommand;
+  SetOrdersCommand | OrderUnitCommand | DisturbAgentCommand | OrderSquadCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -83,23 +49,6 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
   switch (command.type) {
     case 'setOrders':
       validateOrders(command.orders);
-      return;
-    case 'setEngagementArea': {
-      const { id, vertices } = command.area;
-      if (typeof id !== 'string' || id === '') {
-        throw new RangeError('engagement area id must be a non-empty string');
-      }
-      if (!vertices.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))) {
-        throw new RangeError('engagement area vertices must be finite');
-      }
-      if (!isSimplePolygon(vertices)) {
-        throw new RangeError(
-          `engagement area "${id}" must be a simple polygon of at least 3 vertices`,
-        );
-      }
-      return;
-    }
-    case 'beginEngagement':
       return;
     case 'orderUnit':
       if (typeof command.unitId !== 'string' || command.unitId === '') {
@@ -149,12 +98,6 @@ export function applyCommands(
     switch (command.type) {
       case 'setOrders':
         applySetOrders(state, world, command, startSeconds, events);
-        break;
-      case 'setEngagementArea':
-        applySetEngagementArea(state, world, command, events);
-        break;
-      case 'beginEngagement':
-        beginEngagement(state, world, command, startSeconds, events);
         break;
       case 'orderUnit':
         // A force in a force-on-force experiment is driven by its contact
@@ -238,22 +181,4 @@ function applySetOrders(
     nextTurnIndex: 0,
   };
   events.push({ type: 'ordersChanged', tick: state.tick, soldierId: soldier.id, orders });
-}
-
-function applySetEngagementArea(
-  state: SimState,
-  world: SimWorld,
-  command: SetEngagementAreaCommand,
-  events: SimEvent[],
-): void {
-  const { area } = command;
-  if (area.vertices.some(({ x, y }) => !isOnTerrain(world.terrain, x, y))) {
-    events.push({ type: 'commandRejected', tick: state.tick, command, reason: 'areaOffTerrain' });
-    return;
-  }
-  const copy = clonePlainData(area);
-  const index = state.engagementAreas.findIndex((a) => a.id === area.id);
-  if (index >= 0) state.engagementAreas[index] = copy;
-  else state.engagementAreas.push(copy);
-  events.push({ type: 'engagementAreaChanged', tick: state.tick, area });
 }

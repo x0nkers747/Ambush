@@ -1,5 +1,5 @@
 import { surfaceHeightAt } from '../bridge-navigation';
-import { hitProbabilityAt } from '../combat-config';
+import { hitProbabilityAt } from './hit-probability';
 import { azimuthOf, type Vec2 } from '../geometry';
 import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_SCENARIO } from '#exercise';
+import { DEMO_TERRAIN } from '#exercise';
 import {
   createSyntheticTerrain,
   gradeTerrain,
@@ -42,7 +42,7 @@ const site = gradeTerrain(
 describe('2D and 3D elevation queries', () => {
   for (const [name, terrain] of [
     ['a graded site', site],
-    ['the demo', DEMO_SCENARIO.terrain],
+    ['the demo', DEMO_TERRAIN],
   ] as const) {
     it(`agree exactly with each other and with the simulation on ${name}`, () => {
       expect(refinementIndex(terrain)).not.toBeNull();

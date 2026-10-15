@@ -4,29 +4,22 @@ import {
   rectangle,
   type Building,
   type Road,
-  type ScenarioSoldier,
+  type TerrainDataset,
   type VegetationArea,
   type Vec2,
 } from '#sim';
-import { deployInOrp, type AmbushScenario, type OpforRoute } from './ambush-scenario';
-import { DEFAULT_MOVEMENT, squadInstance, USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
-import type { ObjectiveRallyPoint } from './orp';
-import { OPFOR_FORCES } from './scenario-definition';
 
-// Development content for the interactive ambush slice (Phases 3–3.7), not a
-// doctrinal ambush scenario. A 13-Marine rifle squad (the MCWP 3-11.2
-// organization template, docs/adr/0012) at an ORP in the south; a three-soldier
-// OPFOR patrol in the north whose route follows the valley road south through
-// a small hamlet. 800 m × 600 m of synthetic terrain designed so that planning
-// choices matter (docs/adr/0011):
+// The demo battlefield's ground (docs/adr/0011): 800 m × 600 m of synthetic
+// terrain with relief, a valley road through a small hamlet, buildings,
+// woods and tree lines, drawn so that sight lines and routes depend on where
+// one stands. A fixture for the terrain, line-of-sight and rendering tests:
 //
-// - a low east–west ridge between the squad and the hamlet masks the road from
-//   positions behind it;
+// - a low east–west ridge in the south masks the road from positions behind it;
 // - a wooded ridge to the west gives height but its woods obscure the view;
 // - a barn west of the road blocks the view from the south-west; a low shed
 //   west of the hamlet does not;
 // - a dense tree line east of the road screens the fields beyond it;
-// - a cottage stands on the squad's direct line north, so routes bend round it.
+// - a cottage stands on the direct line north from the south, so routes bend round it.
 
 /** Smooth bump of `height` metres centred on (cx, cy) with spread `sigma` metres. */
 function bump(x: number, y: number, cx: number, cy: number, height: number, sigma: number): number {
@@ -175,42 +168,6 @@ const vegetation: VegetationArea[] = [
 ];
 
 /** The squad's objective rally point, behind the south ridge. */
-const DEMO_ORP: ObjectiveRallyPoint = {
-  id: 'ORP-1',
-  name: 'ORP',
-  centre: { east: -60, north: -236 },
-  shape: { kind: 'circle', radiusM: 14 },
-};
-
-const opfor = (id: string, x: number, y: number): ScenarioSoldier => ({
-  id,
-  side: 'OPFOR',
-  unitId: 'EN-TM',
-  position: { x, y },
-  azimuthDeg: 180,
-  posture: 'standing',
-});
-
-/** The OPFOR patrol follows the road south through the hamlet, then east. */
-const PATROL_ROUTE: readonly Vec2[] = [
-  ...[160, 100, 40, -10, -60, -110].map((y) => ({ x: drawCentreX(y), y })),
-  { x: -10, y: -150 },
-  { x: 40, y: -170 },
-  { x: 120, y: -185 },
-];
-
-const patrolRoute = (soldierId: string): OpforRoute => ({
-  id: `${soldierId}-patrol`,
-  soldierId,
-  waypoints: PATROL_ROUTE.map(({ x, y }, i) => ({
-    id: `${soldierId}-patrol.${String(i + 1)}`,
-    x,
-    y,
-  })),
-  finalFacingDeg: 90,
-  shownToTrainee: true,
-});
-
 // The authoritative ground: the demo's elevation, checked (docs/adr/0033),
 // with its road and building foundations graded into it (docs/adr/0032).
 const { terrain } = authoritativeGround(
@@ -220,24 +177,4 @@ const { terrain } = authoritativeGround(
     { roads, buildings, vegetation },
   ),
 );
-const squad = deployInOrp(USMC_RIFLE_SQUAD_TEMPLATE, squadInstance(), DEMO_ORP, terrain);
-
-export const DEMO_SCENARIO: AmbushScenario = {
-  id: 'phase3-demo',
-  terrain,
-  movement: DEFAULT_MOVEMENT,
-  units: [...squad.units, { id: 'EN-TM', echelon: 'fireTeam', parentId: null, leaderId: 'EN-1' }],
-  soldiers: [
-    ...squad.soldiers,
-    // A file 12 m apart on the road, heading south.
-    opfor('EN-1', drawCentreX(250), 250),
-    opfor('EN-2', drawCentreX(262), 262),
-    opfor('EN-3', drawCentreX(274), 274),
-  ],
-  opforRoutes: [patrolRoute('EN-1'), patrolRoute('EN-2'), patrolRoute('EN-3')],
-  orp: DEMO_ORP,
-  organization: squad.organization,
-  opforLoadouts: Object.fromEntries(
-    ['EN-1', 'EN-2', 'EN-3'].map((id) => [id, OPFOR_FORCES['patrol-3'].loadout]),
-  ),
-};
+export const DEMO_TERRAIN: TerrainDataset = terrain;

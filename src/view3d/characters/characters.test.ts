@@ -47,7 +47,6 @@ interface Step {
   azimuth?: number;
   posture?: 'standing' | 'kneeling' | 'prone';
   status?: 'active' | 'incapacitated';
-  behavior?: 'engaging' | 'fleeing';
 }
 
 /** A motion log of one soldier ("S1"), one entry per tick. */
@@ -66,9 +65,6 @@ function logOf(steps: readonly Step[]): MotionRecorder {
           status: s.status ?? 'active',
         },
       ],
-      engagement: s.behavior
-        ? { combatants: [{ soldierId: 'S1', behavior: s.behavior }] }
-        : undefined,
     } as unknown as SimState);
   });
   return log;
@@ -161,13 +157,11 @@ describe('weapon handling and combat', () => {
   const shot = (atSeconds: number): CombatEvent =>
     ({ type: 'shotFired', atSeconds, shooterId: 'S1' }) as unknown as CombatEvent;
 
-  it('aims when engaging or after a shot, carries at patrol when moving, ready otherwise', () => {
+  it('aims after a shot, carries at patrol when moving, ready otherwise', () => {
     const idle = new SoldierMotion(logOf(walk(60, 0)), 'S1');
     expect(idle.at(1).carry).toBe('ready');
     const moving = new SoldierMotion(logOf(walk(0, 60)), 'S1');
     expect(moving.at(1).carry).toBe('lowered');
-    const engaging = new SoldierMotion(logOf(walk(60, 0, 1.5, { behavior: 'engaging' })), 'S1');
-    expect(engaging.at(1).carry).toBe('aimed');
     const firing = new SoldierMotion(logOf(walk(300, 0)), 'S1');
     firing.updateCombat([shot(2)]);
     expect(firing.at(1.9).carry).toBe('ready');

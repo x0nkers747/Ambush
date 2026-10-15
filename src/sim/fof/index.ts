@@ -15,6 +15,7 @@ export {
   type ForceBehaviorConfig,
   type SuppressionConfig,
   type TerminationConfig,
+  type UniformSeconds,
   type VisibilityClass,
   type VisibilityConditions,
 } from './config';
@@ -37,3 +38,4 @@ export {
   type OrderSquadRejection,
 } from './orders';
 export { orderSpecProblem } from './setup';
+export { hitProbabilityAt, type RangeProbability } from './hit-probability';

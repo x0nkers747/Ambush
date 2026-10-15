@@ -1,5 +1,4 @@
 import type { BehaviorParams } from './behavior/params';
-import type { CombatConfig } from './combat-config';
 import type { FofSetup } from './fof/types';
 import type { TerrainDataset } from './terrain';
 
@@ -18,28 +17,10 @@ export interface MovementParams {
 export interface SimWorld {
   readonly terrain: TerrainDataset;
   readonly movement: MovementParams;
-  /** The combat model; absent in worlds without combat (docs/adr/0019). */
-  readonly combat?: CombatSetup;
   /** Unit-movement tuning (docs/behavior-lab/03); absent: `DEFAULT_BEHAVIOR_PARAMS`. */
   readonly behavior?: BehaviorParams;
   /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
   readonly fof?: FofSetup;
-}
-
-/**
- * Everything combat needs beyond the state (docs/adr/0019): the validated
- * configuration, and the weapon each soldier fires. Which weapon that is (the
- * primary weapon of the soldier's resolved loadout) is decided outside the
- * simulation; the simulation only fires it.
- */
-export interface CombatSetup {
-  readonly config: CombatConfig;
-  /**
-   * The weapon profile reference each soldier fires, by soldier id; `null`
-   * (or no entry) for a soldier without a usable weapon, who never fires.
-   * Every reference must have a profile in `config.weapons`.
-   */
-  readonly weapons: Readonly<Record<string, string | null>>;
 }
 
 /** Throws a RangeError describing the first invalid field. */

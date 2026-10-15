@@ -494,7 +494,7 @@ export function readOrganizationTemplate(data: unknown): ReadTemplate {
 export interface OrganizationMember {
   readonly soldierId: string;
   readonly slotId: string;
-  /** Starting position (map metres east, north); laid out in the ORP when omitted. */
+  /** Starting position (map metres east, north); as `startOf` lays it out when omitted. */
   readonly start?: { readonly east: number; readonly north: number };
   /** Starting facing, degrees clockwise from grid north; the instance default when omitted. */
   readonly facingDeg?: number;
@@ -518,7 +518,7 @@ export interface OrganizationInstance {
   readonly members: readonly OrganizationMember[];
 }
 
-/** The trainee's organization as an exercise sees it: template plus who holds each slot. */
+/** An organization as its users see it: template plus who holds each slot. */
 export interface TraineeOrganization {
   readonly template: OrganizationTemplate;
   readonly unitIdPrefix: string;

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createSyntheticTerrain, flatElevation, soldierId, type ScenarioSoldier } from '#sim';
-import { deployInOrp, type AmbushScenario } from './ambush-scenario';
+import type { ScenarioSoldier } from '#sim';
 import { USMC_RIFLE_SQUAD_TEMPLATE } from './squad';
-import { createExercise } from './exercise';
 import {
   instantiateOrganization,
   migrateOrganizationTemplate,
@@ -403,68 +401,5 @@ describe('instantiateOrganization', () => {
     ],
   ])('refuses %s', (_label, bad, message) => {
     expect(() => instantiateOrganization(PATROL, bad, at)).toThrow(message);
-  });
-});
-
-describe('an exercise with the alternative organization', () => {
-  it('runs from the ORP to readiness with no assumptions about size or fire teams', () => {
-    const terrain = createSyntheticTerrain(
-      { originX: -100, originY: -100, cellSize: 10, columns: 21, rows: 21 },
-      flatElevation(0),
-    );
-    const orp = {
-      id: 'ORP-P',
-      name: 'ORP',
-      centre: { east: 0, north: -60 },
-      shape: { kind: 'ellipse', majorAxisM: 20, minorAxisM: 8, orientationDeg: 90 },
-    } as const;
-    const patrolForce = deployInOrp(
-      PATROL,
-      {
-        templateId: PATROL.id,
-        templateVersion: PATROL.version,
-        side: 'BLUEFOR',
-        unitIdPrefix: '',
-        facingDeg: 0,
-        posture: 'standing',
-        members: PATROL.slots.map((s, i) => ({ soldierId: `P${String(i + 1)}`, slotId: s.id })),
-      },
-      orp,
-      terrain,
-    );
-    const scenario: AmbushScenario = {
-      id: 'patrol',
-      terrain,
-      movement: { speed: 2, maxTurnRate: Math.PI },
-      units: [...patrolForce.units, { id: 'EN', echelon: 'team', parentId: null, leaderId: null }],
-      soldiers: [
-        ...patrolForce.soldiers,
-        {
-          id: 'E',
-          side: 'OPFOR',
-          unitId: 'EN',
-          position: { x: 0, y: 80 },
-          azimuthDeg: 180,
-          posture: 'standing',
-        },
-      ],
-      opforRoutes: [],
-      orp,
-      organization: patrolForce.organization,
-    };
-    const exercise = createExercise({ config: { tickRateHz: 10, seed: 1 }, scenario });
-    expect(rosterMembers(exercise.roster)).toHaveLength(6);
-    expect(exercise.roster.children.map((c) => c.unit.name)).toEqual([
-      'North group',
-      'South group',
-    ]);
-    // Only two of the six are given destinations; the others do not hold up readiness.
-    exercise.setDestination(soldierId('P3'), { x: -20, y: 0 });
-    exercise.setDestination(soldierId('P6'), { x: 20, y: 0 });
-    expect(exercise.execute().ok).toBe(true);
-    for (let i = 0; i < 600 && exercise.phase !== 'bluforReady'; i += 1) exercise.advance(0.1);
-    expect(exercise.phase).toBe('bluforReady');
-    expect(exercise.deploymentStatus(soldierId('P3'))).toBe('inPosition');
-    expect(exercise.deploymentStatus(soldierId('P1'))).toBe('atOrp');
   });
 });

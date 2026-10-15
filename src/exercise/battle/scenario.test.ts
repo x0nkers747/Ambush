@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NO_FEATURES, pointProblem, rectangle, type SimEvent } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
-import { SCENARIO_SCHEMA, type ScenarioDefinition } from '../scenario-definition';
 import { createBattle, squadSoldierStarts } from './battle';
 import {
   addOrder,
@@ -12,6 +11,8 @@ import {
   deleteSquad,
   faceSquadToward,
   migrateAmbushScenario,
+  SCENARIO_SCHEMA,
+  type AmbushScenarioV1,
   moveOrder,
   moveSquad,
   newBattleScenario,
@@ -55,7 +56,7 @@ function threeSquads(): BattleScenarioDefinition {
   return d;
 }
 
-const v1: ScenarioDefinition = {
+const v1: AmbushScenarioV1 = {
   schema: SCENARIO_SCHEMA,
   schemaVersion: 1,
   id: 'bf/1',

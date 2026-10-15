@@ -2,7 +2,7 @@ import { surfaceHeightAt } from '../bridge-navigation';
 import type { SimEvent } from '../events';
 import { isSegmentWalkable, navArea, planPath, pointProblem } from '../navigation';
 import { azimuthDelta, azimuthOf, turnToward } from '../geometry';
-import type { PathSegment, TickTime } from '../movement';
+import type { TickTime } from '../movement';
 import type { SimState, Soldier } from '../state';
 import type { SimWorld } from '../world';
 import { flattenFormation } from './formation-spec';
@@ -51,20 +51,16 @@ const target = slotTarget();
 const pushed = { x: 0, y: 0 };
 const NO_PUSH = Object.freeze({ x: 0, y: 0 });
 
-/**
- * Moves every soldier steered by a unit task through the tick and returns
- * the straight pieces they travelled (one per substep), like `moveSoldiers`.
- */
+/** Moves every soldier steered by a unit task through the tick. */
 export function updateBehavior(
   state: SimState,
   world: SimWorld,
   time: TickTime,
   events: SimEvent[],
-): PathSegment[] {
+): void {
   const behavior = state.behavior;
-  if (!behavior) return [];
+  if (!behavior) return;
   const params = behaviorParams(world);
-  const path: PathSegment[] = [];
 
   // Soldiers who were given individual orders (or fell) leave their tasks.
   const { soldiers, index, crowd } = lookups(state.soldiers, CROWD_CELL_M);
@@ -83,7 +79,7 @@ export function updateBehavior(
   }
 
   const active = behavior.tasks.filter(isRunning);
-  if (active.length === 0) return path;
+  if (active.length === 0) return;
 
   // Each task's agents (in soldier order), gathered once: agents change only between ticks.
   const members = active.map((task) => behavior.agents.filter((a) => a.taskId === task.id));
@@ -132,8 +128,6 @@ export function updateBehavior(
       for (const agent of agents) {
         const soldier = soldiers.get(agent.soldierId);
         if (!soldier) continue;
-        const fromX = soldier.position.x;
-        const fromY = soldier.position.y;
         stepAgent(
           agent,
           soldier,
@@ -145,19 +139,9 @@ export function updateBehavior(
           index.get(soldier.id) ?? -1,
           tEnd,
         );
-        if (soldier.position.x !== fromX || soldier.position.y !== fromY) {
-          path.push({
-            soldierId: soldier.id,
-            from: { x: fromX, y: fromY },
-            to: { x: soldier.position.x, y: soldier.position.y },
-            startSeconds: t,
-            endSeconds: tEnd,
-          });
-        }
       }
     }
   }
-  return path;
 }
 
 /**

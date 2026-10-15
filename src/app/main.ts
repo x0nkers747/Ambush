@@ -5,7 +5,6 @@ import {
   openIndexedDbStore,
   type BattlefieldStore,
 } from '#acquire';
-import { buildPreviewScenario, defaultScenarioDefinition } from '#exercise';
 import {
   battleScenarioId,
   newBattleScenario,
@@ -145,13 +144,10 @@ function unresolvedNotice(quality: DemQualityReport): string | null {
 /** What the terrain-selection preview shows of a battlefield and its battle scenario. */
 function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition): PreviewData {
   // The map shows the terrain; the battle's squads and plans are drawn over it.
-  const empty = defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false });
-  const { scenario } = buildPreviewScenario(pkg.terrain, empty);
   return {
     name: pkg.name,
     centre: pkg.request.centre,
-    scenario,
-    squadPlaced: false,
+    terrain: pkg.terrain,
     attribution: pkg.attribution,
     caption:
       battle.squads.length === 0

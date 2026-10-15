@@ -1,5 +1,10 @@
 # Combat configuration reference
 
+> **Retired.** Combat v1 and its configuration were removed with the ambush
+> exercise ([progress](constructive-simulation/progress.md#the-old-engine-removed)).
+> Battles fight with the force-on-force model, configured in
+> `src/exercise/forces/fof-v1.json`. This page is kept as a record.
+
 Every balance parameter of combat v1 ([ADR 0019](adr/0019-probabilistic-engagements.md)) lives in
 one JSON file, [`src/exercise/combat/combat-v1.json`](../src/exercise/combat/combat-v1.json). The
 simulation reads these values and nothing else: no combat number is written into the code. The file

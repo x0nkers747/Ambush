@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createExercise, DEMO_SCENARIO, type Exercise } from '#exercise';
-import { surfaceHeightAt, type Vec2 } from '#sim';
+import {
+  combatEventOf,
+  createMotionRecorder,
+  type CombatEvent,
+  type MotionRecorder,
+} from '#exercise';
+import { labTerrain } from '#exercise/behavior-lab';
+import { createBattle } from '#exercise/battle';
+import { surfaceHeightAt, type TerrainDataset } from '#sim';
 import {
   type BakedCharacter,
   type CharacterAsset,
@@ -16,17 +23,18 @@ import { makeWeapon, weaponKindOf } from './weapon-map';
 // simulation time is the same live and in the After Action Review, at any
 // playback speed, whether the time is reached by playing, pausing or seeking
 // in any order. The real soldier's skeleton and clips (the baked file),
-// posed by the game's animation code, over a played exercise.
+// posed by the game's animation code, over a fought battle.
 
 /** Exact: bit-for-bit the same numbers (positions, rotations, weights, times). */
 const TOLERANCE = 0;
 
-const KILL_ZONE: Vec2[] = [
-  { x: -40, y: -20 },
-  { x: 40, y: -20 },
-  { x: 40, y: 30 },
-  { x: -40, y: 30 },
-];
+/** What the characters are posed from: a battle's logs, its soldiers' weapons and its ground. */
+interface Fight {
+  readonly motionLog: MotionRecorder;
+  readonly combatLog: CombatEvent[];
+  readonly combatWeapons: Readonly<Record<string, string | null>>;
+  readonly simulation: { readonly world: { readonly terrain: TerrainDataset } };
+}
 
 let asset: CharacterAsset;
 const models = (() => {
@@ -47,65 +55,112 @@ beforeAll(async () => {
   };
 });
 
-function puppets(exercise: Exercise, ids: readonly string[]): Puppet[] {
+function puppets(fight: Fight, ids: readonly string[]): Puppet[] {
   return ids.map(
     (id) =>
       new Puppet(
         asset,
         id,
-        makeWeapon(weaponKindOf(exercise.combatWeapons[id]), models),
-        exercise.motionLog,
+        makeWeapon(weaponKindOf(fight.combatWeapons[id]), models),
+        fight.motionLog,
       ),
   );
 }
 
-function poseAll(exercise: Exercise, ps: readonly Puppet[], seconds: number): PoseFingerprint[] {
-  const terrain = exercise.simulation.world.terrain;
+function poseAll(fight: Fight, ps: readonly Puppet[], seconds: number): PoseFingerprint[] {
+  const terrain = fight.simulation.world.terrain;
   const surface = (x: number, y: number) => surfaceHeightAt(terrain, x, y);
   return ps.map((p) => {
-    p.pose(exercise.motionLog, exercise.combatLog, seconds, surface);
+    p.pose(fight.motionLog, fight.combatLog, seconds, surface);
     return fingerprint(p);
   });
 }
 
 interface Played {
-  exercise: Exercise;
+  fight: Fight;
   ids: string[];
-  /** Live poses: (render time, fingerprints) taken while the exercise ran. */
+  /** Live poses: (render time, fingerprints) taken while the battle was fought. */
   live: { seconds: number; poses: PoseFingerprint[] }[];
 }
 
-/** The demo played to its end, with soldiers posed live every frame at irregular frame times. */
+/**
+ * A battle fought until soldiers have fallen (two squads attacking each
+ * other across open ground), with soldiers posed live every frame at
+ * irregular frame times, as the page does.
+ */
 function play(): Played {
-  const exercise = createExercise({ config: { tickRateHz: 30, seed: 7 }, scenario: DEMO_SCENARIO });
-  const soldiers = exercise.simulation.state.soldiers;
-  // Two Marines (one with the SAW if there is one) and two of the patrol.
-  const saw = soldiers.find((s) => exercise.combatWeapons[s.id] === 'squad-automatic-weapon');
+  const battle = createBattle(
+    {
+      seed: 7,
+      tickRateHz: 30,
+      squads: [
+        {
+          id: 'B1',
+          name: 'B1',
+          side: 'BLUEFOR',
+          organization: 'squad',
+          position: { x: 0, y: -250 },
+          facingDeg: 0,
+          plan: [{ kind: 'attack', destination: { x: 0, y: 250 } }],
+        },
+        {
+          id: 'O1',
+          name: 'O1',
+          side: 'OPFOR',
+          organization: 'squad',
+          position: { x: 0, y: 250 },
+          facingDeg: 180,
+          plan: [{ kind: 'attack', destination: { x: 0, y: -250 } }],
+        },
+      ],
+    },
+    labTerrain(),
+  );
+  const rate = battle.spec.tickRateHz;
+  const motionLog = createMotionRecorder(rate);
+  motionLog.record(battle.sim.state);
+  const combatWeapons: Record<string, string | null> = {};
+  for (const squad of battle.squads) Object.assign(combatWeapons, squad.displayWeapons);
+  const fight: Fight = {
+    motionLog,
+    combatLog: [],
+    combatWeapons,
+    simulation: { world: battle.sim.world },
+  };
+  const soldiers = battle.sim.state.soldiers;
+  // Two Marines (one with the SAW) and two of the enemy.
+  const saw = soldiers.find((s) => combatWeapons[s.id] === 'squad-automatic-weapon');
   const blufor = soldiers.filter((s) => s.side === 'BLUEFOR');
   const opfor = soldiers.filter((s) => s.side === 'OPFOR');
   const ids = [...new Set([saw ?? blufor[0], blufor[1], opfor[0], opfor[1]])]
     .filter((s) => s !== undefined)
     .map((s) => s.id);
-  const ps = puppets(exercise, ids);
+  const ps = puppets(fight, ids);
   const live: Played['live'] = [];
   let frame = 0;
-  // Irregular frames (6 to 37 ms), posing every frame; keep every 25th.
+  let clock = 0;
+  // Irregular frames (6 to 37 ms) at 8×, posing every frame; keep every 25th.
   const step = () => {
     frame += 1;
-    exercise.advance((6 + ((frame * 7919) % 31)) / 1000);
-    const seconds = exercise.renderSeconds;
-    const poses = poseAll(exercise, ps, seconds);
-    if (frame % 25 === 0) live.push({ seconds, poses });
+    clock += (8 * (6 + ((frame * 7919) % 31))) / 1000;
+    // The battle a tick ahead of the time posed, as Combat keeps it (the
+    // pose at a time may read the tick after it).
+    while (battle.sim.tick < Math.ceil(clock * rate) + 1) {
+      for (const e of battle.step()) {
+        const c = combatEventOf(e);
+        if (c) fight.combatLog.push(c);
+      }
+      motionLog.record(battle.sim.state);
+    }
+    const poses = poseAll(fight, ps, clock);
+    if (frame % 25 === 0) live.push({ seconds: clock, poses });
   };
-  for (const v of KILL_ZONE) exercise.addKillZoneVertex(v);
-  exercise.execute();
-  for (let i = 0; i < 60 * 300 && exercise.phase !== 'bluforReady'; i += 1) step();
-  if (!exercise.startOpfor().ok) throw new Error('START OPFOR refused');
-  for (let i = 0; i < 60 * 300 && (exercise.killZoneOccupancy()?.inside ?? 0) < 1; i += 1) step();
-  if (!exercise.triggerAmbush().ok) throw new Error('TRIGGER AMBUSH refused');
-  for (let i = 0; i < 60 * 120 && exercise.phase !== 'engagementComplete'; i += 1) step();
-  if (exercise.phase !== 'engagementComplete') throw new Error('the engagement did not end');
-  return { exercise, ids, live };
+  const fallen = () => battle.sim.state.soldiers.filter((s) => s.status !== 'active').length;
+  while (clock < 900 && fallen() < 4) step();
+  if (fallen() < 4) throw new Error('nobody fell');
+  // A little more: the falls run their course.
+  for (let i = 0; i < 100; i += 1) step();
+  return { fight, ids, live };
 }
 
 let played: Played;
@@ -114,12 +169,12 @@ beforeAll(() => {
 }, 120000);
 
 /** Check times: moving, firing, recoil, incapacitation, posture changes, the end. */
-function checkTimes(exercise: Exercise): number[] {
-  const rate = exercise.motionLog.tickRateHz;
+function checkTimes(fight: Fight): number[] {
+  const rate = fight.motionLog.tickRateHz;
   const times = new Set<number>();
-  const trigger = exercise.trigger?.atSeconds ?? 0;
-  for (const dt of [-20, -6.4, -1.03, 0, 0.5]) times.add(trigger + dt);
-  for (const e of exercise.combatLog.slice(0, 40)) {
+  const firstShot = fight.combatLog.find((e) => e.type === 'shotFired')?.atSeconds ?? 0;
+  for (const dt of [-20, -6.4, -1.03, 0, 0.5]) times.add(firstShot + dt);
+  for (const e of fight.combatLog.slice(0, 40)) {
     if (e.type === 'shotFired') {
       times.add(e.atSeconds);
       times.add(e.atSeconds + 0.017);
@@ -130,7 +185,7 @@ function checkTimes(exercise: Exercise): number[] {
       times.add(e.atSeconds + 0.7);
     }
   }
-  times.add(exercise.motionLog.lastTick / rate);
+  times.add(fight.motionLog.lastTick / rate);
   return [...times].filter((t) => t >= 0).sort((a, b) => a - b);
 }
 
@@ -156,13 +211,13 @@ function compare(
 
 describe('animation replay', () => {
   it('poses the soldiers live, and the review reproduces every live pose exactly', () => {
-    const { exercise, ids, live } = played;
+    const { fight, ids, live } = played;
     expect(live.length).toBeGreaterThan(20);
-    const ps = puppets(exercise, ids);
+    const ps = puppets(fight, ids);
     let worst = 0;
     // Reconstructed backwards, on fresh soldiers: no history from playing.
     for (const { seconds, poses } of [...live].reverse()) {
-      const again = poseAll(exercise, ps, seconds);
+      const again = poseAll(fight, ps, seconds);
       poses.forEach((p, i) => {
         const a = again[i];
         if (!a) throw new Error('missing');
@@ -174,15 +229,15 @@ describe('animation replay', () => {
   });
 
   it('gives the same pose at a time however the time is reached', () => {
-    const { exercise, ids } = played;
-    const times = checkTimes(exercise);
+    const { fight, ids } = played;
+    const times = checkTimes(fight);
     expect(times.length).toBeGreaterThan(10);
     const start = Math.max(0, (times[0] ?? 0) - 1);
     const end = times[times.length - 1] ?? 0;
 
     /** Continuous playback at `step` seconds per frame, from `start`, keeping the check times. */
     const playback = (step: (frame: number) => number) => {
-      const ps = puppets(exercise, ids);
+      const ps = puppets(fight, ids);
       const out = new Map<number, PoseFingerprint[]>();
       const pending = [...times];
       let t = start;
@@ -190,14 +245,14 @@ describe('animation replay', () => {
         const next = pending[0] ?? end;
         const target = Math.min(t + step(frame), next);
         t = target;
-        const poses = poseAll(exercise, ps, t);
+        const poses = poseAll(fight, ps, t);
         if (t === next) out.set(pending.shift() ?? next, poses);
       }
       return out;
     };
-    const seeks = (order: readonly number[], ps = puppets(exercise, ids)) => {
+    const seeks = (order: readonly number[], ps = puppets(fight, ids)) => {
       const out = new Map<number, PoseFingerprint[]>();
-      for (const t of order) out.set(t, poseAll(exercise, ps, t));
+      for (const t of order) out.set(t, poseAll(fight, ps, t));
       return out;
     };
 
@@ -231,7 +286,7 @@ describe('animation replay', () => {
         'repeated',
         reference,
         (() => {
-          const ps = puppets(exercise, ids);
+          const ps = puppets(fight, ids);
           seeks(shuffled, ps);
           seeks(times, ps);
           return seeks([...times].reverse(), ps);

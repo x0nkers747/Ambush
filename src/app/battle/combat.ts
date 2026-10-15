@@ -33,7 +33,7 @@ export interface Combat {
   readonly playing: boolean;
   readonly speed: CombatSpeed;
   readonly ended: boolean;
-  /** The time drawn: simulation seconds, smooth between ticks (never ahead of the battle). */
+  /** The time drawn: simulation seconds, smooth between ticks, at least a tick behind the battle. */
   readonly renderSeconds: number;
   play(): void;
   pause(): void;
@@ -124,7 +124,10 @@ export function createCombat(o: CombatOptions): Combat {
       return ended;
     },
     get renderSeconds() {
-      return Math.min(clock, session.seconds);
+      // A tick behind the battle: the characters' pose at a time may read the
+      // tick after it, which must be there already (or a live pose would
+      // differ from the review's).
+      return Math.max(0, Math.min(clock, session.seconds - 1 / rate));
     },
     play() {
       if (!ended) playing = true;

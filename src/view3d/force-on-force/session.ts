@@ -1,4 +1,9 @@
-import { createMotionRecorder, type CombatEvent, type MotionRecorder } from '#exercise';
+import {
+  combatEventOf,
+  createMotionRecorder,
+  type CombatEvent,
+  type MotionRecorder,
+} from '#exercise';
 import {
   createFofMetrics,
   createFofRun,
@@ -132,25 +137,6 @@ export const KEPT: ReadonlySet<SimEvent['type']> = new Set([
   'commandRejected',
 ]);
 
-/** A burst as the character layer's shot (it reads the shooter and the time). */
-export function asCombatEvent(event: SimEvent): CombatEvent | null {
-  if (event.type === 'soldierIncapacitated') return event;
-  if (event.type !== 'fofFire') return null;
-  return {
-    type: 'shotFired',
-    tick: event.tick,
-    atSeconds: event.atSeconds,
-    shooterId: event.shooterId,
-    shooterSide: event.side,
-    targetId: event.targetId,
-    weaponProfileRef: event.weapon,
-    rangeM: event.rangeM,
-    hitProbability: event.hitProbability,
-    hit: event.hit,
-    incapacitated: event.incapacitated,
-  };
-}
-
 /** Mean and 95th percentile of CPU samples. */
 export function cpuSummary(cpu: readonly number[]): { mean: number; p95: number } {
   if (cpu.length === 0) return { mean: 0, p95: 0 };
@@ -275,7 +261,7 @@ export function createFofSession(
     for (const event of stepped) {
       if (!KEPT.has(event.type)) continue;
       events.push({ seconds: head.sim.timeSeconds, event });
-      const c = asCombatEvent(event);
+      const c = combatEventOf(event);
       if (c) combat.push(c);
     }
     atTick();

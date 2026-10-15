@@ -265,12 +265,8 @@ The five-stage battle workflow replaces the ambush exercise.
   read, and converted to a battle when first opened.
 - **Simplified:** the workflow's gates are the pages' rules alone
   (`WorkflowRules`).
-- **What remains, and why:** the exercise engine
-  (`src/exercise/exercise.ts` and its scenario, ORP, kill-zone and combat
-  v1 modules). The 2D map and the 3D view still draw the terrain through an
-  exercise (`terrainOnlyExercise`), and the terrain preview builds one too.
-  Removing it means giving both renderers another source for the terrain
-  and their soldiers.
+- **What remained:** the exercise engine, through which the 2D map and the
+  3D view still drew the terrain. It has since been removed (see below).
 
 ### The battle in a worker
 
@@ -293,3 +289,60 @@ Combat and the review's replay are simulated in a background worker
   - the battle runs at the one-core limit, about 10–13×;
   - a 405-second battle replayed and verified in the worker, with no
     mismatch.
+
+### The old engine removed
+
+The ambush exercise's engine is gone, from the renderers down to the
+simulation kernel.
+
+- **The renderers take the terrain directly.**
+  - `createTacticalMap({ canvas, terrain, editor? })` draws the terrain, the
+    grid, the north arrow and the scale bar; its only pointer handling is pan
+    and zoom, and everything else goes to the editor.
+  - `createBattlefieldView3d({ terrain, figures? })` shows the soldiers its
+    owner gives it (a battle's), and none otherwise.
+  - The terrain preview gives both renderers the battlefield's terrain.
+- **Deleted from the exercise layer:**
+  - the exercise, its scenario (ORP, kill zone, OPFOR routes), deployment,
+    formation, combat v1 and its configuration, replay, the demo scenario,
+    weapon display, and their tests;
+  - the `session` layer (the exercise's UI state).
+  - Kept:
+    - the demo's ground, as `DEMO_TERRAIN`;
+    - the reader of version 1 scenarios, so old saves still convert to
+      battles.
+- **Deleted from the 2D map:** the exercise's overlays, symbols and
+  interaction (selection, plans, visibility, engagement), the viewshed
+  worker, and `milsymbol`.
+- **Deleted from the simulation:**
+  - combat v1 (`beginEngagement`, the engagement state, OPFOR reactions,
+    flee speeds);
+  - engagement areas and their monitoring (`setEngagementArea`), and the
+    path pieces only they read;
+  - viewsheds, and the sight tracer's neighbour proofs that only viewsheds
+    used.
+  - The force-on-force model keeps the hit-probability curve
+    (`src/sim/fof/hit-probability.ts`).
+  - The motion log no longer records a combat behaviour (always none in a
+    battle).
+- **Unchanged:** the battles, the visuals and the speed.
+  - **Battles:** the same battles (6 squads, on open ground and in an urban
+    district, 420 s each), fought by the old and the new code, agree on
+    every per-second fingerprint of the soldiers, units, behaviour,
+    force-on-force state, random state and events.
+  - **State hashes:** states no longer carry the empty `engagementAreas`.
+    The pinned hashes in `src/sim/determinism.test.ts` changed for that
+    reason alone: with the empty list put back, the new code reproduces the
+    old pins exactly.
+  - **The sight tracer** still agrees with `traceSightLine` on every cell of
+    the grids that used to compare viewsheds.
+  - **Visuals:**
+    - the 2D map (fitted and zoomed) and the terrain preview are
+      pixel-identical, old against new;
+    - the 3D view differs only within its own frame-to-frame noise (animated
+      grass and wind).
+  - **Speed:**
+    - simulation: 3.86 s against 3.91 s (open) and 5.89 s against 5.89 s
+      (urban) for those battles;
+    - 3D frames: median 6.6 ms in both, uncapped.
+- `npm run check` and `npm run build` pass.

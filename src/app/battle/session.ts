@@ -1,4 +1,5 @@
 import {
+  combatEventOf,
   createMotionRecorder,
   type CombatEvent,
   type MotionLog,
@@ -61,29 +62,12 @@ export const KEYFRAME_SECONDS = 5;
 export const ADVANCE_BUDGET_MS = 30;
 const CPU_SAMPLES = 300;
 
-/** A burst or a casualty as the character layer's combat event (it reads the shooter and the time). */
-export function combatEventOf(event: SimEvent): CombatEvent | null {
-  if (event.type === 'soldierIncapacitated') return event;
-  if (event.type !== 'fofFire') return null;
-  return {
-    type: 'shotFired',
-    tick: event.tick,
-    atSeconds: event.atSeconds,
-    shooterId: event.shooterId,
-    shooterSide: event.side,
-    targetId: event.targetId,
-    weaponProfileRef: event.weapon,
-    rangeM: event.rangeM,
-    hitProbability: event.hitProbability,
-    hit: event.hit,
-    incapacitated: event.incapacitated,
-  };
-}
-
 /**
  * What the pages read of a battle being simulated: here (`BattleSession`)
  * or in the battle worker (`worker-combat.ts`, its mirror of the worker's).
  */
+export { combatEventOf };
+
 export interface BattleRun {
   /** The battle's squads, and every command given (with `origins`). */
   readonly battle: Pick<Battle, 'squads' | 'commands' | 'origins'>;

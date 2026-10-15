@@ -1,7 +1,5 @@
 import { updateBehavior } from './behavior/system';
-import { resolveCombat } from './combat';
 import { applyCommands, type SimCommand } from './commands';
-import { monitorEngagementAreas } from './engagement-areas';
 import type { SimEvent } from './events';
 import { updateForceOnForce } from './fof/system';
 import { moveSoldiers } from './movement';
@@ -34,15 +32,12 @@ export function stepState(
 
   // 2. Systems, as free functions in fixed order. They work in seconds, never
   //    in ticks, so behavior does not depend on the tick rate (docs/adr/0003).
-  //    Combat resolves the tick's firing opportunities against the positions
-  //    soldiers reached by its end (docs/adr/0019).
   //    Marines steered by unit tasks move first (docs/behavior-lab/03 §4.3);
-  //    `moveSoldiers` moves those following individual orders.
-  const steered = updateBehavior(state, world, time, events);
-  const path = moveSoldiers(state, world, time, events);
-  monitorEngagementAreas(state, steered.length > 0 ? [...steered, ...path] : path, time, events);
-  resolveCombat(state, world, time, events);
-  // Force-on-force experiments (docs/behavior-lab/force-on-force): only with a setup in the world.
+  //    `moveSoldiers` moves those following individual orders. Force on
+  //    force (docs/behavior-lab/force-on-force) runs only with a setup in the
+  //    world: a battle's detection, fire and outcomes.
+  updateBehavior(state, world, time, events);
+  moveSoldiers(state, world, time, events);
   updateForceOnForce(state, world, time, events);
 
   // 3. Advance the clock.

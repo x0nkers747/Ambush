@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createExercise, scenarioForTerrain } from '#exercise';
+import {
+  addOrder,
+  addSquad,
+  battleSpecOf,
+  createBattle,
+  newBattleScenario,
+} from '#exercise/battle';
 import {
   battlefieldRequest,
   buildBattlefield,
@@ -12,8 +18,8 @@ import { heightAt, lineOfSight, planPath, pointProblem } from '#sim';
 import { GRAFENWOEHR_OSM as grafenwoehr, QUANTICO_OSM as quantico } from '#geo/fixtures';
 
 // End to end without the network (docs/adr/0014): recorded OpenStreetMap data
-// for two real places, synthetic elevation tiles, a battlefield package, the
-// minimal scenario and an exercise that runs to the ready state.
+// for two real places, synthetic elevation tiles, a battlefield package and a
+// battle that is fought on it.
 
 /** Gently rolling synthetic elevation: real tiles are checked in the browser. */
 function tilesFor(
@@ -51,32 +57,39 @@ describe.each([
     expect(parseBattlefieldPackage(JSON.parse(JSON.stringify(pkg)))).toEqual(pkg);
   });
 
-  it('places the squad off buildings and water, and plays to the ready state', () => {
-    const scenario = scenarioForTerrain(pkg.terrain, `battlefield-${pkg.id}`);
-    for (const s of scenario.soldiers) expect(pointProblem(pkg.terrain, s.position)).toBeNull();
-    const exercise = createExercise({ config: { tickRateHz: 30, seed: 1 }, scenario });
-    // Send three Marines 150 m in different directions where they can stand.
-    const soldiers = exercise.simulation.state.soldiers.slice(0, 3);
-    const { east, north } = scenario.orp.centre;
-    soldiers.forEach((s, k) => {
-      for (let r = 150; r < 450; r += 10) {
-        const a = (k * 2 * Math.PI) / 3;
-        const p = { x: east + r * Math.sin(a), y: north + r * Math.cos(a) };
-        if (Math.abs(p.x) > 490 || Math.abs(p.y) > 490 || pointProblem(pkg.terrain, p)) continue;
-        try {
-          exercise.setDestination(s.id, p);
-          return;
-        } catch {
-          // Unreachable from here: try further out.
+  it('takes a battle: squads placed clear of buildings and water, ordered and fought', () => {
+    let d = newBattleScenario(pkg.terrain, pkg.id);
+    const place = (side: 'BLUEFOR' | 'OPFOR', at: { x: number; y: number }) => {
+      // Near `at`, the first spot the squad can be placed (its soldiers moved clear).
+      for (let r = 0; r < 300; r += 10) {
+        for (let k = 0; k < 12; k += 1) {
+          const a = (k * Math.PI) / 6;
+          const p = { x: at.x + r * Math.sin(a), y: at.y + r * Math.cos(a) };
+          const edit = addSquad(pkg.terrain, d, side, 'squad', p);
+          if (edit.ok) {
+            d = edit.definition;
+            return p;
+          }
         }
       }
-    });
-    expect(exercise.execute().ok).toBe(true);
-    for (let i = 0; i < 4000 && exercise.phase === 'bluforOccupation'; i += 1)
-      exercise.advance(1, 16);
-    expect(exercise.phase).toBe('bluforReady');
-    // Terrain analysis works on it as on the demo.
-    const a = exercise.simulation.state.soldiers[0]?.position;
+      throw new Error(`no ground for a ${side} squad near (${String(at.x)}, ${String(at.y)})`);
+    };
+    place('BLUEFOR', { x: 0, y: -250 });
+    const enemy = place('OPFOR', { x: 0, y: 250 });
+    const order = addOrder(pkg.terrain, d, 'B1', 'attack', enemy);
+    if (!order.ok) throw new Error(order.problem);
+    d = order.definition;
+    const battle = createBattle(battleSpecOf(d, 30), pkg.terrain);
+    for (const s of battle.sim.state.soldiers)
+      expect(pointProblem(pkg.terrain, s.position)).toBeNull();
+    while (battle.sim.timeSeconds < 120) battle.step();
+    // Moving, on the ground, as the simulation has them.
+    const b1 = battle.sim.state.soldiers.filter((s) => s.id.startsWith('B1-'));
+    expect(b1).toHaveLength(13);
+    for (const s of b1)
+      expect(Number.isFinite(s.position.x + s.position.y + s.position.z)).toBe(true);
+    // Terrain analysis works on it as on synthetic ground.
+    const a = b1[0]?.position;
     if (!a) throw new Error('no soldier');
     expect(Number.isFinite(heightAt(pkg.terrain, a.x, a.y))).toBe(true);
     expect(typeof lineOfSight(pkg.terrain, a, { x: 0, y: 400 }).clear).toBe('boolean');

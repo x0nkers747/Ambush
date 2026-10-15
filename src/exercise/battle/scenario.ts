@@ -7,6 +7,7 @@ import {
   pointProblem,
   terrainModelId,
   type OrderKind,
+  type PointProblem,
   type Side,
   type TerrainDataset,
   type Vec2,
@@ -16,13 +17,6 @@ import {
   SQUAD_ORGANIZATIONS,
   type SquadOrganization,
 } from '../forces/forces';
-import { describePathProblem } from '../routes';
-import {
-  parseScenarioDefinition,
-  SCENARIO_SCHEMA,
-  type ScenarioDefinition,
-} from '../scenario-definition';
-import type { MapPoint } from '../deployment';
 import {
   battleScenario,
   CLEAR_START_SEARCH_M,
@@ -50,7 +44,49 @@ import {
 // scenario from being played; edits never refuse what only that would
 // report, so work in progress can be saved.
 
+/** The schema of stored scenarios (version 1: the retired ambush exercise's; 2: battles). */
+export const SCENARIO_SCHEMA = 'ambush.scenario';
 export const BATTLE_SCHEMA_VERSION = 2;
+
+/** A point on a battlefield, in its local metres east and north. */
+export interface MapPoint {
+  readonly east: number;
+  readonly north: number;
+}
+
+/**
+ * A version 1 scenario, as the retired ambush exercise stored it: the
+ * squad's ORP (or none) and the OPFOR patrol's route, whose first point is
+ * where it starts. Only read, to be migrated (`migrateAmbushScenario`).
+ */
+export interface AmbushScenarioV1 {
+  readonly schema: typeof SCENARIO_SCHEMA;
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly battlefieldId: string;
+  readonly name: string;
+  readonly orp: MapPoint | null;
+  readonly opfor: { readonly force: 'patrol-3'; readonly route: readonly MapPoint[] };
+  readonly terrainModel?: string;
+}
+
+/** What makes a point unusable, in words ("in water (lake-1); soldiers cannot enter water"). */
+export function describePathProblem(
+  problem: PointProblem | { readonly kind: 'unreachable' },
+): string {
+  switch (problem.kind) {
+    case 'offTerrain':
+      return 'off the map';
+    case 'insideBuilding':
+      return `inside building ${problem.buildingId}; soldiers cannot enter buildings`;
+    case 'tooCloseToBuilding':
+      return `against the wall of building ${problem.buildingId}; keep a little clear of it`;
+    case 'inWater':
+      return `in water (${problem.waterId}); soldiers cannot enter water`;
+    case 'unreachable':
+      return "cannot be reached from the soldier's position";
+  }
+}
 
 /** An order of a plan, as the scenario holds it. */
 export interface PlannedOrder {
@@ -146,7 +182,7 @@ const degreesToward = (from: MapPoint, to: MapPoint): number => {
  * element where its route starts, with a Move order to each later point of
  * the route. Both face the other side's start.
  */
-export function migrateAmbushScenario(v1: ScenarioDefinition): BattleScenarioDefinition {
+export function migrateAmbushScenario(v1: AmbushScenarioV1): BattleScenarioDefinition {
   const squads: ScenarioSquad[] = [];
   const [start, ...route] = v1.opfor.route;
   if (v1.orp) {
@@ -184,6 +220,45 @@ export function migrateAmbushScenario(v1: ScenarioDefinition): BattleScenarioDef
   };
 }
 
+/** A stored version 1 scenario, checked (see `AmbushScenarioV1`). */
+function readAmbushScenarioV1(
+  d: Record<string, unknown>,
+  fail: (m: string) => never,
+): AmbushScenarioV1 {
+  for (const key of ['id', 'battlefieldId', 'name']) {
+    if (typeof d[key] !== 'string' || d[key] === '') fail(`"${key}" is missing`);
+  }
+  const point = (v: unknown, what: string): MapPoint => {
+    const p = v as { east?: unknown; north?: unknown } | null;
+    if (
+      !p ||
+      typeof p.east !== 'number' ||
+      typeof p.north !== 'number' ||
+      !Number.isFinite(p.east) ||
+      !Number.isFinite(p.north)
+    ) {
+      return fail(`${what} is not a map point`);
+    }
+    return { east: p.east, north: p.north };
+  };
+  const orp = d['orp'] === null ? null : point(d['orp'], 'the ORP');
+  const opfor = d['opfor'] as { force?: unknown; route?: unknown } | undefined;
+  if (!opfor || typeof opfor !== 'object') return fail('"opfor" is missing');
+  if (opfor.force !== 'patrol-3') fail('the OPFOR force is unknown');
+  if (!Array.isArray(opfor.route)) return fail('the OPFOR route is missing');
+  const route = (opfor.route as unknown[]).map((p, i) => point(p, `route point ${String(i + 1)}`));
+  return {
+    schema: SCENARIO_SCHEMA,
+    schemaVersion: 1,
+    id: d['id'] as string,
+    battlefieldId: d['battlefieldId'] as string,
+    name: d['name'] as string,
+    orp,
+    opfor: { force: 'patrol-3', route },
+    ...(typeof d['terrainModel'] === 'string' ? { terrainModel: d['terrainModel'] } : {}),
+  };
+}
+
 export class BattleScenarioError extends Error {
   override name = 'BattleScenarioError';
 }
@@ -201,17 +276,7 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
     return fail('the data is not an object');
   const d = data as Record<string, unknown>;
   if (d['schema'] !== SCENARIO_SCHEMA) fail(`the schema is not "${SCENARIO_SCHEMA}"`);
-  if (d['schemaVersion'] === 1) {
-    try {
-      return migrateAmbushScenario(parseScenarioDefinition(data));
-    } catch (error) {
-      return fail(
-        error instanceof Error
-          ? error.message.replace(/^Scenario not loaded: |\.$/g, '')
-          : String(error),
-      );
-    }
-  }
+  if (d['schemaVersion'] === 1) return migrateAmbushScenario(readAmbushScenarioV1(d, fail));
   if (d['schemaVersion'] !== BATTLE_SCHEMA_VERSION) {
     fail(`schema version ${JSON.stringify(d['schemaVersion'])} is not supported`);
   }

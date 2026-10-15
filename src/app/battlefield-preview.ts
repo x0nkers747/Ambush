@@ -1,30 +1,25 @@
-import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
-import { createSession, setTool, type Session } from '#session';
-import { DEFAULT_TICK_RATE_HZ } from '#sim';
+import type { TerrainDataset } from '#sim';
 import { createTacticalMap, type MapEditor, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d } from '#view3d';
 import { saveScreenshot, screenshotName } from './screenshot';
 
 // The terrain-selection preview (docs/adr/0025): the selected battlefield on
-// the tactical map, with its scenario as saved (ORP, OPFOR and route). It is
-// for looking only: the map pans and zooms, and clicks select but never edit
-// (the `view` tool). Opening the battlefield hands this map to the
-// workspace, and leaving the workspace hands it back, so the map is never
-// rebuilt between the two.
+// the tactical map, with its battle's squads and plans as saved drawn over
+// it. It is for looking only: the map pans and zooms, and clicks do nothing.
+// Opening the battlefield hands this map to the battle's page, and leaving
+// that page hands it back, so the map is never rebuilt between the two.
 //
 // The 3D button shows the same battlefield in the 3D view (docs/adr/0029),
 // loaded on first use. It is the preview's own: it follows the selected
 // battlefield, and is disposed when the preview is hidden or its map is
-// handed to the workspace, which has its own 3D view.
+// handed to the battle's page, which has its own 3D view.
 
 export interface PreviewData {
   /** The battlefield's name and centre (for screenshots' names and notes). */
   readonly name: string;
   readonly centre: { readonly lat: number; readonly lon: number };
-  /** The battlefield's scenario as it would be played (its terrain is the battlefield's). */
-  readonly scenario: AmbushScenario;
-  /** Whether its ORP is placed; until then the squad and the ORP are not shown. */
-  readonly squadPlaced: boolean;
+  /** The battlefield's terrain. */
+  readonly terrain: TerrainDataset;
   /** Source credits shown on the map. */
   readonly attribution: readonly string[];
   /** A short line about the scenario, e.g. "No OPFOR yet". */
@@ -39,11 +34,11 @@ export interface BattlefieldPreview {
    * loading; a newer `show`, `adopt` or `hide` wins over a slower load.
    */
   show(id: string, load: () => Promise<PreviewData>): void;
-  /** Shows battlefield `id` on a map handed back by its workspace, keeping the map's view. */
+  /** Shows battlefield `id` on a map handed back by its battle's page, keeping the map's view. */
   adopt(id: string, map: TacticalMap, data: PreviewData): void;
   hide(): void;
   /**
-   * Gives the map away (to the workspace) without disposing it, or `null`
+   * Gives the map away (to the battle's page) without disposing it, or `null`
    * when no map is shown yet. The preview is empty afterwards.
    */
   release(): TacticalMap | null;
@@ -68,15 +63,13 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     return e;
   };
   let map: TacticalMap | null = null;
-  let session: Session = setTool(createSession(), 'view');
   /** The battlefield shown or loading, or `null`. */
   let shownId: string | null = null;
   /** Each show, adopt or hide; a load that finishes after a newer one is dropped. */
   let generation = 0;
   let frame: number | null = null;
-  /** The shown exercise (view only), for the 3D view. */
-  let exercise: Exercise | null = null;
-  let hideTrainee = true;
+  /** The shown battlefield's terrain, for the 3D view. */
+  let terrain: TerrainDataset | null = null;
   let viewMode: '2d' | '3d' = '2d';
   let view3d: BattlefieldView3d | null = null;
   let loading3d = false;
@@ -102,7 +95,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   const stopMap = () => {
     stopLoop();
     stop3d();
-    exercise = null;
+    terrain = null;
     if (!map) return;
     map.dispose();
     map = null;
@@ -156,7 +149,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     fit.title = viewMode === '3d' ? 'Back to the overhead view' : 'Fit the whole map';
     fit.textContent = viewMode === '3d' ? 'Reset view' : 'Fit map';
   };
-  /** Places a 3D view over the 2D map, with the map's overlays (ORP, OPFOR, route) drawn on it. */
+  /** Places a 3D view over the 2D map, which takes its pointer input. */
   const place3d = (v: BattlefieldView3d) => {
     el('preview-map').append(v.canvas, v.overlay);
     if (!map) return;
@@ -188,7 +181,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   };
   /** Opens the 3D view for the shown battlefield, loading the 3D code on first use. */
   const open3d = () => {
-    if (view3d || loading3d || !exercise) return;
+    if (view3d || loading3d || !terrain) return;
     loading3d = true;
     const loading = 'Loading the 3D view…';
     status(loading);
@@ -197,15 +190,8 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
         loading3d = false;
         if (el('preview-status').textContent === loading) status(null);
         // Whatever is shown now (the battlefield may have changed while loading), if still wanted.
-        if (!exercise || viewMode !== '3d' || view3d) return;
-        view3d = createBattlefieldView3d({
-          exercise: () => {
-            if (!exercise) throw new Error('No battlefield shown');
-            return exercise;
-          },
-          session: () => session,
-          hideTrainee: () => hideTrainee,
-        });
+        if (!terrain || viewMode !== '3d' || view3d) return;
+        view3d = createBattlefieldView3d({ terrain });
         place3d(view3d);
         showViewMode();
         // The first frame lays out the camera; then look where the 2D map did.
@@ -219,7 +205,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
         if (el('preview-status').textContent === loading) status(null);
         viewMode = '2d';
         showViewMode();
-        if (exercise)
+        if (terrain)
           status(
             `The 3D view could not be opened: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -280,28 +266,17 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     stopLoop();
     // The 3D view follows the map, so a new one is made for the new map and battlefield.
     stop3d();
-    session = setTool(createSession(), 'view');
-    exercise = createExercise({
-      config: { tickRateHz: DEFAULT_TICK_RATE_HZ, seed: 1 },
-      scenario: data.scenario,
-    });
-    hideTrainee = !data.squadPlaced;
-    const binding = {
-      exercise,
-      getSession: () => session,
-      setSession: (next: Session) => {
-        session = next;
-      },
-      hideTrainee: () => !data.squadPlaced,
-      ...(data.overlay ? { editor: data.overlay } : {}),
-    };
+    terrain = data.terrain;
+    if (existing && existing.terrain !== data.terrain)
+      throw new Error('The map shows one terrain: a handed-back map must show this battlefield.');
+    const binding = data.overlay ? { editor: data.overlay } : {};
     const canvas = existing?.canvas ?? document.createElement('canvas');
     canvas.id = '';
     canvas.className = 'preview-canvas';
     canvas.setAttribute('aria-label', 'Battlefield preview');
     el('preview-map').replaceChildren(canvas);
     if (existing) existing.attach(binding);
-    map = existing ?? createTacticalMap({ canvas, ...binding });
+    map = existing ?? createTacticalMap({ canvas, terrain: data.terrain, ...binding });
     const credits = el('preview-attribution');
     credits.hidden = data.attribution.length === 0;
     credits.textContent = data.attribution
@@ -354,7 +329,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       shownId = null;
       stopLoop();
       stop3d();
-      exercise = null;
+      terrain = null;
       const given = map;
       map = null;
       return given;

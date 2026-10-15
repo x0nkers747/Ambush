@@ -104,7 +104,6 @@ export function createFrameLog(tickRateHz: number, soldierIds: readonly SoldierI
       const c = (k * n + i) * CODES_PER_SOLDIER;
       out.posture = POSTURES[b.codes[c] ?? 0] ?? 'standing';
       out.status = STATUSES[b.codes[c + 1] ?? 0] ?? 'active';
-      out.behavior = null;
       return out;
     },
   };

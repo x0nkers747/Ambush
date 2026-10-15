@@ -16,8 +16,6 @@ import {
   WebGLRenderer,
 } from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import type { Exercise } from '#exercise';
-import type { Session } from '#session';
 import { groundFieldInput, isOnTerrain, surfaceHeightAt, type TerrainDataset } from '#sim';
 import {
   compileField,
@@ -46,7 +44,7 @@ import {
   type MapPoint,
   type ScreenPoint,
 } from './ground-projection';
-import { emptyMotionSample } from '#exercise';
+import { createMotionRecorder, emptyMotionSample } from '#exercise';
 import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
 import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
@@ -61,13 +59,9 @@ import {
 import { installShadowEdgeFade } from './shadow-fade';
 import { apronElevation, surroundings } from './surroundings';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
-import {
-  createTerrainRenderer,
-  type GroundOverlay,
-  type TerrainRenderer,
-} from './terrain-renderer';
+import { createTerrainRenderer, type TerrainRenderer } from './terrain-renderer';
 import { createTilePool, type TilePool } from './tile-pool';
-import { destinationMarkers, unitMarkers, type UnitMarker } from './unit-markers';
+import type { UnitMarker } from './unit-markers';
 import type { VegetationLayer } from './vegetation-layer';
 import { createWaterSurface, type WaterSurface } from './water-surface';
 
@@ -78,25 +72,18 @@ import { createWaterSurface, type WaterSurface } from './water-surface';
 // on it; daylight, shadows, sky and fog, the tactical camera, and the
 // soldiers. The ground appears once the tile workers have compiled the field;
 // buildings and vegetation are generated in a worker and appear when ready.
-// Like the 2D map it renders whatever exercise it is given (live, the scenario
-// preview, or an After Action Review frame) and owns no game state: it reads,
-// never writes.
+// It shows the terrain it is given and the soldiers its owner gives it
+// (`figures`: a battle's, live or replayed), and owns no game state: it
+// reads, never writes.
+
+/** The clock of no soldiers (an empty motion log), for a view given none. */
+const NO_SOLDIERS: AnimationClock = { log: createMotionRecorder(30), combatLog: [], seconds: 0 };
 
 export interface BattlefieldView3dOptions {
-  /** The exercise to show now: the same one the 2D map shows. */
-  readonly exercise: () => Exercise;
-  readonly session: () => Session;
-  /** Whether the trainee's squad is hidden (no ORP yet), as on the 2D map. */
-  readonly hideTrainee: () => boolean;
+  /** The battlefield's terrain: the same the 2D map shows. */
+  readonly terrain: TerrainDataset;
   /** Rendering quality; by default chosen from the GPU. */
   readonly quality?: QualityLevel | 'auto';
-  /**
-   * What the soldiers are posed from (docs/character-animation.md): by
-   * default the shown exercise's motion log, combat log and render time
-   * (`Exercise.renderSeconds`). The After Action Review gives its replay time
-   * and the whole logs.
-   */
-  readonly animation?: () => AnimationClock | null;
   /**
    * Animated soldiers (default), or the simple markers alone (`false`; also
    * `?characters=off` in the page's address). Until the soldier models have
@@ -106,8 +93,8 @@ export interface BattlefieldView3dOptions {
   /** Where the soldier models are (the folder holding `rocketbox/` and `weapons/`). */
   readonly characterAssets?: string;
   /**
-   * Soldiers to show instead of the exercise's (a battle,
-   * docs/constructive-simulation/03), or `null` for the exercise's.
+   * The soldiers to show now (a battle's, docs/constructive-simulation/03),
+   * and what poses them (docs/character-animation.md); `null`: none.
    */
   readonly figures?: () => ViewFigures | null;
 }
@@ -141,7 +128,7 @@ export interface BattlefieldView3d {
   readonly canvas: HTMLCanvasElement;
   /** A transparent canvas for 2D overlays over the view, the same size; the caller places it above `canvas`. */
   readonly overlay: HTMLCanvasElement;
-  /** Draws a frame from the current exercise. Call once per animation frame while shown. */
+  /** Draws a frame. Call once per animation frame while shown. */
   render(): void;
   /** The ground as a map projection, as the camera stands now (`GroundProjection`). */
   projection(): GroundProjection;
@@ -149,8 +136,6 @@ export interface BattlefieldView3d {
   setPointerHandler(handler: PointerHandler | null): void;
   /** Draws the 2D overlay after each frame (on `overlay`, cleared first, in CSS pixels). */
   setOverlayPainter(paint: ((ctx: CanvasRenderingContext2D) => void) | null): void;
-  /** Paints a visibility overlay on the ground, or none (`GroundOverlay`). */
-  setGroundOverlay(overlay: GroundOverlay | null): void;
   /** The map point the camera looks at, and how far it is from it (metres), or null before the first frame. */
   focus(): { readonly point: MapPoint; readonly distance: number } | null;
   /** Looks at a map point (keeping the angle), from `distance` metres if given. */
@@ -259,7 +244,6 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   overlay.setAttribute('aria-hidden', 'true');
   const overlayContext = overlay.getContext('2d');
   let paintOverlay: ((ctx: CanvasRenderingContext2D) => void) | null = null;
-  let groundOverlay: GroundOverlay | null = null;
   let pointerHandler: PointerHandler | null = null;
   let pointerGround: { x: number; y: number; z: number } | null = null;
   // WebGLRenderer is WebGL 2 only in current Three.js.
@@ -723,9 +707,6 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     setOverlayPainter(paint) {
       paintOverlay = paint;
     },
-    setGroundOverlay(next) {
-      groundOverlay = next;
-    },
     focus() {
       if (!current) return null;
       const { target, position } = current.camera.pose();
@@ -746,8 +727,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     render() {
       if (disposed) return;
       resize();
-      const exercise = o.exercise();
-      const entry = terrainEntry(exercise.simulation.world.terrain);
+      const terrain = o.terrain;
+      const entry = terrainEntry(terrain);
       const step = revealEntry === entry ? reveal.shift() : undefined;
       step?.();
       if (reveal.length === 0) pendingLayers = [];
@@ -765,13 +746,11 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       }
       entry.vegetation?.update(eye);
       followWithShadows(entry);
-      const session = o.session();
-      const hide = o.hideTrainee();
       const figures = o.figures?.() ?? null;
-      const units = figures?.units ?? unitMarkers(exercise, session, hide);
-      const destinations = figures ? [] : destinationMarkers(exercise, session, hide);
+      const units = figures?.units ?? [];
+      const surfaceAt = (x: number, y: number) =>
+        isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN;
       if (characters?.ready && bench) {
-        const terrain = exercise.simulation.world.terrain;
         const { crowd, startMs } = bench;
         const seconds = ((performance.now() - startMs) / 1000) % crowd.seconds;
         const tick = Math.floor(seconds * crowd.log.tickRateHz);
@@ -782,35 +761,25 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
           }),
           clock: { log: crowd.log, combatLog: [], seconds },
           weapons: crowd.weapons,
-          surfaceAt: (x, y) =>
-            isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
+          surfaceAt,
           camera: eye,
           viewportHeightPx: height,
         });
-        markers.update([], [], eye, height);
+        markers.update([], eye, height);
       } else if (characters?.ready) {
-        const terrain = exercise.simulation.world.terrain;
-        const clock = figures?.clock ??
-          o.animation?.() ?? {
-            log: exercise.motionLog,
-            combatLog: exercise.combatLog,
-            seconds: exercise.renderSeconds,
-            ended: exercise.phase === 'engagementComplete',
-          };
+        // The soldiers are drawn as characters (none without figures).
+        const clock = figures?.clock ?? NO_SOLDIERS;
         characters.update({
           units,
           clock: { ...clock, seconds: clock.seconds + aftermath(clock, performance.now()) },
-          weapons: figures?.weapons ?? exercise.combatWeapons,
-          surfaceAt: (x, y) =>
-            isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
+          weapons: figures?.weapons ?? {},
+          surfaceAt,
           camera: eye,
           viewportHeightPx: height,
         });
-        // The soldiers are drawn as characters; markers keep the planned destinations.
-        markers.update([], destinations, eye, height);
-      } else markers.update(units, destinations, eye, height);
+        markers.update([], eye, height);
+      } else markers.update(units, eye, height);
       const drawing = performance.now();
-      entry.ground?.setOverlay(groundOverlay);
       renderer.render(scene, eye);
       if (overlayContext) {
         const ratio = overlay.width / Math.max(width, 1);
@@ -968,7 +937,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         bench = null;
         return;
       }
-      const terrain = o.exercise().simulation.world.terrain;
+      const terrain = o.terrain;
       bench = {
         crowd: benchCrowd(count, { x: target.x, y: -target.z }, (x, y) =>
           isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
@@ -1035,7 +1004,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
               (current.groundAt(pose.position.x, pose.position.z) ?? current.apronZ)
             : null,
         // Marker (or character) feet back in battlefield metres, beside the simulated positions.
-        soldiers: o.exercise().simulation.state.soldiers.map((s) => {
+        soldiers: (o.figures?.()?.units ?? []).map((s) => {
           const m = (characters?.ready ? characters.positions() : markers.positions()).get(s.id);
           return {
             id: s.id,

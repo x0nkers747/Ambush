@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_SCENARIO } from '#exercise';
+import { DEMO_TERRAIN } from '#exercise';
 import {
   battlefieldBuffers,
   createGenerator,
@@ -13,7 +13,7 @@ import {
 // Generating features and vegetation off the main thread (docs/adr/0031):
 // the latest job wins, cancelled jobs end, stale replies are ignored.
 
-const terrain = DEMO_SCENARIO.terrain;
+const terrain = DEMO_TERRAIN;
 
 /** A stand-in worker the test answers by hand. */
 class FakeWorker implements GenerationWorker {

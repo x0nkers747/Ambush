@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_SCENARIO } from '#exercise';
+import { DEMO_TERRAIN } from '#exercise';
 import {
   createSyntheticTerrain,
   flatElevation,
@@ -145,7 +145,7 @@ describe('contourLines', () => {
   });
 
   it('lies exactly on the simulated surface of the demo terrain', () => {
-    const { segments } = expectOnLevels(DEMO_SCENARIO.terrain, 2);
+    const { segments } = expectOnLevels(DEMO_TERRAIN, 2);
     expect(segments).toBeGreaterThan(1000);
   });
 
@@ -253,7 +253,7 @@ describe('spotHeights', () => {
   });
 
   it('is deterministic and puts every summit on a local maximum (the demo battlefield)', () => {
-    const terrain = DEMO_SCENARIO.terrain;
+    const terrain = DEMO_TERRAIN;
     const spots = spotHeights(terrain);
     expect(spots.length).toBeGreaterThan(0);
     expect(spotHeights(terrain)).toEqual(spots);

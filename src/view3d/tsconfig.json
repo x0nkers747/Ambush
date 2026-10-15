@@ -8,5 +8,5 @@
     "outDir": "../../.tsbuild/view3d"
   },
   "include": ["**/*.ts", "textures/**/*.json"],
-  "references": [{ "path": "../sim" }, { "path": "../exercise" }, { "path": "../session" }]
+  "references": [{ "path": "../sim" }, { "path": "../exercise" }]
 }

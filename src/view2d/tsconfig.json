@@ -8,5 +8,5 @@
     "outDir": "../../.tsbuild/view2d"
   },
   "include": ["**/*.ts"],
-  "references": [{ "path": "../sim" }, { "path": "../exercise" }, { "path": "../session" }]
+  "references": [{ "path": "../sim" }, { "path": "../exercise" }]
 }

@@ -8,7 +8,7 @@ import tseslint from 'typescript-eslint';
  * globals in the headless layers and imports of unreferenced layers; these
  * rules add what the compiler cannot see.
  */
-const LAYERS = ['sim', 'exercise', 'geo', 'acquire', 'session', 'view2d', 'view3d', 'app'];
+const LAYERS = ['sim', 'exercise', 'geo', 'acquire', 'view2d', 'view3d', 'app'];
 
 /** Relative imports that reach into another layer's folder instead of its `#alias`. */
 const CROSS_LAYER_RELATIVE_IMPORT = {
@@ -94,7 +94,7 @@ export default defineConfig(
     files: ['src/sim/**/*.ts'],
     rules: {
       'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['exercise', 'geo', 'acquire', 'session', 'view2d', 'view3d', 'app'],
+        forbiddenLayers: ['exercise', 'geo', 'acquire', 'view2d', 'view3d', 'app'],
         allowThree: false,
       }),
     },
@@ -103,7 +103,7 @@ export default defineConfig(
     files: ['src/exercise/**/*.ts'],
     rules: {
       'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['geo', 'acquire', 'session', 'view2d', 'view3d', 'app'],
+        forbiddenLayers: ['geo', 'acquire', 'view2d', 'view3d', 'app'],
         allowThree: false,
       }),
     },
@@ -112,7 +112,7 @@ export default defineConfig(
     files: ['src/geo/**/*.ts'],
     rules: {
       'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['exercise', 'acquire', 'session', 'view2d', 'view3d', 'app'],
+        forbiddenLayers: ['exercise', 'acquire', 'view2d', 'view3d', 'app'],
         allowThree: false,
       }),
     },
@@ -121,16 +121,7 @@ export default defineConfig(
     files: ['src/acquire/**/*.ts'],
     rules: {
       'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['exercise', 'session', 'view2d', 'view3d', 'app'],
-        allowThree: false,
-      }),
-    },
-  },
-  {
-    files: ['src/session/**/*.ts'],
-    rules: {
-      'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['geo', 'acquire', 'view2d', 'view3d', 'app'],
+        forbiddenLayers: ['exercise', 'view2d', 'view3d', 'app'],
         allowThree: false,
       }),
     },
@@ -163,7 +154,7 @@ export default defineConfig(
     files: ['tools/**/*.ts'],
     rules: {
       'no-restricted-imports': importRestrictions({
-        forbiddenLayers: ['acquire', 'session', 'view2d', 'view3d', 'app'],
+        forbiddenLayers: ['acquire', 'view2d', 'view3d', 'app'],
         allowThree: false,
       }),
     },

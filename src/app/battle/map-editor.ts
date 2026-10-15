@@ -1,6 +1,6 @@
 import { ORDER_LABELS, type ScenarioSquad } from '#exercise/battle';
 import type { OrderKind, Side, Vec2 } from '#sim';
-import { AFFILIATION_COLORS, type MapEditor } from '#view2d';
+import type { MapEditor } from '#view2d';
 import type { Planner } from './planner';
 
 // The battle planner on the map (docs/constructive-simulation/03): squads,
@@ -16,9 +16,10 @@ import type { Planner } from './planner';
 //   drag the knob        turn the selected squad (its facing at the start)
 //   right-click a waypoint  delete the order
 
+/** Friendly blue and hostile red (APP-6 affiliation colours, as the map has always drawn them). */
 export const SIDE_COLORS: Readonly<Record<Side, string>> = {
-  BLUEFOR: AFFILIATION_COLORS.friendly,
-  OPFOR: AFFILIATION_COLORS.enemy,
+  BLUEFOR: '#5ec8f7',
+  OPFOR: '#f25c5c',
 };
 const ISSUE_COLOR = '#e0a63a';
 export const OUTLINE = '#0b0d0f';

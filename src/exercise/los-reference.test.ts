@@ -17,7 +17,7 @@ import {
   type Vec2,
   type Vec3,
 } from '#sim';
-import { DEMO_SCENARIO } from './demo-scenario';
+import { DEMO_TERRAIN } from './demo-terrain';
 
 /** Deterministic uniform numbers in [0, 1) for test inputs (a 32-bit LCG). */
 function lcg(seed: number) {
@@ -32,7 +32,7 @@ function lcg(seed: number) {
 // original Phase 3.6 implementation, kept below verbatim as the reference.
 
 describe('lineOfSight matches the reference implementation exactly', () => {
-  const terrain = DEMO_SCENARIO.terrain;
+  const terrain = DEMO_TERRAIN;
   const { originX, originY, cellSize, columns, rows } = terrain.heightfield;
   const random = lcg(2026);
   const point = (): Vec2 => ({

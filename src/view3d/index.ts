@@ -11,7 +11,6 @@ export {
 } from './view';
 export type { UnitMarker } from './unit-markers';
 export type { AnimationClock } from './characters/layer';
-export type { GroundOverlay } from './terrain-renderer';
 export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projection';
 export type { QualityLevel } from './quality';
 export { terrainGround, type GroundAt } from './camera-math';

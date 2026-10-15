@@ -2,7 +2,7 @@ import type * as THREE from 'three';
 import { makeRifle, makeSawPlaceholder, type WeaponInstance, type WeaponKind } from './weapons';
 
 // Which weapon model a soldier carries (docs/character-animation.md), from the
-// weapon the simulation has it fire (`Exercise.combatWeapons`, the primary
+// weapon the simulation has it fire (`ViewFigures.weapons`, the primary
 // weapon of its loadout). Display only: the simulation's weapon profiles
 // decide every shot.
 

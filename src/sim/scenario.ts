@@ -1,5 +1,4 @@
 import { surfaceHeightAt } from './bridge-navigation';
-import { validateCombatConfig, weaponCombatProfile } from './combat-config';
 import { azimuthFromDegrees, type Vec2 } from './geometry';
 import { pointProblem } from './navigation';
 import { clonePlainData } from './plain-data';
@@ -19,12 +18,7 @@ import { isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
 import { validateBehaviorParams, type BehaviorParams } from './behavior/params';
 import { validateFofSetup } from './fof/setup';
 import type { FofSetup } from './fof/types';
-import {
-  validateMovementParams,
-  type CombatSetup,
-  type MovementParams,
-  type SimWorld,
-} from './world';
+import { validateMovementParams, type MovementParams, type SimWorld } from './world';
 
 // Scenario: the human-authored, plain-data description of a simulation's
 // starting point. Ids are plain strings and angles are in degrees
@@ -54,8 +48,6 @@ export interface Scenario {
   readonly movement: MovementParams;
   readonly units: readonly ScenarioUnit[];
   readonly soldiers: readonly ScenarioSoldier[];
-  /** The combat model, for scenarios that can fight (docs/adr/0019). */
-  readonly combat?: CombatSetup;
   /** Unit-movement tuning (docs/behavior-lab/03); absent: the defaults. */
   readonly behavior?: BehaviorParams;
   /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
@@ -126,20 +118,6 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     }
   }
 
-  if (scenario.combat) {
-    try {
-      validateCombatConfig(scenario.combat.config);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-    for (const [id, ref] of Object.entries(scenario.combat.weapons)) {
-      if (!soldiersById.has(id)) fail(`combat weapon assigned to unknown soldier "${id}"`);
-      if (ref !== null && !weaponCombatProfile(scenario.combat.config, ref)) {
-        fail(`soldier "${id}" fires "${ref}", which has no combat profile`);
-      }
-    }
-  }
-
   if (scenario.fof) {
     try {
       validateFofSetup(scenario.fof, scenario.units, scenario.soldiers);
@@ -180,7 +158,7 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     orders: null,
   }));
 
-  return { tick: 0, rng: createRngState(seed), units, soldiers, engagementAreas: [] };
+  return { tick: 0, rng: createRngState(seed), units, soldiers };
 }
 
 /**
@@ -195,13 +173,11 @@ export function createWorld(scenario: Scenario): SimWorld {
     terrain: shareTerrain(scenario.terrain),
     movement: deepFreeze(clonePlainData(scenario.movement)),
   };
-  // Without combat the world has no `combat` property at all, so its
-  // fingerprint is what it was before combat existed.
-  // Likewise unit-movement parameters (docs/behavior-lab/03): absent unless
-  // the scenario overrides the defaults.
+  // Unit-movement parameters (docs/behavior-lab/03) are absent unless the
+  // scenario overrides the defaults, and force on force unless it has a setup,
+  // so a world without them fingerprints as before they existed.
   return Object.freeze({
     ...world,
-    ...(scenario.combat ? { combat: deepFreeze(clonePlainData(scenario.combat)) } : {}),
     ...(scenario.behavior ? { behavior: deepFreeze(clonePlainData(scenario.behavior)) } : {}),
     ...(scenario.fof ? { fof: deepFreeze(clonePlainData(scenario.fof)) } : {}),
   });

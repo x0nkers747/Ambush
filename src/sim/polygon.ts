@@ -17,6 +17,21 @@ export function signedArea2(vertices: readonly Vec2[]): number {
   return sum;
 }
 
+/** The centroid of a simple polygon (either winding), or `undefined` when its area is zero. */
+export function polygonCentroid(vertices: readonly Vec2[]): Vec2 | undefined {
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  vertices.forEach((a, i) => {
+    const b = vertices[(i + 1) % vertices.length] ?? a;
+    const cross = a.x * b.y - b.x * a.y;
+    area += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  });
+  return area === 0 ? undefined : { x: cx / (3 * area), y: cy / (3 * area) };
+}
+
 /** Area in square metres (either winding). */
 export function polygonArea(vertices: readonly Vec2[]): number {
   return Math.abs(signedArea2(vertices)) / 2;

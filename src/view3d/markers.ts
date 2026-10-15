@@ -9,7 +9,7 @@ import {
   type Camera,
 } from 'three';
 import { toThree, yawOf } from './axes';
-import type { DestinationMarker, UnitMarker } from './unit-markers';
+import type { UnitMarker } from './unit-markers';
 
 // Soldier markers (docs/adr/0029): simple figures, blue for BLUEFOR and red for
 // OPFOR, with a nose pointing the way the soldier faces. A marker's origin is
@@ -30,7 +30,7 @@ const COLORS = {
   selected: 0xf2c230,
 } as const;
 
-const material = (color: number, opacity = 1) =>
+const material = (color: number) =>
   new MeshStandardMaterial({
     color,
     emissive: color,
@@ -39,9 +39,9 @@ const material = (color: number, opacity = 1) =>
     metalness: 0,
     // Markers stay readable across the battlefield: no fog.
     fog: false,
-    transparent: opacity < 1,
-    opacity,
-    depthWrite: opacity >= 1,
+    transparent: false,
+    opacity: 1,
+    depthWrite: true,
   });
 
 /** The see-through silhouette: drawn only where something nearer hides the marker. */
@@ -61,10 +61,9 @@ const ghost = (color: number) =>
 
 export interface MarkerLayer {
   readonly group: Group;
-  /** Matches the markers to the soldiers and destinations shown now. */
+  /** Matches the markers to the soldiers shown now. */
   update(
     units: readonly UnitMarker[],
-    destinations: readonly DestinationMarker[],
     camera: Camera & { fov: number },
     viewportHeightPx: number,
   ): void;
@@ -77,18 +76,15 @@ export function createMarkerLayer(): MarkerLayer {
   const group = new Group();
   group.name = 'units';
   // Body, head and facing nose; the nose points along −Z, the marker's
-  // forward (north at yaw 0, see axes.ts). A destination is a downward pin.
+  // forward (north at yaw 0, see axes.ts).
   const body = new CylinderGeometry(0.32, 0.38, 1.35, 12).translate(0, 0.675, 0);
   const head = new SphereGeometry(0.3, 16, 12).translate(0, 1.6, 0);
   const nose = new ConeGeometry(0.22, 0.7, 10).rotateX(-Math.PI / 2).translate(0, 1.15, -0.55);
-  const pin = new ConeGeometry(0.35, 0.9, 12).rotateX(Math.PI).translate(0, 0.45, 0);
   const materials = {
     friendly: material(COLORS.friendly),
     enemy: material(COLORS.enemy),
     down: material(COLORS.down),
     selected: material(COLORS.selected),
-    destinationFriendly: material(COLORS.friendly, 0.45),
-    destinationSelected: material(COLORS.selected, 0.6),
   };
   const ghosts = {
     friendly: ghost(COLORS.friendly),
@@ -97,7 +93,6 @@ export function createMarkerLayer(): MarkerLayer {
     selected: ghost(COLORS.selected),
   };
   const soldiers = new Map<string, { root: Group; parts: Mesh[]; hidden: Mesh[] }>();
-  const pins = new Map<string, Mesh>();
 
   /** Scale so the marker is MARKER_PX tall on screen, but never smaller than life size. */
   const scaleAt = (
@@ -116,7 +111,7 @@ export function createMarkerLayer(): MarkerLayer {
 
   return {
     group,
-    update(units, destinations, camera, viewportHeightPx) {
+    update(units, camera, viewportHeightPx) {
       const seen = new Set<string>();
       for (const u of units) {
         seen.add(u.id);
@@ -171,27 +166,6 @@ export function createMarkerLayer(): MarkerLayer {
         group.remove(entry.root);
         soldiers.delete(id);
       }
-      const planned = new Set<string>();
-      for (const d of destinations) {
-        planned.add(d.id);
-        let mesh = pins.get(d.id);
-        if (!mesh) {
-          mesh = new Mesh(pin);
-          mesh.name = `destination ${d.id}`;
-          mesh.renderOrder = 1;
-          group.add(mesh);
-          pins.set(d.id, mesh);
-        }
-        mesh.material = d.selected ? materials.destinationSelected : materials.destinationFriendly;
-        const p = toThree(d.position.x, d.position.y, d.position.z);
-        mesh.position.set(p.x, p.y, p.z);
-        mesh.scale.setScalar(scaleAt(p.x, p.y, p.z, camera, viewportHeightPx) * 0.7);
-      }
-      for (const [id, mesh] of pins) {
-        if (planned.has(id)) continue;
-        group.remove(mesh);
-        pins.delete(id);
-      }
     },
     positions() {
       const out = new Map<string, { x: number; y: number; z: number; lying: boolean }>();
@@ -207,10 +181,9 @@ export function createMarkerLayer(): MarkerLayer {
     },
     dispose() {
       for (const m of [...Object.values(materials), ...Object.values(ghosts)]) m.dispose();
-      for (const g of [body, head, nose, pin]) g.dispose();
+      for (const g of [body, head, nose]) g.dispose();
       group.clear();
       soldiers.clear();
-      pins.clear();
     },
   };
 }

@@ -1,8 +1,8 @@
 import type { SimEvent } from './events';
-import { azimuthDelta, azimuthOf, turnToward, type Vec2 } from './geometry';
+import { azimuthDelta, azimuthOf, turnToward } from './geometry';
 import type { PathPoint } from './bridge-navigation';
 import { surfaceHeightAt } from './bridge-navigation';
-import type { ActiveOrders, SimState, Soldier, SoldierId } from './state';
+import type { ActiveOrders, SimState, Soldier } from './state';
 import type { SimWorld } from './world';
 
 // Movement system (docs/adr/0008, docs/adr/0011). Soldiers travel at constant
@@ -15,7 +15,7 @@ import type { SimWorld } from './world';
 //
 // Navigation (docs/adr/0011, docs/adr/0043) plans how each leg is travelled:
 // the turn points stored alongside the progress in `ActiveOrders`; the
-// trainee's `Orders` stay as given.
+// `Orders` stay as given.
 //
 // Height: a soldier stands on the surface (`surfaceHeightAt`: the ground, or
 // a bridge's deck over water). Between two route points that both carry a
@@ -37,43 +37,21 @@ export interface TickTime {
   readonly dtSeconds: number;
 }
 
-/** A straight piece of a soldier's path during one tick, at constant speed. */
-export interface PathSegment {
-  readonly soldierId: SoldierId;
-  readonly from: Vec2;
-  readonly to: Vec2;
-  readonly startSeconds: number;
-  readonly endSeconds: number;
-}
-
-/**
- * Moves every soldier through the tick and returns the straight pieces they
- * travelled, in soldier order then time order, so later systems can find what
- * happened between the start and end of the tick.
- */
+/** Moves every soldier following individual orders through the tick. */
 export function moveSoldiers(
   state: SimState,
   world: SimWorld,
   time: TickTime,
   events: SimEvent[],
-): PathSegment[] {
-  const path: PathSegment[] = [];
-  for (const soldier of state.soldiers) moveSoldier(soldier, world, time, events, path);
-  return path;
+): void {
+  for (const soldier of state.soldiers) moveSoldier(soldier, world, time, events);
 }
 
-function moveSoldier(
-  soldier: Soldier,
-  world: SimWorld,
-  time: TickTime,
-  events: SimEvent[],
-  path: PathSegment[],
-): void {
+function moveSoldier(soldier: Soldier, world: SimWorld, time: TickTime, events: SimEvent[]): void {
   const active = soldier.orders;
   if (active === null || active.behavior === 'inPosition') return;
 
-  const { maxTurnRate } = world.movement;
-  const speed = active.speed ?? world.movement.speed;
+  const { speed, maxTurnRate } = world.movement;
   const { waypoints, finalFacing } = active.orders;
   /** Seconds of this tick used so far. */
   let elapsed = 0;
@@ -84,7 +62,7 @@ function moveSoldier(
       active.behavior = 'facing';
       break;
     }
-    // Walk the leg's generated turn points first; only the waypoint itself is trainee intent.
+    // Walk the leg's generated turn points first; only the waypoint itself is the author's intent.
     const turn = active.legPaths[active.nextWaypointIndex]?.[active.nextTurnIndex];
     const target = turn ?? waypoint;
     const remaining = time.dtSeconds - elapsed;
@@ -98,8 +76,6 @@ function moveSoldier(
     if (distance > 0) {
       soldier.azimuth = turnToward(soldier.azimuth, azimuthOf(dx, dy), maxTurnRate * seconds);
     }
-    const from = { x: soldier.position.x, y: soldier.position.y };
-    const start = time.startSeconds + elapsed;
     const previous = previousPoint(active);
     if (!arrives) {
       const fraction = (speed * seconds) / distance;
@@ -111,14 +87,12 @@ function moveSoldier(
         previous,
         target,
       );
-      record(path, soldier, from, start, time.startSeconds + time.dtSeconds);
       return;
     }
 
     // Arrive exactly on the point and carry the rest of the tick forward.
     place(soldier, world, target.x, target.y, previous, target);
     elapsed += seconds;
-    record(path, soldier, from, start, time.startSeconds + elapsed);
     if (turn) {
       active.nextTurnIndex += 1;
       continue;
@@ -150,18 +124,6 @@ function moveSoldier(
     soldierId: soldier.id,
     atSeconds: time.startSeconds + elapsed + Math.min(turnSeconds, remaining),
   });
-}
-
-function record(
-  path: PathSegment[],
-  soldier: Soldier,
-  from: Vec2,
-  startSeconds: number,
-  endSeconds: number,
-): void {
-  const to = { x: soldier.position.x, y: soldier.position.y };
-  if (to.x === from.x && to.y === from.y) return;
-  path.push({ soldierId: soldier.id, from, to, startSeconds, endSeconds });
 }
 
 /** The route point the soldier is walking from, if it is one (not where the orders were given). */

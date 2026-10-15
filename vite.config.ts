@@ -96,7 +96,7 @@ export default defineConfig(({ command, isPreview }) => ({
   base: command === 'serve' && !isPreview ? '/' : productionBase(),
   plugins: [screenshotEndpoint(import.meta.dirname)],
   build: {
-    // milsymbol (APP-6 unit symbols, docs/adr/0012) is about 860 kB minified on its own.
+    // Three.js (the 3D view, loaded on first use) is about 790 kB minified on its own.
     chunkSizeWarningLimit: 1200,
   },
 }));
