@@ -84,7 +84,7 @@ export interface ExerciseStage {
   selectionHtml(editing: boolean): string;
   visibilityHtml(): string;
   /** The map banner for a stage, or `null`. */
-  bannerHtml(stage: 'bluefor' | 'opfor'): string | null;
+  bannerHtml(stage: 'bluefor' | 'combat'): string | null;
   /** Wires the selection panel's buttons (clear destination, default facing, …). */
   wireSelection(element: HTMLElement): void;
 }
@@ -417,7 +417,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
     )} · ${String(result.tickRateHz)} Hz</p>`;
   };
 
-  const bannerHtml = (stage: 'bluefor' | 'opfor'): string | null => {
+  const bannerHtml = (stage: 'bluefor' | 'combat'): string | null => {
     const e = ex();
     const trigger = e.trigger;
     const result = e.engagementResult;

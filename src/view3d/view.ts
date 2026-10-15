@@ -67,7 +67,7 @@ import {
   type TerrainRenderer,
 } from './terrain-renderer';
 import { createTilePool, type TilePool } from './tile-pool';
-import { destinationMarkers, unitMarkers } from './unit-markers';
+import { destinationMarkers, unitMarkers, type UnitMarker } from './unit-markers';
 import type { VegetationLayer } from './vegetation-layer';
 import { createWaterSurface, type WaterSurface } from './water-surface';
 
@@ -105,6 +105,19 @@ export interface BattlefieldView3dOptions {
   readonly characters?: boolean;
   /** Where the soldier models are (the folder holding `rocketbox/` and `weapons/`). */
   readonly characterAssets?: string;
+  /**
+   * Soldiers to show instead of the exercise's (a battle,
+   * docs/constructive-simulation/03), or `null` for the exercise's.
+   */
+  readonly figures?: () => ViewFigures | null;
+}
+
+/** Soldiers the view is given to show: where they are, what poses them, what they carry. */
+export interface ViewFigures {
+  readonly units: readonly UnitMarker[];
+  readonly clock: AnimationClock;
+  /** The weapon each soldier carries (display model), by soldier id. */
+  readonly weapons: Readonly<Record<string, string | null>>;
 }
 
 /**
@@ -754,8 +767,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       followWithShadows(entry);
       const session = o.session();
       const hide = o.hideTrainee();
-      const units = unitMarkers(exercise, session, hide);
-      const destinations = destinationMarkers(exercise, session, hide);
+      const figures = o.figures?.() ?? null;
+      const units = figures?.units ?? unitMarkers(exercise, session, hide);
+      const destinations = figures ? [] : destinationMarkers(exercise, session, hide);
       if (characters?.ready && bench) {
         const terrain = exercise.simulation.world.terrain;
         const { crowd, startMs } = bench;
@@ -776,16 +790,17 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         markers.update([], [], eye, height);
       } else if (characters?.ready) {
         const terrain = exercise.simulation.world.terrain;
-        const clock = o.animation?.() ?? {
-          log: exercise.motionLog,
-          combatLog: exercise.combatLog,
-          seconds: exercise.renderSeconds,
-          ended: exercise.phase === 'engagementComplete',
-        };
+        const clock = figures?.clock ??
+          o.animation?.() ?? {
+            log: exercise.motionLog,
+            combatLog: exercise.combatLog,
+            seconds: exercise.renderSeconds,
+            ended: exercise.phase === 'engagementComplete',
+          };
         characters.update({
           units,
           clock: { ...clock, seconds: clock.seconds + aftermath(clock, performance.now()) },
-          weapons: exercise.combatWeapons,
+          weapons: figures?.weapons ?? exercise.combatWeapons,
           surfaceAt: (x, y) =>
             isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN,
           camera: eye,

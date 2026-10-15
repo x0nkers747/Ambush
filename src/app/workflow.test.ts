@@ -27,20 +27,20 @@ describe('the workflow', () => {
   it('has exactly five stages, numbered and named in order', () => {
     expect(WORKFLOW_STAGES.map((s) => [stageNumber(s), STAGE_NAMES[s]])).toEqual([
       [1, 'Select Terrain'],
-      [2, 'Edit Scenario'],
+      [2, 'Scenario Setup'],
       [3, 'BLUEFOR Planning'],
-      [4, 'OPFOR & Combat'],
-      [5, 'After Action Review'],
+      [4, 'Combat'],
+      [5, 'After-Action Review'],
     ]);
     expect(previousStage('terrain')).toBeNull();
     expect(nextStage('aar')).toBeNull();
-    expect(previousStage('opfor')).toBe('bluefor');
+    expect(previousStage('combat')).toBe('bluefor');
     expect(nextStage('scenario')).toBe('bluefor');
   });
 
   it('blocks Previous only at the first stage and Next only at the last or on an unmet prerequisite', () => {
     expect(previousBlocker('terrain', facts())).toBe('This is the first stage.');
-    for (const s of ['scenario', 'bluefor', 'opfor', 'aar'] as const)
+    for (const s of ['scenario', 'bluefor', 'combat', 'aar'] as const)
       expect(previousBlocker(s, facts())).toBeNull();
     expect(nextBlocker('aar', facts())).toBe('This is the last stage.');
   });
@@ -81,8 +81,8 @@ describe('the workflow', () => {
   });
 
   it('opens the After Action Review once the engagement is complete', () => {
-    expect(nextBlocker('opfor', facts())).toMatch(/engagement is complete/);
-    expect(nextBlocker('opfor', facts({ engagementComplete: () => true }))).toBeNull();
+    expect(nextBlocker('combat', facts())).toMatch(/engagement is complete/);
+    expect(nextBlocker('combat', facts({ engagementComplete: () => true }))).toBeNull();
   });
 
   it('asks only for the facts of the stage being left', () => {
@@ -102,12 +102,12 @@ describe('the workflow', () => {
     expect(asked).toEqual(['scenarioProblems']);
   });
 
-  it('labels the header segments as the reference bar does', () => {
+  it('labels the header segments with the stages of the constructive simulation', () => {
     expect(WORKFLOW_STAGES.map((s) => STAGE_LABELS[s])).toEqual([
       'Terrain',
-      'Edit Scenario',
+      'Setup',
       'BLUEFOR',
-      'OPFOR',
+      'Combat',
       'AAR',
     ]);
   });
@@ -115,7 +115,7 @@ describe('the workflow', () => {
   it('lets a stage segment open any earlier stage, the next one through its gate, and no further', () => {
     const open = facts({ engagementComplete: () => true });
     for (const s of ['terrain', 'scenario', 'bluefor'] as const)
-      expect(stageBlocker('opfor', s, open)).toBeNull();
+      expect(stageBlocker('combat', s, open)).toBeNull();
     expect(stageBlocker('scenario', 'bluefor', open)).toBeNull();
     expect(
       stageBlocker('scenario', 'bluefor', facts({ scenarioProblems: () => ['Place the OPFOR.'] })),
@@ -124,22 +124,22 @@ describe('the workflow', () => {
     expect(
       stageBlocker('scenario', 'aar', facts({ scenarioProblems: () => ['Place the OPFOR.'] })),
     ).toBe('Place the OPFOR.');
-    expect(stageBlocker('scenario', 'opfor', open)).toBe('Go through BLUEFOR Planning first.');
-    expect(stageBlocker('terrain', 'aar', open)).toBe('Go through Edit Scenario first.');
+    expect(stageBlocker('scenario', 'combat', open)).toBe('Go through BLUEFOR Planning first.');
+    expect(stageBlocker('terrain', 'aar', open)).toBe('Go through Scenario Setup first.');
   });
 
   it('allows no way back to the scenario or BLUEFOR planning once OPFOR has started', () => {
     const started = facts({ opforStarted: () => true, engagementComplete: () => true });
-    expect(previousBlocker('opfor', started)).toMatch(
+    expect(previousBlocker('combat', started)).toMatch(
       /^OPFOR has started: there is no going back to BLUEFOR Planning\. Choose Terrain/,
     );
-    expect(stageBlocker('opfor', 'scenario', started)).toMatch(/no going back to Edit Scenario/);
+    expect(stageBlocker('combat', 'scenario', started)).toMatch(/no going back to Scenario Setup/);
     expect(stageBlocker('aar', 'bluefor', started)).toMatch(/no going back to BLUEFOR Planning/);
     // Terrain selection (leaving the battlefield) and the AAR's way back to combat stay open.
-    expect(stageBlocker('opfor', 'terrain', started)).toBeNull();
+    expect(stageBlocker('combat', 'terrain', started)).toBeNull();
     expect(previousBlocker('aar', started)).toBeNull();
     // Before OPFOR starts, every earlier stage is open.
-    expect(stageBlocker('opfor', 'scenario', facts())).toBeNull();
-    expect(previousBlocker('opfor', facts())).toBeNull();
+    expect(stageBlocker('combat', 'scenario', facts())).toBeNull();
+    expect(previousBlocker('combat', facts())).toBeNull();
   });
 });

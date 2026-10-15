@@ -7,7 +7,10 @@ export {
   type BattlefieldView3d,
   type BattlefieldView3dOptions,
   type PointerHandler,
+  type ViewFigures,
 } from './view';
+export type { UnitMarker } from './unit-markers';
+export type { AnimationClock } from './characters/layer';
 export type { GroundOverlay } from './terrain-renderer';
 export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projection';
 export type { QualityLevel } from './quality';

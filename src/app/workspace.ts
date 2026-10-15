@@ -77,6 +77,7 @@ import {
   backBlocker,
   nextBlocker,
   STAGE_NAMES,
+  factsRules,
   type WorkflowFacts,
   type WorkflowStage,
 } from './workflow';
@@ -222,7 +223,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         </div>
         <div data-ui="planning-lock"></div>
       </div>
-      <div data-stage="opfor">
+      <div data-stage="combat">
         <div class="combat-actions">
           <button class="action" data-ui="start-opfor" aria-describedby="start-opfor-reason">Start OPFOR</button>
           <p class="reason" id="start-opfor-reason" data-ui="start-opfor-reason"></p>
@@ -642,17 +643,17 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
       exerciseStage.collect(e.advance(1 / 30));
   });
   ui('pause').addEventListener('click', () => {
-    if (stage === 'bluefor' || stage === 'opfor') exerciseStage.pause();
+    if (stage === 'bluefor' || stage === 'combat') exerciseStage.pause();
   });
   ui('resume').addEventListener('click', () => {
-    if (stage === 'bluefor' || stage === 'opfor') exerciseStage.resume();
+    if (stage === 'bluefor' || stage === 'combat') exerciseStage.resume();
   });
   const speedButtons = TIME_SCALES.map((scale) => {
     const b = document.createElement('button');
     b.textContent = `${String(scale)}×`;
     b.setAttribute('aria-label', `${String(scale)} times speed`);
     b.addEventListener('click', () => {
-      if (stage === 'bluefor' || stage === 'opfor') session = setTimeScale(session, scale);
+      if (stage === 'bluefor' || stage === 'combat') session = setTimeScale(session, scale);
     });
     ui('speeds').append(b);
     return { scale, b };
@@ -662,8 +663,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   // After Action Review, back to planning.
   const PRIMARY: Readonly<Record<WorkspaceStage, string>> = {
     scenario: 'Continue to BLUEFOR Planning →',
-    bluefor: 'Continue to OPFOR & Combat →',
-    opfor: 'View After Action Review →',
+    bluefor: 'Continue to Combat →',
+    combat: 'View After Action Review →',
     aar: '← Try again',
   };
   /**
@@ -683,8 +684,8 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   };
   const NEXT: Readonly<Record<WorkspaceStage, WorkspaceStage | null>> = {
     scenario: 'bluefor',
-    bluefor: 'opfor',
-    opfor: 'aar',
+    bluefor: 'combat',
+    combat: 'aar',
     aar: null,
   };
   ui('primary').addEventListener('click', () => {
@@ -1000,7 +1001,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         return;
       }
     }
-    const running = stage === 'bluefor' || stage === 'opfor';
+    const running = stage === 'bluefor' || stage === 'combat';
     const planning = stage === 'bluefor';
     switch (event.key) {
       case 'f':
@@ -1065,19 +1066,19 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   const TOOLS_TITLE: Readonly<Record<WorkspaceStage, string>> = {
     scenario: 'Scenario tools',
     bluefor: 'Planning tools',
-    opfor: 'OPFOR & combat',
+    combat: 'OPFOR & combat',
     aar: STAGE_NAMES.aar,
   };
   const STATUS_TITLE: Readonly<Record<WorkspaceStage, string>> = {
     scenario: 'Scenario status',
     bluefor: 'BLUEFOR status',
-    opfor: 'Combat status',
+    combat: 'Combat status',
     aar: 'Engagement result',
   };
   const HELP: Readonly<Record<WorkspaceStage, string>> = {
     scenario: SCENARIO_HELP,
     bluefor: PLANNING_HELP + TIME_HELP,
-    opfor: COMBAT_HELP + TIME_HELP,
+    combat: COMBAT_HELP + TIME_HELP,
     aar: REPLAY_HELP,
   };
 
@@ -1331,7 +1332,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
 
   const updateSimulation = () => {
     const e = ex();
-    const live = stage === 'bluefor' || stage === 'opfor';
+    const live = stage === 'bluefor' || stage === 'combat';
     setText(ui('clock'), `T+ ${clock(e.simulation.timeSeconds)}`);
     setText(ui('sim-state'), exerciseStage.phaseLabel());
     ui('sim-state').dataset['phase'] = e.paused ? 'paused' : e.phase;
@@ -1442,7 +1443,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
   };
 
   const updatePanels = () => {
-    header.update(stage, facts);
+    header.update(stage, factsRules(facts));
     app.dataset['stage'] = stage;
     for (const s of sections) {
       const on = s.dataset['stage'] === stage;
@@ -1466,7 +1467,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
         updatePlanningTools();
         setHtml(ui('status'), bluforStatusHtml());
         break;
-      case 'opfor':
+      case 'combat':
         updateCombatTools();
         setHtml(ui('status'), combatStatusHtml());
         break;
@@ -1505,7 +1506,7 @@ export function startWorkspace(app: HTMLElement, o: WorkspaceOptions): void {
 
     // The map banner (stages 3 and 4).
     const banner =
-      stage === 'bluefor' || stage === 'opfor' ? exerciseStage.bannerHtml(stage) : null;
+      stage === 'bluefor' || stage === 'combat' ? exerciseStage.bannerHtml(stage) : null;
     ui('banner').hidden = banner === null;
     const e = exercise;
     ui('banner').dataset['kind'] =

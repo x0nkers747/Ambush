@@ -13,6 +13,14 @@ import {
   scenarioProblems,
   type ScenarioDefinition,
 } from '#exercise';
+import {
+  battleScenarioId,
+  newBattleScenario,
+  scenarioIssues,
+  parseBattleScenario,
+  scenarioSummary,
+  type BattleScenarioDefinition,
+} from '#exercise/battle';
 import type { BattlefieldPackage } from '#geo';
 import { demQualitySummary, shareTerrain, terrainModelId, type DemQualityReport } from '#sim';
 import type { TacticalMap } from '#view2d';
@@ -21,11 +29,16 @@ import { installFeedbackButton } from './feedback';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
 import { demoInfoHtml, startWorkspace } from './workspace';
+import { battleOverlay } from './battle/overlay';
+import { battleNextBlocker } from './battle/planner';
+import { startBattlePage } from './battle/page';
 
 // Composition root: the five-stage workflow (docs/adr/0025). Terrain
-// selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a battlefield
-// (scenario editing, BLUEFOR planning, OPFOR and combat, and the After Action
-// Review) share another (workspace.ts). Each page has its own address
+// selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a
+// battlefield's battle (Scenario Setup, BLUEFOR Planning, Combat and the
+// After-Action Review, docs/constructive-simulation/03) share another
+// (battle/page.ts). The legacy ambush exercise keeps its own page
+// (workspace.ts) at its own addresses until Combat replaces it. Each page has its own address
 // (stages.ts). Moving between the two happens in place, without a reload:
 // the page being left stops what it started, and the tactical map of the
 // battlefield is handed over, so it is never rebuilt. The browser's Back and
@@ -81,6 +94,8 @@ async function loadScenario(
 ): Promise<{ definition: ScenarioDefinition; notice: string | null }> {
   const saved = await store.listScenarios(pkg.id);
   for (const data of saved) {
+    // The battle's scenario (version 2) is the battle page's.
+    if ((data as { schemaVersion?: unknown } | null)?.schemaVersion === 2) continue;
     try {
       const definition = parseScenarioDefinition(data);
       if (definition.battlefieldId !== pkg.id) continue;
@@ -114,6 +129,47 @@ async function loadScenario(
 }
 
 /**
+ * The battlefield's battle scenario: the saved one; else its ambush scenario
+ * migrated (docs/constructive-simulation/03); else a new one with no squads.
+ * One that cannot be read is reported and replaced, never silently.
+ */
+async function loadBattle(
+  store: BattlefieldStore,
+  pkg: BattlefieldPackage,
+): Promise<{ definition: BattleScenarioDefinition; notice: string | null }> {
+  const saved = (await store.listScenarios(pkg.id)).filter(
+    (d): d is Record<string, unknown> => typeof d === 'object' && d !== null,
+  );
+  const fresh = () => newBattleScenario(pkg.terrain, pkg.id);
+  const notices: string[] = [];
+  const v2 = saved.find((d) => d['schemaVersion'] === 2 && d['id'] === battleScenarioId(pkg.id));
+  const v1 = saved.find((d) => d['schemaVersion'] === 1);
+  let definition: BattleScenarioDefinition;
+  try {
+    if (v2) definition = parseBattleScenario(v2);
+    else if (v1) {
+      definition = parseBattleScenario(v1);
+      if (definition.squads.length > 0)
+        notices.push(
+          `This battlefield's ambush scenario was converted to a battle: ${scenarioSummary(definition)}. The OPFOR patrol keeps its route as Move orders; BLUEFOR's squad stands at the ORP, with no plan yet.`,
+        );
+    } else definition = fresh();
+  } catch (error) {
+    definition = fresh();
+    notices.push(
+      `The saved scenario could not be read and was replaced by a new one: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const model = terrainModelId(pkg.terrain);
+  if (definition.terrainModel !== undefined && definition.terrainModel !== model)
+    notices.push(
+      'This scenario was made on an earlier model of the ground: check that its squads and destinations are still where you want them.',
+    );
+  if (definition.terrainModel !== model) definition = { ...definition, terrainModel: model };
+  return { definition, notice: notices.join(' ') || null };
+}
+
+/**
  * A saved battlefield with its authoritative terrain: the stored raw terrain
  * with its DEM cleaned (docs/adr/0033), then the terrain field sampled from it
  * (docs/adr/0049), then shared (`shareTerrain`): everything on the page (scenario edits,
@@ -139,25 +195,22 @@ function unresolvedNotice(quality: DemQualityReport): string | null {
   return quality.unresolvedRegions > 0 ? demQualitySummary(quality) : null;
 }
 
-/** What the terrain-selection preview shows of a battlefield and its scenario. */
-function previewData(pkg: BattlefieldPackage, definition: ScenarioDefinition): PreviewData {
-  const waypoints = Math.max(0, definition.opfor.route.length - 1);
-  const { scenario, squadPlaced } = buildPreviewScenario(pkg.terrain, definition);
-  const opfor =
-    definition.opfor.route.length === 0
-      ? 'no OPFOR yet'
-      : `OPFOR and a route of ${String(waypoints)} waypoint${waypoints === 1 ? '' : 's'}`;
+/** What the terrain-selection preview shows of a battlefield and its battle scenario. */
+function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition): PreviewData {
+  // The map shows the terrain; the battle's squads and plans are drawn over it.
+  const empty = defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false });
+  const { scenario } = buildPreviewScenario(pkg.terrain, empty);
   return {
     name: pkg.name,
     centre: pkg.request.centre,
     scenario,
-    squadPlaced,
+    squadPlaced: false,
     attribution: pkg.attribution,
-    caption: squadPlaced
-      ? `Saved scenario: ORP, ${opfor}`
-      : definition.opfor.route.length === 0
-        ? 'No scenario yet: place the ORP and the OPFOR in Edit Scenario'
-        : `Saved scenario: no ORP yet, ${opfor}`,
+    caption:
+      battle.squads.length === 0
+        ? 'No scenario yet: place the squads in Scenario Setup'
+        : `Saved scenario: ${scenarioSummary(battle)}`,
+    overlay: battleOverlay(pkg.terrain, battle),
   };
 }
 
@@ -180,11 +233,11 @@ async function main(root: HTMLElement): Promise<void> {
   });
 
   /**
-   * The battlefield last loaded for the preview or left in the workspace, with
-   * its scenario. Opening it again reuses it, so the preview's map (built on
-   * its terrain) can be handed over as it is.
+   * The battlefield last loaded for the preview or left on its battle page,
+   * with its battle scenario. Opening it again reuses it, so the preview's
+   * map (built on its terrain) can be handed over as it is.
    */
-  let loaded: { pkg: OpenedBattlefield; definition: ScenarioDefinition } | null = null;
+  let loaded: { pkg: OpenedBattlefield; battle: BattleScenarioDefinition } | null = null;
   /** Preview loads started; only the latest may set `loaded` (it is the one the preview shows). */
   let previewLoads = 0;
 
@@ -201,54 +254,70 @@ async function main(root: HTMLElement): Promise<void> {
       loadPreview: async (id) => {
         const mine = (previewLoads += 1);
         const pkg = await openBattlefield(store, id);
-        const { definition } = await loadScenario(store, pkg);
-        if (mine === previewLoads) loaded = { pkg, definition };
+        const { definition } = await loadBattle(store, pkg);
+        if (mine === previewLoads) loaded = { pkg, battle: definition };
         return previewData(pkg, definition);
       },
       openBattlefield: (id, map) => {
-        void showBattlefield(id, 'edit', map, page);
+        void showBattle(id, 'scenario', map, page);
       },
     });
   };
 
-  /** Stages 2–5 of a saved battlefield, replacing `previous` (terrain selection) once it is ready. */
-  const showBattlefield = async (
+  /** Back to terrain selection from a battlefield's page, the map handed back to the preview. */
+  const backToSelection = (
+    pkg: OpenedBattlefield,
+    battle: BattleScenarioDefinition,
+    map: TacticalMap,
+  ) => {
+    pushAddress({ kind: 'select', selected: pkg.id });
+    loaded = { pkg, battle };
+    showSelection({ adopt: { id: pkg.id, map, data: previewData(pkg, battle) } });
+  };
+
+  /** Stages 2–5 of a battlefield's battle, replacing `previous` (terrain selection) once ready. */
+  const showBattle = async (
     id: string,
-    kind: 'edit' | 'play',
+    stage: 'scenario' | 'bluefor',
     handed: TacticalMap | null,
     previous: { dispose(): void } | null,
   ): Promise<void> => {
     let map = handed;
     try {
       let pkg: OpenedBattlefield;
-      let definition: ScenarioDefinition;
+      let definition: BattleScenarioDefinition;
       let notice: string | null = null;
-      if (loaded?.pkg.id === id) ({ pkg, definition } = loaded);
+      if (loaded?.pkg.id === id) ({ pkg, battle: definition } = loaded);
       else {
         pkg = await openBattlefield(store, id);
-        ({ definition, notice } = await loadScenario(store, pkg));
+        ({ definition, notice } = await loadBattle(store, pkg));
         // A map of another load of this battlefield shows another terrain object.
         map?.dispose();
         map = null;
       }
       let latest = definition;
-      const save = (d: ScenarioDefinition) => {
+      const save = (d: BattleScenarioDefinition) => {
         latest = d;
-        loaded = { pkg, definition: d };
+        loaded = { pkg, battle: d };
         return store.putScenario(pkg.id, d.id, d);
       };
       await save(definition);
-      // Only a complete scenario is played; otherwise it opens for editing.
-      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
-      const initialStage = kind === 'play' && playable ? 'bluefor' : 'scenario';
-      if (handed || previous)
-        pushAddress({ kind: initialStage === 'bluefor' ? 'play' : 'edit', battlefieldId: id });
-      // Terrain selection stays on screen until now, so the handed-over map is never blank.
+      // Planning opens only on a scenario that is set up; otherwise Scenario Setup.
+      const ready =
+        battleNextBlocker('scenario', scenarioIssues(pkg.terrain, definition), definition) === null;
+      const initialStage = stage === 'bluefor' && ready ? 'bluefor' : 'scenario';
+      const address = (s: 'scenario' | 'bluefor'): Stage => ({
+        kind: s === 'bluefor' ? 'plan' : 'setup',
+        battlefieldId: id,
+      });
+      if (handed || previous) pushAddress(address(initialStage));
+      else setAddress(address(initialStage));
       previous?.dispose();
-      startWorkspace(root, {
+      startBattlePage(root, {
         title: pkg.name,
         terrain: pkg.terrain,
-        scenario: { kind: 'editable', definition, save },
+        definition,
+        save,
         attribution: pkg.attribution,
         describePoint: describePointFor(pkg),
         infoHtml: battlefieldInfoHtml(pkg, pkg.quality),
@@ -256,16 +325,51 @@ async function main(root: HTMLElement): Promise<void> {
         notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
         map,
         leave: (m) => {
-          pushAddress({ kind: 'select', selected: pkg.id });
-          showSelection({ adopt: { id: pkg.id, map: m, data: previewData(pkg, latest) } });
+          backToSelection(pkg, latest, m);
+        },
+        setAddress: (s) => {
+          setAddress(address(s));
+        },
+        openLegacy: () => {
+          go({ kind: 'edit', battlefieldId: id });
+        },
+      });
+    } catch (error) {
+      previous?.dispose();
+      map?.dispose();
+      showFatal(root, error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /** The legacy ambush exercise of a saved battlefield (docs/adr/0025). */
+  const showAmbush = async (id: string, kind: 'edit' | 'play'): Promise<void> => {
+    try {
+      const pkg = await openBattlefield(store, id);
+      const { definition, notice } = await loadScenario(store, pkg);
+      const save = (d: ScenarioDefinition) => store.putScenario(pkg.id, d.id, d);
+      await save(definition);
+      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
+      const initialStage = kind === 'play' && playable ? 'bluefor' : 'scenario';
+      startWorkspace(root, {
+        title: `${pkg.name} · ambush exercise`,
+        terrain: pkg.terrain,
+        scenario: { kind: 'editable', definition, save },
+        attribution: pkg.attribution,
+        describePoint: describePointFor(pkg),
+        infoHtml: battlefieldInfoHtml(pkg, pkg.quality),
+        initialStage,
+        notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
+        map: null,
+        leave: (m) => {
+          void loadBattle(store, pkg).then(({ definition: battle }) => {
+            backToSelection(pkg, battle, m);
+          });
         },
         setAddress: (s) => {
           setAddress({ kind: s === 'bluefor' ? 'play' : 'edit', battlefieldId: pkg.id });
         },
       });
     } catch (error) {
-      previous?.dispose();
-      map?.dispose();
       showFatal(root, error instanceof Error ? error.message : String(error));
     }
   };
@@ -297,9 +401,19 @@ async function main(root: HTMLElement): Promise<void> {
       });
       return;
 
+    case 'setup':
+    case 'plan':
+      await showBattle(
+        stage.battlefieldId,
+        stage.kind === 'plan' ? 'bluefor' : 'scenario',
+        null,
+        null,
+      );
+      return;
+
     case 'edit':
     case 'play':
-      await showBattlefield(stage.battlefieldId, stage.kind, null, null);
+      await showAmbush(stage.battlefieldId, stage.kind);
       return;
   }
 }

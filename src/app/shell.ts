@@ -1,5 +1,4 @@
 import {
-  nextBlocker,
   nextStage,
   previousBlocker,
   previousStage,
@@ -8,7 +7,7 @@ import {
   stageBlocker,
   stageNumber,
   WORKFLOW_STAGES,
-  type WorkflowFacts,
+  type WorkflowRules,
   type WorkflowStage,
 } from './workflow';
 
@@ -27,7 +26,7 @@ const STAGE_ICONS: Readonly<Record<WorkflowStage, string>> = {
   terrain: `<path d="M2 20 9.5 6 17 20Z M13.2 12.2 16 8.5 22 20H17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>`,
   scenario: `<path d="M3 6 9 4l6 2 6-2v14l-6 2-6-2-6 2Z M9 4v14 M15 6v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`,
   bluefor: `<g fill="currentColor"><circle cx="12" cy="7" r="3"/><circle cx="5.5" cy="9" r="2.2"/><circle cx="18.5" cy="9" r="2.2"/><path d="M7 19a5 5 0 0 1 10 0Z M1.5 19a4 4 0 0 1 6.3-3.3A6.5 6.5 0 0 0 6 19Z M22.5 19a4 4 0 0 0-6.3-3.3A6.5 6.5 0 0 1 18 19Z"/></g>`,
-  opfor: `<path d="M12 3.5 20.5 12 12 20.5 3.5 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>`,
+  combat: `<path d="M12 3.5 20.5 12 12 20.5 3.5 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>`,
   aar: `<path d="M4 3v17h17" fill="none" stroke="currentColor" stroke-width="1.6"/><g fill="currentColor"><rect x="7" y="13" width="2.4" height="6"/><rect x="11" y="9" width="2.4" height="10"/><rect x="15" y="5" width="2.4" height="14"/><rect x="19" y="10" width="1.6" height="9"/></g>`,
 };
 
@@ -58,7 +57,7 @@ export function headerHtml(context = ''): string {
 
 export interface WorkflowHeader {
   /** Shows a stage and what blocks leaving it; call whenever either may have changed. */
-  update(stage: WorkflowStage, facts: WorkflowFacts): void;
+  update(stage: WorkflowStage, rules: WorkflowRules): void;
 }
 
 /**
@@ -80,7 +79,7 @@ export function wireHeader(
     return e;
   };
   let current: WorkflowStage = WORKFLOW_STAGES[0] ?? 'terrain';
-  let facts: WorkflowFacts | null = null;
+  let facts: WorkflowRules | null = null;
   const goTo = (target: WorkflowStage | null, reason: string | null) => {
     if (reason !== null || target === null) {
       o.blocked(reason ?? '');
@@ -92,7 +91,7 @@ export function wireHeader(
     goTo(previousStage(current), facts ? previousBlocker(current, facts) : null);
   });
   el('wf-next').addEventListener('click', () => {
-    goTo(nextStage(current), facts ? nextBlocker(current, facts) : null);
+    goTo(nextStage(current), facts ? facts.next(current) : null);
   });
   for (const stage of WORKFLOW_STAGES) {
     el(`wf-step-${stage}`).addEventListener('click', () => {
@@ -120,7 +119,7 @@ export function wireHeader(
     update(stage, f) {
       current = stage;
       facts = f;
-      const next = nextBlocker(stage, f);
+      const next = f.next(stage);
       const prevTarget = previousStage(stage);
       const nextTarget = nextStage(stage);
       show(

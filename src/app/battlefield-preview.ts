@@ -1,7 +1,7 @@
 import { createExercise, type AmbushScenario, type Exercise } from '#exercise';
 import { createSession, setTool, type Session } from '#session';
 import { DEFAULT_TICK_RATE_HZ } from '#sim';
-import { createTacticalMap, type MapSurface, type TacticalMap } from '#view2d';
+import { createTacticalMap, type MapEditor, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d } from '#view3d';
 import { saveScreenshot, screenshotName } from './screenshot';
 
@@ -29,6 +29,8 @@ export interface PreviewData {
   readonly attribution: readonly string[];
   /** A short line about the scenario, e.g. "No OPFOR yet". */
   readonly caption: string;
+  /** Drawn over the map (a battle's squads and plans); clicks on the map are its, and ignored. */
+  readonly overlay?: MapEditor;
 }
 
 export interface BattlefieldPreview {
@@ -291,6 +293,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
         session = next;
       },
       hideTrainee: () => !data.squadPlaced,
+      ...(data.overlay ? { editor: data.overlay } : {}),
     };
     const canvas = existing?.canvas ?? document.createElement('canvas');
     canvas.id = '';

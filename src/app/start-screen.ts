@@ -27,7 +27,7 @@ import {
 } from '#geo';
 import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
 import { createToast, escapeHtml, headerHtml, TRASH_ICON, wireHeader } from './shell';
-import type { WorkflowFacts } from './workflow';
+import { factsRules, type WorkflowFacts } from './workflow';
 
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
 // enter a position and generate a new 5 km battlefield, or select a saved
@@ -355,7 +355,7 @@ export function startBattlefieldSelection(
             <dt>Size</dt><dd>${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} × ${DEFAULT_BATTLEFIELD_SIZE_M.toLocaleString('en')} m · UTM ${String(frame.zone)}${frame.hemisphere}</dd>
             <dt>Elevation</dt><dd>${String(DEFAULT_CELL_SIZE_M)} m grid</dd>
           </dl>
-          <p class="muted">You place the squad's ORP and the OPFOR in Edit Scenario.
+          <p class="muted">You place both sides' squads in Scenario Setup.
           <a href="https://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}#map=16/${lat}/${lon}" target="_blank" rel="noopener">View on OpenStreetMap</a></p>`;
       }
     }
@@ -415,7 +415,7 @@ export function startBattlefieldSelection(
     ui('placeholder').hidden = id !== null;
     if (next.kind !== 'location') show('error', null);
     markSelected();
-    header.update('terrain', facts);
+    header.update('terrain', factsRules(facts));
   };
 
   const setLocation = (position: LatLon, name: string | null) => {
@@ -757,7 +757,7 @@ export function startBattlefieldSelection(
     show('preview', previewHtml());
     updatePrimary();
     ui('placeholder').hidden = true;
-    header.update('terrain', facts);
+    header.update('terrain', factsRules(facts));
   } else select({ kind: 'none' });
   void refresh(o.adopt?.id ?? o.selected);
 

@@ -1,34 +1,35 @@
-// The five-stage workflow (docs/adr/0025). A workflow stage says what the
-// trainee is doing; it is not the exercise's phase. Stage 3 holds BLUEFOR
-// planning and execution, stage 4 the OPFOR approach and the ambush, and the
-// exercise's own phases run inside them. What blocks a stage change is read
-// from the existing rules (`scenarioProblems`, `startOpforProblems`, the
-// exercise phase), never from a copy of them.
+// The five-stage workflow (docs/adr/0025, docs/constructive-simulation/03):
+// Terrain, Scenario Setup, BLUEFOR Planning, Combat and the After-Action
+// Review. A workflow stage says what the user is doing; it is not the
+// simulation's phase. What blocks a stage change is read from the page's own
+// rules (`WorkflowRules`): the battle's (scenario issues, combat ended) or the
+// legacy ambush exercise's (`WorkflowFacts`: `scenarioProblems`,
+// `startOpforProblems`, the exercise phase), never from a copy of them.
 
-export type WorkflowStage = 'terrain' | 'scenario' | 'bluefor' | 'opfor' | 'aar';
+export type WorkflowStage = 'terrain' | 'scenario' | 'bluefor' | 'combat' | 'aar';
 
 export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
   'terrain',
   'scenario',
   'bluefor',
-  'opfor',
+  'combat',
   'aar',
 ];
 
 export const STAGE_NAMES: Readonly<Record<WorkflowStage, string>> = {
   terrain: 'Select Terrain',
-  scenario: 'Edit Scenario',
+  scenario: 'Scenario Setup',
   bluefor: 'BLUEFOR Planning',
-  opfor: 'OPFOR & Combat',
-  aar: 'After Action Review',
+  combat: 'Combat',
+  aar: 'After-Action Review',
 };
 
 /** The short labels of the header's stage segments; `STAGE_NAMES` stays the full name. */
 export const STAGE_LABELS: Readonly<Record<WorkflowStage, string>> = {
   terrain: 'Terrain',
-  scenario: 'Edit Scenario',
+  scenario: 'Setup',
   bluefor: 'BLUEFOR',
-  opfor: 'OPFOR',
+  combat: 'Combat',
   aar: 'AAR',
 };
 
@@ -46,8 +47,17 @@ export function nextStage(stage: WorkflowStage): WorkflowStage | null {
 }
 
 /**
- * What the stage gates need, read lazily from the existing state: each is
- * asked only for the stage being left.
+ * A page's stage gates: why Next is not available from a stage, and why an
+ * earlier stage cannot be returned to (`null` when it can).
+ */
+export interface WorkflowRules {
+  next(stage: WorkflowStage): string | null;
+  back(to: WorkflowStage): string | null;
+}
+
+/**
+ * What the legacy ambush exercise's stage gates need, read lazily from its
+ * state: each is asked only for the stage being left.
  */
 export interface WorkflowFacts {
   /** Stage 1: whether a saved battlefield is selected. */
@@ -73,7 +83,7 @@ export function nextBlocker(stage: WorkflowStage, facts: WorkflowFacts): string 
       return facts.scenarioProblems()[0] ?? null;
     case 'bluefor':
       return facts.opforStarted() ? null : (facts.startOpforProblems()[0] ?? null);
-    case 'opfor':
+    case 'combat':
       return facts.engagementComplete()
         ? null
         : 'The After Action Review opens when the engagement is complete.';
@@ -82,10 +92,24 @@ export function nextBlocker(stage: WorkflowStage, facts: WorkflowFacts): string 
   }
 }
 
+/** The legacy exercise's gates as `WorkflowRules`. */
+export function factsRules(facts: WorkflowFacts): WorkflowRules {
+  return {
+    next: (stage) => nextBlocker(stage, facts),
+    back: (to) => backBlocker(to, facts),
+  };
+}
+
+const rulesOf = (r: WorkflowFacts | WorkflowRules): WorkflowRules =>
+  'next' in r ? r : factsRules(r);
+
 /** Why Previous is not available from `stage`, or `null` when it is. */
-export function previousBlocker(stage: WorkflowStage, facts: WorkflowFacts): string | null {
+export function previousBlocker(
+  stage: WorkflowStage,
+  facts: WorkflowFacts | WorkflowRules,
+): string | null {
   const previous = previousStage(stage);
-  return previous === null ? 'This is the first stage.' : backBlocker(previous, facts);
+  return previous === null ? 'This is the first stage.' : rulesOf(facts).back(previous);
 }
 
 /**
@@ -109,13 +133,12 @@ export function backBlocker(to: WorkflowStage, facts: WorkflowFacts): string | n
 export function stageBlocker(
   from: WorkflowStage,
   to: WorkflowStage,
-  facts: WorkflowFacts,
+  facts: WorkflowFacts | WorkflowRules,
 ): string | null {
+  const rules = rulesOf(facts);
   const next = nextStage(from);
   if (to === from) return null;
-  if (stageNumber(to) < stageNumber(from)) return backBlocker(to, facts);
-  if (to === next) return nextBlocker(from, facts);
-  return next === null
-    ? null
-    : (nextBlocker(from, facts) ?? `Go through ${STAGE_NAMES[next]} first.`);
+  if (stageNumber(to) < stageNumber(from)) return rules.back(to);
+  if (to === next) return rules.next(from);
+  return next === null ? null : (rules.next(from) ?? `Go through ${STAGE_NAMES[next]} first.`);
 }

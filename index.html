@@ -272,7 +272,7 @@
         color: var(--blue);
       }
       /* OPFOR's icon is red when current, grey like the others when not. */
-      .wf-step[data-step='opfor'] .wf-step-btn[aria-current='step'] .wf-icon {
+      .wf-step[data-step='combat'] .wf-step-btn[aria-current='step'] .wf-icon {
         color: var(--red);
       }
       /* The current segment's corner marks. */
@@ -890,6 +890,162 @@
         padding-left: 18px;
         margin: 4px 0;
         color: var(--muted);
+      }
+
+      /* The battle page (docs/constructive-simulation/03): squads by force,
+         the selected squad and its plan. Blue BLUEFOR, red OPFOR. */
+      .battle .squad-row.blue,
+      .battle .force.blue h3 {
+        border-left: 3px solid var(--blue);
+      }
+      .battle .squad-row.red,
+      .battle .force.red h3 {
+        border-left: 3px solid var(--red);
+      }
+      .battle .force h3 {
+        padding-left: 6px;
+      }
+      .battle .order-tools {
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .battle .place-tools {
+        grid-template-columns: 62px repeat(3, 1fr);
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .battle .place-side {
+        padding-left: 6px;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .battle .place-side.blue {
+        border-left: 3px solid var(--blue);
+      }
+      .battle .place-side.red {
+        border-left: 3px solid var(--red);
+      }
+      .battle .place-tools .tool,
+      .battle .order-tools .tool {
+        padding: 5px 4px;
+        text-align: center;
+      }
+      .battle .order-tools .tool:last-child:nth-child(odd) {
+        grid-column: auto;
+      }
+      .battle .squad-row {
+        display: grid;
+        grid-template-columns: 26px 1fr auto auto;
+        gap: 6px;
+        align-items: baseline;
+        width: 100%;
+        margin: 2px 0;
+        padding: 3px 6px;
+        background: transparent;
+        border-top-color: transparent;
+        border-right-color: transparent;
+        border-bottom-color: transparent;
+        text-align: left;
+        font-size: 12px;
+      }
+      .battle .squad-row .sq-id {
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .battle .squad-row .sq-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .battle .squad-row .sq-plan {
+        font-size: 11px;
+      }
+      .battle .squad-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .battle .side-badge {
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: #fff;
+      }
+      .battle .squad-head.blue .side-badge {
+        background: var(--blue-bg);
+      }
+      .battle .squad-head.red .side-badge {
+        background: #6a2a24;
+      }
+      .battle .squad-name {
+        flex: 1;
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .battle input.squad-name {
+        font: inherit;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text);
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 2px 6px;
+      }
+      .battle select,
+      .battle input[type='number'] {
+        font: inherit;
+        color: var(--text);
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 1px 4px;
+      }
+      .battle .facing-input {
+        width: 64px;
+      }
+      .battle .seed-input {
+        width: 120px;
+      }
+      .battle ol.plan-list {
+        margin: 4px 0;
+        padding: 0;
+        list-style: none;
+      }
+      .battle .order-row {
+        display: grid;
+        grid-template-columns: 30px auto 1fr auto;
+        gap: 6px;
+        align-items: center;
+        padding: 2px 0;
+        border-radius: 3px;
+      }
+      .battle .order-row.selected {
+        background: var(--blue-bg);
+      }
+      .battle .order-row .coords {
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+      .battle .order-row .order-buttons {
+        display: flex;
+        gap: 2px;
+      }
+      .battle .order-row .order-buttons button {
+        padding: 1px 5px;
+      }
+      .battle .order-row .order-issue {
+        grid-column: 2 / -1;
+        font-size: 11px;
+      }
+      .battle .mapbar-check {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
       }
 
       /* Roster. */
