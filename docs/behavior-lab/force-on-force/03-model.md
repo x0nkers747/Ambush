@@ -182,8 +182,9 @@ these hold:
 
 It is ordered `withdrawDistanceM` (250 m) away from the threat it knows of, through
 the movement engine, in its formation. It takes the first heading of 0°, ±30°, ±60°,
-±90° from straight away that has reachable ground. It does not fire while withdrawing,
-and a pinned soldier is held until he recovers.
+±90° from straight away that has reachable ground. While withdrawing, its soldiers fire on the move at what they can see (× 0.3 accuracy
+on the move). They keep their last rounds: no fire below the withdrawal share of their
+load. A pinned soldier is held until he recovers.
 
 It has **withdrawn** (terminal) when either:
 
@@ -201,7 +202,8 @@ ends the experiment):
 | 1   | An invariant broken: negative or fractional rounds, suppression out of [0, 1], a casualty with a burst due, non-finite effectiveness, a halted force with a movement task                 | `invalid` (naming it)                                  | invalid                |
 | 2   | Both forces combat ineffective                                                                                                                                                            | `mutualIneffective`                                    | decisive               |
 | 3   | One force combat ineffective                                                                                                                                                              | the other side's `…Victory`                            | decisive               |
-| 4   | Both withdrawn / one withdrawn                                                                                                                                                            | `mutualDisengagement` / `…Withdrawal`                  | decisive               |
+| 4   | Both withdrawn, or one withdrawn while the other is still withdrawing / one withdrawn                                                                                                     | `mutualDisengagement` / `…Withdrawal`                  | decisive               |
+| 4b  | Never in contact, and both done moving (at their objectives) for `disengagementSeconds`                                                                                                   | `noContact`                                            | decisive               |
 | 5   | After contact, neither in contact nor firing, no confirmed contact and no fire either way for `disengagementSeconds` (120 s)                                                              | `mutualDisengagement`                                  | decisive               |
 | 6   | After contact, both below 5 % of their ammunition                                                                                                                                         | `stalemate` (ammunition exhausted)                     | adjudicated            |
 | 7   | Over a 240 s window of contact: no casualties, lasting effectiveness unchanged (< 0.05), and either both forces suppressed (mean ≥ 0.45), no hits, or contact lost and regained ≥ 4 times | `stalemate`                                            | adjudicated            |
@@ -225,3 +227,14 @@ their suppression and casualties are applied after all of them, so the order
 soldiers are listed in gives no side the first shot. Before this, BLUEFOR (listed first)
 won 5 of 6 open-ground runs. After it, over 30 seeds: 17 BLUEFOR victories and 13 OPFOR
 (chance level); the first burst came from each side 15 times.
+
+**Refinements found while building the experiments (F4).**
+
+- **No fire while breaking contact was unrealistic.** A withdrawing force that did not
+  fire let its opponent fire on it unanswered. With cautious forces, the first to
+  withdraw was destroyed in 3 of 3 seeds (8–0). Withdrawing soldiers now fire on the
+  move, keeping their last rounds.
+- **The first force to finish withdrawing ended the run as a one-sided withdrawal** even
+  while the other was still pulling back. Rule 4 now makes that a mutual disengagement.
+- **Observation-only runs ran to the time limit.** Rule 4b now ends them once both
+  forces have finished moving without ever coming into contact.

@@ -83,7 +83,7 @@
 One run (open, seed 1): contact at 300 m at T+451 s; 1,564 bursts and 15 casualties
 over the next 7.5 min. About 5–6 ms of CPU per simulated second.
 
-## F3: engagement completion (2026-10-14)
+## F3: engagement completion (2026-10-14) — `d19a690`
 
 **Built** ([03 §7](03-model.md)):
 
@@ -135,3 +135,41 @@ The cases covered:
 | Open    |    30 | 17 BLUEFOR, 13 OPFOR | —                  | —                    | —         | —          |
 | Wooded  |    20 | 3 BLUEFOR, 3 OPFOR   | 4 BLUEFOR, 8 OPFOR | 1                    | 1         | —          |
 | Urban   |    12 | 4 BLUEFOR, 1 OPFOR   | 2 BLUEFOR, 2 OPFOR | 1                    | 1         | 1          |
+
+## F4: the visual lab (2026-10-14)
+
+**Built** ([05](05-lab.md)): the page at `#force-on-force` (`src/view3d/force-on-force`),
+with:
+
+- a session: the head run, keyframes and scrubbing, the motion and combat logs for the
+  characters, events, per-second hashes, replay verification, save and load;
+- two-sided controls;
+- perspectives (observer, or each side's own picture);
+- nine overlays;
+- force panels, an inspector, the event timeline, metrics and a graph;
+- an outcome banner;
+- woods drawn over the vegetation areas.
+
+The exercise layer gained:
+
+- `metrics.ts` (detection, engagement and quality metrics, per-second samples);
+- `experiments.ts` (the default demonstration and 12 experiments);
+- replayable runs.
+
+The page is isolated from the game: loaded lazily only at its address, checked by
+`force-on-force-isolation.test.ts`.
+
+**Model refinements found while building the experiments** ([03 §7](03-model.md)):
+
+- fire on the move while withdrawing, keeping the last rounds;
+- one withdrawn while the other withdraws is mutual disengagement;
+- `noContact` once both have finished moving without contact.
+
+**Validation.**
+
+- Session tests: replay through an engagement, saved and loaded, with every second's
+  hash matching; the characters get every burst and casualty; scrubbing back during the
+  firefight; refusing a foreign file.
+- The isolation test.
+- Browser: the default demonstration, and wooded and urban runs ([05](05-lab.md)); replay
+  verified over 793 s with no mismatch; 57 fps at 32×.

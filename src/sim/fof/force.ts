@@ -3,6 +3,7 @@ import { azimuthOf, type Vec2 } from '../geometry';
 import { nextFloat } from '../rng';
 import { orgUnitId, type Soldier } from '../state';
 import type { UnitOrder } from '../behavior/types';
+import { fofWeapon } from './config';
 import { confidenceAt } from './detection';
 import type { FofContext } from './system';
 import { forceActive, glimpse, setLevel, soldierOf } from './system';
@@ -24,6 +25,9 @@ import type { FofForce, ForcePhase, ObservationLevel } from './types';
 //
 // Withdrawal and combat ineffectiveness (terminal) are added by the
 // engagement lifecycle (`lifecycle.ts`).
+
+/** Seconds from the start of a withdrawal to a soldier's first burst on the move. */
+const WITHDRAW_FIRE_DELAY_S = 2;
 
 /** Phases in which the force is halted in place (no unit task). */
 export function halted(phase: ForcePhase): boolean {
@@ -275,6 +279,18 @@ function carryOut(context: FofContext, force: FofForce): void {
     if (!member || soldier?.status !== 'active') continue;
     hold(context, soldier, !stopped && member.level === 'pinned');
     if (!stopped) {
+      // Breaking contact, he fires on the move at what he can see (after a moment to start off).
+      if (
+        force.phase === 'withdrawing' &&
+        member.nextFireAt === null &&
+        member.weapon !== null &&
+        member.rounds >=
+          (fofWeapon(context.setup.config, member.weapon)?.basicLoadRounds ?? 0) *
+            context.setup.config.force.withdrawAmmunitionFraction &&
+        member.rounds > 0
+      ) {
+        member.nextFireAt = t + WITHDRAW_FIRE_DELAY_S;
+      }
       if (member.level === 'pinned') soldier.posture = 'prone';
       else if (soldier.posture !== 'standing' && member.level === 'none')
         soldier.posture = 'standing';

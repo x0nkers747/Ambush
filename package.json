@@ -20,7 +20,8 @@
     "#session": "./src/session/index.ts",
     "#view2d": "./src/view2d/index.ts",
     "#view3d": "./src/view3d/index.ts",
-    "#view3d/behavior-lab": "./src/view3d/behavior-lab/index.ts"
+    "#view3d/behavior-lab": "./src/view3d/behavior-lab/index.ts",
+    "#view3d/force-on-force": "./src/view3d/force-on-force/index.ts"
   },
   "scripts": {
     "dev": "vite",

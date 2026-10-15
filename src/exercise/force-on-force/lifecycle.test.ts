@@ -114,26 +114,62 @@ describe('combat ineffectiveness and withdrawal', () => {
     expect(after).toEqual([]);
   }, 60_000);
 
-  it('a withdrawing force moves away from the threat through the movement engine and does not fire', () => {
-    const run = createFofRun(headOn('wooded', 2));
-    const events = finish(run);
-    const outcome = checkEnded(run, events);
-    expect(outcome.outcome).toMatch(/Withdrawal$/);
-    const side = outcome.outcome === 'blueforWithdrawal' ? 'BLUEFOR' : 'OPFOR';
-    const start = phasesOf(events).find((e) => e.side === side && e.to === 'withdrawing');
-    const done = phasesOf(events).find((e) => e.side === side && e.to === 'withdrawn');
-    expect(start && done).toBeTruthy();
-    const from = start?.atSeconds ?? 0;
-    const to = done?.atSeconds ?? 0;
-    const unit = run.forces.find((f) => f.side === side)?.unitId;
-    expect(
-      events.some(
-        (e) => e.type === 'unitOrdered' && e.unitId === unit && e.tick >= (start?.tick ?? 0),
-      ),
-    ).toBe(true);
-    expect(
-      firesOf(events).some((e) => e.side === side && e.atSeconds > from && e.atSeconds <= to),
-    ).toBe(false);
+  it('a withdrawing force moves away from the enemy through the movement engine, standing and on the move', () => {
+    // The light-load approach: forces run low and withdraw.
+    let withdrawals = 0;
+    for (const seed of [1, 2, 3]) {
+      const run = createFofRun({
+        ...headOn('open', seed),
+        config: config((c) => {
+          for (const w of c.fire.weapons) w.basicLoadRounds = w.id === 'rifle' ? 40 : 120;
+        }),
+      });
+      const centre = (side: string) => {
+        const own = run.sim.state.soldiers.filter((x) => x.side === side && x.status === 'active');
+        return {
+          x: own.reduce((sum, x) => sum + x.position.x, 0) / Math.max(1, own.length),
+          y: own.reduce((sum, x) => sum + x.position.y, 0) / Math.max(1, own.length),
+        };
+      };
+      const gap = (side: string) => {
+        const a = centre(side);
+        const b = centre(side === 'BLUEFOR' ? 'OPFOR' : 'BLUEFOR');
+        return Math.hypot(a.x - b.x, a.y - b.y);
+      };
+      const events: SimEvent[] = [];
+      const starts = new Map<string, { gap: number; tick: number }>();
+      const ends = new Map<string, number>();
+      while (!run.done) {
+        const step = run.step();
+        events.push(...step);
+        for (const e of phasesOf(step)) {
+          if (e.to === 'withdrawing' && !starts.has(e.side)) {
+            starts.set(e.side, { gap: gap(e.side), tick: e.tick });
+          }
+          if (e.to === 'withdrawn') ends.set(e.side, gap(e.side));
+        }
+        for (const x of run.sim.state.soldiers) {
+          if (x.status !== 'active') continue;
+          const member = run.sim.state.fof?.soldiers.find((m) => m.soldierId === x.id);
+          const phase = run.sim.state.fof?.forces.find((f) => f.side === x.side)?.phase;
+          if (phase === 'withdrawing' && member?.level === 'none')
+            expect(x.posture).toBe('standing');
+        }
+      }
+      checkEnded(run, events);
+      for (const [side, end] of ends) {
+        const start = starts.get(side);
+        expect(start).toBeDefined();
+        if (!start) continue;
+        withdrawals += 1;
+        const unit = run.forces.find((f) => f.side === side)?.unitId;
+        expect(
+          events.some((e) => e.type === 'unitOrdered' && e.unitId === unit && e.tick >= start.tick),
+        ).toBe(true);
+        expect(end).toBeGreaterThan(start.gap + 50);
+      }
+    }
+    expect(withdrawals).toBeGreaterThan(0);
   }, 60_000);
 });
 

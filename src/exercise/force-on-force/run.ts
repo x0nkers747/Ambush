@@ -22,7 +22,11 @@ import {
 } from '#sim';
 import { LAB_ORGANIZATIONS, labTerrain, type LabOrganization } from '../behavior-lab/run';
 import { urbanFeatures } from '../behavior-lab/urban';
-import { buildFormationSpec } from '../formations/formations';
+import {
+  buildFormationSpec,
+  formationsFor,
+  type FormationTemplate,
+} from '../formations/formations';
 import {
   instantiateOrganization,
   type OrganizationTemplate,
@@ -102,6 +106,19 @@ export interface FofRun {
   readonly outcome: FofOutcome | null;
 }
 
+export const LAB_ORGANIZATION_NAMES: Readonly<Record<LabOrganization, string>> = {
+  element3: '3-Marine element',
+  fireTeam: '4-Marine fire team',
+  squad: '13-Marine squad',
+};
+
+/** The formations an organization of the lab can take. */
+export function formationsForLab(organization: LabOrganization): readonly FormationTemplate[] {
+  const template = LAB_ORGANIZATIONS[organization];
+  const echelon = template.units.find((u) => u.parentId === null)?.echelon ?? '';
+  return formationsFor(echelon, template.slots.length);
+}
+
 /** The visibility class a terrain is observed under by default. */
 export function defaultVisibility(terrain: FofTerrainKind): VisibilityClass {
   return terrain;
@@ -136,10 +153,20 @@ function weaponCategory(template: OrganizationTemplate, slot: TemplateSlot): str
   return null;
 }
 
-/** Builds a run: both organizations loosely in formation at their starts, both ordered at tick 0. */
+/** Commands to give instead of the setup's own orders (replay, branching). */
+export interface FofReplay {
+  readonly commands: readonly SimCommand[];
+  readonly origins: readonly FofCommandOrigin[];
+}
+
+/**
+ * Builds a run: both organizations loosely in formation at their starts, both
+ * ordered at tick 0 (or, replaying, given `replay`'s commands instead).
+ */
 export function createFofRun(
   spec: FofRunSpec,
   terrain: TerrainDataset = fofTerrainFor(spec),
+  replay?: FofReplay,
 ): FofRun {
   const config = spec.config ?? FOF_DEFAULT_CONFIG;
   const built = (['BLUEFOR', 'OPFOR'] as const).map((side) =>
@@ -174,7 +201,12 @@ export function createFofRun(
     commands.push(command);
     origins.push(origin);
   };
-  for (const f of built) {
+  if (replay) {
+    replay.commands.forEach((c, i) => {
+      submit(c, replay.origins[i] ?? 'user');
+    });
+  }
+  for (const f of replay ? [] : built) {
     if (!f.spec.destination) continue;
     submit(
       {

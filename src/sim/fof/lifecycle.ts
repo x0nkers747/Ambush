@@ -153,7 +153,9 @@ function withdraw(context: FofContext, force: FofForce, reason: string): void {
  *
  * 1. an invariant failed: `invalid`;
  * 2. a force combat ineffective: the other side's victory (both: mutual);
- * 3. a force withdrawn: its withdrawal (both: mutual disengagement);
+ * 3. a force withdrawn: its withdrawal (both, or the other withdrawing too:
+ *    mutual disengagement);
+ * 3b. never in contact, both done moving for `disengagementSeconds`: `noContact`;
  * 4. after contact, neither in contact nor firing for `disengagementSeconds`:
  *    mutual disengagement;
  * 5. both nearly out of ammunition: stalemate (adjudicated);
@@ -194,13 +196,29 @@ export function adjudicate(context: FofContext): void {
     end(context, 'mutualDisengagement', 'decisive', 'both forces withdrew');
     return;
   }
-  for (const x of [a, b]) {
-    if (x.phase === 'withdrawn') {
+  for (const [x, y] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    if (x.phase !== 'withdrawn') continue;
+    if (y.phase === 'withdrawing') {
+      end(context, 'mutualDisengagement', 'decisive', 'both forces broke contact');
+    } else {
       end(context, withdrawal(x.side), 'decisive', `${x.side} withdrew`);
-      return;
     }
+    return;
   }
   const contactEver = a.contactCycles + b.contactCycles > 0;
+  // Both have done all their moving without ever coming into contact.
+  if (
+    !contactEver &&
+    a.phase === 'atObjective' &&
+    b.phase === 'atObjective' &&
+    t - Math.max(a.phaseSince, b.phaseSince) >= term.disengagementSeconds - 1e-9
+  ) {
+    end(context, 'noContact', 'decisive', 'both forces completed their movement without contact');
+    return;
+  }
   const quietSince = (f: FofForce) =>
     Math.max(
       f.lastContactAt ?? -Infinity,
@@ -228,7 +246,13 @@ export function adjudicate(context: FofContext): void {
   if (stalemate(context)) return;
   if (t >= term.maxDurationSeconds - 1e-9) {
     if (contactEver) end(context, 'timeLimit', 'adjudicated', 'maximum duration reached');
-    else end(context, 'noContact', 'decisive', 'maximum duration reached without contact');
+    else
+      end(
+        context,
+        'noContact',
+        'decisive',
+        'maximum duration reached; neither force came into contact',
+      );
   }
 }
 

@@ -12,7 +12,8 @@ import { soldierOf } from './system';
 import type { FofSoldier, FofTrack, SuppressionLevel } from './types';
 
 // Abstract fire (docs/behavior-lab/force-on-force/03 §5): a burst is a fire
-// event, not a bullet. A soldier whose force is in contact fires when his
+// event, not a bullet. A soldier whose force is in contact (or breaking
+// contact, firing on the move at what he can see) fires when his
 // next burst is due: aimed, at the nearest contact of his force he can see
 // (within his weapon's range and the rules of engagement), or else area fire
 // at the last known position of a contact seen recently. One draw decides
@@ -75,7 +76,9 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
 
 /** Phases in which a force's soldiers fire. */
 function firing(phase: string): boolean {
-  return phase === 'contact' || phase === 'engaged' || phase === 'holding';
+  return (
+    phase === 'contact' || phase === 'engaged' || phase === 'holding' || phase === 'withdrawing'
+  );
 }
 
 /**
@@ -101,13 +104,26 @@ export function resolveFire(context: FofContext): void {
     if (member.nextFireAt === null || member.nextFireAt > t + 1e-9) return;
     const shooter = soldierOf(context, member);
     const force = fof.forces[member.force];
-    if (shooter.status !== 'active' || !force || !firing(force.phase) || !member.reacted) {
+    if (
+      shooter.status !== 'active' ||
+      !force ||
+      !firing(force.phase) ||
+      (!member.reacted && force.phase !== 'withdrawing')
+    ) {
       member.nextFireAt = null;
       return;
     }
     const weapon =
       member.weapon === null ? undefined : fofWeapon(context.setup.config, member.weapon);
     if (!weapon || member.rounds <= 0) {
+      member.nextFireAt = null;
+      return;
+    }
+    // Breaking contact, a soldier keeps his last rounds (below the withdrawal share of his load).
+    if (
+      force.phase === 'withdrawing' &&
+      member.rounds < weapon.basicLoadRounds * context.setup.config.force.withdrawAmmunitionFraction
+    ) {
       member.nextFireAt = null;
       return;
     }
