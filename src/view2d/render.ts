@@ -90,10 +90,20 @@ export interface ContourTile {
   readonly bounds: Bounds;
   readonly minor: Path2D | null;
   readonly index: Path2D | null;
+  /** Line segments in `minor` and in `index`. */
+  readonly minorSegments: number;
+  readonly indexSegments: number;
 }
 
 /** Side of a contour tile in map metres. */
 const CONTOUR_TILE_M = 250;
+
+/**
+ * Most line segments stroked as one path. Chrome silently drops a stroke of
+ * about a million segments, and every drawing operation after it in the same
+ * batch, which is what a whole large battlefield's contours come to.
+ */
+export const MAX_CONTOUR_SEGMENTS_PER_STROKE = 100_000;
 
 /**
  * Canvas objects for one terrain, built once. Every feature carries its
@@ -184,7 +194,13 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
   const tileRows = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) / CONTOUR_TILE_M));
   const tiles = new Map<
     number,
-    { minor: Path2D | null; index: Path2D | null; box: [number, number, number, number] }
+    {
+      minor: Path2D | null;
+      index: Path2D | null;
+      minorSegments: number;
+      indexSegments: number;
+      box: [number, number, number, number];
+    }
   >();
   for (const { level, segments } of contourLines(terrain, intervals.minor)) {
     const isIndex = Math.round(level / intervals.minor) % (intervals.index / intervals.minor) === 0;
@@ -204,10 +220,18 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
       const key = tr * tileColumns + tc;
       let tile = tiles.get(key);
       if (!tile) {
-        tile = { minor: null, index: null, box: [x1, y1, x1, y1] };
+        tile = {
+          minor: null,
+          index: null,
+          minorSegments: 0,
+          indexSegments: 0,
+          box: [x1, y1, x1, y1],
+        };
         tiles.set(key, tile);
       }
       const path = isIndex ? (tile.index ??= new Path2D()) : (tile.minor ??= new Path2D());
+      if (isIndex) tile.indexSegments += 1;
+      else tile.minorSegments += 1;
       path.moveTo(x1, y1);
       path.lineTo(x2, y2);
       const box = tile.box;
@@ -219,9 +243,11 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
   }
   const contours = [...tiles.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([, { minor, index, box }]) => ({
+    .map(([, { minor, index, minorSegments, indexSegments, box }]) => ({
       minor,
       index,
+      minorSegments,
+      indexSegments,
       bounds: { minX: box[0], minY: box[1], maxX: box[2], maxY: box[3] },
     }));
   const {
@@ -418,7 +444,34 @@ export function drawFeatures(
   for (const phase of FEATURE_PHASES) phase(ctx, scene, layer, area);
 }
 
-/** Contours: the visible tiles joined into one path per weight, so overlapping translucent lines blend as in one stroke. */
+/**
+ * The visible tiles' paths joined into as few paths as `MAX_CONTOUR_SEGMENTS_PER_STROKE`
+ * allows (one, unless the view shows a great many contours), in tile order.
+ */
+export function contourBatches(
+  tiles: readonly ContourTile[],
+  weight: 'minor' | 'index',
+): { readonly tiles: readonly ContourTile[]; readonly segments: number }[] {
+  const batches: { tiles: ContourTile[]; segments: number }[] = [];
+  let current: { tiles: ContourTile[]; segments: number } | null = null;
+  for (const tile of tiles) {
+    const segments = weight === 'minor' ? tile.minorSegments : tile.indexSegments;
+    if (segments === 0) continue;
+    if (!current || current.segments + segments > MAX_CONTOUR_SEGMENTS_PER_STROKE) {
+      current = { tiles: [], segments: 0 };
+      batches.push(current);
+    }
+    current.tiles.push(tile);
+    current.segments += segments;
+  }
+  return batches;
+}
+
+/**
+ * Contours: the visible tiles joined into one path per weight, so overlapping
+ * translucent lines blend as in one stroke (in a few, on the largest views:
+ * `contourBatches`).
+ */
 function drawContours(
   ctx: CanvasRenderingContext2D,
   scene: MapScene,
@@ -427,26 +480,27 @@ function drawContours(
 ): void {
   const mpp = scene.camera.metersPerPixel;
   const dpr = ctx.getTransform().a;
-  const minor = new Path2D();
-  const index = new Path2D();
-  let any = false;
-  for (const tile of layer.contours) {
-    if (!overlaps(tile.bounds, area, 2 * mpp)) continue;
-    if (tile.minor) minor.addPath(tile.minor);
-    if (tile.index) index.addPath(tile.index);
-    any = true;
-  }
-  if (!any) return;
+  const visible = layer.contours.filter((tile) => overlaps(tile.bounds, area, 2 * mpp));
+  if (visible.length === 0) return;
   ctx.save();
   clipToTerrain(ctx, scene, layer);
   useMapTransform(ctx, scene, dpr);
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = COLORS.contour;
-  ctx.lineWidth = 0.8 * mpp;
-  ctx.stroke(minor);
-  ctx.strokeStyle = COLORS.indexContour;
-  ctx.lineWidth = 1.4 * mpp;
-  ctx.stroke(index);
+  for (const [weight, style, width] of [
+    ['minor', COLORS.contour, 0.8],
+    ['index', COLORS.indexContour, 1.4],
+  ] as const) {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width * mpp;
+    for (const batch of contourBatches(visible, weight)) {
+      const path = new Path2D();
+      for (const tile of batch.tiles) {
+        const tilePath = tile[weight];
+        if (tilePath) path.addPath(tilePath);
+      }
+      ctx.stroke(path);
+    }
+  }
   ctx.restore();
 }
 
