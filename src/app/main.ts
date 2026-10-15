@@ -5,14 +5,7 @@ import {
   openIndexedDbStore,
   type BattlefieldStore,
 } from '#acquire';
-import {
-  buildPreviewScenario,
-  DEMO_SCENARIO,
-  defaultScenarioDefinition,
-  parseScenarioDefinition,
-  scenarioProblems,
-  type ScenarioDefinition,
-} from '#exercise';
+import { buildPreviewScenario, defaultScenarioDefinition } from '#exercise';
 import {
   battleScenarioId,
   newBattleScenario,
@@ -28,7 +21,6 @@ import type { PreviewData } from './battlefield-preview';
 import { installFeedbackButton } from './feedback';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
-import { demoInfoHtml, startWorkspace } from './workspace';
 import { battleOverlay } from './battle/overlay';
 import { battleNextBlocker } from './battle/planner';
 import { startBattlePage } from './battle/page';
@@ -37,8 +29,7 @@ import { startBattlePage } from './battle/page';
 // selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a
 // battlefield's battle (Scenario Setup, BLUEFOR Planning, Combat and the
 // After-Action Review, docs/constructive-simulation/03) share another
-// (battle/page.ts). The legacy ambush exercise keeps its own page
-// (workspace.ts) at its own addresses until Combat replaces it. Each page has its own address
+// (battle/page.ts). Each page has its own address
 // (stages.ts). Moving between the two happens in place, without a reload:
 // the page being left stops what it started, and the tactical map of the
 // battlefield is handed over, so it is never rebuilt. The browser's Back and
@@ -82,50 +73,6 @@ function go(stage: Stage): void {
   }
   window.location.hash = hash;
   window.location.reload();
-}
-
-/**
- * The battlefield's scenario: the saved one when valid, otherwise a new
- * default (an invalid saved scenario is reported, not silently replaced).
- */
-async function loadScenario(
-  store: BattlefieldStore,
-  pkg: BattlefieldPackage,
-): Promise<{ definition: ScenarioDefinition; notice: string | null }> {
-  const saved = await store.listScenarios(pkg.id);
-  for (const data of saved) {
-    // The battle's scenario (version 2) is the battle page's.
-    if ((data as { schemaVersion?: unknown } | null)?.schemaVersion === 2) continue;
-    try {
-      const definition = parseScenarioDefinition(data);
-      if (definition.battlefieldId !== pkg.id) continue;
-      // Planned on another model of the ground (docs/adr/0032): kept, checked
-      // against this one, and the trainee told; never changed silently.
-      const model = terrainModelId(pkg.terrain);
-      if (definition.terrainModel !== model) {
-        const problems = scenarioProblems(pkg.terrain, definition);
-        return {
-          definition: { ...definition, terrainModel: model },
-          notice: `This scenario was planned on an earlier model of the ground. The ground is now modelled to the metre: roads level across and smoothed along, junctions blended, bridges with their own decks, building pads, ditches and stream channels, and water beds; slopes, cover and sight lines can differ. ${
-            problems.length > 0
-              ? 'Some of its positions are no longer valid: check the ORP and the OPFOR route.'
-              : 'Check the ORP and the OPFOR route.'
-          }`,
-        };
-      }
-      return { definition, notice: null };
-    } catch (error) {
-      return {
-        definition: defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false }),
-        notice: `The saved scenario could not be read and was replaced by a new one: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-  // A new scenario: the trainee places the ORP (and the OPFOR) in stage 2.
-  return {
-    definition: defaultScenarioDefinition(pkg.terrain, pkg.id, undefined, { withOrp: false }),
-    notice: null,
-  };
 }
 
 /**
@@ -330,46 +277,10 @@ async function main(root: HTMLElement): Promise<void> {
         setAddress: (s) => {
           setAddress(address(s));
         },
-        openLegacy: () => {
-          go({ kind: 'edit', battlefieldId: id });
-        },
       });
     } catch (error) {
       previous?.dispose();
       map?.dispose();
-      showFatal(root, error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  /** The legacy ambush exercise of a saved battlefield (docs/adr/0025). */
-  const showAmbush = async (id: string, kind: 'edit' | 'play'): Promise<void> => {
-    try {
-      const pkg = await openBattlefield(store, id);
-      const { definition, notice } = await loadScenario(store, pkg);
-      const save = (d: ScenarioDefinition) => store.putScenario(pkg.id, d.id, d);
-      await save(definition);
-      const playable = scenarioProblems(pkg.terrain, definition).length === 0;
-      const initialStage = kind === 'play' && playable ? 'bluefor' : 'scenario';
-      startWorkspace(root, {
-        title: `${pkg.name} · ambush exercise`,
-        terrain: pkg.terrain,
-        scenario: { kind: 'editable', definition, save },
-        attribution: pkg.attribution,
-        describePoint: describePointFor(pkg),
-        infoHtml: battlefieldInfoHtml(pkg, pkg.quality),
-        initialStage,
-        notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
-        map: null,
-        leave: (m) => {
-          void loadBattle(store, pkg).then(({ definition: battle }) => {
-            backToSelection(pkg, battle, m);
-          });
-        },
-        setAddress: (s) => {
-          setAddress({ kind: s === 'bluefor' ? 'play' : 'edit', battlefieldId: pkg.id });
-        },
-      });
-    } catch (error) {
       showFatal(root, error instanceof Error ? error.message : String(error));
     }
   };
@@ -380,27 +291,6 @@ async function main(root: HTMLElement): Promise<void> {
       showSelection(stage.selected === undefined ? {} : { selected: stage.selected });
       return;
 
-    case 'demo':
-      startWorkspace(root, {
-        title: 'Demo battlefield',
-        terrain: DEMO_SCENARIO.terrain,
-        scenario: { kind: 'fixed', scenario: DEMO_SCENARIO },
-        attribution: [],
-        infoHtml: demoInfoHtml(DEMO_SCENARIO),
-        initialStage: stage.play === true ? 'bluefor' : 'scenario',
-        // Terrain selection does not list the demo (it is reached only by its
-        // address), so its map is not handed on.
-        leave: (map) => {
-          map.dispose();
-          pushAddress({ kind: 'select' });
-          showSelection({});
-        },
-        setAddress: (s) => {
-          setAddress({ kind: 'demo', play: s === 'bluefor' });
-        },
-      });
-      return;
-
     case 'setup':
     case 'plan':
       await showBattle(
@@ -409,11 +299,6 @@ async function main(root: HTMLElement): Promise<void> {
         null,
         null,
       );
-      return;
-
-    case 'edit':
-    case 'play':
-      await showAmbush(stage.battlefieldId, stage.kind);
       return;
   }
 }

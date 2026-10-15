@@ -2,12 +2,12 @@
 
 - Part of: [Constructive simulation](README.md)
 
-| Milestone | Scope                                                                         | State | Commit                                         |
-| --------- | ----------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
-| A         | Generalized forces, orders and plans, battle builder, architecture            | Done  | e6957eb                                        |
-| B         | Scenario Setup and BLUEFOR Planning UI, schema v2 and v1 migration, save/load | Done  | acae397                                        |
-| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Done  | 0d1c567                                        |
-| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | Done  | see git log: `feat(constructive): milestone D` |
+| Milestone | Scope                                                                         | State | Commit  |
+| --------- | ----------------------------------------------------------------------------- | ----- | ------- |
+| A         | Generalized forces, orders and plans, battle builder, architecture            | Done  | e6957eb |
+| B         | Scenario Setup and BLUEFOR Planning UI, schema v2 and v1 migration, save/load | Done  | acae397 |
+| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Done  | 0d1c567 |
+| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | Done  | cdac6f5 |
 
 ## Milestone A: generalized forces, orders and architecture
 
@@ -240,9 +240,35 @@ Validation:
 
 ### Not done
 
-- **The legacy ambush exercise** (`#edit/<id>`, `#play/<id>`, `#demo`) is
-  still reachable; its replacement now works end to end. Retiring it
-  (removing its page, its scoring and its tests) is a separate decision.
+- **The legacy ambush exercise** was still reachable at the end of
+  Milestone D. It has since been retired (see below).
 - **The simulation runs on the page's thread.** A worker, as the
   Force-on-Force Lab has, would let 12 squads on real ground run faster than
   about 10–20× without sharing frames with drawing.
+
+## After Milestone D
+
+### The ambush exercise retired
+
+The five-stage battle workflow replaces the ambush exercise.
+
+- **Deleted:**
+  - the exercise's page (`src/app/workspace.ts`) with its stage
+    controllers: `scenario-stage.ts`, `exercise-stage.ts`, `roster.ts`,
+    `carry-plans.ts`;
+  - the AAR scoring (`src/exercise/scoring.ts`);
+  - their tests, and the page's styles.
+- **Old addresses:**
+  - `#edit/<id>` now leads to Scenario Setup;
+  - `#play/<id>` leads to BLUEFOR Planning;
+  - `#demo` leads to terrain selection.
+- **Old scenarios:** a battlefield's ambush scenario (version 1) is still
+  read, and converted to a battle when first opened.
+- **Simplified:** the workflow's gates are the pages' rules alone
+  (`WorkflowRules`).
+- **What remains, and why:** the exercise engine
+  (`src/exercise/exercise.ts` and its scenario, ORP, kill-zone and combat
+  v1 modules). The 2D map and the 3D view still draw the terrain through an
+  exercise (`terrainOnlyExercise`), and the terrain preview builds one too.
+  Removing it means giving both renderers another source for the terrain
+  and their soldiers.

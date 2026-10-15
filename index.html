@@ -398,42 +398,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .banner {
-        position: absolute;
-        top: 14px;
-        left: 50%;
-        transform: translateX(-50%);
-        max-width: 80%;
-        padding: 8px 20px;
-        border-radius: 6px;
-        text-align: center;
-        background: rgba(20, 24, 28, 0.88);
-        border: 2px solid #9fd17a;
-        pointer-events: none;
-      }
-      /* With the floating simulation panel shown, the banner is centred between
-         the north arrow (to 50 px, plus an 8 px gap) and the panel (284 px wide,
-         14 px from the edge, plus a 12 px gap). */
-      .ws-canvas:has(.sim-float:not([hidden])) .banner {
-        left: calc(50% - 126px);
-        max-width: calc(100% - 384px);
-      }
-      .banner[data-kind='triggered'] {
-        border-color: var(--red);
-        background: rgba(60, 12, 10, 0.9);
-      }
-      .banner[data-kind='complete'] {
-        border-color: #c9ccd1;
-      }
-      .banner-title {
-        font-size: 18px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        color: #ff8a80;
-      }
-      .banner-title.ready {
-        color: #9fd17a;
-      }
       .toast {
         position: absolute;
         bottom: 18px;
@@ -504,16 +468,6 @@
       .tool-grid .tool:last-child:nth-child(odd) {
         grid-column: 1 / -1;
       }
-      /* A tool button with a small action beside it (the kill zone and its bin). */
-      .tool-with-action {
-        display: flex;
-        gap: 4px;
-        min-width: 0;
-      }
-      .tool-with-action .tool {
-        flex: 1;
-        min-width: 0;
-      }
       .tool-row {
         display: flex;
         gap: 6px;
@@ -549,9 +503,6 @@
       .primary-action .reason {
         margin-bottom: 0;
       }
-      .msg {
-        margin: 8px 0 0;
-      }
       dl.kv {
         display: grid;
         grid-template-columns: max-content 1fr;
@@ -581,10 +532,6 @@
       .selection:empty {
         display: none;
       }
-      .soldier-title {
-        font-size: 14px;
-        font-weight: 700;
-      }
       .facing {
         font-variant-numeric: tabular-nums;
         font-weight: 700;
@@ -594,67 +541,11 @@
         flex-wrap: wrap;
         gap: 6px;
       }
-      ol.team-members,
-      .route-list {
-        margin: 4px 0;
-        padding-left: 18px;
-      }
-      .coming-soon {
-        font-size: 16px;
-        font-weight: 700;
-        color: var(--amber);
-      }
-
-      /* Simulation controls. */
-      /* The simulation controls float in the map's top-right corner, so they
-         are always to hand (the north arrow is in the top-left corner). */
-      .sim-float {
-        position: absolute;
-        top: 10px;
-        right: 14px;
-        z-index: 2;
-        width: 284px;
-        max-width: calc(100% - 80px);
-        padding: 10px 12px 4px;
-        background: rgb(27 31 35 / 0.94);
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
-      }
-      .sim-float .hint:empty {
-        display: none;
-      }
-      .sim-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 8px;
-      }
-      /* Move, Instant, Pause and Resume share the panel's width. */
-      .sim-row > button {
-        flex: 1 1 0;
-        min-width: 0;
-        padding-left: 4px;
-        padding-right: 4px;
-      }
       .clock {
         font-size: 16px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
         min-width: 96px;
-      }
-      .sim-state {
-        color: var(--muted);
-      }
-      .sim-state[data-phase='bluforOccupation'],
-      .sim-state[data-phase='opforApproach'] {
-        color: var(--green);
-      }
-      .sim-state[data-phase='paused'] {
-        color: var(--amber);
-      }
-      .sim-state[data-phase='engagement'] {
-        color: #ff8a80;
       }
       .speed {
         display: flex;
@@ -670,11 +561,6 @@
       .replay {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-      }
-      .replay-time {
-        display: flex;
-        align-items: baseline;
         gap: 8px;
       }
       .replay-scrub {
@@ -694,90 +580,6 @@
       .replay-buttons [data-replay='play'] {
         flex: 1.6;
         font-weight: 600;
-      }
-      .replay-follow {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: var(--muted);
-      }
-      .replay-unit .sel-name {
-        margin: 2px 0 4px;
-        font-weight: 600;
-      }
-
-      /* The AAR scorecard (docs/adr/0027). */
-      .score-head {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-        margin-bottom: 6px;
-      }
-      .score-total {
-        font-size: 28px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-      }
-      .score-grade {
-        margin-left: auto;
-        min-width: 34px;
-        padding: 2px 8px;
-        border-radius: 4px;
-        text-align: center;
-        font-size: 18px;
-        font-weight: 700;
-        background: var(--panel-2);
-        border: 1px solid var(--line);
-      }
-      .score-grade[data-grade='A'],
-      .score-grade[data-grade='B'] {
-        color: var(--green);
-      }
-      .score-grade[data-grade='C'],
-      .score-grade[data-grade='D'] {
-        color: var(--amber);
-      }
-      .score-grade[data-grade='F'] {
-        color: var(--red);
-      }
-      .score-cats {
-        list-style: none;
-        margin: 0 0 8px;
-        padding: 0;
-      }
-      .score-cat {
-        margin: 0 0 8px;
-      }
-      .score-cat-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .score-pts {
-        font-variant-numeric: tabular-nums;
-        color: var(--muted);
-      }
-      .score-bar {
-        height: 5px;
-        margin: 3px 0 2px;
-        border-radius: 3px;
-        background: var(--panel-2);
-        overflow: hidden;
-      }
-      .score-bar i {
-        display: block;
-        height: 100%;
-        background: var(--blue);
-      }
-      .score-cat .hint {
-        margin: 2px 0 0;
-      }
-      .scorecard h3 {
-        margin: 10px 0 6px;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
       }
       details.rec {
         margin: 0 0 6px;
@@ -802,61 +604,9 @@
       details.rec p {
         margin: 6px 0;
       }
-
-      /* OPFOR & combat. */
-      .combat-actions button {
-        width: 100%;
-      }
       button.action.ready[data-ui='start-opfor'] {
         background: #5a2a24;
         border-color: var(--red);
-      }
-      button.trigger-ambush {
-        margin-top: 4px;
-        min-height: 36px;
-        font-weight: 800;
-        letter-spacing: 0.06em;
-        background: var(--red-strong);
-        border: 2px solid #ff8a80;
-        color: #fff;
-      }
-      button.trigger-ambush:hover:not(:disabled) {
-        background: #cf3328;
-      }
-      button.trigger-ambush:disabled {
-        background: #3a2321;
-      }
-      button.trigger-ambush[data-state='queued'],
-      button.trigger-ambush[data-state='triggered'] {
-        opacity: 1;
-        background: #5a1612;
-        border-style: dashed;
-      }
-      .readouts {
-        margin-top: 8px;
-        font-variant-numeric: tabular-nums;
-      }
-      table.engagement-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-        margin: 4px 0 8px;
-        font-variant-numeric: tabular-nums;
-      }
-      table.engagement-table th {
-        text-align: left;
-        font-weight: normal;
-        color: var(--muted);
-      }
-      table.engagement-table td {
-        text-align: right;
-      }
-      table.engagement-table.soldiers td:last-child {
-        text-align: left;
-        padding-left: 8px;
-      }
-      table.engagement-table tr[data-side='OPFOR'] th {
-        color: #ff8a80;
       }
       .events {
         margin: 0;
@@ -1231,86 +981,6 @@
       .battle .mk-row.past {
         opacity: 0.6;
       }
-
-      /* Roster. */
-      .roster-unit {
-        margin-left: calc(var(--depth) * 8px);
-      }
-      .roster-unit-name {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        margin: 4px 0 1px;
-        color: var(--muted);
-        font-size: 11px;
-      }
-      button.roster-unit-name.team {
-        width: 100%;
-        padding: 2px 6px;
-        border: 1px solid transparent;
-        border-radius: 2px;
-        background: transparent;
-        font-weight: 600;
-        text-align: left;
-        color: var(--text);
-      }
-      button.roster-unit-name.team:hover {
-        border-color: var(--line);
-      }
-      button.roster-unit-name.team[aria-pressed='true'] {
-        border-color: var(--blue);
-        background: var(--blue-bg);
-        color: #fff;
-      }
-      .roster-unit.team-selected {
-        border-left: 2px solid var(--blue);
-      }
-      .unit-symbol svg {
-        display: block;
-        height: 13px;
-        width: auto;
-      }
-      .roster-row {
-        display: grid;
-        grid-template-columns: 15px 34px 1fr auto auto;
-        gap: 6px;
-        align-items: baseline;
-        width: 100%;
-        margin: 0;
-        padding: 2px 6px;
-        border-color: transparent;
-        background: transparent;
-        text-align: left;
-        font-size: 12px;
-        border-radius: 2px;
-      }
-      .roster-row .icon {
-        align-self: center;
-      }
-      .roster-row .icon svg {
-        display: block;
-      }
-      .roster-row .abbr {
-        font-weight: 700;
-      }
-      .roster-row .role {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--muted);
-      }
-      .roster-row[aria-pressed='true'] .role {
-        color: #fff;
-      }
-      .roster-row .sid {
-        font-variant-numeric: tabular-nums;
-        color: var(--muted);
-      }
-      .roster-row .st {
-        font-size: 11px;
-        min-width: 70px;
-        text-align: right;
-      }
       .st[data-status='moving'] {
         color: var(--amber);
       }
@@ -1319,10 +989,6 @@
       }
       .st[data-status='destinationAssigned'] {
         color: var(--blue);
-      }
-      .roster-source {
-        margin: 6px 0 0;
-        font-size: 11px;
       }
 
       /* Stage 1: terrain selection, in the same layout as the other stages. */

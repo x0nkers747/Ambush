@@ -27,7 +27,7 @@ import {
 } from '#geo';
 import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
 import { createToast, escapeHtml, headerHtml, TRASH_ICON, wireHeader } from './shell';
-import { factsRules, type WorkflowFacts } from './workflow';
+import type { WorkflowRules } from './workflow';
 
 // Stage 1, terrain selection (docs/adr/0014, docs/adr/0025): find a place or
 // enter a position and generate a new 5 km battlefield, or select a saved
@@ -305,12 +305,13 @@ export function startBattlefieldSelection(
   /** The battlefield whose map was handed back, until the saved list confirms the selection. */
   let adopting = o.adopt?.id ?? null;
 
-  const facts: WorkflowFacts = {
-    battlefieldSelected: () => selection.kind === 'saved',
-    scenarioProblems: () => [],
-    startOpforProblems: () => [],
-    opforStarted: () => false,
-    engagementComplete: () => false,
+  /** Terrain selection's gate: a saved battlefield selected. */
+  const rules: WorkflowRules = {
+    next: () =>
+      selection.kind === 'saved'
+        ? null
+        : 'Select a battlefield first: a saved one, or generate a new one.',
+    back: () => null,
   };
   const header = wireHeader(app, {
     go: () => {
@@ -415,7 +416,7 @@ export function startBattlefieldSelection(
     ui('placeholder').hidden = id !== null;
     if (next.kind !== 'location') show('error', null);
     markSelected();
-    header.update('terrain', factsRules(facts));
+    header.update('terrain', rules);
   };
 
   const setLocation = (position: LatLon, name: string | null) => {
@@ -757,7 +758,7 @@ export function startBattlefieldSelection(
     show('preview', previewHtml());
     updatePrimary();
     ui('placeholder').hidden = true;
-    header.update('terrain', factsRules(facts));
+    header.update('terrain', rules);
   } else select({ kind: 'none' });
   void refresh(o.adopt?.id ?? o.selected);
 

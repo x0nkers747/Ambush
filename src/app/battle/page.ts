@@ -92,8 +92,6 @@ export interface BattlePageOptions {
   /** Back to terrain selection, handing the map over (the page has stopped by then). */
   readonly leave: (map: TacticalMap) => void;
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
-  /** Opens the battlefield's legacy ambush exercise instead (until Combat replaces it). */
-  readonly openLegacy?: () => void;
 }
 
 /**
@@ -192,7 +190,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     <details class="sec collapsible" data-sec="info">
       <summary>Battlefield Information</summary>
       <div class="bf-info">${o.infoHtml}</div>
-      ${o.openLegacy ? '<p class="hint">The earlier ambush exercise (one squad, the ORP, the kill zone) is still available until Combat replaces it. <button class="link" data-act="legacy">Open the ambush exercise</button></p>' : ''}
     </details>
   </aside>`;
 
@@ -987,10 +984,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             planner.select(null);
           },
         });
-        return;
-      case 'legacy':
-        stop();
-        o.openLegacy?.();
         return;
     }
   });
