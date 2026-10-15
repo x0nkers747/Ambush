@@ -44,6 +44,8 @@ Most are [E]. Doctrine gives principles, not tolerances (02 §6).
 | —   | 3-Marine element             | Every applicable scenario above with a 3-soldier team         | As above                                                                                                                                                                             |
 | —   | Completion                   | All scenarios                                                 | Task ends with `arrived`; no member moves faster than 0.05 m/s after its latch until the next order (no endless corrections)                                                         |
 
+Scenarios 1, 4, 5 and 6 also run through the lab's seeded urban district (`terrain: 'urban'`): see [implementation notes](implementation.md#after-review-the-urban-district-and-obstacles) for what is measured there and the tests (`urban.test.ts`).
+
 **Priorities.**
 
 - **The first implementation must pass 1–5** for the squad and the 3-Marine element.

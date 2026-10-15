@@ -15,6 +15,7 @@ import {
   type LabScenarioId,
 } from '#exercise/behavior-lab';
 import {
+  nearestClearPoint,
   orgUnitId,
   soldierId,
   surfaceHeightAt,
@@ -34,6 +35,7 @@ import {
   STATE_TEXT,
   type OverlayOptions,
 } from './overlays';
+import { createCityLayer, type CityLayer } from './city';
 import { createLabScene } from './scene';
 import {
   createLabSession,
@@ -63,6 +65,7 @@ interface Settings {
   pace: number;
   seed: number;
   tickRateHz: number;
+  terrain: 'open' | 'urban';
 }
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16] as const;
@@ -95,10 +98,11 @@ function specOf(settings: Settings): LabRunSpec {
     seed: settings.seed,
     tickRateHz: settings.tickRateHz,
   };
+  const terrain = { terrain: settings.terrain };
   if (settings.scenario === 'free') {
-    return { ...scenarioSpec('s1-straight', options), waypoints: [] };
+    return { ...scenarioSpec('s1-straight', options), waypoints: [], ...terrain };
   }
-  return scenarioSpec(settings.scenario, options);
+  return { ...scenarioSpec(settings.scenario, options), ...terrain };
 }
 
 /** Starts the lab in `root`; returns a function that stops it. */
@@ -119,6 +123,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     <div class="group speed">${SPEEDS.map((s) => `<button data-speed="${String(s)}">${s < 1 ? (s === 0.25 ? '¼' : '½') : String(s)}×</button>`).join('')}</div>
     <span class="time" data-o="time">T+ 00:00.0</span>
     <span class="grow"></span>
+    <label>Ground <select data-i="ground" style="width:110px"><option value="urban">Urban district</option><option value="open">Open ground</option></select></label>
     <label>Seed <input data-i="seed" type="number" min="0" step="1" style="width:72px"></label>
     <label>Tick rate <select data-i="rate" style="width:84px">${RATES.map((r) => `<option value="${String(r)}">${String(r)} Hz</option>`).join('')}</select></label>
   </header>
@@ -217,6 +222,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     pace: 1.4,
     seed: Number(params.get('seed') ?? 1),
     tickRateHz: 30,
+    terrain: params.get('ground') === 'open' ? 'open' : 'urban',
   };
   settings.formation = params.get('formation') ?? DEFAULT_FORMATION[settings.organization];
   let overlays: OverlayOptions = { ...DEFAULT_OVERLAYS };
@@ -232,6 +238,17 @@ export function startBehaviorLab(root: HTMLElement): () => void {
   const scene = createLabScene(canvas, HALF_M, ELEVATION_M);
   const characters = createCharacterLayer(new URL('characters/', document.baseURI).href);
   scene.scene.add(characters.group);
+  let city: { terrain: unknown; layer: CityLayer } | null = null;
+  const showCity = () => {
+    const terrain = session.view.sim.world.terrain;
+    if (city?.terrain === terrain) return;
+    if (city) {
+      scene.scene.remove(city.layer.group);
+      city.layer.dispose();
+    }
+    city = { terrain, layer: createCityLayer(terrain, ELEVATION_M) };
+    scene.scene.add(city.layer.group);
+  };
   scene.camera.setPose(new Vector3(0, ELEVATION_M, -60), new Vector3(70, ELEVATION_M + 70, 40));
 
   // --- the run ---------------------------------------------------------------
@@ -320,6 +337,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     input('pace').value = String(settings.pace);
     output('pace').textContent = `${settings.pace.toFixed(2)} m/s`;
     input('seed').value = String(settings.seed);
+    input('ground').value = settings.terrain;
     input('rate').value = String(settings.tickRateHz);
     const scenario = LAB_SCENARIOS.find((s) => s.id === settings.scenario);
     output('scenario-hint').textContent = scenario
@@ -400,6 +418,11 @@ export function startBehaviorLab(root: HTMLElement): () => void {
   input('seed').addEventListener('change', (e) => {
     changed(() => {
       settings.seed = Math.max(0, Math.floor(Number((e.target as HTMLInputElement).value) || 0));
+    });
+  });
+  input('ground').addEventListener('change', (e) => {
+    changed(() => {
+      settings.terrain = (e.target as HTMLSelectElement).value === 'open' ? 'open' : 'urban';
     });
   });
   input('rate').addEventListener('change', (e) => {
@@ -521,9 +544,12 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     if (mode === 'destination' || mode === 'displace') {
       const point = projection.toWorld(screen);
       if (!point) return;
-      if (mode === 'destination') order(point);
-      else disturb({ kind: 'goTo', x: point.x, y: point.y });
-      if (mode === 'displace') destination = point;
+      // A click on a building or a car: the nearest point a soldier can stand on.
+      const clear = nearestClearPoint(session.head.sim.world.terrain, point);
+      if (!clear) return;
+      if (mode === 'destination') order(clear);
+      else disturb({ kind: 'goTo', x: clear.x, y: clear.y });
+      if (mode === 'displace') destination = clear;
       mode = 'select';
       return;
     }
@@ -591,6 +617,9 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       return `Sent away by a disturbance: walking to E ${a.override.x.toFixed(0)} N ${a.override.y.toFixed(0)}, then he rejoins his slot.`;
     }
     if (a.latched) return 'In position at the destination: stopped, facing the final direction.';
+    if (d.state === 'detouring') {
+      return `Going round an obstacle: the straight way to his slot (${d.error.toFixed(1)} m away) is blocked, so he follows a short path round it (purple), re-checked every half second.`;
+    }
     if (d.state === 'fallingIn') {
       return `Falling in: the leader has stepped off and he is making for his slot (${d.error.toFixed(1)} m away) on the move, up to ${d.cap.toFixed(2)} m/s. The unit keeps an easier pace until everyone has fallen in.`;
     }
@@ -912,6 +941,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
       });
     }
     output('loading').hidden = characters.ready;
+    showCity();
     scene.render();
     const ctx = overlay.getContext('2d');
     if (ctx) {
@@ -1044,6 +1074,7 @@ export function startBehaviorLab(root: HTMLElement): () => void {
     observer.disconnect();
     window.removeEventListener('keydown', onKey);
     characters.dispose();
+    city?.layer.dispose();
     scene.dispose();
     style.remove();
   };

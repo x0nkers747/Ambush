@@ -414,3 +414,64 @@ Scenarios 1–5 are unchanged in substance. They start already roughly in format
 - The drop-down mid-move replaced the task with a continuing one. The column formed over about 30 s while the squad kept walking.
 - The run arrived with no collisions, nobody stuck and no stop.
 - **Replay & verify** matched all 233 seconds.
+
+## After review: the urban district and obstacles
+
+**Review note** (2026-10-14): "add obstacles that units will need to path around to get into formation. If they can't get to the exact required position because of an obstacle, they should just get as close as possible … many random objects … kind of emulating an urban area."
+
+This goes past the M3 gate into the obstacle work the roadmap put in M4 (scenarios 6–7). It does it the simple way: each Marine finds his own way round. There is no formation-level splitting or file mode yet.
+
+**What changed.**
+
+1. **The district (`exercise/behavior-lab/urban.ts`).** A seeded, synthetic town of about 1,300 objects for seed 1, 960 m square: a street grid (72 × 60 m blocks, 14 m streets) with:
+   - houses along the blocks, walled yards and sheds;
+   - blocks of larger buildings;
+   - open squares with containers;
+   - parked cars and the odd container in the streets.
+
+   Every object is a terrain building (a rectangle footprint and a height). Navigation, clearance and the soldiers' standing checks treat it as one. The start and the waypoints are kept clear for 34 m. The same seed always gives the same town.
+
+2. **Kernel: slots out of reach (`slots.ts`).** A slot whose point is not in the anchor's navigation area moves to the nearest point that is. That covers a slot inside a building, against one, or in a yard sealed off by walls. The slot keeps no velocity there, so the Marine stands as close as he can get rather than pushing into the wall.
+3. **Kernel: going round (`system.ts`).** Each Marine checks the straight way to his slot every `detourCheckSeconds` (0.25 s, staggered by slot), and at once if his next 1.5 s of walking is blocked.
+   - If the way is blocked, he plans a way round with the navigation's A* (`planPath`). He keeps that way while its next point is in sight and its end is within 8 m of his moving slot. He drops it once the straight way is open.
+   - If no way exists, he goes back to the last point he could route from.
+   - Movement itself never enters a building or water: a step into an obstacle's clearance slides along it (rotated tries up to 75°, slower the more it turns), or stops.
+   - A Marine found stuck (no progress, slow) is taken as in position (latched), so a unit whose slot is out of reach still completes.
+4. **Kernel: a floor on the bend slowdown (`minBendPace`, 0.5 × pace).** Round a tight corner in town, the wide formation's bend limit had the anchor crawl at 0.03 m/s for minutes (one run took 1,231 s). Now the outer Marines fall behind on the bend and catch up.
+5. **Lab.**
+   - **Ground** selector: urban district (the default) or open ground (`?ground=open`).
+   - The town is drawn as instanced boxes per kind, with asphalt streets.
+   - Clicked destinations snap to clear ground.
+   - A detour is drawn in purple; the agent state reads "going round".
+
+**Measurements** (10 seeds each, urban; the worst over the seeds; `inside` = Marines inside a building at the end):
+
+| Organization | Scenario    | Arrived | Collisions | Stuck | Straggling | Steady max error (m) | Inside |
+| ------------ | ----------- | ------: | ---------: | ----: | ---------: | -------------------: | -----: |
+| squad        | 1 straight  |   10/10 |          3 |     7 |          4 |                 53.9 |      0 |
+| squad        | 4 turn      |   10/10 |          3 |     8 |          3 |                 44.3 |      0 |
+| squad        | 6 fall in   |   10/10 |          2 |     5 |          2 |                 39.8 |      0 |
+| squad        | 5 waypoints |   10/10 |          5 |    10 |          4 |                 46.3 |      0 |
+| element3     | 1 straight  |   10/10 |          0 |     2 |          0 |                 33.1 |      0 |
+| element3     | 4 turn      |   10/10 |          0 |     1 |          0 |                 31.2 |      0 |
+| element3     | 6 fall in   |   10/10 |          0 |     1 |          0 |                 18.2 |      0 |
+| element3     | 5 waypoints |   10/10 |          0 |     2 |          0 |                 31.2 |      0 |
+
+- Open ground is unchanged: the 50-seed sweep is still 700/700 accepted, with no collisions and no stuck Marines.
+- Simulation CPU in town is 0.2–0.4 ms per tick for the squad (p95 about 0.7 ms). The first tick on new ground takes about 15 ms, to build the navigation grid. The browser lab runs at 60 fps.
+- The large errors are expected: a 13-Marine wedge 40 m wide does not fit in a 14 m street, so its outer slots fall in buildings and their Marines stand at the nearest clear point. The acceptance thresholds are for open ground and are not applied in town.
+
+**Tests (`urban.test.ts`):**
+
+- the district is the same for a seed, dense, of every kind, and clear round kept points;
+- squad s4/s5 and element s5 through town arrive, with nobody ever (checked every tick) inside a building or water;
+- the element through town has no collisions;
+- a house built on a Marine's final slot: he ends outside it, at its wall;
+- town runs are bit-identical at 30 and 120 Hz.
+
+**Limitations.**
+
+- Marines go round obstacles one by one, so a squad in a street becomes a loose crowd rather than a deliberate file. The urban collision counts (up to 5 for the squad) come from Marines meeting at corners.
+- Formation-level adaptation (narrowing to the street, file through gaps) is the M4 work it should become.
+- Brushing along a wall, a Marine can move sideways at 0.6–0.9 m/s.
+- The navigation grid is 2 m, so gaps narrower than about 3 m are closed to planning, and a yard behind such a gap counts as sealed off.

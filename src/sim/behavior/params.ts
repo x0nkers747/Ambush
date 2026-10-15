@@ -20,6 +20,12 @@ export interface BehaviorParams {
   readonly lagStop: number;
   /** Highest speed of a slot on a bend, as a multiple of pace (the anchor slows to keep to it). */
   readonly bendSpeedFactor: number;
+  /**
+   * The anchor never slows below this × pace for a bend: round a tight
+   * corner (in a town) a wide formation cannot wheel, so its outer Marines
+   * fall behind and catch up instead of the whole unit crawling.
+   */
+  readonly minBendPace: number;
   /** Marines' top speed as a multiple of pace (catch-up; no running). */
   readonly maxSpeedFactor: number;
   /** Correction speed per metre of error (1/s), and the error (× interval) below which none is applied. */
@@ -72,6 +78,9 @@ export interface BehaviorParams {
   /** Stuck: less than `stuckProgress` m nearer his slot over `stuckSeconds`, while not near it. */
   readonly stuckProgress: number;
   readonly stuckSeconds: number;
+  /** How often a Marine checks his way to his slot and plans a way round an obstacle (s), and how near a detour point counts as reached (m). */
+  readonly detourCheckSeconds: number;
+  readonly detourReach: number;
 }
 
 export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
@@ -82,6 +91,7 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   lagStart: 0.5,
   lagStop: 2.0,
   bendSpeedFactor: 1.15,
+  minBendPace: 0.5,
   maxSpeedFactor: 1.3,
   trackingGain: 0.3,
   deadBand: 0.15,
@@ -107,6 +117,8 @@ export const DEFAULT_BEHAVIOR_PARAMS: BehaviorParams = Object.freeze({
   stragglerSeconds: 10,
   stuckProgress: 0.5,
   stuckSeconds: 10,
+  detourCheckSeconds: 0.25,
+  detourReach: 1.5,
 });
 
 /** Throws a RangeError naming the first invalid parameter. */

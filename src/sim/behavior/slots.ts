@@ -1,3 +1,6 @@
+import type { Vec2 } from '../geometry';
+import { navArea } from '../navigation';
+import type { TerrainDataset } from '../terrain';
 import type { BehaviorParams } from './params';
 import { flattenFormation, type FlatFormation } from './formation-spec';
 import { smoothNoise } from './noise';
@@ -48,6 +51,8 @@ export interface TaskFrame {
   /** Personal drift: largest offset per axis (m) and how often it changes course (s). */
   readonly drift: number;
   readonly driftSeconds: number;
+  /** The ground: a slot in or against an obstacle is moved to the nearest point a Marine can stand on. */
+  readonly terrain: TerrainDataset | null;
 }
 
 /** The frame of `task` at time `t`, for its current agents (those with `taskId` = task's). */
@@ -56,6 +61,7 @@ export function taskFrame(
   agents: readonly AgentState[],
   t: number,
   params: BehaviorParams,
+  terrain: TerrainDataset | null = null,
 ): TaskFrame {
   const flat = flattenFormation(task.formation);
   let b = 0;
@@ -84,10 +90,13 @@ export function taskFrame(
     t,
     drift: params.driftRadius * task.formation.interval * Math.SQRT1_2,
     driftSeconds: params.driftSeconds,
+    terrain,
   };
 }
 
 const p = routePoint();
+/** How far a blocked slot looks for standable ground (m). */
+const CLEAR_SEARCH_M = 30;
 
 /** The target of slot `i` of the frame's formation, written into `out`. */
 export function slotTargetAt(frame: TaskFrame, i: number, out: SlotTarget): SlotTarget {
@@ -128,7 +137,43 @@ export function slotTargetAt(frame: TaskFrame, i: number, out: SlotTarget): Slot
     out.vx *= 1 - w;
     out.vy *= 1 - w;
   }
+  // As close as he can get: a slot in a building, against one, in water, or
+  // in a yard the streets do not reach (another connected area of the
+  // navigation than the route's here) is moved to the nearest point of the
+  // route's area: ground he can be routed to, and on from.
+  const terrain = frame.terrain;
+  if (terrain) {
+    const area = navArea(terrain, p);
+    if (area > 0 && navArea(terrain, { x, y }) !== area) {
+      const clear = nearestInArea(terrain, { x, y }, area);
+      if (clear) {
+        x = clear.x;
+        y = clear.y;
+        // The point stands in for a slot it cannot follow: it does not move
+        // with the route, so he waits there rather than walking into the wall.
+        out.vx = 0;
+        out.vy = 0;
+      }
+    }
+  }
   out.x = x;
   out.y = y;
   return out;
+}
+
+/**
+ * The point of navigation area `area` nearest `p`: on rings round it, 0.5 m
+ * apart, up to `CLEAR_SEARCH_M` (the first found, clockwise from north on
+ * the smallest ring); `null` when there is none. Deterministic.
+ */
+export function nearestInArea(terrain: TerrainDataset, p: Vec2, area: number): Vec2 | null {
+  for (let r = 0.5; r <= CLEAR_SEARCH_M; r += 0.5) {
+    const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
+    for (let k = 0; k < steps; k += 1) {
+      const a = (2 * Math.PI * k) / steps;
+      const q = { x: p.x + r * Math.sin(a), y: p.y + r * Math.cos(a) };
+      if (navArea(terrain, q) === area) return q;
+    }
+  }
+  return null;
 }

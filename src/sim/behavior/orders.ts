@@ -383,6 +383,9 @@ export function applyOrderUnit(
       checkError: -1,
       checkAt: startSeconds,
       stuck: false,
+      detour: null,
+      detourIndex: 0,
+      lastRoutable: null,
     };
     insertAgent(soldierIndex, behavior, agent);
   }

@@ -7,6 +7,7 @@ export {
   createLabRun,
   LAB_ORGANIZATIONS,
   labTerrain,
+  labTerrainFor,
   secondHashes,
   type CommandOrigin,
   type LabDisturbance,
@@ -32,3 +33,4 @@ export {
   formationTemplate,
   type FormationTemplate,
 } from '../formations/formations';
+export { urbanFeatures, urbanKind, urbanStreets, type UrbanKind, type UrbanOptions } from './urban';

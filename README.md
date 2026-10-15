@@ -91,8 +91,8 @@ npm run dev
 ```
 
 **Behavior Lab:** http://localhost:5173/#behavior-lab, a page for watching and measuring
-organizations moving in formation on their own orders
-([docs/behavior-lab](docs/behavior-lab/README.md)).
+organizations moving in formation on their own orders, through a seeded urban district (or open ground,
+`?ground=open`) ([docs/behavior-lab](docs/behavior-lab/README.md)).
 
 It is also published to GitHub Pages, at https://x0nkers747.github.io/Ambush/, on every push to
 `main`: see [docs/GITHUB_PAGES_DEPLOYMENT.md](docs/GITHUB_PAGES_DEPLOYMENT.md).

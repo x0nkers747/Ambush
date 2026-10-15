@@ -46,6 +46,8 @@ export interface AgentDiagnostics {
   readonly straggling: boolean;
   readonly stuck: boolean;
   readonly override: AgentState['override'];
+  /** His way round an obstacle (points still ahead), or null. */
+  readonly detour: readonly { readonly x: number; readonly y: number }[] | null;
   /** Easing apart from neighbours too close (m/s). */
   readonly separation: { readonly x: number; readonly y: number };
   readonly speed: number;
@@ -79,7 +81,7 @@ export function behaviorDiagnostics(
   );
   const out: AgentDiagnostics[] = [];
   for (const task of behavior.tasks) {
-    const frame = taskFrame(task, agents, seconds, params);
+    const frame = taskFrame(task, agents, seconds, params, world.terrain);
     const at = routeAt(task.route, task.anchorS, routePoint());
     const slots = agents
       .filter((a) => a.taskId === task.id)
@@ -120,6 +122,7 @@ export function behaviorDiagnostics(
         straggling: agent.straggling,
         stuck: agent.stuck,
         override: agent.override,
+        detour: agent.detour ? agent.detour.slice(agent.detourIndex) : null,
         separation: { x: push.x, y: push.y },
         speed: Math.sqrt(agent.vx * agent.vx + agent.vy * agent.vy),
         wantedSpeed: Math.sqrt(d.wx * d.wx + d.wy * d.wy),

@@ -1013,6 +1013,20 @@ export function bridgeCrossings(terrain: TerrainDataset): {
   };
 }
 
+/**
+ * The connected area of the navigation grid `p` lies in (a positive label;
+ * two points with the same label can be routed between without bridges),
+ * or 0 where the grid is blocked (in or near an obstacle) or off it.
+ */
+export function navArea(terrain: TerrainDataset, p: Vec2): number {
+  const grid = navGrid(terrain);
+  const c = Math.floor((p.x - grid.originX) / NAV_CELL_M);
+  const r = Math.floor((p.y - grid.originY) / NAV_CELL_M);
+  if (c < 0 || r < 0 || c >= grid.columns || r >= grid.rows) return 0;
+  grid.areas ??= labelAreas(grid);
+  return grid.areas[r * grid.columns + c] ?? 0;
+}
+
 function cellCentre(grid: NavGrid, cell: number): Vec2 {
   return {
     x: grid.originX + ((cell % grid.columns) + 0.5) * NAV_CELL_M,

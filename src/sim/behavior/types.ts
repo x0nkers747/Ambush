@@ -142,6 +142,18 @@ export interface AgentState {
   checkAt: number;
   /** Made less than `stuckProgress` m of progress toward his slot over a window. */
   stuck: boolean;
+  /**
+   * A short way round an obstacle to his slot (planned when the straight way
+   * is blocked, re-checked every half second), and the point he is making for
+   * on it; `null` when the way is clear.
+   */
+  detour: { readonly x: number; readonly y: number }[] | null;
+  detourIndex: number;
+  /**
+   * Where he last stood on ground the navigation routes over (its connected
+   * area): from a gap it cannot route out of, he goes back there.
+   */
+  lastRoutable: { x: number; y: number } | null;
 }
 
 export type AgentOverride =

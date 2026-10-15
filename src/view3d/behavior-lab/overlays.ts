@@ -71,6 +71,7 @@ export const STATE_TEXT: Readonly<Record<AgentDiagnostics['desire']['state'], st
   held: 'held',
   displaced: 'sent away',
   fallingIn: 'falling in',
+  detouring: 'going round',
 };
 
 export interface OverlayFrame {
@@ -179,7 +180,10 @@ export function drawOverlays(f: OverlayFrame): void {
       };
       const t = p.toScreen(slot);
       const colour = bandColour(agent, interval);
-      if (options.errors && Number.isFinite(t.x)) line(ctx, [s, t], colour, 2);
+      if (agent.detour && options.errors) {
+        // His way round an obstacle, then on to his slot.
+        line(ctx, [s, ...agent.detour.map((q) => p.toScreen(q))], '#c58cff', 2);
+      } else if (options.errors && Number.isFinite(t.x)) line(ctx, [s, t], colour, 2);
       if (options.slots && Number.isFinite(t.x)) {
         ctx.strokeStyle = colour;
         ctx.lineWidth = 2;

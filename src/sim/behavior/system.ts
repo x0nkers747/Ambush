@@ -1,5 +1,6 @@
 import { surfaceHeightAt } from '../bridge-navigation';
 import type { SimEvent } from '../events';
+import { isSegmentWalkable, navArea, planPath, pointProblem } from '../navigation';
 import { azimuthDelta, azimuthOf, turnToward } from '../geometry';
 import type { PathSegment, TickTime } from '../movement';
 import type { SimState, Soldier } from '../state';
@@ -8,7 +9,14 @@ import { flattenFormation } from './formation-spec';
 import { DEFAULT_BEHAVIOR_PARAMS, type BehaviorParams } from './params';
 import { createCrowd, CROWD_CELL_M, fillCrowd, separation, type Crowd } from './crowd';
 import { maxCurvature } from './route';
-import { slotTarget, slotTargetAt, taskFrame, type SlotTarget, type TaskFrame } from './slots';
+import {
+  nearestInArea,
+  slotTarget,
+  slotTargetAt,
+  taskFrame,
+  type SlotTarget,
+  type TaskFrame,
+} from './slots';
 import type { AgentState, BehaviorState, TaskOutcome, TaskPhase, UnitTask } from './types';
 
 // The unit-movement system (docs/behavior-lab/03 §4.3, §8): runs each tick
@@ -93,7 +101,7 @@ export function updateBehavior(
       const agents = members[j] ?? [];
       stepTask(
         task,
-        taskFrame(task, agents, t, params),
+        taskFrame(task, agents, t, params, world.terrain),
         agents,
         soldiers,
         params,
@@ -120,7 +128,7 @@ export function updateBehavior(
       const task = active[j];
       if (!task || !isRunning(task)) continue;
       const agents = members[j] ?? [];
-      const frame = taskFrame(task, agents, tEnd, params);
+      const frame = taskFrame(task, agents, tEnd, params, world.terrain);
       for (const agent of agents) {
         const soldier = soldiers.get(agent.soldierId);
         if (!soldier) continue;
@@ -263,7 +271,10 @@ export function taskPace(
     want = params.joinPace * task.pace;
     limitedBy = 'joining';
   }
-  const bendLimit = (params.bendSpeedFactor * task.pace) / bend;
+  const bendLimit = Math.max(
+    params.minBendPace * task.pace,
+    (params.bendSpeedFactor * task.pace) / bend,
+  );
   if (bendLimit < want) {
     want = bendLimit;
     limitedBy = 'bend';
@@ -356,7 +367,8 @@ export interface Desire {
     | 'arriving'
     | 'held'
     | 'displaced'
-    | 'fallingIn';
+    | 'fallingIn'
+    | 'detouring';
 }
 
 /**
@@ -387,10 +399,11 @@ export function desire(
   let cap = params.maxSpeedFactor * task.pace;
   if (agent.latched) return standing(t, e, along, across, band, cap, 'inPosition');
   if (agent.override?.kind === 'hold') return standing(t, e, along, across, band, cap, 'held');
+  const via = agent.detour?.[agent.detourIndex];
   if (agent.override?.kind === 'goTo') {
-    // Sent elsewhere: walk there at pace, stopping on the point.
-    const gx = agent.override.x - soldier.position.x;
-    const gy = agent.override.y - soldier.position.y;
+    // Sent elsewhere: walk there at pace (round obstacles), stopping on the point.
+    const gx = (via?.x ?? agent.override.x) - soldier.position.x;
+    const gy = (via?.y ?? agent.override.y) - soldier.position.y;
     const g = Math.sqrt(gx * gx + gy * gy);
     const v = Math.min(task.pace, Math.sqrt(2 * params.decel * 0.25 * g));
     const f = g > 1e-9 ? v / g : 0;
@@ -419,6 +432,23 @@ export function desire(
     wy *= cap / w;
     w = cap;
   }
+  // Round an obstacle: the same speed, toward the next point of his way round.
+  if (via) {
+    const speed = Math.max(Math.min(w, cap), Math.min(cap, task.pace));
+    const vx = via.x - soldier.position.x;
+    const vy = via.y - soldier.position.y;
+    const l = Math.sqrt(vx * vx + vy * vy);
+    if (l > 1e-9) {
+      wx = (vx / l) * speed + push.x;
+      wy = (vy / l) * speed + push.y;
+      w = Math.sqrt(wx * wx + wy * wy);
+      if (w > cap) {
+        wx *= cap / w;
+        wy *= cap / w;
+        w = cap;
+      }
+    }
+  }
   // Turning before walking: full speed only toward where he faces.
   let turnFactor = 1;
   if (w > 1e-9) {
@@ -430,17 +460,19 @@ export function desire(
     wy *= turnFactor;
   }
   const slotSpeed = Math.sqrt(t.vx * t.vx + t.vy * t.vy);
-  const state: Desire['state'] = settling
-    ? 'arriving'
-    : !agent.joined
-      ? 'fallingIn'
-      : e <= band
-        ? 'onStation'
-        : along > band && w > slotSpeed + 0.05
-          ? 'catchingUp'
-          : along < -band
-            ? 'easingOff'
-            : 'correcting';
+  const state: Desire['state'] = via
+    ? 'detouring'
+    : settling
+      ? 'arriving'
+      : !agent.joined
+        ? 'fallingIn'
+        : e <= band
+          ? 'onStation'
+          : along > band && w > slotSpeed + 0.05
+            ? 'catchingUp'
+            : along < -band
+              ? 'easingOff'
+              : 'correcting';
   return { target: t, error: e, along, across, wx, wy, band, cap, turnFactor, state };
 }
 
@@ -481,17 +513,20 @@ function stepAgent(
     const ex = target.x - soldier.position.x;
     const ey = target.y - soldier.position.y;
     const e = Math.sqrt(ex * ex + ey * ey);
+    // In position: at his slot, or as close as he can get to it (stuck:
+    // another Marine stands there, or an obstacle is in the way).
     if (
       !agent.latched &&
       frame.settle >= 1 &&
-      e <= params.latchRadius &&
+      (e <= params.latchRadius || agent.stuck) &&
       speedOf(agent) <= params.latchSpeed
     ) {
       agent.latched = true;
-    } else if (agent.latched && e > params.unlatchRadius) {
+    } else if (agent.latched && e > params.unlatchRadius && !agent.stuck) {
       agent.latched = false;
     }
   }
+  keepDetour(agent, soldier, frame, world, params, t);
   const push =
     me >= 0 ? separation(crowd, me, params.personalSpace, params.separationSpeed, pushed) : NO_PUSH;
   const wanted = desire(agent, soldier, frame, params, target, push);
@@ -535,8 +570,7 @@ function stepAgent(
     agent.vy = dy;
   }
 
-  soldier.position.x += agent.vx * h;
-  soldier.position.y += agent.vy * h;
+  moveClear(soldier, agent, world, h);
   soldier.position.z = surfaceHeightAt(world.terrain, soldier.position.x, soldier.position.y);
 
   // Facing: toward travel when walking; toward where he means to go when
@@ -574,8 +608,10 @@ function stepAgent(
   // Stuck: over each window, too little progress toward a slot he is not near.
   if (t - agent.checkAt >= params.stuckSeconds) {
     // The first window only takes the reference (`checkError` < 0: none yet).
+    // Walking a way round counts as progress: stuck means barely moving too.
     agent.stuck =
       agent.checkError >= 0 &&
+      speedOf(agent) < 0.3 &&
       agent.override === null &&
       !agent.latched &&
       e > 2 * wanted.band + params.latchRadius &&
@@ -584,6 +620,148 @@ function stepAgent(
     agent.checkAt = t;
   }
 }
+
+/**
+ * His way to his slot (or the point he was sent to): every
+ * `detourCheckSeconds` (staggered by slot), if the straight way is blocked
+ * he plans a short way round with the navigation's A* (`planPath`), and
+ * drops it once the straight way is open; in between he works along it,
+ * point by point.
+ */
+function keepDetour(
+  agent: AgentState,
+  soldier: Soldier,
+  frame: TaskFrame,
+  world: SimWorld,
+  params: BehaviorParams,
+  t: number,
+): void {
+  if (agent.latched || agent.override?.kind === 'hold') {
+    agent.detour = null;
+    return;
+  }
+  const from = { x: soldier.position.x, y: soldier.position.y };
+  const i = frame.flat.indexOf.get(agent.slotId) ?? 0;
+  const period = Math.max(1, Math.round(params.detourCheckSeconds * params.substepHz));
+  const n = Math.round(t * params.substepHz);
+  // Also at once when, without a way round, his present course would take
+  // him into an obstacle within `LOOK_AHEAD_S`: he turns before the wall.
+  const ahead = {
+    x: from.x + agent.vx * LOOK_AHEAD_S,
+    y: from.y + agent.vy * LOOK_AHEAD_S,
+  };
+  const headingIn =
+    agent.detour === null &&
+    (agent.vx !== 0 || agent.vy !== 0) &&
+    !isSegmentWalkable(world.terrain, from, ahead);
+  if (headingIn || (n + i * 7) % period === 0) {
+    const slot = slotTargetAt(frame, i, target);
+    const goal =
+      agent.override?.kind === 'goTo'
+        ? { x: agent.override.x, y: agent.override.y }
+        : { x: slot.x, y: slot.y };
+    // A way round he has is kept while it still works (its next point in
+    // sight, and it still ends near his goal): replanning from a slightly
+    // different spot can give another way, and he would turn to and fro.
+    const next = agent.detour?.[agent.detourIndex];
+    const end = agent.detour?.at(-1);
+    const keep =
+      next !== undefined &&
+      end !== undefined &&
+      Math.hypot(end.x - goal.x, end.y - goal.y) < DETOUR_DRIFT_M &&
+      isSegmentWalkable(world.terrain, from, next);
+    if (isSegmentWalkable(world.terrain, from, goal)) {
+      agent.detour = null;
+    } else if (!keep) {
+      const path = planPath(world.terrain, from, goal);
+      if (path.ok) {
+        agent.detour = [...path.turns.map((p) => ({ x: p.x, y: p.y })), goal];
+      } else {
+        // Somewhere the navigation cannot route from (a gap or yard reached
+        // between buildings): back the way he came, to where he last stood on
+        // routable ground; failing that, the nearest ground of his goal's area.
+        const area = navArea(world.terrain, goal);
+        const back =
+          agent.lastRoutable ?? (area > 0 ? nearestInArea(world.terrain, from, area) : null);
+        agent.detour = back ? [{ x: back.x, y: back.y }, goal] : null;
+      }
+      agent.detourIndex = 0;
+    }
+  }
+  if (navArea(world.terrain, from) > 0) {
+    agent.lastRoutable = from;
+  }
+  // Points reached in turn; past the last, the detour is done.
+  while (agent.detour) {
+    const next = agent.detour[agent.detourIndex];
+    if (!next) {
+      agent.detour = null;
+      break;
+    }
+    if (Math.hypot(next.x - from.x, next.y - from.y) > params.detourReach) break;
+    agent.detourIndex += 1;
+  }
+}
+
+/**
+ * Moves the soldier by his velocity, but not into a building's clearance or
+ * water: such a step is turned along the edge instead (he slides along the
+ * wall), or stopped. Within a clearance already, he may move on but never
+ * into the building.
+ */
+function moveClear(soldier: Soldier, agent: AgentState, world: SimWorld, h: number): void {
+  const x0 = soldier.position.x;
+  const y0 = soldier.position.y;
+  const problem = (x: number, y: number) => {
+    const p = pointProblem(world.terrain, { x, y });
+    return p === null || p.kind === 'offTerrain' ? null : p.kind;
+  };
+  // Within an obstacle's clearance already (pushed there), he may move on,
+  // but never into a building or water.
+  const here = problem(x0, y0);
+  const blocked = (x: number, y: number) => {
+    const p = problem(x, y);
+    return p !== null && (here === null || p !== 'tooCloseToBuilding');
+  };
+  const vx = agent.vx;
+  const vy = agent.vy;
+  if (!blocked(x0 + vx * h, y0 + vy * h)) {
+    soldier.position.x = x0 + vx * h;
+    soldier.position.y = y0 + vy * h;
+    return;
+  }
+  // Against an obstacle: the clear direction nearest the one he wanted,
+  // turned at most 75° either way (left first at each angle), slower the
+  // more it turns: he slides along the wall.
+  for (const deg of SLIDE_ANGLES) {
+    const a = (deg * Math.PI) / 180;
+    const c = Math.cos(a);
+    const sn = Math.sin(a);
+    // Rotated by a (clockwise for positive), slowed by cos² a: the more he
+    // has to turn, the slower he goes (people sidestep slowly).
+    const k = c * c;
+    const rx = (vx * c + vy * sn) * k;
+    const ry = (-vx * sn + vy * c) * k;
+    if (!blocked(x0 + rx * h, y0 + ry * h)) {
+      agent.vx = rx;
+      agent.vy = ry;
+      soldier.position.x = x0 + rx * h;
+      soldier.position.y = y0 + ry * h;
+      return;
+    }
+  }
+  agent.vx = 0;
+  agent.vy = 0;
+}
+
+/** A way round is replanned once its end is this far from where his goal has moved to (m). */
+const DETOUR_DRIFT_M = 8;
+
+/** How far ahead (s at his present velocity) a Marine looks for an obstacle in his way. */
+const LOOK_AHEAD_S = 1.5;
+
+/** Directions tried when sliding along an obstacle (degrees from the wanted one). */
+const SLIDE_ANGLES = [-15, 15, -30, 30, -45, 45, -60, 60, -75, 75] as const;
 
 function speedOf(agent: AgentState): number {
   return Math.sqrt(agent.vx * agent.vx + agent.vy * agent.vy);

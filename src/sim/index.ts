@@ -114,6 +114,7 @@ export {
   ASHORE_MARGIN_M,
   bridgeCrossings,
   isSegmentWalkable,
+  navArea,
   NAV_CELL_M,
   OBSTACLE_CLEARANCE_M,
   pathLength,

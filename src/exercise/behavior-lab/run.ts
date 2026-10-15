@@ -1,6 +1,8 @@
 import {
   createSimulation,
   createSyntheticTerrain,
+  NO_FEATURES,
+  type EnvironmentFeatures,
   DEFAULT_BEHAVIOR_PARAMS,
   flattenFormation,
   flatElevation,
@@ -19,6 +21,7 @@ import {
   type Vec2,
 } from '#sim';
 import { buildFormationSpec } from '../formations/formations';
+import { urbanFeatures } from './urban';
 import {
   instantiateOrganization,
   validateOrganizationTemplate,
@@ -73,6 +76,8 @@ export interface LabRunSpec {
   readonly tickRateHz: number;
   /** Tuning overrides (absent: the defaults). */
   readonly params?: BehaviorParams;
+  /** The ground: open (default) or a seeded urban district (`urban.ts`, from `seed`). */
+  readonly terrain?: 'open' | 'urban';
 }
 
 /**
@@ -108,11 +113,32 @@ export interface LabRun {
 }
 
 /** Flat ground for lab runs: 2.4 km square, 10 m above the datum. */
-export function labTerrain(): TerrainDataset {
+export function labTerrain(features: EnvironmentFeatures = NO_FEATURES): TerrainDataset {
   return createSyntheticTerrain(
     { originX: -1200, originY: -1200, cellSize: 40, columns: 61, rows: 61 },
     flatElevation(10),
+    features,
   );
+}
+
+/** Recent lab terrains by content, so a run rebuilt (replay, scrubbing) reuses its ground and navigation. */
+const terrains = new Map<string, TerrainDataset>();
+
+/**
+ * A run's ground: open, or the urban district of its seed with the start
+ * and the waypoints kept clear. The same spec always gives the same ground
+ * (and the same object, while it is among the last few used).
+ */
+export function labTerrainFor(spec: LabRunSpec): TerrainDataset {
+  if (spec.terrain !== 'urban') return labTerrain();
+  const keepClear = [spec.start, ...(spec.via ?? []), ...spec.waypoints];
+  const key = JSON.stringify({ seed: spec.seed, keepClear });
+  const known = terrains.get(key);
+  if (known) return known;
+  const terrain = labTerrain(urbanFeatures({ seed: spec.seed, keepClear, clearRadius: 34 }));
+  terrains.set(key, terrain);
+  if (terrains.size > 4) terrains.delete(terrains.keys().next().value ?? '');
+  return terrain;
 }
 
 /** Starts a run: builds the organization, lays it out loosely at the start, orders the first waypoint. */
@@ -132,7 +158,7 @@ export interface LabReplay {
 
 export function createLabRun(
   spec: LabRunSpec,
-  terrain: TerrainDataset = labTerrain(),
+  terrain: TerrainDataset = labTerrainFor(spec),
   replay?: LabReplay,
 ): LabRun {
   const template = LAB_ORGANIZATIONS[spec.organization];
