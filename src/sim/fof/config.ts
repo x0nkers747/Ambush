@@ -181,6 +181,13 @@ export interface ForceBehaviorConfig {
   readonly boundLengthM: number;
   readonly boundPaceMps: number;
   readonly boundRestSeconds: number;
+  /**
+   * A bound ends at a firing position: among points from half to the whole
+   * bound length, up to this many degrees either side of straight at the
+   * enemy, the one from which the element (prone) sees most of the enemy
+   * positions its force knows of. 0: straight at the enemy, the whole length.
+   */
+  readonly boundSearchDegrees: number;
 }
 
 export interface EffectivenessConfig {
@@ -533,6 +540,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     'boundLengthM',
     'boundPaceMps',
     'boundRestSeconds',
+    'boundSearchDegrees',
   ]);
   const delay = object(fb['reactionDelay'], '.force.reactionDelay', ['minSeconds', 'maxSeconds']);
   const dmin = number(delay['minSeconds'], '.force.reactionDelay.minSeconds', 0);
@@ -556,6 +564,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     boundLengthM: [1],
     boundPaceMps: [0.1],
     boundRestSeconds: [0],
+    boundSearchDegrees: [0, 90],
   });
   if ((fb['ineffectiveEffectiveness'] as number) > (fb['withdrawEffectiveness'] as number)) {
     fail('.force.ineffectiveEffectiveness', 'must not exceed withdrawEffectiveness');

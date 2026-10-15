@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   hashSimState,
+  lineOfSight,
   validateFofSetup,
   type ActionsOn,
   type FofFireEvent,
   type ForcePhaseChangedEvent,
   type SimEvent,
 } from '#sim';
+import { withConfig } from './experiments';
 import { createFofRun, FOF_DEFAULT_CONFIG, type FofRun, type FofRunSpec } from './run';
 import { headOn } from './test-specs';
 
@@ -135,7 +137,7 @@ describe('actions on contact: attack', () => {
 
 describe('actions on contact: attack by fire and movement', () => {
   for (const terrain of ['open', 'urban'] as const) {
-    it(`${terrain}: one fire team (with the squad leader) rushes at a time, not firing, while the others fire from the ground`, () => {
+    it(`${terrain}: one element (a fire team, or the squad leader) rushes at a time, not firing, while the others fire from the ground`, () => {
       const run = createFofRun(spec(terrain, 1, 'attack', 'continue'));
       const teams = new Map<string, number>();
       let order: string[] = [];
@@ -159,7 +161,7 @@ describe('actions on contact: attack by fire and movement', () => {
           return;
         }
         boundTicks += 1;
-        // One element at a time: a fire team and the squad leader.
+        // One element at a time: a fire team, or the squad leader.
         expect(bounding.size).toBeLessThanOrEqual(5);
         const units = new Set(
           run.sim.state.soldiers.filter((s) => bounding.has(s.id)).map((s) => s.unitId),
@@ -207,6 +209,57 @@ describe('actions on contact: attack by fire and movement', () => {
     expect(sizes.size).toBeGreaterThan(0);
     expect([...sizes].every((n) => n <= 2)).toBe(true);
   }, 120_000);
+});
+
+describe('actions on contact: attack, firing positions', () => {
+  /** The share of looks (each second, while assaulting) in which a soldier of the base of fire, prone, sees an enemy. */
+  function baseOfFireSight(searchDegrees: number, seeds: readonly number[]) {
+    let looks = 0;
+    let seeing = 0;
+    for (const seed of seeds) {
+      const run = createFofRun({
+        ...spec('urban', seed, 'attack', 'continue'),
+        config: withConfig((c) => {
+          c.force.boundSearchDegrees = searchDegrees;
+        }),
+      });
+      const terrain = run.sim.world.terrain;
+      finish(run, () => {
+        const fof = run.sim.state.fof;
+        const blue = fof?.forces[0];
+        if (blue?.phase !== 'assaulting' || run.sim.tick % run.spec.tickRateHz !== 0) return;
+        const enemies = run.sim.state.soldiers.filter(
+          (s) => s.side === 'OPFOR' && s.status === 'active',
+        );
+        for (const m of fof?.soldiers ?? []) {
+          if (m.force !== 0 || !m.reacted || blue.bounding.includes(m.soldierId)) continue;
+          const s = run.sim.state.soldiers.find((x) => x.id === m.soldierId);
+          if (s?.status !== 'active') continue;
+          looks += 1;
+          if (
+            enemies.some(
+              (e) =>
+                lineOfSight(terrain, s.position, e.position, {
+                  observerHeightMeters: 0.3,
+                  targetHeightMeters: 0.5,
+                }).clear,
+            )
+          ) {
+            seeing += 1;
+          }
+        }
+      });
+    }
+    return seeing / Math.max(1, looks);
+  }
+
+  it('in town, bounding to firing positions gives the base of fire more sight of the enemy than bounding straight', () => {
+    const seeds = [1, 2, 3, 4];
+    const straight = baseOfFireSight(0, seeds);
+    const searched = baseOfFireSight(FOF_DEFAULT_CONFIG.force.boundSearchDegrees, seeds);
+    expect(FOF_DEFAULT_CONFIG.force.boundSearchDegrees).toBeGreaterThan(0);
+    expect(searched).toBeGreaterThan(straight + 0.05);
+  }, 300_000);
 });
 
 describe('actions on contact: withdraw', () => {

@@ -208,7 +208,8 @@
     "assaultRetargetM": 30,
     "boundLengthM": 40,
     "boundPaceMps": 3,
-    "boundRestSeconds": 6
+    "boundRestSeconds": 6,
+    "boundSearchDegrees": 60
   },
   "effectiveness": {
     "suppressionWeight": 0.5,

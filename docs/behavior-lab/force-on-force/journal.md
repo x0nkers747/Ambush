@@ -294,7 +294,8 @@ formation, firing on the move. It now attacks by fire and movement
 **How it works.**
 
 - One fire team, with the squad leader, rushes 40 m at 3 m/s toward the believed enemy
-  position, not firing.
+  position, not firing. (Since revised: the squad leader bounds on his own; see the
+  next entry.)
 - The other teams stay down and fire, as the base of fire.
 - 6 s after a team is down and firing, the next team bounds, in turn.
 - A fire team or element without subordinate units bounds in two halves.
@@ -346,6 +347,58 @@ formation, firing on the move. It now attacks by fire and movement
 - There is no flanking, and no individual rushes within a team.
 - The force does not assault through; it closes to 30 m and fights.
 
+## Firing positions for the base of fire (2026-10-15)
+
+**Asked for.** In town the base of fire often lay behind a building with no sight of the
+enemy. A bounding element now goes to a **firing position**, and an element that sees
+nothing from where it lies bounds first ([03 §2.2](03-model.md)).
+
+**Built.**
+
+- **The firing position.** Each bound ends where the element sees most of what its force
+  knows of the enemy:
+  - 3 distances × 7 headings (±60° in 20° steps), each moved to the nearest reachable
+    ground;
+  - scored from three points across the element's front, prone, through buildings,
+    terrain and vegetation;
+  - of the points seeing at least ¾ as much as the best, the farthest forward.
+- **Bound order.** An element that sees nothing from where it lies goes next (never twice
+  running).
+- **Configuration:** `force.boundSearchDegrees` (60°; 0: straight bounds).
+
+**Two defects of the first fire-and-movement version, found while measuring and fixed.**
+
+- **Routes started from the squad leader.** The squad leader moved with every bound, and
+  the movement engine plans a unit's route from its leader. A team bounding from behind
+  him got a route from his position (13 m), so it hardly moved.
+  - Teams are now ordered as themselves, so the route starts from the team leader.
+  - The squad leader is the last element of the rotation.
+- **Bounds hit their time limit.** A bound waited for the movement task to settle, which
+  waits for every soldier to reach his slot. A soldier pinned on the way never does. The
+  bound now ends when the element reaches its destination.
+
+**Measured** (seeds 1–5, BLUEFOR attacking; base of fire = soldiers of the assaulting
+force who are down and have reacted, sampled each second; sight = a clear prone sight
+line to any active enemy, the truth):
+
+| Terrain, OPFOR does | Base of fire seeing an enemy, straight → firing positions | Outcomes with firing positions                                      | Casualties B / O over 5 seeds, straight → firing positions |
+| ------------------- | --------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Urban, continue     | 21 % → 40 %                                               | 1 BLUEFOR victory, 1 OPFOR victory, 2 BLUEFOR withdrawals, 1 mutual | 39 / 8 → 29 / 24                                           |
+| Urban, attack       | 35 % → 51 %                                               | 3 BLUEFOR, 1 OPFOR victory, 1 mutual                                | 27 / 36 → 19 / 34                                          |
+| Wooded, continue    | 78 % → 89 %                                               | 4 OPFOR victories, 1 OPFOR withdrawal                               | 36 / 16 → 34 / 15                                          |
+| Wooded, attack      | 75 % → 97 %                                               | 3 BLUEFOR, 1 OPFOR victory, 1 mutual                                | 25 / 27 → 27 / 35                                          |
+| Open, continue      | 100 % → 100 %                                             | 3 OPFOR, 1 BLUEFOR victory, 1 mutual                                | 38 / 23 → 34 / 24                                          |
+| Open, attack        | 100 % → 100 %                                             | BLUEFOR victory ×5                                                  | 17 / 35 → 15 / 42                                          |
+
+- **What remains.** In some urban seeds the enemy is prone behind a block, with no
+  reachable spot within a bound that sees him. The attacker then advances on his last
+  known position blind, and the halted defender, who can see it, usually wins.
+- **Validation:**
+  - a new test shows that, over urban seeds 1–4, the base of fire sees an enemy more
+    often with firing positions than with straight bounds;
+  - the force-on-force suite passes;
+  - the default (`continue`) runs are untouched (only attacking forces bound).
+
 ## Known limitations
 
 **Detection.**
@@ -358,8 +411,8 @@ formation, firing on the move. It now attacks by fire and movement
 
 **Behaviour.**
 
-- A force fights where it halts, or (attacking) bounds straight at the enemy. There
-  is no cover-seeking or choice of firing positions, and no flanking.
+- A force fights where it halts, or (attacking) bounds toward the enemy, to firing
+  positions chosen for sight, not cover. There is no cover-seeking or flanking.
 - A withdrawal is one 250 m move away from the known threat. In town it can fail (no
   reachable point); the force then fights on and retries.
 - One force per side; the adjudicator assumes two.

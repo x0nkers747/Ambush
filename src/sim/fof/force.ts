@@ -3,11 +3,13 @@ import { nearestInArea } from '../behavior/slots';
 import { azimuthOf, normalizeAzimuth, type Vec2 } from '../geometry';
 import { navArea } from '../navigation';
 import { nextFloat } from '../rng';
+import { surfaceHeightAt } from '../bridge-navigation';
+import { sightLineTracer } from '../sight-tracer';
 import { isOnTerrain } from '../terrain';
 import { orgUnitId, type Soldier, type SoldierId } from '../state';
 import type { FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
 import { fofWeapon } from './config';
-import { confidenceAt } from './detection';
+import { confidenceAt, vegetationTransmission } from './detection';
 import type { FofContext } from './system';
 import { forceActive, glimpse, setLevel, soldierOf } from './system';
 import type { FofForce, ForcePhase, ObservationLevel } from './types';
@@ -221,9 +223,21 @@ export function centreOf(context: FofContext, force: FofForce): Vec2 | null {
   return n > 0 ? { x: x / n, y: y / n } : null;
 }
 
-/** The force's running unit task, if any. */
+/** The running unit task of the force or of one of its units (a bounding element), if any. */
 export function runningTask(context: FofContext, force: FofForce) {
-  return context.state.behavior?.tasks.find((t) => t.unitId === force.unitId && t.outcome === null);
+  return context.state.behavior?.tasks.find(
+    (t) => t.outcome === null && inForce(context, force, t.unitId),
+  );
+}
+
+/** Whether `unitId` is the force's unit or one below it. */
+function inForce(context: FofContext, force: FofForce, unitId: string): boolean {
+  for (let id: string | null = unitId; id !== null;) {
+    if (id === force.unitId) return true;
+    const at: string = id;
+    id = context.state.units.find((u) => u.id === at)?.parentId ?? null;
+  }
+  return false;
 }
 
 /**
@@ -262,16 +276,17 @@ export function halt(
   }
 }
 
-/** Cancels the force's unit task, if it has one (the movement engine's own cancel). */
+/** Cancels the running unit tasks of the force and its units (the movement engine's own cancel). */
 export function cancelTask(context: FofContext, force: FofForce): void {
-  if (!runningTask(context, force)) return;
-  applyOrderUnit(
-    context.state,
-    context.world,
-    { type: 'orderUnit', tick: context.state.tick, unitId: orgUnitId(force.unitId), order: null },
-    context.t,
-    context.events,
-  );
+  for (let task = runningTask(context, force); task; task = runningTask(context, force)) {
+    applyOrderUnit(
+      context.state,
+      context.world,
+      { type: 'orderUnit', tick: context.state.tick, unitId: task.unitId, order: null },
+      context.t,
+      context.events,
+    );
+  }
 }
 
 /**
@@ -338,9 +353,12 @@ function updateAssault(context: FofContext, force: FofForce, enemy: Vec2 | null)
     force.objectiveAt = t;
   }
   if (force.bounding.length > 0) {
-    // A bound ends when the element arrives (or, held up, after twice its expected time).
+    // A bound ends when the element reaches its destination (its route done:
+    // a soldier pinned on the way goes down where he is), or, held up, after
+    // twice its expected time.
     const expected = behavior.boundLengthM / behavior.boundPaceMps;
-    if (runningTask(context, force) && t - force.boundSince < 2 * expected + 5 - 1e-9) return;
+    const task = runningTask(context, force);
+    if (task?.phase === 'moving' && t - force.boundSince < 2 * expected + 5 - 1e-9) return;
     endBound(context, force);
     return;
   }
@@ -375,9 +393,10 @@ interface Element {
 
 /**
  * The force's elements for fire and movement, from its formation: each
- * subordinate unit (with the force's own leader and headquarters moving
- * with it, a little behind) when it has two or more; else its soldiers in
- * two halves, in formation order (the leader with the first).
+ * subordinate unit (ordered as itself, so that its route starts from its own
+ * leader), then the force's leader and headquarters on their own, when it
+ * has two or more; else its soldiers in two halves, in formation order (the
+ * leader with the first).
  */
 export function elementsOf(context: FofContext, force: FofForce): Element[] {
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
@@ -389,16 +408,20 @@ export function elementsOf(context: FofContext, force: FofForce): Element[] {
     ...n.children.flatMap(soldiersOf),
   ];
   if (root.children.length >= 2) {
-    const behind = Math.max(0, ...root.children.flatMap((c) => c.slots.map((s) => s.back)));
-    const headquarters = root.slots.map((s) => ({ ...s, back: s.back + behind }));
-    return root.children.map((child) => ({
+    const teams = root.children.map((child) => ({
       unitId: child.unitId,
-      formation: {
-        interval: formation.interval,
-        root: { ...root, slots: headquarters, children: [{ ...child, back: 0, right: 0 }] },
-      },
-      memberIds: [...headquarters.map((s) => s.soldierId), ...soldiersOf(child)],
+      formation: { interval: formation.interval, root: { ...child, back: 0, right: 0 } },
+      memberIds: soldiersOf(child),
     }));
+    if (root.slots.length === 0) return teams;
+    return [
+      ...teams,
+      {
+        unitId: root.unitId,
+        formation: { interval: formation.interval, root: { ...root, children: [] } },
+        memberIds: root.slots.map((s) => s.soldierId),
+      },
+    ];
   }
   const slots = root.slots;
   if (slots.length < 2 || root.children.length > 0) {
@@ -421,8 +444,7 @@ function bound(context: FofContext, force: FofForce, target: Vec2): boolean {
   const { t } = context;
   const behavior = context.setup.config.force;
   const elements = elementsOf(context, force);
-  for (let k = 0; k < elements.length; k += 1) {
-    const index = (force.boundElement + k) % elements.length;
+  for (const index of boundOrder(context, force, elements, target)) {
     const element = elements[index];
     if (!element) continue;
     const up = element.memberIds.filter(
@@ -430,13 +452,8 @@ function bound(context: FofContext, force: FofForce, target: Vec2): boolean {
     );
     const at = centreOfSoldiers(context, up);
     if (!at) continue;
-    const d = Math.hypot(target.x - at.x, target.y - at.y);
-    const step = Math.min(behavior.boundLengthM, d - behavior.assaultRetargetM / 2);
-    if (step < 5) continue;
-    const to = {
-      x: at.x + ((target.x - at.x) / d) * step,
-      y: at.y + ((target.y - at.y) / d) * step,
-    };
+    const to = firingPosition(context, force, at, target);
+    if (!to) continue;
     if (!moveTo(context, force, to, element.formation, behavior.boundPaceMps, at)) continue;
     // The bounding soldiers get up and go; the others stay down, firing.
     for (const id of up) {
@@ -455,6 +472,132 @@ function bound(context: FofContext, force: FofForce, target: Vec2): boolean {
     return true;
   }
   return false;
+}
+
+/** Distances tried for a bound, as shares of `boundLengthM`, and the spread of an element across its front (m). */
+const BOUND_SHARES: readonly number[] = [1, 0.75, 0.5];
+const ELEMENT_HALF_FRONT_M = 7;
+/** A point seeing at least this share of what the best one sees counts as a firing position as good. */
+const SIGHT_SHARE = 0.75;
+
+/**
+ * How much of the enemy its force knows of a prone soldier at a point would
+ * see: the enemy positions (its current confirmed contacts; else `target`)
+ * with a clear sight line, each weighted by the light through vegetation.
+ */
+function sightOfEnemy(context: FofContext, force: FofForce, target: Vec2): (from: Vec2) => number {
+  const terrain = context.world.terrain;
+  const index = context.fof.forces.indexOf(force);
+  const known = context.fof.tracks
+    .filter((tr) => tr.force === index && (tr.level === 'detected' || tr.level === 'identified'))
+    .map((tr) => tr.lastKnown);
+  const enemies = known.length > 0 ? known : [target];
+  const tracer = sightLineTracer(terrain);
+  const eyeHeight = context.setup.config.detection.eyeHeightM.prone;
+  return (from) => {
+    const eye = { x: from.x, y: from.y, z: surfaceHeightAt(terrain, from.x, from.y) + eyeHeight };
+    let seen = 0;
+    for (const e of enemies) {
+      const aim = { x: e.x, y: e.y, z: surfaceHeightAt(terrain, e.x, e.y) + 0.5 };
+      if (!tracer.blocked(eye, aim)) seen += vegetationTransmission(terrain, from, e);
+    }
+    return seen;
+  };
+}
+
+/**
+ * The order in which elements are tried for the next bound: from
+ * `boundElement` on, in turn; but (searching for firing positions) an
+ * element none of whose own soldiers sees the enemy from where it lies goes
+ * first, since it adds nothing to the base of fire there. The element that
+ * has just bounded never goes twice in a row unless it is the only one.
+ */
+function boundOrder(
+  context: FofContext,
+  force: FofForce,
+  elements: readonly Element[],
+  target: Vec2,
+): number[] {
+  const n = elements.length;
+  const turn = Array.from({ length: n }, (_, k) => (force.boundElement + k) % n);
+  if (context.setup.config.force.boundSearchDegrees <= 0 || n < 2) return turn;
+  const sees = sightOfEnemy(context, force, target);
+  const blind = (element: Element) =>
+    element.memberIds.every((id) => {
+      const s = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
+      return s?.status !== 'active' || sees(s.position) <= 0;
+    });
+  const last = (force.boundElement - 1 + n) % n;
+  const first = turn.filter((i) => {
+    const element = elements[i];
+    return i !== last && element !== undefined && blind(element);
+  });
+  return [...first, ...turn.filter((i) => !first.includes(i))];
+}
+
+/**
+ * Where an element at `at` bounds to, toward `target`: the reachable point,
+ * from half to the whole bound length and up to `boundSearchDegrees` either
+ * side of straight at the target (never within half of `assaultRetargetM` of
+ * it), from which the element, prone, would see most of the enemy positions
+ * its force knows of (three points across its front, through buildings and
+ * vegetation). Of the points that see at least `SIGHT_SHARE` of the best
+ * (all of them, with no sight from anywhere): the farthest toward the
+ * target, then the straightest. `null` when it is already close.
+ */
+function firingPosition(context: FofContext, force: FofForce, at: Vec2, target: Vec2): Vec2 | null {
+  const { world, setup } = context;
+  const behavior = setup.config.force;
+  const d = Math.hypot(target.x - at.x, target.y - at.y);
+  const length = Math.min(behavior.boundLengthM, d - behavior.assaultRetargetM / 2);
+  if (length < 5) return null;
+  const straight = azimuthOf(target.x - at.x, target.y - at.y);
+  const ahead = (heading: number, m: number): Vec2 => ({
+    x: at.x + Math.sin(heading) * m,
+    y: at.y + Math.cos(heading) * m,
+  });
+  const search = behavior.boundSearchDegrees;
+  if (search <= 0) return ahead(straight, length);
+  const area = forceArea(context, force, at);
+  if (area === 0) return ahead(straight, length);
+  const terrain = world.terrain;
+  const sees = sightOfEnemy(context, force, target);
+  const step = Math.max(5, search / 3);
+  const offsets = [0];
+  for (let a = step; a <= search + 1e-9; a += step) offsets.push(a, -a);
+  const candidates: { point: Vec2; score: number; progress: number }[] = [];
+  for (const share of BOUND_SHARES) {
+    for (const offset of offsets) {
+      const heading = straight + (offset * Math.PI) / 180;
+      const wanted = ahead(heading, length * share);
+      if (!isOnTerrain(terrain, wanted.x, wanted.y)) continue;
+      const point = nearestInArea(terrain, wanted, area);
+      if (!point) continue;
+      if (Math.hypot(target.x - point.x, target.y - point.y) < behavior.assaultRetargetM / 2) {
+        continue;
+      }
+      // Three points across the element's front, square to the enemy.
+      const fx = target.x - point.x;
+      const fy = target.y - point.y;
+      const fl = Math.hypot(fx, fy) || 1;
+      const rx = (fy / fl) * ELEMENT_HALF_FRONT_M;
+      const ry = (-fx / fl) * ELEMENT_HALF_FRONT_M;
+      const score =
+        sees(point) +
+        sees({ x: point.x + rx, y: point.y + ry }) +
+        sees({ x: point.x - rx, y: point.y - ry });
+      const progress = d - fl;
+      candidates.push({ point, score, progress });
+    }
+  }
+  // Of the points that see nearly as much as the best, the farthest forward (then the straightest).
+  const most = Math.max(0, ...candidates.map((c) => c.score));
+  let best: (typeof candidates)[number] | null = null;
+  for (const c of candidates) {
+    if (c.score < SIGHT_SHARE * most - 1e-9) continue;
+    if (!best || c.progress > best.progress + 1e-9) best = c;
+  }
+  return best?.point ?? null;
 }
 
 /** The bounding element arrives (or is held up): it goes down and, after its reaction delays, fires. */
@@ -613,14 +756,21 @@ export function resume(context: FofContext, force: FofForce, reason: string): vo
   }
 }
 
-/** Issues a movement order to the force (as the movement engine's own `orderUnit`). Returns whether it took. */
+/**
+ * Issues a movement order to the force, or to the unit of the force its
+ * formation is for (a bounding element), as the movement engine's own
+ * `orderUnit`. Returns whether it took.
+ */
 export function issue(context: FofContext, force: FofForce, order: UnitOrder): boolean {
   const { state } = context;
   const events: typeof context.events = [];
+  const unitId = inForce(context, force, order.formation.root.unitId)
+    ? order.formation.root.unitId
+    : orgUnitId(force.unitId);
   applyOrderUnit(
     state,
     context.world,
-    { type: 'orderUnit', tick: state.tick, unitId: orgUnitId(force.unitId), order },
+    { type: 'orderUnit', tick: state.tick, unitId, order },
     context.t,
     events,
   );

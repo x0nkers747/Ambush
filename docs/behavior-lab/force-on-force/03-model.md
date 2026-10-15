@@ -111,33 +111,54 @@ force stays down and fires (the base of fire); then the next element moves, in t
 
 - **Elements.**
   - A force with two or more subordinate units (a squad): each fire team is an
-    element. The squad leader moves with each bound, a little behind the team.
+    element, ordered as itself (the movement engine plans a unit's route from its
+    leader, so the team's route starts from its team leader). The squad leader is
+    the last element of the rotation, and bounds on his own.
   - A force without subordinate units (a fire team, a 3-Marine element): its
     soldiers in two halves, in formation order, the leader with the first.
   - A single soldier: no fire and movement; he moves alone.
 - **A bound.**
-  - The next element, in turn, rushes `boundLengthM` (40 m) at `boundPaceMps`
-    (3 m/s) toward where the force believes the enemy is. It never goes closer than
-    half of `assaultRetargetM`. It moves in its own part of the force's formation,
-    through the movement engine.
+  - The next element rushes up to `boundLengthM` (40 m) at `boundPaceMps` (3 m/s)
+    toward where the force believes the enemy is, to a **firing position** (below).
+    It never goes closer than half of `assaultRetargetM`. It moves in its own part of
+    the force's formation, through the movement engine.
   - Bounding soldiers do not fire. They are standing and moving, so easier to see
     and hit.
   - Everyone else is halted in contact: down, facing the enemy, firing aimed or
     area fire at what the force knows.
-  - The bound ends when the element arrives, or (held up, say by a pinned soldier)
-    after twice its expected time plus 5 s. Its soldiers then go down and, after
-    their reaction delays, fire.
+  - The bound ends when the element reaches its destination (a soldier pinned on the
+    way goes down where he is), or, held up, after twice its expected time plus 5 s.
+    Its soldiers then go down and, after their reaction delays, fire.
   - The next element bounds once the last has been down `boundRestSeconds` (6 s),
     so that its fire is established.
+- **Firing positions.** The element that bounds becomes part of the base of fire, so
+  it bounds to a spot it can shoot from.
+  - **Candidates:** points at the whole, ¾ and ½ of the bound length, straight at the
+    enemy and every 20° up to `boundSearchDegrees` (60°) either side, each moved to
+    the nearest reachable ground.
+  - **Score:** from three points across the element's front (±7 m), prone (eye at
+    0.3 m), the enemy positions the force knows of (its current confirmed contacts:
+    its picture, not the truth) with a clear sight line through buildings and terrain,
+    each weighted by the light through vegetation.
+  - **Choice:** of the candidates seeing at least ¾ as much as the best, the one
+    farthest toward the enemy, then the straightest. With no sight from anywhere, that
+    is the straight, whole bound.
+  - `boundSearchDegrees` 0 turns this off: straight bounds.
+- **Which element bounds next.** In turn, from the last; but an element none of whose
+  soldiers sees a known enemy from where it lies goes first, since it adds nothing to
+  the base of fire there. No element bounds twice in a row unless it is the only one.
 - **An element that cannot move** (all of it down, already close, or no way) is
   skipped for the next. If none can, the force halts and fights where it is.
 - **Not modelled:**
-  - choosing firing positions or cover for the base of fire (in town, it often has no
-    sight line and can give only area fire, or none);
-  - flanking, individual rushes within a team, and assaulting through the position.
-- **What it changes** (seeds 1–5, [the journal](journal.md)): against a halted,
-  prone defender the attack still usually fails in the open, but it now inflicts real
-  casualties. Attacking a withdrawing force wins every seed.
+  - cover (a firing position is chosen for sight, not protection);
+  - flanking beyond the 60° search, individual rushes within a team, and assaulting
+    through the position.
+- **What it changes** (seeds 1–5, [the journal](journal.md)):
+  - In town, the base of fire has a sight line to an enemy about twice as often as
+    with straight bounds.
+  - Against a halted, prone defender, the attack still usually fails in the open, but
+    it inflicts real casualties.
+  - Attacking a withdrawing force wins every seed.
 
 ## 3. Soldiers
 
