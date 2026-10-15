@@ -515,6 +515,37 @@ run the simulation in a worker, and make detection cheaper.
 drawn advanced every frame, by 0.46–0.59 ticks on average (standard deviation
 0.07–0.10), and never stood still. The characters follow the same clock.
 
+## Levels of detail for the characters (2026-10-15)
+
+**Asked for.** Levels of detail, so that about 1,000 soldiers can be drawn as
+characters. Every soldier was an animated model of some 38 draw calls, and the
+988-soldier battle drew at 4 fps.
+
+**Built** (in the shared character layer, so the game's 3D view has it too; see
+`docs/character-animation.md` §7):
+
+- **By a soldier's height on screen:**
+  - from 28 px, the model with its shadow, posed every frame;
+  - from 16 px, the model without its shadow, posed every other frame;
+  - below, an instanced figure in his posture, from the motion log.
+- **Models are made the first time a soldier is near enough.**
+- **Team indicators are instanced.**
+
+**Measured.**
+
+- **The 988-soldier battle with characters:** 60 fps at any zoom.
+  - From the overview, every soldier is a figure, and no model has been made.
+  - At 60–90 m, the soldiers nearest are models (50–65 of them) and the rest figures.
+- **In the game's view** (crowd benchmark): 1,000 soldiers seen from 400 m, 66 fps in 68
+  draw calls. 50 soldiers at the usual 40 m are all full models with shadows, as before.
+
+**Not done.**
+
+- A dense crowd of models close to the camera is still costly: 500 within 40 m, 21 fps.
+  Skinned instancing would be the next step there.
+- The figures are simple, for a soldier a few pixels tall: they have no arms or weapon,
+  and they do not animate their gait.
+
 ## Known limitations
 
 **Detection.**

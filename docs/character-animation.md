@@ -198,10 +198,41 @@ from `ambushBenchCharacters`, walking and running.
   about 38 draw calls. Those are the model's 13 material groups and the rifle's parts, each
   drawn twice with shadows.
 - **Memory:** about 4 MB of assets, plus the motion log (35 bytes per soldier per tick).
-- **Culling:** soldiers outside the view are not posed. A soldier under 14 px tall is posed
-  every 4th frame; his pose is still a function of time.
-- **Prepared, not built:** pose sharing and skinned instancing (`@three.ez/instanced-mesh`),
-  per the recommended architecture. The layer's interface would not change.
+- **Culling:** soldiers outside the view are not posed.
+- **Levels of detail** (`layer.ts`, `impostors.ts`), by a standing soldier's height on screen:
+
+  | Height on screen | Drawn as                                                                    | Posed             |
+  | ---------------- | --------------------------------------------------------------------------- | ----------------- |
+  | 28 px and more   | the animated model, its weapon and shadow                                   | every frame       |
+  | 16 to 28 px      | the animated model and weapon, no shadow                                    | every other frame |
+  | under 16 px      | a simple figure in his posture (standing, kneeling, prone, down), instanced | not at all        |
+  - **Switching is seamless.** A pose is a function of the logs and the time, so a soldier
+    switches level at any moment, at once.
+  - **Models are made lazily.** A model is made the first time a soldier is near enough,
+    and then kept.
+  - **Far figures** are one draw call per posture, with shadows.
+  - **Team indicators** are one instanced draw call for every soldier. The selection ring
+    is a single mesh.
+  - **Figure tones** are near the models' look at that size: grey-green BLUEFOR, khaki
+    OPFOR, grey down.
+  - `fingerprints()` lists the soldiers drawn as models.
+  - `stats()` reports the soldiers at each level, and the models made.
+
+- **Measured** (`ambushBenchCharacters`, Quantico town, Chrome uncapped, the same machine):
+
+  | Crowd, camera          | Frames per second | Draw calls | At each level (near / middle / far) |
+  | ---------------------- | ----------------: | ---------: | ----------------------------------- |
+  | 50, 40 m away          |                44 |      1,913 | 50 / 0 / 0                          |
+  | 500, 40 m away (dense) |                21 |      3,248 | 147 / 146 / 207                     |
+  | 500, 250 m away        |                66 |        108 | 0 / 0 / 500                         |
+  | 1,000, 400 m away      |                66 |         68 | 0 / 0 / 1,000                       |
+
+  The Force-on-Force Lab's 988-soldier battle, with characters, draws at 60 fps (it drew at
+  4 fps with every soldier a model).
+
+- **Prepared, not built:** pose sharing and skinned instancing (`@three.ez/instanced-mesh`)
+  for crowds of models near the camera, per the recommended architecture. The layer's
+  interface would not change.
 
 ## 8. How to
 

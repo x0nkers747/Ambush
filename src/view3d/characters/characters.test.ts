@@ -311,4 +311,83 @@ describe('the character layer', () => {
     layer.dispose();
     expect(layer.group.children.length).toBe(0);
   });
+
+  it('draws a far soldier as an instanced figure, and makes his model only when he comes near', async () => {
+    const assets: SoldierAssets = {
+      soldier: asset,
+      rifle: models.rifle,
+      ak: models.ak,
+      materials: { friendly: new Map(), enemy: new Map() },
+      loadMs: 0,
+    };
+    const layer = createCharacterLayer(Promise.resolve(assets));
+    await Promise.resolve();
+    await Promise.resolve();
+    const log = createMotionRecorder(30);
+    log.record({
+      tick: 0,
+      soldiers: [
+        {
+          id: 'M01',
+          side: 'BLUEFOR',
+          position: { x: 0, y: 0, z: 0 },
+          azimuth: 0,
+          posture: 'standing',
+          status: 'active',
+        },
+        {
+          id: 'M02',
+          side: 'BLUEFOR',
+          position: { x: 3, y: 0, z: 0 },
+          azimuth: 0,
+          posture: 'prone',
+          status: 'active',
+        },
+      ],
+    } as unknown as SimState);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+    const at = (distance: number) => {
+      camera.position.set(0, 2, distance);
+      camera.lookAt(0, 1, 0);
+      layer.update({
+        units: [
+          unit('M01', 'friendly'),
+          { ...unit('M02', 'friendly'), position: { x: 3, y: 0, z: 0 } },
+        ],
+        clock: { log, combatLog: [], seconds: 0 },
+        weapons: { M01: 'm16-rifle', M02: 'm16-rifle' },
+        surfaceAt: () => 0,
+        camera,
+        viewportHeightPx: 800,
+      });
+      return layer.stats();
+    };
+    const instances = (name: string) =>
+      (layer.group.getObjectByName(name) as THREE.InstancedMesh | undefined)?.count ?? -1;
+    // 1.5 km away, a few pixels tall: figures in their postures, no models made.
+    let stats = at(1500);
+    expect(stats.lod).toEqual({ near: 0, mid: 0, far: 2 });
+    expect(stats.models).toBe(0);
+    expect(stats.posed).toBe(0);
+    expect(instances('impostors standing')).toBe(1);
+    expect(instances('impostors prone')).toBe(1);
+    expect(instances('indicators')).toBe(2);
+    expect(layer.fingerprints().size).toBe(0);
+    expect(layer.positions().get('M02')?.lying).toBe(true);
+    // Close: the animated models, posed, and no figures.
+    stats = at(8);
+    expect(stats.lod.near).toBe(2);
+    expect(stats.models).toBe(2);
+    expect(stats.posed).toBe(2);
+    expect(instances('impostors standing')).toBe(0);
+    expect(layer.fingerprints().size).toBe(2);
+    expect(layer.group.getObjectByName('soldier M01')?.visible).toBe(true);
+    // Far again: the models are kept but hidden.
+    stats = at(1500);
+    expect(stats.models).toBe(2);
+    expect(layer.group.getObjectByName('soldier M01')?.visible).toBe(false);
+    expect(instances('impostors standing')).toBe(1);
+    layer.dispose();
+    expect(layer.group.children.length).toBe(0);
+  });
 });
