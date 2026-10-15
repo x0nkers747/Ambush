@@ -56,7 +56,11 @@ export interface BattlefieldStore {
   get(id: string): Promise<BattlefieldPackage>;
   getSources(id: string): Promise<BattlefieldSources | undefined>;
   put(pkg: BattlefieldPackage, sources: BattlefieldSources): Promise<void>;
-  /** Deletes a battlefield and its scenarios. */
+  /**
+   * Deletes a battlefield, its working scenario and that scenario's link.
+   * Saved scenarios are kept: they only refer to the battlefield, which can
+   * be found again or regenerated when one is loaded.
+   */
   delete(id: string): Promise<void>;
   /**
    * Scenarios saved for a battlefield (docs/adr/0015), as stored: this layer
@@ -65,6 +69,25 @@ export interface BattlefieldStore {
   listScenarios(battlefieldId: string): Promise<unknown[]>;
   /** Saves (or replaces) a scenario of a battlefield. Kept apart from the battlefield package. */
   putScenario(battlefieldId: string, scenarioId: string, data: unknown): Promise<void>;
+  /**
+   * The scenario library (docs/scenarios.md): saved scenarios by id, as
+   * stored. Like the working scenarios, this layer does not know their
+   * format; the caller validates them. They are independent of the
+   * battlefields they refer to.
+   */
+  listSavedScenarios(): Promise<unknown[]>;
+  getSavedScenario(id: string): Promise<unknown>;
+  putSavedScenario(id: string, data: unknown): Promise<void>;
+  deleteSavedScenario(id: string): Promise<void>;
+  /**
+   * Which saved scenario a battlefield's working scenario was loaded from or
+   * saved as (`undefined`: none), as stored.
+   */
+  getScenarioLink(battlefieldId: string): Promise<unknown>;
+  /** Sets (or with `null`, removes) a battlefield's scenario link. */
+  putScenarioLink(battlefieldId: string, link: unknown): Promise<void>;
+  /** Every scenario link, by battlefield. */
+  listScenarioLinks(): Promise<{ readonly battlefieldId: string; readonly link: unknown }[]>;
 }
 
 export function summarize(pkg: BattlefieldPackage): BattlefieldSummary {
@@ -89,6 +112,8 @@ export function createMemoryStore(): BattlefieldStore {
   const packages = new Map<string, unknown>();
   const sources = new Map<string, BattlefieldSources>();
   const scenarios = new Map<string, { battlefieldId: string; data: unknown }>();
+  const library = new Map<string, unknown>();
+  const links = new Map<string, unknown>();
   return {
     list: () =>
       Promise.resolve(
@@ -109,6 +134,7 @@ export function createMemoryStore(): BattlefieldStore {
       packages.delete(id);
       sources.delete(id);
       for (const [key, s] of scenarios) if (s.battlefieldId === id) scenarios.delete(key);
+      links.delete(id);
       return Promise.resolve();
     },
     listScenarios: (battlefieldId) =>
@@ -122,16 +148,44 @@ export function createMemoryStore(): BattlefieldStore {
       scenarios.set(scenarioId, { battlefieldId, data: structuredClone(data) });
       return Promise.resolve();
     },
+    listSavedScenarios: () => Promise.resolve([...library.values()].map((d) => structuredClone(d))),
+    getSavedScenario: (id) => Promise.resolve(structuredClone(library.get(id))),
+    putSavedScenario: (id, data) => {
+      library.set(id, structuredClone(data));
+      return Promise.resolve();
+    },
+    deleteSavedScenario: (id) => {
+      library.delete(id);
+      return Promise.resolve();
+    },
+    getScenarioLink: (battlefieldId) => Promise.resolve(structuredClone(links.get(battlefieldId))),
+    putScenarioLink: (battlefieldId, link) => {
+      if (link === null) links.delete(battlefieldId);
+      else links.set(battlefieldId, structuredClone(link));
+      return Promise.resolve();
+    },
+    listScenarioLinks: () =>
+      Promise.resolve(
+        [...links.entries()].map(([battlefieldId, link]) => ({
+          battlefieldId,
+          link: structuredClone(link),
+        })),
+      ),
   };
 }
 
 const DB_NAME = 'ambush';
-/** 2 added the scenarios store (existing battlefields are kept). */
-const DB_VERSION = 2;
+/**
+ * 2 added the scenarios store; 3 the scenario library and the working
+ * scenarios' links to it (existing data is kept).
+ */
+const DB_VERSION = 3;
 const SUMMARIES = 'battlefieldSummaries';
 const PACKAGES = 'battlefieldPackages';
 const SOURCES = 'battlefieldSources';
 const SCENARIOS = 'scenarios';
+const LIBRARY = 'savedScenarios';
+const LINKS = 'scenarioLinks';
 
 const request = <T>(r: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -163,7 +217,7 @@ export async function openIndexedDbStore(
   const open = factory.open(DB_NAME, DB_VERSION);
   open.onupgradeneeded = () => {
     const db = open.result;
-    for (const name of [SUMMARIES, PACKAGES, SOURCES, SCENARIOS]) {
+    for (const name of [SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LIBRARY, LINKS]) {
       if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
     }
   };
@@ -196,8 +250,8 @@ export async function openIndexedDbStore(
       await done(tx);
     },
     async delete(id) {
-      const tx = db.transaction([SUMMARIES, PACKAGES, SOURCES, SCENARIOS], 'readwrite');
-      for (const name of [SUMMARIES, PACKAGES, SOURCES]) tx.objectStore(name).delete(id);
+      const tx = db.transaction([SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LINKS], 'readwrite');
+      for (const name of [SUMMARIES, PACKAGES, SOURCES, LINKS]) tx.objectStore(name).delete(id);
       const scenarios = tx.objectStore(SCENARIOS);
       const keys = (await request(scenarios.getAllKeys())) as string[];
       const values = (await request(scenarios.getAll())) as { battlefieldId: string }[];
@@ -221,6 +275,41 @@ export async function openIndexedDbStore(
       const tx = db.transaction(SCENARIOS, 'readwrite');
       tx.objectStore(SCENARIOS).put({ battlefieldId, data }, scenarioId);
       await done(tx);
+    },
+    async listSavedScenarios() {
+      const tx = db.transaction(LIBRARY, 'readonly');
+      return (await request(tx.objectStore(LIBRARY).getAll())) as unknown[];
+    },
+    async getSavedScenario(id) {
+      const tx = db.transaction(LIBRARY, 'readonly');
+      return (await request(tx.objectStore(LIBRARY).get(id))) as unknown;
+    },
+    async putSavedScenario(id, data) {
+      const tx = db.transaction(LIBRARY, 'readwrite');
+      tx.objectStore(LIBRARY).put(data, id);
+      await done(tx);
+    },
+    async deleteSavedScenario(id) {
+      const tx = db.transaction(LIBRARY, 'readwrite');
+      tx.objectStore(LIBRARY).delete(id);
+      await done(tx);
+    },
+    async getScenarioLink(battlefieldId) {
+      const tx = db.transaction(LINKS, 'readonly');
+      return (await request(tx.objectStore(LINKS).get(battlefieldId))) as unknown;
+    },
+    async putScenarioLink(battlefieldId, link) {
+      const tx = db.transaction(LINKS, 'readwrite');
+      if (link === null) tx.objectStore(LINKS).delete(battlefieldId);
+      else tx.objectStore(LINKS).put(link, battlefieldId);
+      await done(tx);
+    },
+    async listScenarioLinks() {
+      const tx = db.transaction(LINKS, 'readonly');
+      const store = tx.objectStore(LINKS);
+      const keys = (await request(store.getAllKeys())) as string[];
+      const values = (await request(store.getAll())) as unknown[];
+      return keys.map((battlefieldId, i) => ({ battlefieldId, link: values[i] }));
     },
   };
 }
