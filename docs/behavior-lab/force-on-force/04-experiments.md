@@ -264,6 +264,56 @@ Worker (`sim.worker.ts`; `session-host.ts` on the worker side,
 **In Chrome with both** (988 soldiers, dots, 32×): 60 fps throughout. The battle plays
 at 1.2–3.3× real time (never below real time; before, 0.65× at worst, at 6–14 fps).
 
+### 5.2 Toward 32× real time at 988 soldiers (2026-10-15)
+
+Goal: the 988-soldier battle at 32× real time, without significant loss of fidelity.
+
+**Exact: the run is the same** (bit-identical apart from the look counts; checked on
+open, wooded and urban seeds 1–2, default and attacking, against the previous code):
+
+| Change                                              | What it removes                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sight reuse** (`sight-cache.ts`)                  | A pair's sight is traced again only when one of the two has moved or changed posture (a version per soldier). Detection and fire's exposure share it. In a firefight most soldiers lie still.                                                                                                                                                           |
+| **Out of reach** (`look-schedule.ts`)               | Each pair has a reach: the range beyond which even the best case (standing, moving, every cue, wholly in view) cannot detect. Farther, the pair is not looked at until the two soldiers' odometers (summed moves) have grown by the gap, so no speed limit is assumed. A soldier who has never fired is reached without the firing cue, until he fires. |
+| **Clear lines without walking** (`sight-tracer.ts`) | 128 m blocks hold their highest ground and whether any building or vegetation is near. A line whose lowest end clears the ground in every block under it, with nothing near, is clear (exactly as the reference finds it). On ground without any feature, one comparison. `clearCount` and `blocked` both use it.                                       |
+| **The scan's loop**                                 | Arrays per decision instead of lookups and objects per pair; tracks by soldier index; a check without haze first (haze only lowers cycles), against the cycles each pair needs (computed once).                                                                                                                                                         |
+| **The forces' decisions**                           | Soldiers' movement agents in a map (it was a search per soldier); the nearest known contact over typed arrays, with `Math.hypot` only where it could win; fire's target taken nearest first instead of sorting every candidate.                                                                                                                         |
+| **The lab**                                         | For runs over 100 soldiers, the state hash (over 100 ms at 988) is taken at each keyframe rather than every second; replay still checks each.                                                                                                                                                                                                           |
+
+**Not exact, with the same results in distribution:**
+
+- **Redundant looks are not taken.** A look at an enemy whom the force has already
+  identified, and already saw in the same decision at full confidence, changes nothing it
+  knows (the same time, confidence, place and level), so it is skipped. Only the random
+  numbers it would have drawn shift. Runs differ from before seed by seed. The 50-seed
+  sweeps (§3) gave the same distributions. Two tests that followed one seed were moved to
+  other seeds (one asks for identification on both sides; the other now checks attacks
+  over seeds 1–3).
+- **Movement integrated at 30 Hz** (a run's `substepHz`, default 120). Experiment 14 and
+  the scalability test use it.
+  - Over 50 seeds each, the two-squad battles gave the same distributions at 30 and
+    120 Hz, in the open and in town. That covers outcomes, detection and identification
+    ranges, casualties and engagement lengths, with no refused orders or invalid states.
+  - At 988 soldiers, positions after 120 s differed from 120 Hz by 0.3 m on average
+    (0.8 m at most). So did 60 Hz: the difference comes from discrete moments such as
+    falling in, not from integration error.
+
+**Measured** (988 soldiers, Node, one run at a time):
+
+|                              | Whole battle                 | Before contact | After contact | Worst tick |
+| ---------------------------- | ---------------------------- | -------------: | ------------: | ---------: |
+| Start of this round (120 Hz) | 813 s in 268 s: 3× real time |       484 ms/s |      266 ms/s |     222 ms |
+| Exact changes (120 Hz)       | 999 s in 88 s: 11×           |       175 ms/s |       61 ms/s |     256 ms |
+| And 30 Hz movement           | 959 s in 54 s: 18×           |        92 ms/s |       45 ms/s |     253 ms |
+
+- **In Chrome** (dots, 32×, 60 fps throughout): about 10× real time on the approach, 6×
+  around contact, then rising from 12× to 27×.
+- **What the rest costs:** each observer looks at each enemy within reach every second,
+  about 50,000 looks a second on the approach and 150,000 at contact. On the approach,
+  movement is about a third of the time.
+- **32× is not reached yet.** Reaching it needs changes to the model's resolution (see
+  the journal for the options).
+
 **Next, if larger forces are wanted:**
 
 - give looks a spatial index or a nearest-first budget (no longer exact: the order of

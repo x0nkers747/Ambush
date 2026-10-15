@@ -64,7 +64,7 @@ export interface HostBatch {
   readonly samples: readonly FofSample[];
   /** Per-second hashes from second `hashesFrom` on. */
   readonly hashesFrom: number;
-  readonly hashes: readonly string[];
+  readonly hashes: readonly (string | null)[];
   readonly keyframes: readonly (readonly [number, SimSnapshot])[];
   /** The head's state (without the per-pair thresholds, which the page never reads), if due. */
   readonly state: DeepReadonly<SimState> | null;

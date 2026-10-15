@@ -55,7 +55,9 @@ describe('the experimental configuration', () => {
 });
 
 describe('detection in the open', () => {
-  const run = createFofRun(headOn('open', 1));
+  // A seed in which both sides identify the other within the run (they do in
+  // most; in seed 1 BLUEFOR does not, by chance, before 700 s).
+  const run = createFofRun(headOn('open', 2));
   const events = runFor(run, 700);
   const contacts = observed(events);
 

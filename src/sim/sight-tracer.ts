@@ -25,6 +25,10 @@ import { isRefinedAt, refinementIndex, sampleSurface, typedSamples } from './ter
 
 /** Bucket size of the feature and edge index, in metres. */
 const BUCKET_M = 32;
+/** Block size of the clear-line proof (highest ground, features near), in metres. */
+const BLOCK_M = 128;
+/** How far the lowest end of a line must stand above the highest ground to prove it clear (m). */
+const CLEAR_MARGIN_M = 1e-6;
 /** Features and edges are indexed in every bucket their box comes within this distance of. */
 const INDEX_MARGIN_M = 1;
 /** Widening of feature boxes, in metres, and of their parameter ranges along a line. */
@@ -409,6 +413,56 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     Math.max(px[i] ?? 0, qx[i] ?? 0),
     Math.max(py[i] ?? 0, qy[i] ?? 0),
   ]);
+
+  // Blocks of BLOCK_M for proving a line clear without walking it
+  // (`provablyClear`): the highest ground in each (the surface is linear on
+  // triangles of samples, so never above its cell's highest sample), and
+  // whether any feature's box comes near it.
+  const blockCols = Math.max(1, Math.ceil((maxX - originX) / BLOCK_M));
+  const blockRows = Math.max(1, Math.ceil((maxY - originY) / BLOCK_M));
+  const blockMax = new Float64Array(blockCols * blockRows).fill(-Infinity);
+  const blockFeatures = new Uint8Array(blockCols * blockRows);
+  const blockC = (x: number) =>
+    Math.min(blockCols - 1, Math.max(0, Math.floor((x - originX) / BLOCK_M)));
+  const blockR = (y: number) =>
+    Math.min(blockRows - 1, Math.max(0, Math.floor((y - originY) / BLOCK_M)));
+  for (let r = 0; r < rows - 1; r += 1) {
+    for (let c = 0; c < columns - 1; c += 1) {
+      const o = r * columns + c;
+      let high = Math.max(
+        elevations[o] ?? Infinity,
+        elevations[o + 1] ?? Infinity,
+        elevations[o + columns] ?? Infinity,
+        elevations[o + columns + 1] ?? Infinity,
+      );
+      const slot = refinement ? (refinement.slot[r * (columns - 1) + c] ?? -1) : -1;
+      if (refinement && slot >= 0) {
+        const n1 = refinement.factor + 1;
+        for (let q = 0; q < n1 * n1; q += 1) {
+          high = Math.max(high, refinement.samples[slot * n1 * n1 + q] ?? Infinity);
+        }
+      }
+      if (!Number.isFinite(high)) high = Infinity;
+      const x0 = originX + c * cellSize;
+      const y0 = originY + r * cellSize;
+      for (let br = blockR(y0 - 1); br <= blockR(y0 + cellSize + 1); br += 1) {
+        for (let bc = blockC(x0 - 1); bc <= blockC(x0 + cellSize + 1); bc += 1) {
+          const k = br * blockCols + bc;
+          blockMax[k] = Math.max(blockMax[k] ?? -Infinity, high);
+        }
+      }
+    }
+  }
+  // The whole terrain: its highest ground, for lines over ground without features.
+  let terrainMax = -Infinity;
+  for (const high of blockMax) terrainMax = Math.max(terrainMax, high);
+  for (const f of features) {
+    for (let br = blockR(f.box.minY - 2); br <= blockR(f.box.maxY + 2); br += 1) {
+      for (let bc = blockC(f.box.minX - 2); bc <= blockC(f.box.maxX + 2); bc += 1) {
+        blockFeatures[br * blockCols + bc] = 1;
+      }
+    }
+  }
 
   // --- Per-line state, reused ---------------------------------------------------
   const featureStamp = new Int32Array(featureCount);
@@ -1054,6 +1108,17 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   function blocked(a: Vec3, b: Vec3, obstruction?: Obstruction): boolean {
     record = obstruction;
     if (record) record.kind = 0;
+    // Open ground: proved clear without walking (nothing to record).
+    ax = a.x;
+    ay = a.y;
+    bx = b.x;
+    by = b.y;
+    dx = bx - ax;
+    dy = by - ay;
+    if (provablyClear(Math.min(a.z, b.z))) {
+      record = undefined;
+      return false;
+    }
     const result = walk(a, b, 0, Infinity);
     record = undefined;
     return result === 1;
@@ -1066,6 +1131,41 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   let laneObscuredFrom = new Float64Array(4);
   let laneAlive = new Uint8Array(4);
   const laneParts = new Float64Array(64);
+
+  /**
+   * Whether the line (ax, ay)–(bx, by), never lower than `lowest`, is clear
+   * without walking it: in every block under it (taken piece by piece, each
+   * piece's box, widened) there is no feature, and the highest ground lies
+   * `CLEAR_MARGIN_M` below `lowest`. Then every cut's clearance is positive
+   * and no piece is in a building or vegetation: the reference finds it
+   * clear. `false` proves nothing.
+   */
+  function provablyClear(lowest: number): boolean {
+    // No feature anywhere and the line above all the ground: at once.
+    if (featureCount === 0 && terrainMax <= lowest - CLEAR_MARGIN_M) return true;
+    const length = Math.hypot(dx, dy);
+    const pieces = Math.max(1, Math.ceil(length / BLOCK_M));
+    let x0 = ax;
+    let y0 = ay;
+    for (let p = 1; p <= pieces; p += 1) {
+      const x1 = p === pieces ? bx : ax + (dx * p) / pieces;
+      const y1 = p === pieces ? by : ay + (dy * p) / pieces;
+      const c0 = blockC(Math.min(x0, x1) - 1);
+      const c1 = blockC(Math.max(x0, x1) + 1);
+      const r0 = blockR(Math.min(y0, y1) - 1);
+      const r1 = blockR(Math.max(y0, y1) + 1);
+      for (let r = r0; r <= r1; r += 1) {
+        for (let c = c0; c <= c1; c += 1) {
+          const k = r * blockCols + c;
+          if (blockFeatures[k] !== 0) return false;
+          if (!((blockMax[k] ?? Infinity) <= lowest - CLEAR_MARGIN_M)) return false;
+        }
+      }
+      x0 = x1;
+      y0 = y1;
+    }
+    return true;
+  }
 
   /**
    * How many of the sight lines from eye `a` to the points (bx, by, zs[i])
@@ -1092,6 +1192,10 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     dx = bx - ax;
     dy = by - ay;
     dz = 0;
+    // Open ground: proved clear for every height without walking.
+    let lowest = az;
+    for (const z of zs) lowest = Math.min(lowest, z);
+    if (provablyClear(lowest)) return n;
     const distance = Math.hypot(dx, dy);
     begin(0);
     let previous = 0;

@@ -13,6 +13,8 @@ import { createFofRun, type FofRunSpec } from '#exercise/force-on-force';
 const squads = Number(process.env['AMBUSH_FOF_SCALE'] ?? 0);
 const limit = Number(process.env['AMBUSH_FOF_SCALE_SECONDS'] ?? 900);
 const terrain = (process.env['AMBUSH_FOF_SCALE_TERRAIN'] ?? 'open') as FofRunSpec['terrain'];
+/** The movement engine's integration rate (Hz): 30, as experiment 14 runs it. */
+const substepHz = Number(process.env['AMBUSH_FOF_SCALE_SUBSTEP'] ?? 30);
 
 function spec(n: number): FofRunSpec {
   const force = {
@@ -31,6 +33,7 @@ function spec(n: number): FofRunSpec {
     terrain,
     seed: 1,
     tickRateHz: 30,
+    substepHz,
   };
 }
 

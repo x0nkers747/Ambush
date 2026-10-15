@@ -3,6 +3,7 @@ import {
   azimuthFromDegrees,
   azimuthOf,
   createSimulation,
+  DEFAULT_BEHAVIOR_PARAMS,
   flattenFormation,
   hashSimState,
   orgUnitId,
@@ -93,6 +94,11 @@ export interface FofRunSpec {
   readonly tickRateHz: number;
   /** The model's configuration; default `FOF_DEFAULT_CONFIG`. */
   readonly config?: FofConfig;
+  /**
+   * The movement engine's integration rate (Hz; default 120). Lower is
+   * cheaper and less exact (docs/behavior-lab/force-on-force/04 §5.1).
+   */
+  readonly substepHz?: number;
 }
 
 /** A force of a run: its organization and ids. */
@@ -211,6 +217,9 @@ export function createFofRun(
     movement: { speed: Math.max(spec.blufor.pace, spec.opfor.pace), maxTurnRate: Math.PI / 2 },
     units: [...blue.units, ...red.units],
     soldiers: [...blue.soldiers, ...red.soldiers],
+    ...(spec.substepHz !== undefined
+      ? { behavior: { ...DEFAULT_BEHAVIOR_PARAMS, substepHz: spec.substepHz } }
+      : {}),
     fof: {
       config,
       visibility: spec.visibility ?? defaultVisibility(spec.terrain),

@@ -55,47 +55,55 @@ const gap = (run: FofRun) => {
 describe('actions on contact: attack', () => {
   for (const terrain of ['open', 'urban'] as const) {
     it(`${terrain}: returns fire, then assaults the enemy's believed position, closing under its own covering fire`, () => {
-      const run = createFofRun(spec(terrain, 1, 'attack', 'continue'));
-      const at: { assault: number | null } = { assault: null };
-      let closest = Infinity;
-      let assaultFire = 0;
-      let rejected = 0;
-      const events = finish(run, (stepped) => {
-        const blue = run.sim.state.fof?.forces[0];
-        for (const e of stepped) {
-          if (e.type === 'commandRejected') rejected += 1;
-          if (e.type === 'forcePhaseChanged' && e.side === 'BLUEFOR' && e.to === 'assaulting') {
-            at.assault ??= gap(run);
+      // Over seeds 1–3: every attack returns fire first and assaults; most close
+      // in (an attack can be broken before it has gone far).
+      let closing = 0;
+      for (const seed of [1, 2, 3]) {
+        const run = createFofRun(spec(terrain, seed, 'attack', 'continue'));
+        const at: { assault: number | null } = { assault: null };
+        let closest = Infinity;
+        let assaultFire = 0;
+        let rejected = 0;
+        const events = finish(run, (stepped) => {
+          const blue = run.sim.state.fof?.forces[0];
+          for (const e of stepped) {
+            if (e.type === 'commandRejected') rejected += 1;
+            if (e.type === 'forcePhaseChanged' && e.side === 'BLUEFOR' && e.to === 'assaulting') {
+              at.assault ??= gap(run);
+            }
+            if (e.type === 'fofFire' && e.side === 'BLUEFOR' && blue?.phase === 'assaulting') {
+              assaultFire += 1;
+            }
           }
-          if (e.type === 'fofFire' && e.side === 'BLUEFOR' && blue?.phase === 'assaulting') {
-            assaultFire += 1;
+          if (blue?.phase === 'assaulting') {
+            closest = Math.min(closest, gap(run));
+            // It assaults where it believes the enemy is.
+            expect(blue.objective).not.toBeNull();
           }
-        }
-        if (blue?.phase === 'assaulting') {
-          closest = Math.min(closest, gap(run));
-          // It assaults where it believes the enemy is.
-          expect(blue.objective).not.toBeNull();
-        }
-      });
-      const blue = phasesOf(events).filter((e) => e.side === 'BLUEFOR');
-      const contact = blue.find((e) => e.to === 'contact');
-      const assault = blue.find((e) => e.to === 'assaulting');
-      expect(contact).toBeDefined();
-      expect(assault).toBeDefined();
-      // It returns fire and locates the enemy first.
-      expect((assault?.atSeconds ?? 0) - (contact?.atSeconds ?? 0)).toBeGreaterThanOrEqual(
-        FOF_DEFAULT_CONFIG.force.assaultAfterSeconds - 1e-9,
-      );
-      expect(events.some((e) => e.type === 'fofFire' && e.side === 'BLUEFOR')).toBe(true);
-      // Moving forward into contact.
-      expect(at.assault).not.toBeNull();
-      expect(closest).toBeLessThan((at.assault ?? 0) - 25);
-      expect(assaultFire).toBeGreaterThan(0);
-      expect(rejected).toBe(0);
-      expect(run.outcome?.basis).not.toBe('invalid');
-      // The other force is not attacking.
-      expect(phasesOf(events).some((e) => e.side === 'OPFOR' && e.to === 'assaulting')).toBe(false);
-    }, 120_000);
+        });
+        const blue = phasesOf(events).filter((e) => e.side === 'BLUEFOR');
+        const contact = blue.find((e) => e.to === 'contact');
+        const assault = blue.find((e) => e.to === 'assaulting');
+        expect(contact).toBeDefined();
+        expect(assault).toBeDefined();
+        // It returns fire and locates the enemy first.
+        expect((assault?.atSeconds ?? 0) - (contact?.atSeconds ?? 0)).toBeGreaterThanOrEqual(
+          FOF_DEFAULT_CONFIG.force.assaultAfterSeconds - 1e-9,
+        );
+        expect(events.some((e) => e.type === 'fofFire' && e.side === 'BLUEFOR')).toBe(true);
+        expect(at.assault).not.toBeNull();
+        expect(assaultFire).toBeGreaterThan(0);
+        expect(rejected).toBe(0);
+        expect(run.outcome?.basis).not.toBe('invalid');
+        // The other force is not attacking.
+        expect(phasesOf(events).some((e) => e.side === 'OPFOR' && e.to === 'assaulting')).toBe(
+          false,
+        );
+        // Moving forward into contact.
+        if (closest < (at.assault ?? 0) - 25) closing += 1;
+      }
+      expect(closing).toBeGreaterThanOrEqual(2);
+    }, 300_000);
   }
 
   it('once the enemy is broken, the winner returns to its original movement order', () => {

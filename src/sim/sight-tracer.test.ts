@@ -235,6 +235,35 @@ describe('sightLineTracer', () => {
     for (const c of counts) expect(c).toBeGreaterThan(5);
   });
 
+  it('counts clear lines exactly on open ground too, where most are proved clear without walking', () => {
+    const lone = building('lone', rectangle(60, 60, 12, 12), 10);
+    for (const [name, elevation, features] of [
+      ['flat', SHAPES['flat'], {}],
+      ['flat with one building', SHAPES['flat'], { buildings: [lone] }],
+      ['ridge', SHAPES['ridge'], {}],
+      ['hilltop', SHAPES['hilltop'], { buildings: [lone] }],
+    ] as const) {
+      const g = terrain(elevation ?? (() => 0), features);
+      const tr = sightLineTracer(g);
+      const at = (x: number, y: number, h: number): Vec3 => ({ x, y, z: heightAt(g, x, y) + h });
+      const rng = createRngState(23);
+      const r = () => -199 + 398 * nextFloat(rng);
+      for (let i = 0; i < 1500; i += 1) {
+        const a = at(r(), r(), [0.3, 1.0, 1.65][i % 3] ?? 1.65);
+        const x = r();
+        const y = r();
+        if (a.x === x && a.y === y) continue;
+        const ground = heightAt(g, x, y);
+        const zs = [0.15, 0.55, 1.2].map((h) => ground + h);
+        const reference = zs.filter((z) => traceSightLine(g, a, { x, y, z }) === null).length;
+        expect(
+          tr.clearCount(a, x, y, zs),
+          `${name}: ${JSON.stringify(a)} → (${String(x)}, ${String(y)})`,
+        ).toBe(reference);
+      }
+    }
+  });
+
   it('agrees on sight lines along building edges, grid lines and through grid vertices', () => {
     const lines: [Vec3, Vec3][] = [
       [point(-60, 15, 1.7), point(-40, 15, 1.5)], // along the aligned building's south edge

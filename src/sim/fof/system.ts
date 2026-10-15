@@ -1,23 +1,17 @@
 import type { SimEvent } from '../events';
+import { azimuthDelta, azimuthOf } from '../geometry';
 import { nextFloat } from '../rng';
 import type { TickTime } from '../movement';
 import type { SimState, Soldier, SoldierId } from '../state';
 import type { SimWorld } from '../world';
 import { fofWeapon } from './config';
-import {
-  chanceIn,
-  confidenceAt,
-  cyclesOnTarget,
-  draw,
-  glance,
-  levelAt,
-  traceSight,
-  ttpf,
-} from './detection';
+import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, ttpf } from './detection';
 import { resolveFire, updateSuppression } from './fire';
 import { updateEffectiveness, updateForces } from './force';
 import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
+import { cyclesNeeded, deferLook, scheduleFor, travelled } from './look-schedule';
+import { sightBetween } from './sight-cache';
 import type { FofForce, FofSetup, FofSoldier, FofState, FofTrack, ObservationLevel } from './types';
 
 // The force-on-force system (docs/behavior-lab/force-on-force/03): runs after
@@ -32,6 +26,8 @@ import type { FofForce, FofSetup, FofSoldier, FofState, FofTrack, ObservationLev
 // observers due look (detection draws); tracks age and change level; forces
 // take their decisions (contact behavior, fire, withdrawal); the experiment is
 // adjudicated. Every random number comes from `SimState.rng`, in that order.
+
+const ARCMIN_RAD = Math.PI / (180 * 60);
 
 /** Everything one decision works with. */
 export interface FofContext {
@@ -148,6 +144,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       stats: {
         detectionAttempts: 0,
         tracedAttempts: 0,
+        redundantLooks: 0,
         visibleAttempts: 0,
         glimpses: 0,
         bursts: 0,
@@ -244,13 +241,14 @@ function decide(context: FofContext): void {
 
 /** Each member's ground speed since the previous decision. */
 function updateMotion(context: FofContext): void {
-  for (const member of context.fof.soldiers) {
+  context.fof.soldiers.forEach((member, i) => {
     const soldier = soldierOf(context, member);
     const d = Math.hypot(soldier.position.x - member.lastX, soldier.position.y - member.lastY);
     member.speed = context.n === 0 ? 0 : d / context.dt;
+    travelled(context, i, d);
     member.lastX = soldier.position.x;
     member.lastY = soldier.position.y;
-  }
+  });
 }
 
 /** Whether a force still looks and acts (not terminal). */
@@ -270,60 +268,131 @@ export function trackKey(force: number, targetId: string): string {
 
 /** The observers due look at every enemy in their field of regard. */
 function scan(context: FofContext): void {
-  const { fof, setup, state, world, t, n } = context;
+  const { fof, setup, state, t, n: decision } = context;
   const detection = setup.config.detection;
   const conditions = setup.config.visibility[setup.visibility];
   const every = Math.max(1, Math.round(detection.scanIntervalSeconds * setup.config.decisionHz));
   const lookSeconds = every / setup.config.decisionHz;
-  const tracks = new Map(fof.tracks.map((tr) => [trackKey(tr.force, tr.targetId), tr]));
-  fof.soldiers.forEach((member, i) => {
-    if ((n + i) % every !== 0) return;
-    const observer = soldierOf(context, member);
+  const n = fof.soldiers.length;
+  // This decision's soldiers, their cues and the tracks by observing force and target member.
+  const soldiers: Soldier[] = fof.soldiers.map((m) => soldierOf(context, m));
+  const cues = new Float64Array(n);
+  const firing = new Uint8Array(n);
+  fof.soldiers.forEach((enemy, j) => {
+    firing[j] =
+      enemy.lastFiredAt !== null && t - enemy.lastFiredAt <= detection.firingSignatureSeconds
+        ? 1
+        : 0;
+    cues[j] =
+      (enemy.speed > detection.movingSpeedMps ? detection.movingTargetFactor : 1) *
+      (firing[j] === 1 ? detection.firingSignatureFactor : 1);
+  });
+  const tracks: (FofTrack | undefined)[][] = fof.forces.map(
+    () => new Array<FofTrack | undefined>(n),
+  );
+  for (const tr of fof.tracks) {
+    const j = context.memberIndex.get(tr.targetId);
+    const row = tracks[tr.force];
+    if (j !== undefined && row) row[j] = tr;
+  }
+  const enemies = enemiesOf(fof);
+  const schedule = scheduleFor(fof);
+  const odometer = schedule.odometer;
+  const budget = schedule.budget;
+  const sumAt = schedule.sumAt;
+  const firedAt = schedule.firedAt;
+  const thresholds = fof.thresholds;
+  const maxRange = conditions.maxObservationRangeM;
+  const regard = detection.regardHalfAngleDeg;
+  const central = detection.centralHalfAngleDeg;
+  const n50 = detection.detectionCycles50;
+  // One sighting, reused: the cycles of a look are computed from it.
+  const sighting = { rangeM: 0, visibleFraction: 1, transmission: 1, attention: 1 };
+  for (let i = 0; i < n; i += 1) {
+    if ((decision + i) % every !== 0) continue;
+    const member = fof.soldiers[i];
+    const observer = soldiers[i];
+    if (!member || !observer) continue;
     const force = fof.forces[member.force];
-    if (observer.status !== 'active' || !force || !forceActive(force)) return;
+    if (observer.status !== 'active' || !force || !forceActive(force)) continue;
     const search = alerted(force) ? detection.alertedSearchFactor : detection.unalertedSearchFactor;
-    fof.soldiers.forEach((enemy, j) => {
-      if (enemy.force === member.force) return;
-      const threshold = fof.thresholds[i * fof.soldiers.length + j] ?? 1;
-      const target = soldierOf(context, enemy);
-      if (target.status !== 'active') return;
-      const looked = glance(observer, target, detection, conditions);
-      if (!looked) return;
-      force.stats.detectionAttempts += 1;
-      const cue =
-        (enemy.speed > detection.movingSpeedMps ? detection.movingTargetFactor : 1) *
-        (enemy.lastFiredAt !== null && t - enemy.lastFiredAt <= detection.firingSignatureSeconds
-          ? detection.firingSignatureFactor
-          : 1);
+    const row = tracks[member.force] ?? [];
+    const others = enemies[member.force] ?? [];
+    const ox = observer.position.x;
+    const oy = observer.position.y;
+    const odoI = odometer[i] ?? 0;
+    for (const j of others) {
+      const k = i * n + j;
+      // Out of this pair's reach (look-schedule.ts): this look could not detect.
+      const b = budget[k] ?? 0;
+      if (b > 0) {
+        const f = firedAt[k] ?? Number.NaN;
+        const fired = !Number.isNaN(f) && f !== (fof.soldiers[j]?.lastFiredAt ?? -1);
+        if (!fired && odoI + (odometer[j] ?? 0) - (sumAt[k] ?? 0) < b) continue;
+        budget[k] = 0;
+      }
+      const target = soldiers[j];
+      if (target?.status !== 'active') continue;
+      const threshold = thresholds[k] ?? 1;
+      const dx = target.position.x - ox;
+      const dy = target.position.y - oy;
+      const rangeM = Math.hypot(dx, dy);
+      if (rangeM > maxRange) {
+        deferLook(context, i, j, rangeM, maxRange);
+        continue;
+      }
+      if (rangeM < 1e-6) continue;
+      const cue = cues[j] ?? 1;
       const dimension = detection.criticalDimensionM[target.posture];
+      // Cheaper first: haze only lowers the cycles, so short of what the pair
+      // needs even without it, he is not detectable now (as below, exactly).
+      const clearAir =
+        (dimension / (rangeM * detection.cycleArcmin * ARCMIN_RAD)) *
+        conditions.backgroundContrast *
+        cue;
+      if (clearAir < cyclesNeeded(context, k)) {
+        deferLook(context, i, j, rangeM, Infinity, quietOf(fof.soldiers[j]));
+        continue;
+      }
       // The best case first (all of him in view, nothing in the way): when even
-      // that is not detectable to this observer, the sight lines are not traced
-      // (the result would be the same: no draw is taken below the threshold).
-      const best = ttpf(
-        cyclesOnTarget(
-          { ...looked, visibleFraction: 1, transmission: 1 },
-          dimension,
-          detection,
-          conditions,
-          cue,
-        ),
-        detection.detectionCycles50,
-      );
-      if (best <= threshold - 1e-9) return;
+      // that is not detectable to this observer, nothing is traced or drawn,
+      // and the pair is left out until it may be within reach.
+      sighting.rangeM = rangeM;
+      sighting.visibleFraction = 1;
+      sighting.transmission = 1;
+      const best = ttpf(cyclesOnTarget(sighting, dimension, detection, conditions, cue), n50);
+      if (best <= threshold - 1e-9) {
+        // Showing no firing cue now: out of reach until he fires (or comes nearer).
+        deferLook(context, i, j, rangeM, Infinity, quietOf(fof.soldiers[j]));
+        continue;
+      }
+      // His field of regard.
+      const off = Math.abs(azimuthDelta(observer.azimuth, azimuthOf(dx, dy))) * (180 / Math.PI);
+      if (off > regard) continue;
+      const attention = off <= central ? 1 : detection.peripheralFactor;
+      force.stats.detectionAttempts += 1;
+      const track = row[j];
+      // Seen already in this decision, at full confidence, and identified: another
+      // look would change nothing the force knows (the same time, confidence,
+      // place and level), so it is not taken.
+      if (track?.identified === true && track.lastSeenAt === t && track.confidence >= 1) {
+        force.stats.redundantLooks += 1;
+        continue;
+      }
       force.stats.tracedAttempts += 1;
-      const seen = traceSight(world.terrain, observer, target, detection, looked);
-      if (seen.visibleFraction <= 0 || seen.transmission <= 0) return;
+      const between = sightBetween(context, i, j, observer, target);
+      if (between.visibleFraction <= 0 || between.transmission <= 0) continue;
       force.stats.visibleAttempts += 1;
-      const cycles = cyclesOnTarget(seen, dimension, detection, conditions, cue);
+      sighting.visibleFraction = between.visibleFraction;
+      sighting.transmission = between.transmission;
+      const cycles = cyclesOnTarget(sighting, dimension, detection, conditions, cue);
       // Detectable to this observer only while P∞ exceeds the pair's threshold;
       // then found at rate P∞ / searchSeconds (the time law's asymptote is P∞).
-      const pInf = ttpf(cycles, detection.detectionCycles50);
-      if (pInf <= threshold) return;
-      const key = trackKey(member.force, target.id);
-      const track = tracks.get(key);
+      const pInf = ttpf(cycles, n50);
+      if (pInf <= threshold) continue;
       const tracking = track?.confirmed === true ? detection.trackingFactor : 1;
-      const rate = (pInf / detection.searchSeconds) * search * seen.attention * tracking;
-      if (!draw(state.rng, chanceIn(rate, lookSeconds))) return;
+      const rate = (pInf / detection.searchSeconds) * search * attention * tracking;
+      if (!draw(state.rng, chanceIn(rate, lookSeconds))) continue;
       force.stats.glimpses += 1;
       const from: ObservationLevel = track?.level ?? 'unaware';
       const glimpsed = glimpse(
@@ -334,18 +403,37 @@ function scan(context: FofContext): void {
         detection.confidenceGain,
         observer.id,
       );
-      tracks.set(key, glimpsed);
+      row[j] = glimpsed;
       // Identification: a further draw once the contact is confirmed.
       if (glimpsed.confirmed && !glimpsed.identified) {
         const pId = ttpf(cycles, detection.identificationCycles50);
-        const idRate =
-          pId <= threshold ? 0 : (pId / detection.searchSeconds) * search * seen.attention;
+        const idRate = pId <= threshold ? 0 : (pId / detection.searchSeconds) * search * attention;
         if (draw(state.rng, chanceIn(idRate, lookSeconds))) glimpsed.identified = true;
       }
       glimpsed.lastKnown = { x: target.position.x, y: target.position.y };
-      setLevel(context, glimpsed, from, observer.id, seen.rangeM);
-    });
-  });
+      setLevel(context, glimpsed, from, observer.id, rangeM);
+    }
+  }
+}
+
+/**
+ * A soldier who has never fired is left out on the reach without the firing
+ * cue, until he fires; once he has fired, on the reach with every cue (which
+ * no later burst changes).
+ */
+function quietOf(member: FofSoldier | undefined): FofSoldier | null {
+  return member?.lastFiredAt === null ? member : null;
+}
+
+/** Each force's enemies: the members of the other forces, in soldier order (fixed for a run). */
+const enemyLists = new WeakMap<FofState, number[][]>();
+function enemiesOf(fof: FofState): number[][] {
+  let lists = enemyLists.get(fof);
+  if (!lists) {
+    lists = fof.forces.map((_, f) => fof.soldiers.flatMap((m, j) => (m.force === f ? [] : [j])));
+    enemyLists.set(fof, lists);
+  }
+  return lists;
 }
 
 /**

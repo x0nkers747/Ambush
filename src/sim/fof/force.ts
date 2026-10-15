@@ -7,7 +7,7 @@ import { surfaceHeightAt } from '../bridge-navigation';
 import { sightLineTracer } from '../sight-tracer';
 import { isOnTerrain } from '../terrain';
 import { orgUnitId, type Soldier, type SoldierId } from '../state';
-import type { FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
+import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
 import { fofWeapon } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
 import type { FofContext } from './system';
@@ -145,8 +145,12 @@ export function updateForces(context: FofContext): void {
         break;
     }
   });
-  context.fof.forces.forEach((force) => {
-    if (forceActive(force)) carryOut(context, force);
+  // Looked up once for all soldiers: who is steered by a task, and each force's current contacts.
+  const agents = new Map(
+    (context.state.behavior?.agents ?? []).map((a) => [a.soldierId as string, a]),
+  );
+  context.fof.forces.forEach((force, i) => {
+    if (forceActive(force)) carryOut(context, force, agents, knownContacts(context, i));
   });
 }
 
@@ -803,7 +807,12 @@ export function standUp(context: FofContext, force: FofForce): void {
  * the bounding element rushes without firing and the others are halted, in
  * contact (the base of fire).
  */
-function carryOut(context: FofContext, force: FofForce): void {
+function carryOut(
+  context: FofContext,
+  force: FofForce,
+  agents: ReadonlyMap<string, AgentState>,
+  known: KnownContacts,
+): void {
   const { t, fof } = context;
   const assaulting = force.phase === 'assaulting';
   for (const id of force.memberIds) {
@@ -812,7 +821,7 @@ function carryOut(context: FofContext, force: FofForce): void {
     if (!member || soldier?.status !== 'active') continue;
     // Assaulting, the bounding element moves; the rest are down, firing (the base of fire).
     const stopped = halted(force.phase) || (assaulting && !force.bounding.includes(id));
-    hold(context, soldier, !stopped && member.level === 'pinned');
+    holdAgent(agents.get(id), !stopped && member.level === 'pinned');
     if (!stopped) {
       // Assaulting or breaking contact, he fires on the move at what he can see
       // (after a moment to start off); breaking contact, he keeps his last rounds.
@@ -856,7 +865,8 @@ function carryOut(context: FofContext, force: FofForce): void {
     ) {
       member.nextFireAt = t;
     }
-    const look = nearestKnown(context, member.force, soldier) ?? force.threat;
+    const k = nearestKnown(known, soldier);
+    const look = k >= 0 ? { x: known.x[k] ?? 0, y: known.y[k] ?? 0 } : force.threat;
     if (look) {
       const dx = look.x - soldier.position.x;
       const dy = look.y - soldier.position.y;
@@ -867,22 +877,60 @@ function carryOut(context: FofContext, force: FofForce): void {
 
 /** Holds (or releases) a soldier steered by a unit task in place. */
 function hold(context: FofContext, soldier: Soldier, on: boolean): void {
-  const agent = context.state.behavior?.agents.find((a) => a.soldierId === soldier.id);
+  holdAgent(
+    context.state.behavior?.agents.find((a) => a.soldierId === soldier.id),
+    on,
+  );
+}
+
+function holdAgent(agent: AgentState | undefined, on: boolean): void {
   if (!agent) return;
   if (on && agent.override === null) agent.override = { kind: 'hold' };
   else if (!on && agent.override?.kind === 'hold') agent.override = null;
 }
 
-/** The last known position of the nearest contact (not lost) of the force, from a soldier. */
-function nearestKnown(context: FofContext, force: number, from: Soldier): Vec2 | null {
-  let best: Vec2 | null = null;
-  let bestD = Infinity;
-  for (const track of context.fof.tracks) {
+/** A force's current contacts (not lost), in track order: their last known positions. */
+interface KnownContacts {
+  readonly count: number;
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+}
+
+function knownContacts(context: FofContext, force: number): KnownContacts {
+  const tracks = context.fof.tracks;
+  const x = new Float64Array(tracks.length);
+  const y = new Float64Array(tracks.length);
+  let count = 0;
+  for (const track of tracks) {
     if (track.force !== force || track.level === 'lost') continue;
-    const d = Math.hypot(track.lastKnown.x - from.position.x, track.lastKnown.y - from.position.y);
+    x[count] = track.lastKnown.x;
+    y[count] = track.lastKnown.y;
+    count += 1;
+  }
+  return { count, x, y };
+}
+
+/**
+ * The nearest of the known contacts to a soldier (the first of equals), or −1:
+ * by `Math.hypot`, which is computed only where the squared distance could
+ * beat the best so far (a margin far above rounding), so the choice is
+ * exactly the one comparing every distance gives.
+ */
+function nearestKnown(known: KnownContacts, from: Soldier): number {
+  const fx = from.position.x;
+  const fy = from.position.y;
+  let best = -1;
+  let bestD = Infinity;
+  let bound = Infinity;
+  for (let k = 0; k < known.count; k += 1) {
+    const dx = (known.x[k] ?? 0) - fx;
+    const dy = (known.y[k] ?? 0) - fy;
+    if (dx * dx + dy * dy > bound) continue;
+    const d = Math.hypot(dx, dy);
     if (d < bestD) {
       bestD = d;
-      best = track.lastKnown;
+      best = k;
+      bound = d * d * (1 + 1e-9) + 1e-12;
     }
   }
   return best;

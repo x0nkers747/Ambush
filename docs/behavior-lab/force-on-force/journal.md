@@ -546,6 +546,34 @@ characters. Every soldier was an animated model of some 38 draw calls, and the
 - The figures are simple, for a soldier a few pixels tall: they have no arms or weapon,
   and they do not animate their gait.
 
+## Toward 32× real time at 988 soldiers (2026-10-15)
+
+**Asked for.** The 988-soldier battle at 32× real time, without too many compromises.
+
+**Done** ([04 §5.2](04-experiments.md)):
+
+- **Exact changes:** sight reuse; pairs out of reach; clear lines proved without walking;
+  the scan's loop; the forces' per-soldier lookups; fire's target choice; the lab's
+  hashing.
+- **Redundant looks skipped:** the same distributions over 50 seeds, different
+  individual runs.
+- **30 Hz movement** for large runs: the same distributions over 50 seeds.
+- **Refreshed sweeps.** The 50-seed sweeps were run again with the current code: every
+  run ended by a rule, with 0 invalid and 0 refused, and 15/15 re-runs identical.
+  - Open: OPFOR victory 26, BLUEFOR victory 17, mutual 4, withdrawals 3.
+  - Wooded: withdrawals 26, victories 16, mutual 5, stalemate 3.
+  - Urban: victories 19, withdrawals 15, mutual 9, stalemate or time limit 7.
+  - Detection, identification and casualty distributions are as before.
+
+**Result.** The whole battle now runs at 18× real time headless (from 3×): 11× on the
+approach, 22× after contact. In Chrome with dots it is 10× on the approach and 6× around
+contact, at 60 fps.
+
+**Not yet 32×.** What remains is the model's resolution:
+
+- every observer evaluates every enemy within reach every second;
+- the movement engine at 30 Hz.
+
 ## Known limitations
 
 **Detection.**

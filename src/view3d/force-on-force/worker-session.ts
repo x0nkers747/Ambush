@@ -82,7 +82,7 @@ export function createFofWorkerSession(
   let events: TimedEvent[] = [];
   let combat: CombatEvent[] = [];
   let samples: FofSample[] = [];
-  let hashes: string[] = [];
+  let hashes: (string | null)[] = [];
   let keyframes = new Map<number, SimSnapshot>();
   let metrics: FofMetrics = empty;
   let cpu = { mean: 0, p95: 0 };
@@ -289,7 +289,7 @@ export function createFofWorkerSession(
         commands,
         origins,
         endTick: headTick,
-        hashes: [...hashes],
+        hashes: Array.from(hashes, (h) => h ?? null),
       };
     },
     dispose() {

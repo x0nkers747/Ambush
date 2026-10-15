@@ -38,8 +38,11 @@ export interface FofRecording {
   readonly commands: readonly SimCommand[];
   readonly origins: readonly FofCommandOrigin[];
   readonly endTick: number;
-  /** `hashSimState` at every whole second (index = second). */
-  readonly hashes: readonly string[];
+  /**
+   * `hashSimState` at every whole second (index = second); for runs of more
+   * than 100 soldiers, only at every `hashSecondsFor` seconds (the others empty).
+   */
+  readonly hashes: readonly (string | null)[];
 }
 
 export interface Verification {
@@ -72,6 +75,15 @@ const HISTORY_SECONDS = 2;
 const CPU_SAMPLES = 300;
 /** `advance` steps for at most this long (ms; at least one tick), so a frame keeps drawing. */
 export const ADVANCE_BUDGET_MS = 40;
+
+/**
+ * Seconds between state hashes of a run with `soldiers` soldiers: every
+ * second, and for large runs at each keyframe (hashing a thousand soldiers'
+ * state takes over 100 ms).
+ */
+export function hashSecondsFor(soldiers: number): number {
+  return soldiers <= 100 ? 1 : keyframeSecondsFor(soldiers);
+}
 
 /** Seconds between keyframes of a run with `soldiers` soldiers. */
 export function keyframeSecondsFor(soldiers: number): number {
@@ -212,11 +224,12 @@ export function createFofSession(
     : hooks.replay;
   let head = createFofRun(spec, undefined, replay);
   const keyframeSeconds = keyframeSecondsFor(head.sim.state.soldiers.length);
+  const hashSeconds = hashSecondsFor(head.sim.state.soldiers.length);
   let view: FofRun = head;
   let headMotion = createMotionRecorder(rate);
   let viewMotion: MotionRecorder = headMotion;
   let metrics: FofMetricsRecorder = createFofMetrics(head.sim);
-  let hashes: string[] = [];
+  let hashes: (string | null)[] = [];
   let keyframes = new Map<number, SimSnapshot>();
   let events: TimedEvent[] = [];
   let combat: CombatEvent[] = [];
@@ -229,12 +242,13 @@ export function createFofSession(
 
   const atTick = () => {
     const sim = head.sim;
-    if (sim.tick % rate === 0) {
+    if (sim.tick % (hashSeconds * rate) === 0) {
       const second = sim.tick / rate;
       const hash = hashSimState(sim.state);
       hashes[second] = hash;
-      if (reference && verification && second < reference.hashes.length) {
-        const same = reference.hashes[second] === hash;
+      const expected = reference?.hashes[second];
+      if (reference && verification && typeof expected === 'string') {
+        const same = expected === hash;
         verification = {
           checked: verification.checked + 1,
           mismatches: verification.mismatches + (same ? 0 : 1),
@@ -360,7 +374,7 @@ export function createFofSession(
         commands: head.commands,
         origins: head.origins,
         endTick: head.sim.tick,
-        hashes: [...hashes],
+        hashes: Array.from(hashes, (h) => h ?? null),
       };
     },
     dispose() {

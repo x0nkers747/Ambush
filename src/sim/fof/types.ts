@@ -108,6 +108,11 @@ export interface FofForceStats {
   tracedAttempts: number;
   /** Of those, with a clear sight line to some part of the target. */
   visibleAttempts: number;
+  /**
+   * Looks not taken because they could change nothing: the target already
+   * seen in the same decision, at full confidence, and identified.
+   */
+  redundantLooks: number;
   /** Successful glimpses. */
   glimpses: number;
   bursts: number;

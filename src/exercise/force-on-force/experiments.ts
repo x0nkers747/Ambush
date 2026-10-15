@@ -274,6 +274,9 @@ export const FOF_EXPERIMENTS: readonly FofExperiment[] = [
         terrain: 'open',
         seed,
         tickRateHz: rate,
+        // Movement integrated at 30 Hz: about 4 times cheaper; the same outcomes
+        // over 50 seeds (04 §5.1).
+        substepHz: 30,
       });
     },
   },

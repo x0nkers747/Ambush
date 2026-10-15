@@ -5,8 +5,8 @@ import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';
 import type { Soldier } from '../state';
 import { fofWeapon, type FofWeapon } from './config';
-import { vegetationTransmission } from './detection';
 import { enter, firingOnTheMove, underFire } from './force';
+import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
 import { soldierOf } from './system';
 import type { FofSoldier, FofTrack, SuppressionLevel } from './types';
@@ -33,28 +33,11 @@ function engageable(context: FofContext, track: FofTrack): boolean {
 
 /** What a shooter gets of a target: the share of him in sight and the light through vegetation. */
 function exposure(context: FofContext, shooter: Soldier, target: Soldier): number {
-  const { terrain } = context.world;
-  const detection = context.setup.config.detection;
-  const tracer = sightLineTracer(terrain);
-  const eye = {
-    x: shooter.position.x,
-    y: shooter.position.y,
-    z:
-      surfaceHeightAt(terrain, shooter.position.x, shooter.position.y) +
-      detection.eyeHeightM[shooter.posture],
-  };
-  const ground = surfaceHeightAt(terrain, target.position.x, target.position.y);
-  const heights = detection.targetSampleHeightsM[target.posture];
-  const clear = tracer.clearCount(
-    eye,
-    target.position.x,
-    target.position.y,
-    heights.map((h) => ground + h),
-  );
-  if (clear === 0) return 0;
-  return (
-    (clear / heights.length) * vegetationTransmission(terrain, shooter.position, target.position)
-  );
+  const i = context.memberIndex.get(shooter.id) ?? -1;
+  const j = context.memberIndex.get(target.id) ?? -1;
+  const seen = sightBetween(context, i, j, shooter, target);
+  if (seen.visibleFraction <= 0) return 0;
+  return seen.visibleFraction * seen.transmission;
 }
 
 /** Whether the ground point `p` (half a metre up) is in the shooter's sight. */
@@ -186,12 +169,24 @@ function aimedBurst(
     );
     if (range <= weapon.maxEngagementRangeM) candidates.push({ track, target, range });
   }
-  candidates.sort(
-    (a, b) =>
-      a.range - b.range ||
-      (context.soldierIndex.get(a.target.id) ?? 0) - (context.soldierIndex.get(b.target.id) ?? 0),
-  );
-  for (const { target, range } of candidates) {
+  // Nearest first (then in soldier order), as sorting would give: taken one at a
+  // time, since the first in sight is usually among the first few.
+  const order = (c: { target: Soldier; range: number }) =>
+    context.soldierIndex.get(c.target.id) ?? 0;
+  for (let left = candidates.length; left > 0; left -= 1) {
+    let best = 0;
+    for (let k = 1; k < left; k += 1) {
+      const a = candidates[k];
+      const b = candidates[best];
+      if (!a || !b) continue;
+      if (a.range < b.range || (a.range === b.range && order(a) < order(b))) best = k;
+    }
+    const chosen = candidates[best];
+    if (!chosen) break;
+    // The chosen one is out of the remaining.
+    candidates[best] = candidates[left - 1] ?? chosen;
+    candidates[left - 1] = chosen;
+    const { target, range } = chosen;
     const seen = exposure(context, shooter, target);
     if (seen <= 0) continue;
     const pRound =
