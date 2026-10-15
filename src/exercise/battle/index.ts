@@ -3,6 +3,8 @@
 export {
   battleScenario,
   createBattle,
+  CLEAR_START_SEARCH_M,
+  clearStarts,
   orderSquad,
   squadSoldierStarts,
   validateBattleSpec,
@@ -11,6 +13,7 @@ export {
   type BattleReplay,
   type BattleSpec,
   type BattleSquad,
+  type ClearedStart,
   type SquadSpec,
 } from './battle';
 export {

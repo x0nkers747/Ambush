@@ -332,7 +332,7 @@ export function createPlanner(o: PlannerOptions): Planner {
     turnSquadToward(id, point, saving) {
       const s = squad(id);
       if (!canPlace() && !canPlan(s)) return false;
-      return apply((d) => faceSquadToward(d, id, point), saving);
+      return apply((d) => faceSquadToward(terrain, d, id, point), saving);
     },
     moveOrderTo(id, index, point, saving) {
       if (!canPlan(squad(id))) return false;

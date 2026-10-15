@@ -23,7 +23,13 @@ import {
   type ScenarioDefinition,
 } from '../scenario-definition';
 import type { MapPoint } from '../deployment';
-import { battleScenario, squadSoldierStarts, type BattleSpec } from './battle';
+import {
+  battleScenario,
+  CLEAR_START_SEARCH_M,
+  squadSoldierStarts,
+  type BattleSpec,
+  type ClearedStart,
+} from './battle';
 
 // Battle scenarios (docs/constructive-simulation/03): what Scenario Setup
 // and BLUEFOR Planning make on a battlefield. A scenario is any number of
@@ -35,9 +41,12 @@ import { battleScenario, squadSoldierStarts, type BattleSpec } from './battle';
 // stage runs.
 //
 // Edits return a new definition, or the reason they were refused (the
-// definition unchanged). A squad or destination placed in water or in a
-// building is moved to the nearest clear ground instead (with a note saying
-// so); only one with no clear ground near it is refused. `scenarioIssues` lists what still stops a
+// definition unchanged). A soldier whose start would be in water or in a
+// building stands on the nearest clear ground instead, the rest of his
+// squad where its formation puts them (the battle lays the squads out so,
+// `clearStarts`); a destination in water or a building is moved out of it.
+// Edits that move soldiers so say so in a note. Only a placement off the
+// map, or with no clear ground near, is refused. `scenarioIssues` lists what still stops a
 // scenario from being played; edits never refuse what only that would
 // report, so work in progress can be saved.
 
@@ -328,9 +337,6 @@ export function squadPlacementProblem(terrain: TerrainDataset, point: Vec2): str
   return problem ? `A squad cannot stand there: it is ${describePathProblem(problem)}.` : null;
 }
 
-/** How far a placement is moved, at most, to clear water and buildings (m). */
-export const CLEARANCE_SEARCH_M = 200;
-
 /** The squad spec of `squad` standing at `point` (for laying out its soldiers). */
 const specAt = (squad: Omit<ScenarioSquad, 'position'>, point: Vec2) => ({
   id: squad.id,
@@ -343,76 +349,63 @@ const specAt = (squad: Omit<ScenarioSquad, 'position'>, point: Vec2) => ({
   plan: [],
 });
 
-/**
- * The point nearest `point` where a squad (squad `index` of the scenario)
- * stands clear: its centre and every soldier's start on the map and out of
- * water and buildings. `point` itself when it is clear; `null` when there
- * is no such point within `CLEARANCE_SEARCH_M` or `point` is off the map.
- */
-export function clearSquadPosition(
-  terrain: TerrainDataset,
-  d: BattleScenarioDefinition,
-  squad: Omit<ScenarioSquad, 'position'>,
-  index: number,
-  point: Vec2,
-): Vec2 | null {
-  if (!isOnTerrain(terrain, point.x, point.y)) return null;
-  const clear = (p: Vec2) =>
-    pointProblem(terrain, p) === null &&
-    squadSoldierStarts(specAt(squad, p), index, d.seed).every(
-      (m) => pointProblem(terrain, m.position) === null,
-    );
-  if (clear(point)) return point;
-  // Rings outward, nearest first; on each ring, round from the direction of the point's own obstacle-free side.
-  for (let r = 4; r <= CLEARANCE_SEARCH_M; r += 4) {
-    const n = Math.max(8, Math.ceil((2 * Math.PI * r) / 6));
-    for (let k = 0; k < n; k += 1) {
-      const a = (k / n) * 2 * Math.PI;
-      const p = { x: point.x + r * Math.sin(a), y: point.y + r * Math.cos(a) };
-      if (isOnTerrain(terrain, p.x, p.y) && clear(p)) return p;
-    }
-  }
-  return null;
-}
-
-/** What a placement moved off: "out of the water", "off the building". */
-function clearedWhat(terrain: TerrainDataset, points: readonly Vec2[]): string {
-  const kinds = new Set(points.map((p) => pointProblem(terrain, p)?.kind));
-  if (kinds.has('inWater'))
-    return kinds.has('insideBuilding') || kinds.has('tooCloseToBuilding')
-      ? 'out of water and away from buildings'
-      : 'out of the water';
+/** What a placement moved soldiers or a destination off: "out of the water", "clear of the buildings". */
+function clearedWhat(kinds: ReadonlySet<'water' | 'building'>): string {
+  if (kinds.has('water'))
+    return kinds.has('building') ? 'out of water and clear of buildings' : 'out of the water';
   return 'clear of the buildings';
 }
 
 /**
- * Where a squad placed at `point` ends up, and a note when it was moved:
- * `point` itself when the squad stands clear there, otherwise the nearest
- * clear point (`clearSquadPosition`).
+ * Where squad `index` of `d` (as `squad` would make it) has its soldiers
+ * start, each one who would stand in water or a building moved clear
+ * (`clearStarts`), and a note saying how many were.
  */
-function placeSquad(
+function squadStarts(
   terrain: TerrainDataset,
   d: BattleScenarioDefinition,
-  squad: Omit<ScenarioSquad, 'position'>,
+  squad: ScenarioSquad,
   index: number,
-  point: Vec2,
-): { readonly point: Vec2; readonly note?: string } | { readonly problem: string } {
-  if (!isOnTerrain(terrain, point.x, point.y)) return { problem: 'A squad must be on the map.' };
-  const placed = clearSquadPosition(terrain, d, squad, index, point);
-  if (!placed)
-    return {
-      problem: `There is no clear ground for ${squad.name} within ${String(CLEARANCE_SEARCH_M)} m of there: it would stand in water or in a building.`,
-    };
-  if (placed === point) return { point };
-  const blocked = [
-    point,
-    ...squadSoldierStarts(specAt(squad, point), index, d.seed).map((m) => m.position),
-  ];
-  const moved = Math.round(Math.hypot(placed.x - point.x, placed.y - point.y));
-  return {
-    point: placed,
-    note: `${squad.name} was moved ${String(moved)} m, ${clearedWhat(terrain, blocked)}.`,
-  };
+): { readonly starts: readonly ClearedStart[]; readonly note?: string } {
+  const starts = squadSoldierStarts(specAt(squad, toVec(squad.position)), index, d.seed, terrain);
+  const moved = starts.filter((m) => m.movedFrom !== null);
+  if (moved.length === 0) return { starts };
+  const kinds = new Set(moved.flatMap((m) => (m.movedFrom ? [m.movedFrom] : [])));
+  const who =
+    moved.length === starts.length
+      ? `All ${String(starts.length)} of ${squad.name}'s soldiers were`
+      : moved.length === 1
+        ? `1 of ${squad.name}'s soldiers was`
+        : `${String(moved.length)} of ${squad.name}'s soldiers were`;
+  return { starts, note: `${who} moved ${clearedWhat(kinds)}.` };
+}
+
+/** An edit of squad `id`, with the note of its soldiers moved clear (if any). */
+function squadEdit(terrain: TerrainDataset, d: BattleScenarioDefinition, id: string): BattleEdit {
+  const index = d.squads.findIndex((s) => s.id === id);
+  const squad = d.squads[index];
+  const note = squad ? squadStarts(terrain, d, squad, index).note : undefined;
+  return { ok: true, definition: d, ...(note !== undefined ? { note } : {}) };
+}
+
+/**
+ * Squad `index` of `d` standing at its position: refused off the map, or
+ * where some of its soldiers would have no clear ground near them;
+ * otherwise accepted, those in water or a building moved clear.
+ */
+function placedSquad(terrain: TerrainDataset, d: BattleScenarioDefinition, id: string): BattleEdit {
+  const index = d.squads.findIndex((s) => s.id === id);
+  const squad = d.squads[index];
+  if (!squad) return refused(`There is no squad ${id}.`);
+  const { east, north } = squad.position;
+  if (!isOnTerrain(terrain, east, north)) return refused('A squad must be on the map.');
+  const { starts } = squadStarts(terrain, d, squad, index);
+  const stuck = starts.filter((m) => m.stuck).length;
+  if (stuck > 0)
+    return refused(
+      `There is no clear ground within ${String(CLEAR_START_SEARCH_M)} m for ${String(stuck)} of ${squad.name}'s soldiers there: they would stand in water, in a building or off the map.`,
+    );
+  return squadEdit(terrain, d, id);
 }
 
 /** Adds a squad at `point`, facing `facingDeg` (default: toward the nearest enemy squad, else north for BLUEFOR, south for OPFOR). */
@@ -437,15 +430,17 @@ export function addSquad(
     facingDeg ??
       (enemy ? degreesToward(toPoint(point), enemy.position) : side === 'BLUEFOR' ? 0 : 180),
   );
-  const squad = { id, name, side, organization, facingDeg: facing, plan: [] };
-  const placed = placeSquad(terrain, d, squad, d.squads.length, point);
-  if ('problem' in placed) return refused(placed.problem);
-  return {
-    ok: true,
-    squadId: id,
-    definition: { ...d, squads: [...d.squads, { ...squad, position: toPoint(placed.point) }] },
-    ...(placed.note !== undefined ? { note: placed.note } : {}),
+  const squad: ScenarioSquad = {
+    id,
+    name,
+    side,
+    organization,
+    position: toPoint(point),
+    facingDeg: facing,
+    plan: [],
   };
+  const placed = placedSquad(terrain, { ...d, squads: [...d.squads, squad] }, id);
+  return placed.ok ? { ...placed, squadId: id } : placed;
 }
 
 export function moveSquad(
@@ -454,20 +449,20 @@ export function moveSquad(
   id: string,
   point: Vec2,
 ): BattleEdit {
-  const index = d.squads.findIndex((s) => s.id === id);
-  const squad = d.squads[index];
-  if (!squad) return refused(`There is no squad ${id}.`);
-  const placed = placeSquad(terrain, d, squad, index, point);
-  if ('problem' in placed) return refused(placed.problem);
-  return {
-    ok: true,
-    definition: withSquad(d, id, (s) => ({ ...s, position: toPoint(placed.point) })),
-    ...(placed.note !== undefined ? { note: placed.note } : {}),
-  };
+  if (!squadOf(d, id)) return refused(`There is no squad ${id}.`);
+  return placedSquad(
+    terrain,
+    withSquad(d, id, (s) => ({ ...s, position: toPoint(point) })),
+    id,
+  );
 }
 
-/** Turns a squad to face `facingDeg` (degrees from north; kept in [0, 360)). */
+/**
+ * Turns a squad to face `facingDeg` (degrees from north; kept in [0, 360)).
+ * Soldiers the turn puts in water or a building are moved clear (with a note).
+ */
 export function setSquadFacing(
+  terrain: TerrainDataset,
   d: BattleScenarioDefinition,
   id: string,
   facingDeg: number,
@@ -475,15 +470,24 @@ export function setSquadFacing(
   if (!squadOf(d, id)) return refused(`There is no squad ${id}.`);
   if (!Number.isFinite(facingDeg)) return refused('The facing must be a number of degrees.');
   const facing = ((Math.round(facingDeg) % 360) + 360) % 360;
-  return ok(withSquad(d, id, (s) => ({ ...s, facingDeg: facing })));
+  return squadEdit(
+    terrain,
+    withSquad(d, id, (s) => ({ ...s, facingDeg: facing })),
+    id,
+  );
 }
 
-/** Turns a squad to face a map point. */
-export function faceSquadToward(d: BattleScenarioDefinition, id: string, point: Vec2): BattleEdit {
+/** Turns a squad to face a map point (`setSquadFacing`). */
+export function faceSquadToward(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  id: string,
+  point: Vec2,
+): BattleEdit {
   const squad = squadOf(d, id);
   if (!squad) return refused(`There is no squad ${id}.`);
   if (Math.hypot(point.x - squad.position.east, point.y - squad.position.north) < 1) return ok(d);
-  return setSquadFacing(d, id, degreesToward(squad.position, toPoint(point)));
+  return setSquadFacing(terrain, d, id, degreesToward(squad.position, toPoint(point)));
 }
 
 export function renameSquad(d: BattleScenarioDefinition, id: string, name: string): BattleEdit {
@@ -494,24 +498,29 @@ export function renameSquad(d: BattleScenarioDefinition, id: string, name: strin
   return ok(withSquad(d, id, (s) => ({ ...s, name: trimmed })));
 }
 
-/** Changes a squad's organization (its formation back to the organization's first). */
+/**
+ * Changes a squad's organization (its formation back to the organization's
+ * first). Soldiers then in water or a building are moved clear (with a note).
+ */
 export function setSquadOrganization(
+  terrain: TerrainDataset,
   d: BattleScenarioDefinition,
   id: string,
   organization: SquadOrganization,
 ): BattleEdit {
   if (!squadOf(d, id)) return refused(`There is no squad ${id}.`);
   if (!(organization in SQUAD_ORGANIZATIONS)) return refused('Unknown organization.');
-  return ok(
-    withSquad(d, id, (s) => {
-      const rest = { ...s };
-      delete rest.formation;
-      return { ...rest, organization };
-    }),
-  );
+  const next = withSquad(d, id, (s) => {
+    const rest = { ...s };
+    delete rest.formation;
+    return { ...rest, organization };
+  });
+  return squadEdit(terrain, next, id);
 }
 
+/** Changes a squad's formation; soldiers then in water or a building are moved clear (with a note). */
 export function setSquadFormation(
+  terrain: TerrainDataset,
   d: BattleScenarioDefinition,
   id: string,
   formation: string,
@@ -522,7 +531,11 @@ export function setSquadFormation(
     return refused(
       `A ${ORGANIZATION_LABELS[squad.organization].toLowerCase()} has no formation "${formation}".`,
     );
-  return ok(withSquad(d, id, (s) => ({ ...s, formation })));
+  return squadEdit(
+    terrain,
+    withSquad(d, id, (s) => ({ ...s, formation })),
+    id,
+  );
 }
 
 export function deleteSquad(d: BattleScenarioDefinition, id: string): BattleEdit {
@@ -552,7 +565,7 @@ function placeDestination(
     return { problem: 'A destination must be on the map.' };
   const problem = pointProblem(terrain, point);
   if (!problem) return { point };
-  const clear = nearestClearPoint(terrain, point, undefined, CLEARANCE_SEARCH_M);
+  const clear = nearestClearPoint(terrain, point, undefined, CLEAR_START_SEARCH_M);
   if (!clear)
     return {
       problem:
@@ -561,7 +574,7 @@ function placeDestination(
   const moved = Math.round(Math.hypot(clear.x - point.x, clear.y - point.y));
   return {
     point: clear,
-    note: `The destination was moved ${String(moved)} m, ${clearedWhat(terrain, [point])}.`,
+    note: `The destination was moved ${String(moved)} m, ${clearedWhat(new Set([problem.kind === 'inWater' ? 'water' : 'building']))}.`,
   };
 }
 
@@ -730,9 +743,13 @@ export function scenarioIssues(
   }
   const starts = soldierStarts(terrain, d);
   for (const squad of d.squads) {
-    const centre = squadPlacementProblem(terrain, toVec(squad.position));
-    if (centre) {
-      issues.push({ squadId: squad.id, orderIndex: null, message: `${squad.name}: ${centre}` });
+    // Its centre is no soldier: only off the map is it a problem.
+    if (!isOnTerrain(terrain, squad.position.east, squad.position.north)) {
+      issues.push({
+        squadId: squad.id,
+        orderIndex: null,
+        message: `${squad.name}: A squad must be on the map.`,
+      });
       continue;
     }
     const blocked = (starts.get(squad.id) ?? []).filter(
@@ -742,7 +759,7 @@ export function scenarioIssues(
       issues.push({
         squadId: squad.id,
         orderIndex: null,
-        message: `${squad.name}: ${String(blocked.length)} of its soldiers would start in water, in a building or off the map. Move or turn it.`,
+        message: `${squad.name}: ${String(blocked.length)} of its soldiers would start in water, in a building or off the map, with no clear ground within ${String(CLEAR_START_SEARCH_M)} m. Move or turn it.`,
       });
     }
     let from = toVec(squad.position);

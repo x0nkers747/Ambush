@@ -729,13 +729,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         if (s) planner.edit((d) => renameSquad(d, s.id, value));
         break;
       case 'organization':
-        if (s) planner.edit((d) => setSquadOrganization(d, s.id, value as SquadOrganization));
+        if (s)
+          planner.edit((d) => setSquadOrganization(o.terrain, d, s.id, value as SquadOrganization));
         break;
       case 'formation':
-        if (s) planner.edit((d) => setSquadFormation(d, s.id, value));
+        if (s) planner.edit((d) => setSquadFormation(o.terrain, d, s.id, value));
         break;
       case 'facing':
-        if (s) planner.edit((d) => setSquadFacing(d, s.id, Number(value)));
+        if (s) planner.edit((d) => setSquadFacing(o.terrain, d, s.id, Number(value)));
         break;
       case 'order-kind':
         if (s)

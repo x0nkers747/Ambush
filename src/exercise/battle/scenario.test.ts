@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { NO_FEATURES, rectangle, type SimEvent } from '#sim';
+import { NO_FEATURES, pointProblem, rectangle, type SimEvent } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
 import { SCENARIO_SCHEMA, type ScenarioDefinition } from '../scenario-definition';
-import { createBattle } from './battle';
+import { createBattle, squadSoldierStarts } from './battle';
 import {
   addOrder,
   addSquad,
@@ -167,39 +167,98 @@ describe('squads', () => {
     ).toMatchObject({ ok: false, problem: 'A squad must be on the map.' });
   });
 
-  it('placed or moved onto a building, are moved to the nearest clear ground, with a note', () => {
+  it('placed with soldiers in a building: only those soldiers move, each to the nearest clear ground', () => {
     const d = newBattleScenario(built, 'bf');
-    const onRoof = addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 200 }, 0);
-    if (!onRoof.ok) throw new Error(onRoof.problem);
-    expect(onRoof.note).toMatch(/^1st Squad was moved \d+ m, clear of the buildings\.$/);
-    const clear = (def: BattleScenarioDefinition) => {
-      const issues = scenarioIssues(built, def).filter((i) => i.squadId === 'B1');
-      expect(issues).toEqual([]);
-    };
-    clear(onRoof.definition);
-    // Out of the 40 m building, its 13 soldiers clear of it: not far beyond its wall.
-    const p = onRoof.definition.squads[0]?.position ?? { east: 0, north: 0 };
-    const off = Math.max(Math.abs(p.east - 200), Math.abs(p.north - 200));
-    expect(off).toBeGreaterThan(20);
-    expect(off).toBeLessThan(80);
-    // A squad whose centre is clear but whose soldiers would stand in it moves too.
-    const edge = addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 170 }, 0);
+    const edge = addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 165 }, 0);
     if (!edge.ok) throw new Error(edge.problem);
-    expect(edge.note).toMatch(/moved/);
-    clear(edge.definition);
-    // Moving one there is the same; moving it to clear ground moves it exactly there, without a note.
+    // The squad stays where it was put.
+    expect(edge.definition.squads[0]?.position).toEqual({ east: 200, north: 165 });
+    const [spec] = battleSpecOf(edge.definition, 30).squads;
+    if (!spec) throw new Error('no squad');
+    // Where the formation alone would put its soldiers.
+    const formation = squadSoldierStarts(spec, 0, edge.definition.seed);
+    const after = soldierStarts(built, edge.definition).get('B1') ?? [];
+    expect(after).toHaveLength(13);
+    let moved = 0;
+    formation.forEach((f, k) => {
+      const a = after[k];
+      if (!a) throw new Error('missing soldier');
+      expect(pointProblem(built, a.position)).toBeNull();
+      if (pointProblem(built, f.position) === null) {
+        // Clear where the formation puts him: exactly there.
+        expect(a.position).toEqual(f.position);
+      } else {
+        moved += 1;
+        // Out of the building, not far from where he would have stood.
+        expect(Math.hypot(a.position.x - f.position.x, a.position.y - f.position.y)).toBeLessThan(
+          30,
+        );
+      }
+    });
+    expect(moved).toBeGreaterThan(0);
+    expect(moved).toBeLessThan(13);
+    expect(edge.note).toBe(
+      `${String(moved)} of 1st Squad's soldiers ${moved === 1 ? 'was' : 'were'} moved clear of the buildings.`,
+    );
+    expect(scenarioIssues(built, edge.definition).filter((i) => i.squadId === 'B1')).toEqual([]);
+  });
+
+  it('placed on a roof, stays there, its soldiers standing round the building', () => {
+    const d = newBattleScenario(built, 'bf');
+    const onRoof = addSquad(built, d, 'BLUEFOR', 'fireTeam', { x: 200, y: 200 }, 0);
+    if (!onRoof.ok) throw new Error(onRoof.problem);
+    expect(onRoof.definition.squads[0]?.position).toEqual({ east: 200, north: 200 });
+    expect(onRoof.note).toBe(
+      "All 4 of 1st Fire team's soldiers were moved clear of the buildings.",
+    );
+    const after = soldierStarts(built, onRoof.definition).get('B1') ?? [];
+    for (const a of after) expect(pointProblem(built, a.position)).toBeNull();
+    // Kept apart: no two in one spot.
+    for (const a of after)
+      for (const b of after)
+        if (a !== b)
+          expect(
+            Math.hypot(a.position.x - b.position.x, a.position.y - b.position.y),
+          ).toBeGreaterThan(1.4);
+  });
+
+  it('moved, or moved to clear ground, says only what it moved', () => {
+    const d = newBattleScenario(built, 'bf');
     const placed = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 0, y: 0 }));
-    const moved = moveSquad(built, placed, 'B1', { x: 200, y: 200 });
+    const moved = moveSquad(built, placed, 'B1', { x: 200, y: 165 });
     if (!moved.ok) throw new Error(moved.problem);
-    expect(moved.note).toMatch(/moved/);
-    clear(moved.definition);
+    expect(moved.note).toMatch(
+      /^\d+ of 1st Squad's soldiers? (was|were) moved clear of the buildings\.$/,
+    );
     const exact = moveSquad(built, placed, 'B1', { x: 10, y: 20 });
     if (!exact.ok) throw new Error(exact.problem);
     expect(exact.note).toBeUndefined();
     expect(exact.definition.squads[0]?.position).toEqual({ east: 10, north: 20 });
   });
 
-  it('are refused only where there is no clear ground near', () => {
+  it('turned or reformed so that soldiers would stand in a building: those soldiers move', () => {
+    let d = newBattleScenario(built, 'bf');
+    // In line facing north, across the building's south side: clear.
+    d = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 200, y: 150 }, 0));
+    d = done(setSquadFormation(built, d, 'B1', 'usmc.squad.line'));
+    const turned = setSquadFacing(built, d, 'B1', 90);
+    if (!turned.ok) throw new Error(turned.problem);
+    // Facing east, the line runs north into the building.
+    expect(turned.note).toMatch(
+      /^\d+ of 1st Squad's soldiers? (was|were) moved clear of the buildings\.$/,
+    );
+    expect(scenarioIssues(built, turned.definition)).toEqual([
+      expect.objectContaining({ message: 'Place at least one OPFOR squad.' }),
+    ]);
+    const back = setSquadFacing(built, turned.definition, 'B1', 0);
+    if (!back.ok) throw new Error(back.problem);
+    expect(back.note).toBeUndefined();
+    const reformed = setSquadOrganization(built, turned.definition, 'B1', 'fireTeam');
+    if (!reformed.ok) throw new Error(reformed.problem);
+    expect(reformed.definition.squads[0]?.organization).toBe('fireTeam');
+  });
+
+  it('are refused only where some soldiers have no clear ground near', () => {
     // A lake covering the whole lab ground but its margins.
     const lake = labTerrain({
       ...NO_FEATURES,
@@ -208,28 +267,29 @@ describe('squads', () => {
     const d = newBattleScenario(lake, 'bf');
     expect(addSquad(lake, d, 'OPFOR', 'squad', { x: 0, y: 0 })).toMatchObject({
       ok: false,
-      problem: expect.stringMatching(/no clear ground/) as unknown,
+      problem: expect.stringMatching(/no clear ground within 200 m for 13 of/) as unknown,
     });
-    // Near the shore, it is moved out of the water.
-    const ashore = addSquad(lake, d, 'OPFOR', 'squad', { x: 980, y: 0 });
+    // At the shore, it stays; those in the water step out of it.
+    const ashore = addSquad(lake, d, 'OPFOR', 'squad', { x: 995, y: 0 }, 90);
     if (!ashore.ok) throw new Error(ashore.problem);
-    expect(ashore.note).toMatch(/moved \d+ m, out of the water/);
-    expect(ashore.definition.squads[0]?.position.east).toBeGreaterThan(1000);
+    expect(ashore.definition.squads[0]?.position).toEqual({ east: 995, north: 0 });
+    expect(ashore.note).toMatch(/soldiers were moved out of the water\.$/);
+    expect(scenarioIssues(lake, ashore.definition).filter((i) => i.squadId === 'O1')).toEqual([]);
   });
 
   it('are turned, renamed and reorganized', () => {
     let d = threeSquads();
-    d = done(setSquadFacing(d, 'B1', -90));
+    d = done(setSquadFacing(terrain, d, 'B1', -90));
     expect(d.squads[1]?.facingDeg).toBe(270);
-    d = done(faceSquadToward(d, 'B1', { x: -150, y: 0 }));
+    d = done(faceSquadToward(terrain, d, 'B1', { x: -150, y: 0 }));
     expect(d.squads[1]?.facingDeg).toBe(0);
     d = done(renameSquad(d, 'B1', '  Alpha  '));
     expect(d.squads[1]?.name).toBe('Alpha');
     expect(renameSquad(d, 'B1', ' ').ok).toBe(false);
-    d = done(setSquadFormation(d, 'B1', 'usmc.squad.line'));
+    d = done(setSquadFormation(terrain, d, 'B1', 'usmc.squad.line'));
     expect(d.squads[1]?.formation).toBe('usmc.squad.line');
-    expect(setSquadFormation(d, 'B1', 'no-such').ok).toBe(false);
-    d = done(setSquadOrganization(d, 'B1', 'fireTeam'));
+    expect(setSquadFormation(terrain, d, 'B1', 'no-such').ok).toBe(false);
+    d = done(setSquadOrganization(terrain, d, 'B1', 'fireTeam'));
     expect(d.squads[1]?.organization).toBe('fireTeam');
     expect(d.squads[1]?.formation).toBeUndefined();
     expect(moveSquad(terrain, d, 'X9', { x: 0, y: 0 }).ok).toBe(false);
@@ -292,27 +352,33 @@ describe('what stops a scenario from being played', () => {
     expect(scenarioIssues(terrain, threeSquads())).toEqual([]);
   });
 
-  it('soldiers starting in a building, and a destination that became one', () => {
-    let d = newBattleScenario(built, 'bf');
-    d = done(addSquad(built, d, 'BLUEFOR', 'squad', { x: 0, y: 0 }, 0));
-    d = done(addSquad(built, d, 'OPFOR', 'element3', { x: 0, y: 600 }));
-    // As a scenario saved before, or edited elsewhere, can be: the squad's
-    // centre is clear, but its formation reaches into the building, and a
-    // destination is inside it.
+  it('soldiers with no clear ground near, and a destination that became a building', () => {
+    const lake = labTerrain({
+      ...NO_FEATURES,
+      water: [{ id: 'lake', kind: 'water', boundary: rectangle(0, 0, 2000, 2000) }],
+      buildings: [{ id: 'house', footprint: rectangle(1100, 1100, 40, 40), heightMeters: 8 }],
+    });
+    let d = newBattleScenario(lake, 'bf');
+    d = done(addSquad(lake, d, 'BLUEFOR', 'squad', { x: 1100, y: -1100 }, 0));
+    d = done(addSquad(lake, d, 'OPFOR', 'element3', { x: -1100, y: 1100 }));
+    // As a scenario saved before, imported, or edited elsewhere can be: the
+    // squad in mid-lake, a destination inside the building.
     d = {
       ...d,
       squads: d.squads.map((s) =>
         s.id === 'O1'
-          ? { ...s, plan: [{ kind: 'move', destination: { east: 200, north: 200 } }] }
-          : { ...s, position: { east: 200, north: 170 } },
+          ? { ...s, plan: [{ kind: 'move', destination: { east: 1100, north: 1100 } }] }
+          : { ...s, position: { east: 0, north: 0 } },
       ),
     };
-    const issues = scenarioIssues(built, d);
+    const issues = scenarioIssues(lake, d);
     expect(issues.map((i) => [i.squadId, i.orderIndex])).toEqual([
       ['B1', null],
       ['O1', 0],
     ]);
-    expect(issues[0]?.message).toMatch(/of its soldiers would start in water, in a building/);
+    expect(issues[0]?.message).toMatch(
+      /13 of its soldiers would start in water, in a building or off the map, with no clear ground within 200 m/,
+    );
     expect(issues[1]?.message).toMatch(
       /order 1 \(Move\): The destination is inside building house/,
     );

@@ -2,7 +2,9 @@ import {
   azimuthFromDegrees,
   createSimulation,
   DEFAULT_BEHAVIOR_PARAMS,
+  nearestClearPoint,
   orgUnitId,
+  pointProblem,
   type FofConfig,
   type FofForceSetup,
   type OrderSpec,
@@ -140,16 +142,73 @@ function buildSquad(spec: SquadSpec, index: number, seed: number) {
   return { squad, units: built.units, soldiers: built.soldiers, pace: layout.pace };
 }
 
+/** How far a soldier starting in water or a building is moved, at most, to clear ground (m). */
+export const CLEAR_START_SEARCH_M = 200;
+/** The least distance kept between a moved soldier and the squad's others (m). */
+const START_SPACING_M = 1.5;
+
+/** A soldier's start, after `clearStarts`. */
+export interface ClearedStart {
+  readonly id: string;
+  readonly position: Vec2;
+  /** What it was moved out of (`null`: it stands where its formation puts it). */
+  readonly movedFrom: 'water' | 'building' | null;
+  /** In water, a building or off the map, with no clear ground near: left where it is. */
+  readonly stuck: boolean;
+}
+
+/**
+ * A squad's starts with each soldier who would stand in water or in a
+ * building moved to the nearest clear ground (`nearestClearPoint`, within
+ * `CLEAR_START_SEARCH_M`, at least `START_SPACING_M` from the others); every
+ * other soldier stays exactly where the formation puts him. Deterministic: a
+ * function of the terrain and the starts alone.
+ */
+export function clearStarts(
+  terrain: TerrainDataset,
+  starts: readonly { readonly id: string; readonly position: Vec2 }[],
+): ClearedStart[] {
+  const problems = starts.map((s) => pointProblem(terrain, s.position));
+  const placed: Vec2[] = starts.flatMap((s, i) => (problems[i] ? [] : [s.position]));
+  return starts.map((s, i) => {
+    const problem = problems[i];
+    if (!problem) return { id: s.id, position: s.position, movedFrom: null, stuck: false };
+    const spaced = (q: Vec2) =>
+      placed.every((p) => Math.hypot(p.x - q.x, p.y - q.y) >= START_SPACING_M);
+    const clear =
+      problem.kind === 'offTerrain'
+        ? null
+        : nearestClearPoint(terrain, s.position, spaced, CLEAR_START_SEARCH_M);
+    if (!clear) return { id: s.id, position: s.position, movedFrom: null, stuck: true };
+    placed.push(clear);
+    return {
+      id: s.id,
+      position: clear,
+      movedFrom: problem.kind === 'inWater' ? 'water' : 'building',
+      stuck: false,
+    };
+  });
+}
+
 /**
  * Where a squad's soldiers start, as a battle lays it out when it is squad
- * `index` of the spec (the index varies the small jitter of the starts).
+ * `index` of the spec (the index varies the small jitter of the starts). On
+ * `terrain`, soldiers who would stand in water or a building are moved clear
+ * (`clearStarts`); without it, the formation's starts as they are.
  */
 export function squadSoldierStarts(
   spec: SquadSpec,
   index: number,
   seed: number,
-): { readonly id: string; readonly position: Vec2 }[] {
-  return buildSquad(spec, index, seed).soldiers.map((s) => ({ id: s.id, position: s.position }));
+  terrain?: TerrainDataset,
+): ClearedStart[] {
+  const starts = buildSquad(spec, index, seed).soldiers.map((s) => ({
+    id: s.id,
+    position: s.position,
+  }));
+  return terrain
+    ? clearStarts(terrain, starts)
+    : starts.map((s) => ({ ...s, movedFrom: null, stuck: false }));
 }
 
 /** The simulation scenario of a battle on `terrain`. */
@@ -160,7 +219,11 @@ export function battleScenario(
   validateBattleSpec(spec);
   const built = spec.squads.map((s, i) => buildSquad(s, i, spec.seed));
   const units: ScenarioUnit[] = built.flatMap((b) => b.units);
-  const soldiers: ScenarioSoldier[] = built.flatMap((b) => b.soldiers);
+  // Soldiers who would start in water or a building stand on the nearest clear ground.
+  const soldiers: ScenarioSoldier[] = built.flatMap((b) => {
+    const cleared = clearStarts(terrain, b.soldiers);
+    return b.soldiers.map((m, k) => ({ ...m, position: cleared[k]?.position ?? m.position }));
+  });
   const forces: FofForceSetup[] = built.map((b) => ({
     unitId: b.squad.unitId,
     side: b.squad.side,
@@ -168,7 +231,12 @@ export function battleScenario(
     weapons: b.squad.weapons,
     formation: b.squad.formation,
     pace: b.pace,
-    start: b.squad.spec.position,
+    // Its home (where it falls back to on its own): its centre, or the clear ground nearest it.
+    start:
+      pointProblem(terrain, b.squad.spec.position) === null
+        ? b.squad.spec.position
+        : (nearestClearPoint(terrain, b.squad.spec.position, undefined, CLEAR_START_SEARCH_M) ??
+          b.squad.spec.position),
     plan: b.squad.spec.plan,
   }));
   const speed = Math.max(1.4, ...built.map((b) => b.pace));

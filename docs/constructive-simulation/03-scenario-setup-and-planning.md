@@ -143,27 +143,34 @@ is the battle's own starting state, recorded once and given to the view as
 - a destination that cannot be stood on, or cannot be walked to from the
   previous point of the plan (`planPath`, memoized between edits).
 
-**Placing and moving squads.** A squad placed or dragged where it, or any
-of its soldiers, would stand in water or in a building is moved to the
-nearest clear ground instead (`clearSquadPosition`). The search goes outward
-in rings of 4 m, up to 200 m, until the centre and every soldier's start are
-clear. A message says how far the squad moved and what from, for example
-"1st Squad was moved 28 m, clear of the buildings". During a drag, the
-message appears once the squad is dropped.
+**Soldiers in water or a building.** A soldier whose start would be in
+water or in a building stands on the nearest clear ground instead
+(`clearStarts`, using `nearestClearPoint` up to 200 m, kept 1.5 m from the
+squad's others). Every other soldier stays exactly where the formation puts
+him, and the squad's own position is unchanged.
 
-**Placing and moving destinations.** A destination placed in water or in a
-building is moved out of it in the same way (`nearestClearPoint`, up to
-200 m), with a message.
+The battle lays its squads out this way. So this holds however the squad
+got there:
+
+- placed or dragged;
+- turned with the knob or the facing field;
+- given another organization or formation;
+- saved earlier, or imported.
+
+Each edit that moves soldiers says how many were moved and what from, for
+example "4 of 1st Squad's soldiers were moved clear of the buildings". During
+a drag, the message appears when the squad is dropped.
+
+**Destinations.** A destination placed or dragged into water or a building is
+moved out of it to the nearest clear ground, with a message.
 
 **What is still refused:**
 
-- a point off the map;
-- a point with no clear ground within 200 m.
+- a squad or destination placed off the map;
+- a squad placed where some of its soldiers would have no clear ground
+  within 200 m (for example, the middle of a lake).
 
-**What is saved and reported instead:**
-
-- a squad turned or reorganized so that its soldiers reach into a building;
-- a scenario saved before this change, or imported;
-- an unreachable destination.
+**What is reported instead:** a squad that ends up in that state some other
+way, and an unreachable destination. They are listed as problems and saved.
 
 Work in progress is never lost.

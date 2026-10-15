@@ -92,7 +92,7 @@ describe('Scenario Setup', () => {
     expect(p.selection.squadId).toBeNull();
   });
 
-  it('moves a squad dragged onto a building off it, saying so when the drag ends', () => {
+  it('moves the soldiers of a squad dragged against a building out of it, saying so when the drag ends', () => {
     const built = labTerrain({
       ...NO_FEATURES,
       buildings: [{ id: 'house', footprint: rectangle(200, 200, 40, 40), heightMeters: 8 }],
@@ -107,11 +107,13 @@ describe('Scenario Setup', () => {
       save: () => Promise.resolve(),
       notify: (m) => notices.push(m),
     });
-    expect(p.moveSquadTo('B1', { x: 200, y: 200 }, false)).toBe(true);
+    expect(p.moveSquadTo('B1', { x: 200, y: 165 }, false)).toBe(true);
     expect(notices).toEqual([]);
     p.commit();
     expect(notices).toEqual([
-      expect.stringMatching(/^1st Squad was moved \d+ m, clear of the buildings\.$/),
+      expect.stringMatching(
+        /^\d+ of 1st Squad's soldiers? (was|were) moved clear of the buildings\.$/,
+      ),
     ]);
     expect(p.issues()).toEqual([
       expect.objectContaining({ message: 'Place at least one OPFOR squad.' }),
