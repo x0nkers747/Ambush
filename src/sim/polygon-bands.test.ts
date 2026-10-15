@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec2 } from './geometry';
-import { isSegmentWalkable } from './navigation';
+import { isSegmentWalkable, pointProblem, withoutClearRadius } from './navigation';
+import { rectangle } from './environment';
 import { createSyntheticTerrain, flatElevation } from './synthetic-terrain';
 import {
   isOnPolygonBoundary,
@@ -132,5 +133,56 @@ describe('banded segment tests', () => {
     }
     expect(mismatches).toBe(0);
     expect(blocked).toBeGreaterThan(300);
+  });
+});
+
+describe('the clear radius', () => {
+  it('changes no answer of pointProblem or isSegmentWalkable, round buildings, water and open ground', () => {
+    const r = random(21);
+    const buildings = Array.from({ length: 60 }, (_, i) => ({
+      id: `b${String(i)}`,
+      footprint: rectangle(
+        -300 + r() * 600,
+        -300 + r() * 600,
+        6 + r() * 30,
+        6 + r() * 30,
+        r() * 90,
+      ),
+      heightMeters: 6,
+    }));
+    const terrain = createSyntheticTerrain(
+      { originX: -400, originY: -400, cellSize: 20, columns: 41, rows: 41 },
+      flatElevation(10),
+      {
+        roads: [],
+        vegetation: [],
+        buildings,
+        water: [
+          {
+            id: 'river',
+            kind: 'water',
+            boundary: river(120, 4).map((v) => ({ x: v.x + 250, y: v.y - 350 })),
+          },
+        ],
+      },
+    );
+    let mismatches = 0;
+    let clear = 0;
+    for (let k = 0; k < 20000; k += 1) {
+      const a = { x: -395 + r() * 790, y: -395 + r() * 790 };
+      const len = r() < 0.7 ? r() * 3 : r() * 40;
+      const t = r() * 2 * Math.PI;
+      const b = { x: a.x + len * Math.sin(t), y: a.y + len * Math.cos(t) };
+      const fast = [JSON.stringify(pointProblem(terrain, a)), isSegmentWalkable(terrain, a, b)];
+      const exact = withoutClearRadius(() => [
+        JSON.stringify(pointProblem(terrain, a)),
+        isSegmentWalkable(terrain, a, b),
+      ]);
+      if (fast[0] !== exact[0] || fast[1] !== exact[1]) mismatches += 1;
+      if (exact[1]) clear += 1;
+    }
+    expect(mismatches).toBe(0);
+    expect(clear).toBeGreaterThan(5000);
+    expect(clear).toBeLessThan(19000);
   });
 });

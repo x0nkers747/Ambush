@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geometry';
-import { navArea, navAreaAt, navAreaDistance } from '../navigation';
+import { navArea, navAreaLookup, navAreaLowerBound } from '../navigation';
 import type { TerrainDataset } from '../terrain';
 import type { BehaviorParams } from './params';
 import { flattenFormation, type FlatFormation } from './formation-spec';
@@ -167,21 +167,41 @@ export function slotTargetAt(frame: TaskFrame, i: number, out: SlotTarget): Slot
  * the smallest ring); `null` when there is none. Deterministic.
  */
 export function nearestInArea(terrain: TerrainDataset, p: Vec2, area: number): Vec2 | null {
-  // Rings nearer than the area's nearest cell cannot reach it: they are
-  // skipped (the rings are 0.5 m multiples, exact in floating point, so the
-  // rings tried, and the point found, are those of the full search).
-  const nearest = navAreaDistance(terrain, p, area, CLEAR_SEARCH_M);
+  // Rings nearer than the area can be are skipped: a lower bound of its
+  // distance, measured once per grid cell, will do (nearer rings have no
+  // hits). The rings' radii, angles and points are the full search's, to
+  // the bit, so the point found is too.
+  const nearest = navAreaLowerBound(terrain, p, area, CLEAR_SEARCH_M);
   if (nearest === Infinity) return null;
-  for (let r = 0.5; r <= CLEAR_SEARCH_M; r += 0.5) {
+  const areaAt = navAreaLookup(terrain);
+  for (const ring of searchRings()) {
     // (With a micrometre to spare for the rounding of the ring's points.)
-    if (r < nearest - 1e-6) continue;
-    const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
-    for (let k = 0; k < steps; k += 1) {
-      const a = (2 * Math.PI * k) / steps;
-      const x = p.x + r * Math.sin(a);
-      const y = p.y + r * Math.cos(a);
-      if (navAreaAt(terrain, x, y) === area) return { x, y };
+    if (ring.r < nearest - 1e-6) continue;
+    const { r, sin, cos } = ring;
+    for (let k = 0; k < sin.length; k += 1) {
+      const x = p.x + r * (sin[k] ?? 0);
+      const y = p.y + r * (cos[k] ?? 0);
+      if (areaAt(x, y) === area) return { x, y };
     }
   }
   return null;
+}
+
+/** The search's rings: radii 0.5 m apart up to `CLEAR_SEARCH_M`, each with its points' sines and cosines. */
+let rings: { r: number; sin: Float64Array; cos: Float64Array }[] | null = null;
+function searchRings() {
+  if (rings) return rings;
+  rings = [];
+  for (let r = 0.5; r <= CLEAR_SEARCH_M; r += 0.5) {
+    const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
+    const sin = new Float64Array(steps);
+    const cos = new Float64Array(steps);
+    for (let k = 0; k < steps; k += 1) {
+      const a = (2 * Math.PI * k) / steps;
+      sin[k] = Math.sin(a);
+      cos[k] = Math.cos(a);
+    }
+    rings.push({ r, sin, cos });
+  }
+  return rings;
 }

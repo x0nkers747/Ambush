@@ -4,19 +4,15 @@ import {
   placeDestination,
   type BattleScenarioDefinition,
 } from '#exercise/battle';
-import type {
-  DeepReadonly,
-  FofForce,
-  FofOrder,
-  ForcePhase,
-  OrderKind,
-  OrderSpec,
-  Side,
-  SimEvent,
-  TerrainDataset,
-  Vec2,
-} from '#sim';
+import type { ForcePhase, OrderKind, OrderSpec, SimEvent, TerrainDataset, Vec2 } from '#sim';
 import { BATTLE_TICK_RATE_HZ } from './planner';
+import {
+  squadStatus,
+  summarize,
+  type BattleSummary,
+  type QueuedOrder,
+  type SquadStatus,
+} from './status';
 import { createBattleSession, type BattleSession } from './session';
 
 // The Combat stage (docs/constructive-simulation/04), without the page: the
@@ -32,44 +28,9 @@ import { createBattleSession, type BattleSession } from './session';
 export const COMBAT_SPEEDS = [0.5, 1, 2, 4, 8, 16, 32] as const;
 export type CombatSpeed = (typeof COMBAT_SPEEDS)[number];
 
-/** A command given but not yet applied (its tick has not been stepped). */
-export interface QueuedOrder {
-  readonly squadId: string;
-  readonly mode: 'replace' | 'append';
-  readonly orders: readonly OrderSpec[];
-  readonly tick: number;
-}
-
-/** What the page shows of a squad now. */
-export interface SquadStatus {
-  readonly id: string;
-  readonly name: string;
-  readonly side: Side;
-  readonly unitId: string;
-  /** Where its active soldiers are on average (its start, once none is). */
-  readonly centre: Vec2;
-  readonly up: number;
-  readonly total: number;
-  readonly phase: ForcePhase;
-  readonly effectiveness: number;
-  readonly active: DeepReadonly<FofOrder> | null;
-  readonly pending: readonly DeepReadonly<FofOrder>[];
-  /** Every order it was given, in turn. */
-  readonly orders: readonly DeepReadonly<FofOrder>[];
-  readonly queued: readonly QueuedOrder[];
-}
-
-export interface CombatSummary {
-  readonly seconds: number;
-  readonly sides: readonly {
-    readonly side: Side;
-    readonly soldiers: number;
-    readonly casualties: number;
-    readonly squads: number;
-    readonly ineffective: number;
-  }[];
-  readonly orders: { readonly completed: number; readonly failed: number; readonly given: number };
-}
+export type { QueuedOrder, SquadStatus } from './status';
+/** The battle's results by side. */
+export type CombatSummary = BattleSummary;
 
 export interface Combat {
   readonly session: BattleSession;
@@ -86,7 +47,13 @@ export interface Combat {
    * speed, while playing, and steps the battle toward it. Returns the
    * events of the ticks stepped.
    */
-  frame(dtSeconds: number): SimEvent[];
+  frame(dtSeconds: number, budgetMs?: number): SimEvent[];
+  /**
+   * The speed the battle has actually kept up lately (simulated seconds per
+   * real second, smoothed): below the speed chosen when it is slower to
+   * simulate than that.
+   */
+  readonly achievedSpeed: number;
   /** Orders a squad to `point` (snapped clear of water and buildings). `true` when given. */
   order(squadId: string, kind: OrderKind, point: Vec2, mode: 'replace' | 'append'): boolean;
   /** Clears a squad's orders: it holds where it is. */
@@ -120,42 +87,10 @@ export function createCombat(o: CombatOptions): Combat {
   /** The clock: where play has got to (simulation seconds). */
   let clock = 0;
   let queued: QueuedOrder[] = [];
+  let achieved = 1;
 
   const byId = new Map(battle.squads.map((s) => [s.spec.id, s]));
-  const forceOf = (unitId: string): DeepReadonly<FofForce> | undefined =>
-    battle.sim.state.fof?.forces.find((f) => f.unitId === unitId);
-
-  const statusOf = (id: string): SquadStatus | undefined => {
-    const squad = byId.get(id);
-    if (!squad) return undefined;
-    const force = forceOf(squad.unitId);
-    const members = new Set(squad.soldierIds);
-    const soldiers = battle.sim.state.soldiers.filter((s) => members.has(s.id));
-    const up = soldiers.filter((s) => s.status === 'active');
-    const centre =
-      up.length > 0
-        ? {
-            x: up.reduce((a, s) => a + s.position.x, 0) / up.length,
-            y: up.reduce((a, s) => a + s.position.y, 0) / up.length,
-          }
-        : squad.spec.position;
-    const orders = force?.orders ?? [];
-    return {
-      id,
-      name: squad.name,
-      side: squad.side,
-      unitId: squad.unitId,
-      centre,
-      up: up.length,
-      total: soldiers.length,
-      phase: force?.phase ?? 'holding',
-      effectiveness: force?.effectiveness ?? 0,
-      active: orders.find((x) => x.id === force?.activeOrderId) ?? null,
-      pending: orders.filter((x) => x.status === 'pending'),
-      orders,
-      queued: queued.filter((q) => q.squadId === id),
-    };
-  };
+  const statusOf = (id: string) => squadStatus(battle, battle.sim.state, id, queued);
 
   const combat: Combat = {
     session,
@@ -180,15 +115,23 @@ export function createCombat(o: CombatOptions): Combat {
     setSpeed(next) {
       speed = next;
     },
-    frame(dtSeconds) {
+    get achievedSpeed() {
+      return achieved;
+    },
+    frame(dtSeconds, budgetMs) {
       if (ended) return [];
+      const before = session.seconds;
       if (playing) {
         clock += Math.max(0, Math.min(dtSeconds, 0.25)) * speed;
         // Never run away from a battle that cannot keep up.
         clock = Math.min(clock, session.seconds + MAX_LAG_SECONDS);
       } else clock = Math.min(clock, session.seconds);
       const target = Math.ceil(clock * rate);
-      const events = session.advance(target, o.stepBudgetMs);
+      const events = session.advance(target, budgetMs ?? o.stepBudgetMs);
+      if (playing && dtSeconds > 0) {
+        const rateNow = (session.seconds - before) / Math.min(dtSeconds, 0.25);
+        achieved += (rateNow - achieved) * Math.min(1, dtSeconds / 1.5);
+      } else if (!playing) achieved = speed;
       if (queued.length > 0) queued = queued.filter((q) => q.tick >= session.tick);
       for (const event of events) {
         if (event.type === 'commandRejected') {
@@ -244,30 +187,7 @@ export function createCombat(o: CombatOptions): Combat {
       playing = false;
       clock = session.seconds;
     },
-    summary() {
-      const squads = combat.squads();
-      const sides = (['BLUEFOR', 'OPFOR'] as const).map((side) => {
-        const list = squads.filter((s) => s.side === side);
-        const soldiers = list.reduce((n, s) => n + s.total, 0);
-        return {
-          side,
-          soldiers,
-          casualties: soldiers - list.reduce((n, s) => n + s.up, 0),
-          squads: list.length,
-          ineffective: list.filter((s) => s.phase === 'ineffective').length,
-        };
-      });
-      const all = squads.flatMap((s) => s.orders);
-      return {
-        seconds: session.seconds,
-        sides,
-        orders: {
-          given: all.length,
-          completed: all.filter((x) => x.status === 'completed').length,
-          failed: all.filter((x) => x.status === 'failed').length,
-        },
-      };
-    },
+    summary: () => summarize(combat.squads(), session.seconds),
   };
   return combat;
 }

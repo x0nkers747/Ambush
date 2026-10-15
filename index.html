@@ -1122,6 +1122,116 @@
         border-left: 3px solid var(--red);
       }
 
+      .battle .review-verify {
+        margin: 0 0 8px;
+        font-size: 12px;
+      }
+      .battle .timeline {
+        position: relative;
+        height: 34px;
+        margin: 6px 0 4px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+      }
+      .battle .timeline-replayed {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        background: rgb(79 143 224 / 0.14);
+        pointer-events: none;
+      }
+      .battle .timeline-markers {
+        position: absolute;
+        inset: 0 0 14px;
+        pointer-events: none;
+      }
+      .battle .timeline-markers .mk {
+        pointer-events: auto;
+      }
+      .battle .timeline .replay-scrub {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        margin: 0;
+      }
+      .battle .mk {
+        position: absolute;
+        top: 3px;
+        width: 4px;
+        height: 14px;
+        margin-left: -2px;
+        padding: 0;
+        border: 0;
+        border-radius: 1px;
+        background: var(--muted);
+      }
+      .battle .mk.blue {
+        background: var(--blue);
+      }
+      .battle .mk.red {
+        background: var(--red);
+      }
+      .battle .mk.mk-casualty {
+        top: 9px;
+        height: 8px;
+        width: 2px;
+        margin-left: -1px;
+        opacity: 0.8;
+      }
+      .battle .mk.mk-order {
+        background: #fff;
+        top: 0;
+        height: 6px;
+      }
+      .battle .mk.mk-ineffective,
+      .battle .mk.mk-withdrawn {
+        background: var(--amber);
+      }
+      .battle .replay-buttons {
+        display: flex;
+        gap: 4px;
+        margin: 6px 0;
+      }
+      .battle .replay-buttons button {
+        flex: 1;
+        padding: 4px 2px;
+      }
+      .battle ol.moments,
+      .battle ol.phases {
+        margin: 4px 0;
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+      .battle .seek {
+        cursor: pointer;
+        border-radius: 2px;
+      }
+      .battle .seek:hover {
+        background: var(--panel-2);
+      }
+      .battle .mk-row .mk-kind {
+        display: inline-block;
+        min-width: 66px;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .battle .mk-row.mk-contact .mk-kind {
+        color: #ff8a80;
+      }
+      .battle .mk-row.mk-order .mk-kind {
+        color: var(--blue);
+      }
+      .battle .mk-row.past {
+        opacity: 0.6;
+      }
+
       /* Roster. */
       .roster-unit {
         margin-left: calc(var(--depth) * 8px);

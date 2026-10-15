@@ -6,8 +6,8 @@
 | --------- | ----------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
 | A         | Generalized forces, orders and plans, battle builder, architecture            | Done  | e6957eb                                        |
 | B         | Scenario Setup and BLUEFOR Planning UI, schema v2 and v1 migration, save/load | Done  | acae397                                        |
-| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Done  | see git log: `feat(constructive): milestone C` |
-| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | Next  | —                                              |
+| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Done  | 0d1c567                                        |
+| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | Done  | see git log: `feat(constructive): milestone D` |
 
 ## Milestone A: generalized forces, orders and architecture
 
@@ -171,3 +171,78 @@ Validation:
   - End Combat and the summary;
   - the header blocked going back into the ended battle.
 - `npm run check` and `npm run build` pass.
+
+## Milestone D: the After-Action Review, verification and benchmarks
+
+Delivered ([05](05-after-action-review.md)):
+
+- **The After-Action Review:**
+  - The battle is replayed from tick 0 by re-simulation from its
+    recording, and each second's state hash is checked against the
+    recording's as the replay reaches it. The panel says it is verified, or
+    from when it differs.
+  - The replay runs in the background; whatever has been replayed can
+    already be reviewed.
+- **The playhead:**
+  - play and pause at ¼× to 16×;
+  - ±5 s, the start and the end, the previous or next marker;
+  - a timeline to drag or click;
+  - every marker, key moment, phase and event is a seek.
+  - The squads' states come from a view battle brought to the playhead
+    from the replay's keyframes; the soldiers in 2D and 3D come from the
+    replay's motion.
+- **The timeline's markers:** contact, casualties, squads combat
+  ineffective or withdrawn, and the user's orders, coloured by side.
+- **Inspection** of a squad at the playhead: its state, its orders with
+  their statuses and reasons, and its phases with their reasons. Also the
+  roster at the playhead, the event log up to it, the result, and Export
+  recording.
+- **The reference 3v3 battle,** made, fought and reviewed end to end
+  through the page's own planner, combat and review
+  (`reference.test.ts`).
+- **Benchmarks at 2, 6 and 12 squads** on open and urban ground
+  (`benchmark.test.ts`, opt-in), and in the browser on Quantico.
+- **Performance on real ground:**
+  - A clear-radius field for obstacle tests, and a nearest-in-area search
+    bounded per grid cell with precomputed rings. Both change no answer.
+  - The battle and the replay step for at most part of each frame, so the
+    view keeps drawing smoothly, and the panel gives the speed achieved
+    when it is less than the speed asked.
+  - 12 squads on Quantico: about 20× in 2D and 10× in 3D, at 50–60 fps.
+
+Validation:
+
+- Unit tests:
+  - `src/app/battle/review.test.ts`:
+    - every second of a replay matches;
+    - a tampered recording is noticed;
+    - the replay progresses on a budget;
+    - the playhead's state hash equals the recording's at any second,
+      forward or back;
+    - playback at speed stops at the end;
+    - the squads' orders and phases at a moment are right;
+    - the markers are right.
+  - `src/app/battle/reference.test.ts`: the reference 3v3 (see 05 §4).
+  - `src/sim/polygon-bands.test.ts`: the clear radius changes no answer of
+    `pointProblem` or `isSegmentWalkable` on 20,000 points and segments.
+  - `src/sim/behavior/nearest-in-area.test.ts`: still equal to the full
+    search.
+- The benchmarks: every replay verified. Casualty and burst counts are the
+  same before and after the optimizations.
+- The browser, on Quantico:
+  - a 2v2 battle fought, ended and reviewed: 736 seconds replayed and
+    verified, the result equal to the live battle's;
+  - key moments, the next and previous markers, ±5 s, the timeline,
+    playback, a squad's phases, and 3D at the playhead;
+  - a 12-squad battle fought at 32× and reviewed: 402 seconds verified, and
+    the timeline seeks.
+- `npm run check` and `npm run build` pass.
+
+### Not done
+
+- **The legacy ambush exercise** (`#edit/<id>`, `#play/<id>`, `#demo`) is
+  still reachable; its replacement now works end to end. Retiring it
+  (removing its page, its scoring and its tests) is a separate decision.
+- **The simulation runs on the page's thread.** A worker, as the
+  Force-on-Force Lab has, would let 12 squads on real ground run faster than
+  about 10–20× without sharing frames with drawing.

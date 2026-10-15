@@ -9,7 +9,7 @@ import {
   type CombatSummary,
   type SquadStatus,
 } from './combat';
-import type { CombatUi } from './combat-editor';
+import type { BattleDisplay, CombatUi } from './combat-editor';
 import type { TimedEvent } from './session';
 
 // The Combat stage's side panel (docs/constructive-simulation/04): the clock
@@ -56,6 +56,14 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
 
 export function combatHint(c: Combat, ui: CombatUi): string {
   if (c.ended) return 'The battle has ended.';
+  const lagging =
+    c.playing && c.achievedSpeed < 0.8 * c.speed
+      ? `Running at ${c.achievedSpeed.toFixed(0)}×: the battle is slower to simulate than ${String(c.speed)}× here. `
+      : '';
+  return lagging + hintFor(c, ui);
+}
+
+function hintFor(c: Combat, ui: CombatUi): string {
   const s = c.squad(ui.selected);
   if (ui.tool === null)
     return s
@@ -105,7 +113,7 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
     <p class="buttons"><button class="small" data-cact="centre">Centre on map</button></p>`;
 }
 
-export function combatRosterHtml(c: Combat, ui: CombatUi): string {
+export function combatRosterHtml(c: { squads(): readonly SquadStatus[] }, ui: CombatUi): string {
   const squads = c.squads();
   return (['BLUEFOR', 'OPFOR'] as const)
     .map((side) => {
@@ -150,16 +158,19 @@ export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>)
   }
 }
 
-export function combatEventsHtml(c: Combat, limit = 40): string {
-  const names = new Map(c.session.battle.squads.map((s) => [s.unitId, s.name]));
+/** The events up to the time drawn, newest first; `seekable` rows seek the review there. */
+export function combatEventsHtml(c: BattleDisplay, limit = 40, seekable = false): string {
+  const names = new Map(c.battle.squads.map((s) => [s.unitId, s.name]));
   const lines: string[] = [];
-  const events = c.session.events;
+  const events = c.events;
   for (let i = events.length - 1; i >= 0 && lines.length < limit; i -= 1) {
     const e = events[i];
     if (!e || e.seconds > c.renderSeconds) continue;
     const text = describeEvent(e, names);
     if (text)
-      lines.push(`<li><span class="clock">${clockText(e.seconds)}</span> ${escapeHtml(text)}</li>`);
+      lines.push(
+        `<li${seekable ? ` class="seek" data-seek="${String(e.seconds)}"` : ''}><span class="clock">${clockText(e.seconds)}</span> ${escapeHtml(text)}</li>`,
+      );
   }
   return lines.length > 0 ? lines.join('') : '<li class="muted">Nothing yet.</li>';
 }
@@ -171,11 +182,11 @@ export function aarSummaryHtml(summary: CombatSummary): string {
         `<tr class="${sideClass(s.side)}"><th>${s.side}</th><td>${String(s.squads)}</td><td>${String(s.soldiers)}</td><td>${String(s.casualties)}</td><td>${String(s.ineffective)}</td></tr>`,
     )
     .join('');
-  return `<p>The battle was ended at <b>${clockText(summary.seconds)}</b>.</p>
+  return `<p>The battle lasted <b>${clockText(summary.seconds)}</b>.</p>
     <table class="aar-table">
-      <thead><tr><th></th><th>Squads</th><th>Soldiers</th><th>Casualties</th><th>Ineffective</th></tr></thead>
+      <thead><tr><th></th><th>Squads</th><th>Soldiers</th><th title="Casualties: soldiers incapacitated">Hit</th><th title="Squads combat ineffective">Ineff.</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <p>Orders: ${String(summary.orders.given)} given, ${String(summary.orders.completed)} completed, ${String(summary.orders.failed)} failed.</p>
-    <p class="hint">The full replay of the battle from its start, with its timeline and markers, comes in the next milestone.</p>`;
+`;
 }

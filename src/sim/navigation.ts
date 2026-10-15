@@ -55,6 +55,7 @@ export function pointProblem(terrain: TerrainDataset, p: Vec2): PointProblem | n
 /** `pointProblem`, where `decks` says whether a crossable bridge's deck over water may be stood on. */
 function obstacleProblem(terrain: TerrainDataset, p: Vec2, decks: boolean): PointProblem | null {
   if (!isOnTerrain(terrain, p.x, p.y)) return { kind: 'offTerrain' };
+  if (clearAround(terrain, p, p)) return null;
   const index = obstacleIndex(terrain);
   // A bucket lists its obstacles in index order (buildings, then water), so
   // the first problem found is the same as in a scan of every obstacle.
@@ -191,6 +192,8 @@ function signedArea(ring: readonly Vec2[]): number {
 export function isSegmentWalkable(terrain: TerrainDataset, a: Vec2, b: Vec2): boolean {
   // The terrain is a rectangle, so a segment between two points on it stays on it.
   if (!isOnTerrain(terrain, a.x, a.y) || !isOnTerrain(terrain, b.x, b.y)) return false;
+  // Within the clear radius of a's cell: no obstacle can be near (exact).
+  if (clearAround(terrain, a, b)) return true;
   const segmentBox = boundsOf([a, b]);
   const index = obstacleIndex(terrain);
   // Only obstacles registered in the buckets the segment crosses can be near
@@ -610,10 +613,158 @@ function distanceToSegment(p: Vec2, a: Vec2, b: Vec2): number {
 // The polygon loops below use indices rather than an edge list: they run in
 // the hottest loops of path planning and must not allocate.
 
-/** Distance from `p` to the polygon's boundary. */
-function distanceToPolygon(p: Vec2, polygon: readonly Vec2[]): number {
+// --- Clear radius --------------------------------------------------------------
+
+/** Cell size of the clear-radius field, in metres. */
+const CLEAR_CELL_M = 4;
+/** The clear radius is measured out to this distance (beyond it, it is this), in metres. */
+const CLEAR_CAP_M = 16;
+/** Kept from every clear radius, for the rounding of the distances, in metres. */
+const CLEAR_EPSILON_M = 1e-6;
+
+interface ClearField {
+  readonly originX: number;
+  readonly originY: number;
+  readonly columns: number;
+  readonly rows: number;
+  /** Per cell: its clear radius (NaN: not yet measured). */
+  readonly radius: Float32Array;
+}
+
+const clearCache = new WeakMap<TerrainDataset, ClearField>();
+
+/**
+ * The clear radius of the field cell holding `p`: how far from the cell's
+ * centre every point is clear of every obstacle (at least
+ * `OBSTACLE_CLEARANCE_M` from a building, out of water), up to
+ * `CLEAR_CAP_M`; 0 or less where an obstacle is close or the centre is in
+ * one. Measured exactly, once per cell (the terrain is immutable), the first
+ * time a query falls in the cell.
+ */
+function clearRadiusAt(terrain: TerrainDataset, p: Vec2): { centre: Vec2; radius: number } {
+  let field = clearCache.get(terrain);
+  if (!field) {
+    const { originX, originY, cellSize, columns: samplesX, rows: samplesY } = terrain.heightfield;
+    const columns = Math.max(1, Math.ceil(((samplesX - 1) * cellSize) / CLEAR_CELL_M));
+    const rows = Math.max(1, Math.ceil(((samplesY - 1) * cellSize) / CLEAR_CELL_M));
+    field = {
+      originX,
+      originY,
+      columns,
+      rows,
+      radius: new Float32Array(columns * rows).fill(Number.NaN),
+    };
+    clearCache.set(terrain, field);
+  }
+  const c = Math.min(
+    field.columns - 1,
+    Math.max(0, Math.floor((p.x - field.originX) / CLEAR_CELL_M)),
+  );
+  const r = Math.min(field.rows - 1, Math.max(0, Math.floor((p.y - field.originY) / CLEAR_CELL_M)));
+  const centre = {
+    x: field.originX + (c + 0.5) * CLEAR_CELL_M,
+    y: field.originY + (r + 0.5) * CLEAR_CELL_M,
+  };
+  const k = r * field.columns + c;
+  let radius = field.radius[k] ?? Number.NaN;
+  if (Number.isNaN(radius)) {
+    radius = measureClearRadius(terrain, centre);
+    // Stored rounded down to a float: never more than measured.
+    const stored = Math.fround(radius);
+    field.radius[k] = stored > radius ? radius - CLEAR_EPSILON_M : stored;
+    radius = field.radius[k] ?? 0;
+  }
+  return { centre, radius };
+}
+
+/** The clear radius of a point, measured: see `clearRadiusAt`. */
+function measureClearRadius(terrain: TerrainDataset, q: Vec2): number {
+  const index = obstacleIndex(terrain);
+  const reach = CLEAR_CAP_M + OBSTACLE_CLEARANCE_M;
+  let radius = CLEAR_CAP_M;
+  const box = { minX: q.x - reach, maxX: q.x + reach, minY: q.y - reach, maxY: q.y + reach };
+  // Every obstacle whose bounds come within the reach: those registered in the buckets the box spans.
+  const seen = new Set<number>();
+  const c0 = Math.max(0, Math.floor((box.minX - index.originX) / INDEX_BUCKET_M));
+  const c1 = Math.min(index.columns - 1, Math.floor((box.maxX - index.originX) / INDEX_BUCKET_M));
+  const r0 = Math.max(0, Math.floor((box.minY - index.originY) / INDEX_BUCKET_M));
+  const r1 = Math.min(index.rows - 1, Math.floor((box.maxY - index.originY) / INDEX_BUCKET_M));
+  for (let r = r0; r <= r1; r += 1) {
+    for (let c = c0; c <= c1; c += 1) {
+      const k = r * index.columns + c;
+      for (let j = index.start[k] ?? 0; j < (index.start[k + 1] ?? 0); j += 1) {
+        const i = index.items[j] ?? 0;
+        if (seen.has(i)) continue;
+        seen.add(i);
+        const building = index.buildings[i];
+        if (building) {
+          if (!overlaps(building.box, box, 0)) continue;
+          const polygon = building.building.footprint;
+          if (pointInPolygon(q, polygon)) return 0;
+          radius = Math.min(radius, distanceToPolygon(q, polygon, reach) - OBSTACLE_CLEARANCE_M);
+          continue;
+        }
+        const water = index.water[i - index.buildings.length];
+        if (!water || !overlaps(water.box, box, 0)) continue;
+        if (pointInPolygon(q, water.water.boundary)) return 0;
+        radius = Math.min(radius, distanceToPolygon(q, water.water.boundary, reach));
+      }
+    }
+  }
+  return radius;
+}
+
+/** Whether the clear radius is used (tests compare the answers without it). */
+let clearRadiusInUse = true;
+
+/** Runs `f` without the clear radius: every obstacle test exact the long way (for tests). */
+export function withoutClearRadius<T>(f: () => T): T {
+  const was = clearRadiusInUse;
+  clearRadiusInUse = false;
+  try {
+    return f();
+  } finally {
+    clearRadiusInUse = was;
+  }
+}
+
+/**
+ * Whether the segment a–b (or the point, a = b) lies strictly within the
+ * clear radius of a's field cell: then no obstacle is within reach of any of
+ * its points, and every exact obstacle test would pass it.
+ */
+function clearAround(terrain: TerrainDataset, a: Vec2, b: Vec2): boolean {
+  if (!clearRadiusInUse) return false;
+  const { centre, radius } = clearRadiusAt(terrain, a);
+  const limit = radius - CLEAR_EPSILON_M;
+  if (limit <= 0) return false;
+  return (
+    Math.hypot(a.x - centre.x, a.y - centre.y) < limit &&
+    Math.hypot(b.x - centre.x, b.y - centre.y) < limit
+  );
+}
+
+/**
+ * Distance from `p` to the polygon's boundary. With `cap`, a large
+ * polygon's edges beyond `cap` in height are skipped (`polygonBands`): the
+ * result is then exact up to `cap`, and more than `cap` otherwise.
+ */
+function distanceToPolygon(p: Vec2, polygon: readonly Vec2[], cap?: number): number {
   let best = Number.POSITIVE_INFINITY;
   const n = polygon.length;
+  const bands = cap === undefined ? null : polygonBands(polygon);
+  if (bands && cap !== undefined) {
+    const [first, last] = bandRange(bands, p.y - cap, p.y + cap);
+    for (let k = first; k <= last; k += 1) {
+      for (let j = bands.start[k] ?? 0; j < (bands.start[k + 1] ?? 0); j += 1) {
+        const i = bands.edges[j] ?? 0;
+        const a = polygon[i];
+        const b = polygon[(i + 1) % n] ?? a;
+        if (a && b) best = Math.min(best, distanceToSegment(p, a, b));
+      }
+    }
+    return best;
+  }
   for (let i = 0; i < n; i += 1) {
     const a = polygon[i];
     const b = polygon[(i + 1) % n] ?? a;
@@ -700,6 +851,8 @@ interface NavGrid {
   readonly blocked: Uint8Array;
   /** Connected areas of free cells (`connected`), labelled on first use. */
   areas?: Int32Array;
+  /** `navAreaLowerBound` per area, then per cell and search distance, as measured. */
+  lowerBounds?: Map<number, Map<number, number>>;
 }
 
 const gridCache = new WeakMap<TerrainDataset, NavGrid>();
@@ -1039,23 +1192,31 @@ export function navArea(terrain: TerrainDataset, p: Vec2): number {
   return grid.areas[r * grid.columns + c] ?? 0;
 }
 
-/** `navArea` at (x, y), without a point object (for hot loops). */
-export function navAreaAt(terrain: TerrainDataset, x: number, y: number): number {
+/** `navAreaAt` for one terrain, its grid fetched once (for the hottest loops). */
+export function navAreaLookup(terrain: TerrainDataset): (x: number, y: number) => number {
   const grid = navGrid(terrain);
-  const c = Math.floor((x - grid.originX) / NAV_CELL_M);
-  const r = Math.floor((y - grid.originY) / NAV_CELL_M);
-  if (c < 0 || r < 0 || c >= grid.columns || r >= grid.rows) return 0;
   grid.areas ??= labelAreas(grid);
-  return grid.areas[r * grid.columns + c] ?? 0;
+  const { originX, originY, columns, rows } = grid;
+  const areas = grid.areas;
+  return (x, y) => {
+    const c = Math.floor((x - originX) / NAV_CELL_M);
+    const r = Math.floor((y - originY) / NAV_CELL_M);
+    if (c < 0 || r < 0 || c >= columns || r >= rows) return 0;
+    return areas[r * columns + c] ?? 0;
+  };
 }
 
+/** Bounds remembered at most (then forgotten all at once: they are measured again as needed). */
+const LOWER_BOUNDS_KEPT = 200_000;
+
 /**
- * The least distance from `p` to a navigation cell of area `area` (the cell's
- * square, edges included), among the cells within `maxDistance`; `Infinity`
- * when none is. A point of the area at distance `r` from `p` lies in such a
- * cell, so no point closer than this is in the area.
+ * A lower bound of `navAreaDistance` for every point of `p`'s grid cell:
+ * the least distance between that cell's square and a cell of area `area`
+ * (`Infinity` when none is within `maxDistance` of the square). Measured
+ * once per cell and area, so a search that only needs to know where
+ * `area` cannot be (e.g. `nearestInArea`) need not measure it per point.
  */
-export function navAreaDistance(
+export function navAreaLowerBound(
   terrain: TerrainDataset,
   p: Vec2,
   area: number,
@@ -1064,27 +1225,37 @@ export function navAreaDistance(
   const grid = navGrid(terrain);
   grid.areas ??= labelAreas(grid);
   const areas = grid.areas;
-  const c0 = Math.max(0, Math.floor((p.x - maxDistance - grid.originX) / NAV_CELL_M));
-  const c1 = Math.min(
-    grid.columns - 1,
-    Math.floor((p.x + maxDistance - grid.originX) / NAV_CELL_M),
-  );
-  const r0 = Math.max(0, Math.floor((p.y - maxDistance - grid.originY) / NAV_CELL_M));
-  const r1 = Math.min(grid.rows - 1, Math.floor((p.y + maxDistance - grid.originY) / NAV_CELL_M));
+  const c = Math.floor((p.x - grid.originX) / NAV_CELL_M);
+  const r = Math.floor((p.y - grid.originY) / NAV_CELL_M);
+  const span = Math.ceil(maxDistance / NAV_CELL_M) + 1;
+  // Remembered per area, then per cell and search distance (only for cells of the grid).
+  const inGrid = c >= 0 && r >= 0 && c < grid.columns && r < grid.rows;
+  const key = (r * grid.columns + c) * 4096 + Math.min(4095, Math.floor(maxDistance));
+  const all = (grid.lowerBounds ??= new Map());
+  let bounds = all.get(area);
+  const known = inGrid ? bounds?.get(key) : undefined;
+  if (known !== undefined) return known;
   let best = Infinity;
-  for (let r = r0; r <= r1; r += 1) {
-    const y0 = grid.originY + r * NAV_CELL_M;
-    const dy = p.y < y0 ? y0 - p.y : p.y > y0 + NAV_CELL_M ? p.y - y0 - NAV_CELL_M : 0;
+  for (let rr = Math.max(0, r - span); rr <= Math.min(grid.rows - 1, r + span); rr += 1) {
+    const dy = Math.max(0, Math.abs(rr - r) - 1) * NAV_CELL_M;
     if (dy >= best) continue;
-    for (let c = c0; c <= c1; c += 1) {
-      if (areas[r * grid.columns + c] !== area) continue;
-      const x0 = grid.originX + c * NAV_CELL_M;
-      const dx = p.x < x0 ? x0 - p.x : p.x > x0 + NAV_CELL_M ? p.x - x0 - NAV_CELL_M : 0;
+    for (let cc = Math.max(0, c - span); cc <= Math.min(grid.columns - 1, c + span); cc += 1) {
+      if (areas[rr * grid.columns + cc] !== area) continue;
+      const dx = Math.max(0, Math.abs(cc - c) - 1) * NAV_CELL_M;
       const d = Math.hypot(dx, dy);
       if (d < best) best = d;
     }
   }
-  return best <= maxDistance ? best : Infinity;
+  const bound = best <= maxDistance ? best : Infinity;
+  if (inGrid && Math.floor(maxDistance) < 4096) {
+    if (!bounds) {
+      bounds = new Map();
+      all.set(area, bounds);
+    }
+    if (bounds.size >= LOWER_BOUNDS_KEPT) bounds.clear();
+    bounds.set(key, bound);
+  }
+  return bound;
 }
 
 function cellCentre(grid: NavGrid, cell: number): Vec2 {

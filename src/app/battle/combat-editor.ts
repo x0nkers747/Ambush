@@ -1,7 +1,9 @@
-import { emptyMotionSample } from '#exercise';
+import { emptyMotionSample, type MotionLog } from '#exercise';
+import type { Battle } from '#exercise/battle';
 import type { OrderKind, Vec2 } from '#sim';
 import type { MapEditor } from '#view2d';
-import type { Combat, SquadStatus } from './combat';
+import type { TimedEvent } from './session';
+import type { SquadStatus } from './status';
 import { chevron, OUTLINE, ring, SIDE_COLORS, unitSymbol, waypoint } from './map-editor';
 
 // The Combat stage on the map (docs/constructive-simulation/04): every
@@ -10,6 +12,21 @@ import { chevron, OUTLINE, ring, SIDE_COLORS, unitSymbol, waypoint } from './map
 // orders it is carrying out and those given but not yet applied, and the
 // bursts of the last moments. Drawn over the 2D map or the 3D view through
 // either's projection; clicks select squads and give orders, in both views.
+
+/**
+ * A battle as the map shows it: live (Combat) or replayed (the After-Action
+ * Review). `order` is there only where orders can be given.
+ */
+export interface BattleDisplay {
+  readonly motion: MotionLog;
+  readonly events: readonly TimedEvent[];
+  /** The time drawn (simulation seconds). */
+  readonly renderSeconds: number;
+  readonly battle: Pick<Battle, 'squads'>;
+  squads(): readonly SquadStatus[];
+  squad(id: string | null): SquadStatus | undefined;
+  order?(squadId: string, kind: OrderKind, point: Vec2, mode: 'replace' | 'append'): boolean;
+}
 
 export interface CombatUi {
   /** The squad selected (either side), or `null`. */
@@ -28,7 +45,7 @@ const SQUAD_HIT_PX = 16;
 const SOLDIER_HIT_PX = 6;
 
 export function createCombatMapEditor(
-  combat: () => Combat | null,
+  combat: () => BattleDisplay | null,
   ui: CombatUi,
   notify: (message: string) => void,
   organizationOf: (squadId: string) => 'squad' | 'fireTeam' | 'element3',
@@ -37,8 +54,8 @@ export function createCombatMapEditor(
   const sample = emptyMotionSample();
 
   /** Where each soldier is at the time drawn, from the motion log (interpolated). */
-  const positions = (c: Combat) => {
-    const log = c.session.motion;
+  const positions = (c: BattleDisplay) => {
+    const log = c.motion;
     const seconds = c.renderSeconds;
     const exact = seconds * log.tickRateHz;
     const t0 = Math.floor(exact);
@@ -63,7 +80,7 @@ export function createCombatMapEditor(
     const squads = c.squads();
     for (const s of squads) if (near(at(s.centre), SQUAD_HIT_PX)) return s;
     const where = positions(c);
-    for (const s of c.session.battle.squads) {
+    for (const s of c.battle.squads) {
       for (const id of s.soldierIds) {
         const p = where.get(id);
         if (p?.active && near(at(p), SOLDIER_HIT_PX))
@@ -88,7 +105,7 @@ export function createCombatMapEditor(
     click(point) {
       const c = combat();
       if (!c) return;
-      if (ui.tool === null) {
+      if (ui.tool === null || !c.order) {
         ui.selected = null;
         return;
       }
@@ -170,7 +187,7 @@ export function createCombatMapEditor(
 
       // Bursts of the last moments: shooter to aim point.
       const now = c.renderSeconds;
-      const log = c.session.events;
+      const log = c.events;
       for (let i = log.length - 1; i >= 0; i -= 1) {
         const e = log[i];
         if (!e) continue;
@@ -193,7 +210,7 @@ export function createCombatMapEditor(
       ctx.globalAlpha = 1;
 
       // Soldiers: active as dots, casualties as small grey crosses.
-      for (const s of c.session.battle.squads) {
+      for (const s of c.battle.squads) {
         const selected = s.spec.id === ui.selected;
         for (const id of s.soldierIds) {
           const m = where.get(id);

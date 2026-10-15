@@ -46,7 +46,15 @@ import {
 } from '../shell';
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
 import { COMBAT_SPEEDS, createCombat, type Combat, type CombatSpeed } from './combat';
-import { createCombatMapEditor, type CombatUi } from './combat-editor';
+import { createCombatMapEditor, type BattleDisplay, type CombatUi } from './combat-editor';
+import { createReview, type Review, type ReviewSpeed } from './review';
+import {
+  momentsHtml,
+  phasesHtml,
+  reviewToolsHtml,
+  timelineMarkersHtml,
+  verificationText,
+} from './review-panel';
 import {
   aarSummaryHtml,
   clockText,
@@ -211,18 +219,46 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Combat (docs/constructive-simulation/04) ------------------------------
 
-  /** The battle being fought (Combat), or fought (the After-Action Review). */
+  /** The battle being fought (Combat), or fought (until the review replaces it). */
   let combat: Combat | null = null;
+  /** The After-Action Review of the battle fought: its replay from tick 0. */
+  let review: Review | null = null;
   const combatUi: CombatUi = { selected: null, tool: null, append: false, shift: false };
+  /** The live battle, in Combat. */
+  const inCombat = (): Combat | null => (planner.stage === 'combat' ? combat : null);
+  /** The replayed battle, in the review. */
+  const inReview = (): Review | null => (planner.stage === 'aar' ? review : null);
+  const combatDisplay = (c: Combat): BattleDisplay => ({
+    motion: c.session.motion,
+    events: c.session.events,
+    renderSeconds: c.renderSeconds,
+    battle: c.session.battle,
+    squads: () => c.squads(),
+    squad: (id) => c.squad(id),
+    order: (id, kind, point, mode) => c.order(id, kind, point, mode),
+  });
+  const reviewDisplay = (r: Review): BattleDisplay => ({
+    motion: r.replay.motion,
+    events: r.replay.events,
+    renderSeconds: r.seconds,
+    battle: r.replay.battle,
+    squads: () => r.squads(),
+    squad: (id) => r.squad(id),
+  });
+  /** What the map draws of a battle now: the live one, the replayed one, or none (planning). */
+  const display = (): BattleDisplay | null => {
+    const c = inCombat();
+    if (c) return combatDisplay(c);
+    const r = inReview();
+    return r ? reviewDisplay(r) : null;
+  };
   const combatEditor = createCombatMapEditor(
-    () => combat,
+    display,
     combatUi,
     notify,
     (id) => planner.squad(id)?.organization ?? 'squad',
   );
-  const inCombat = (): Combat | null =>
-    planner.stage === 'combat' || planner.stage === 'aar' ? combat : null;
-  const current = (): MapEditor => (inCombat() ? combatEditor : editor);
+  const current = (): MapEditor => (display() ? combatEditor : editor);
   /** The map's editor: the planner's, or in Combat and the review, the battle's. */
   const mapEditor: MapEditor = {
     press: (point, screen, button) => current().press?.(point, screen, button) ?? false,
@@ -302,17 +338,41 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     else map.centreOn(point);
   };
   /** The battle's soldiers where they start, for the 3D view (selected squad highlighted). */
-  let combatWeapons: { combat: Combat; weapons: Record<string, string | null> } | null = null;
-  const figures = () => {
+  let combatWeapons: { battle: object; weapons: Record<string, string | null> } | null = null;
+  /** The battle the 3D view shows: live (Combat) or at the playhead (the review). */
+  const shownBattle = () => {
     const c = inCombat();
+    if (c)
+      return {
+        battle: c.session.battle,
+        state: c.session.battle.sim.state,
+        log: c.session.motion,
+        combatLog: c.session.combatLog,
+        seconds: c.renderSeconds,
+        ended: c.ended,
+      };
+    const r = inReview();
+    if (r)
+      return {
+        battle: r.replay.battle,
+        state: r.view.sim.state,
+        log: r.replay.motion,
+        combatLog: r.replay.combatLog,
+        seconds: r.seconds,
+        ended: false,
+      };
+    return null;
+  };
+  const figures = () => {
+    const c = shownBattle();
     if (c) {
-      if (combatWeapons?.combat !== c) {
+      if (combatWeapons?.battle !== c.battle) {
         const weapons: Record<string, string | null> = {};
-        for (const squad of c.session.battle.squads) Object.assign(weapons, squad.displayWeapons);
-        combatWeapons = { combat: c, weapons };
+        for (const squad of c.battle.squads) Object.assign(weapons, squad.displayWeapons);
+        combatWeapons = { battle: c.battle, weapons };
       }
       const selected = combatUi.selected;
-      const units: UnitMarker[] = c.session.battle.sim.state.soldiers.map((s) => ({
+      const units: UnitMarker[] = c.state.soldiers.map((s) => ({
         id: s.id,
         affiliation: s.side === 'BLUEFOR' ? 'friendly' : 'enemy',
         position: s.position,
@@ -323,12 +383,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       }));
       return {
         units,
-        clock: {
-          log: c.session.motion,
-          combatLog: c.session.combatLog,
-          seconds: c.renderSeconds,
-          ended: c.ended,
-        },
+        clock: { log: c.log, combatLog: c.combatLog, seconds: c.seconds, ended: c.ended },
         weapons: combatWeapons.weapons,
       };
     }
@@ -475,7 +530,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       combatUi.tool = null;
       lastFrameMs = null;
     }
-    if (target === 'scenario' || target === 'bluefor') combat = null;
+    if (target === 'scenario' || target === 'bluefor') {
+      combat = null;
+      review = null;
+    }
+    if (target === 'aar') reviewToolsShown = false;
     planner.setStage(target);
     if (target === 'scenario' || target === 'bluefor') o.setAddress(target);
     lastVersion = -1;
@@ -491,6 +550,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       action: 'End combat',
       onConfirm: () => {
         c.end();
+        // The review replays the battle from its recording, from tick 0.
+        review = createReview({ terrain: o.terrain, recording: c.session.recording() });
+        combatUi.tool = null;
         enter('aar');
       },
     });
@@ -579,8 +641,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'combat':
         return combat ? combatToolsHtml(combat, combatUi) : '';
       case 'aar':
-        return combat
-          ? aarSummaryHtml(combat.summary())
+        return review
+          ? reviewToolsHtml()
           : `<p class="muted">No battle fought yet: ${escapeHtml(scenarioSummary(planner.definition))}.</p>`;
     }
   };
@@ -787,12 +849,79 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     return true;
   };
 
+  /** A click on the review's panel; `true` when it was one. */
+  const reviewClick = (target: HTMLElement, clicks: number): boolean => {
+    const r = inReview();
+    if (!r) return false;
+    const el = target.closest<HTMLElement>(
+      '[data-ract], [data-rspeed], [data-seek], [data-squad], [data-cact]',
+    );
+    if (!el) return false;
+    const { ract, rspeed, seek, squad, cact } = el.dataset;
+    if (seek !== undefined) r.seek(Number(seek));
+    else if (rspeed !== undefined) r.setSpeed(Number(rspeed) as ReviewSpeed);
+    else if (ract !== undefined) reviewAction(r, ract);
+    else if (cact === 'centre') {
+      const s = r.squad(combatUi.selected);
+      if (s) centreOn(s.centre);
+    } else if (squad !== undefined && !el.hasAttribute('data-act')) {
+      combatUi.selected = squad;
+      const s = r.squad(squad);
+      if (s && clicks >= 2) centreOn(s.centre);
+    } else return false;
+    return true;
+  };
+  /** The review's buttons and keys. */
+  const reviewAction = (r: Review, action: string) => {
+    const markers = r.markers();
+    switch (action) {
+      case 'play':
+        if (r.playing) r.pause();
+        else r.play();
+        break;
+      case 'start':
+        r.seek(0);
+        break;
+      case 'end':
+        r.seek(r.endSeconds);
+        break;
+      case 'back':
+        r.seek(r.seconds - 5);
+        break;
+      case 'forward':
+        r.seek(r.seconds + 5);
+        break;
+      case 'prev': {
+        const before = markers.filter((m) => m.seconds < r.seconds - 0.05).at(-1);
+        r.seek(before?.seconds ?? 0);
+        break;
+      }
+      case 'next': {
+        const after = markers.find((m) => m.seconds > r.seconds + 0.05);
+        if (after) r.seek(after.seconds);
+        break;
+      }
+      case 'export': {
+        const blob = new Blob([JSON.stringify(r.recording)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${planner.definition.name.replace(/[^\w.-]+/g, '-') || 'battle'}.battle-run.json`;
+        a.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(a.href);
+        }, 1000);
+        break;
+      }
+    }
+  };
+
   // Clicks and changes in the side panel.
   const aside = app.querySelector<HTMLElement>('aside.side');
   if (!aside) throw new Error('Missing side panel');
   aside.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (combatClick(target, event.detail)) return;
+    if (reviewClick(target, event.detail)) return;
     const toolEl = target.closest<HTMLElement>('[data-tool]');
     if (toolEl?.dataset['tool']) {
       const t = JSON.parse(toolEl.dataset['tool']) as PlannerTool;
@@ -971,6 +1100,26 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       combatKey(c, key, event);
       return;
     }
+    const r = inReview();
+    if (r) {
+      const action = (
+        {
+          ' ': 'play',
+          arrowleft: 'back',
+          arrowright: 'forward',
+          home: 'start',
+          end: 'end',
+          ',': 'prev',
+          '.': 'next',
+        } as Record<string, string | undefined>
+      )[key];
+      if (action) {
+        event.preventDefault();
+        reviewAction(r, action);
+      } else if (key === 'escape') combatUi.selected = null;
+      else if (key === 'f') fitView();
+      return;
+    }
     const order = ORDER_KEYS[key];
     if (order && (planner.stage === 'scenario' || planner.stage === 'bluefor')) {
       planner.setTool({ kind: 'order', order });
@@ -1068,12 +1217,17 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     primary.setAttribute('aria-disabled', String(reason !== null));
     setText(ui('primary-reason'), reason ?? '');
     const c = inCombat();
+    const r = inReview();
     const events = app.querySelector<HTMLElement>('[data-sec="events"]');
-    if (events) events.hidden = !c;
+    if (events) events.hidden = !c && !r;
     const scenarioSection = app.querySelector<HTMLElement>('[data-sec="scenario"]');
-    if (scenarioSection) scenarioSection.hidden = c !== null;
+    if (scenarioSection) scenarioSection.hidden = c !== null || r !== null;
     if (c) {
       updateCombatPanels(c);
+      return;
+    }
+    if (r) {
+      updateReviewPanels(r);
       return;
     }
     const pointer = map.pointer;
@@ -1109,7 +1263,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           : '',
     );
     const squadSection = app.querySelector<HTMLElement>('[data-sec="squad"]');
-    if (squadSection) squadSection.hidden = stage === 'aar';
+    if (squadSection) squadSection.hidden = false;
     // Not while the user is typing in it.
     const squadEl = ui('squad');
     if (!squadEl.contains(document.activeElement) || document.activeElement === document.body)
@@ -1141,7 +1295,76 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     );
     setHtml(ui('squad'), combatSquadHtml(c.squad(combatUi.selected)));
     setHtml(ui('roster'), combatRosterHtml(c, combatUi));
-    setHtml(ui('events'), combatEventsHtml(c));
+    setHtml(ui('events'), combatEventsHtml(combatDisplay(c)));
+  };
+
+  /** Whether the review's controls are drawn (they are drawn once, then kept current). */
+  let reviewToolsShown = false;
+  let reviewPanelsAt = -Infinity;
+  /** Whether the user is dragging the timeline (its value is then left alone). */
+  let scrubbing = false;
+  const updateReviewPanels = (r: Review) => {
+    if (!reviewToolsShown) {
+      app.dataset['stage'] = planner.stage;
+      ui('opfor-toggle').hidden = true;
+      setText(ui('tools-title'), STAGE_NAMES.aar);
+      setText(ui('tool-hint'), '');
+      setText(ui('tool-label'), '');
+      setHtml(ui('tools'), toolsHtml());
+      const scrub = app.querySelector<HTMLInputElement>('[data-ui="review-scrub"]');
+      scrub?.addEventListener('pointerdown', () => {
+        scrubbing = true;
+      });
+      scrub?.addEventListener('pointerup', () => {
+        scrubbing = false;
+      });
+      scrub?.addEventListener('input', () => {
+        r.seek(Number(scrub.value));
+      });
+      reviewToolsShown = true;
+      reviewPanelsAt = -Infinity;
+    }
+    // Every frame: the clock, the timeline and the play button.
+    const q = (name: string) => app.querySelector<HTMLElement>(`[data-ui="${name}"]`);
+    const clock = q('review-clock');
+    if (clock) setText(clock, clockText(r.seconds));
+    const end = q('review-end');
+    if (end) setText(end, `of ${clockText(r.endSeconds)}`);
+    const scrub = q('review-scrub') as HTMLInputElement | null;
+    if (scrub) {
+      const max = String(r.endSeconds);
+      if (scrub.max !== max) scrub.max = max;
+      if (!scrubbing) scrub.value = String(r.seconds);
+    }
+    const replayed = q('timeline-replayed');
+    if (replayed)
+      replayed.style.width = `${((100 * r.replayedSeconds) / Math.max(r.endSeconds, 1e-9)).toFixed(2)}%`;
+    const play = q('review-play');
+    if (play) setText(play, r.playing ? 'Pause' : 'Play');
+    // A few times a second: the rest.
+    const now = performance.now();
+    if (now - reviewPanelsAt < 200) return;
+    reviewPanelsAt = now;
+    const verify = verificationText(r);
+    const line = q('review-verify');
+    if (line) {
+      setText(line, verify.text);
+      line.className = `review-verify ${verify.kind}`;
+    }
+    for (const b of app.querySelectorAll<HTMLButtonElement>('[data-rspeed]'))
+      b.setAttribute('aria-pressed', String(Number(b.dataset['rspeed']) === r.speed));
+    const markers = q('timeline-markers');
+    if (markers) setHtml(markers, timelineMarkersHtml(r));
+    const summary = q('review-summary');
+    if (summary) setHtml(summary, aarSummaryHtml(r.summary()));
+    const moments = q('review-moments');
+    if (moments) setHtml(moments, momentsHtml(r));
+    setHtml(
+      ui('squad'),
+      combatSquadHtml(r.squad(combatUi.selected)) + phasesHtml(r, combatUi.selected),
+    );
+    setHtml(ui('roster'), combatRosterHtml(r, combatUi));
+    setHtml(ui('events'), combatEventsHtml(reviewDisplay(r), 60, true));
   };
 
   let frameId = 0;
@@ -1152,8 +1375,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   document.addEventListener('visibilitychange', onVisibility);
   const frame = (nowMs: number) => {
-    const c = planner.stage === 'combat' ? combat : null;
-    if (c) c.frame(lastFrameMs === null ? 0 : (nowMs - lastFrameMs) / 1000);
+    const dt = lastFrameMs === null ? 0 : (nowMs - lastFrameMs) / 1000;
+    // The battle steps for at most part of a frame, so the view keeps drawing
+    // smoothly (less in 3D, whose drawing takes longer).
+    inCombat()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
+    inReview()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     lastFrameMs = nowMs;
     if (viewMode === '3d' && view3d) {
       map.update();
@@ -1185,6 +1411,26 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       definition: JSON.parse(JSON.stringify(planner.definition)) as unknown,
       issues: planner.issues().map((i) => ({ ...i })),
       blocker: planner.stage === 'aar' ? null : rules.next(planner.stage),
+      review: review
+        ? {
+            seconds: review.seconds,
+            endSeconds: review.endSeconds,
+            replayedSeconds: review.replayedSeconds,
+            playing: review.playing,
+            speed: review.speed,
+            verification: review.verification,
+            markers: review.markers().map((m) => ({ ...m })),
+            squads: review.squads().map((q) => ({
+              id: q.id,
+              up: q.up,
+              phase: q.phase,
+              centre: q.centre,
+              active: q.active?.kind ?? null,
+            })),
+            summary: review.summary(),
+            selected: combatUi.selected,
+          }
+        : null,
       combat: combat
         ? {
             playing: combat.playing,

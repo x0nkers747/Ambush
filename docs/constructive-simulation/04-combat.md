@@ -62,9 +62,8 @@ BLUEFOR Planning fights a new one.
   - phase changes, with their reasons (contact, under fire, assaulting…);
   - casualties;
   - refused orders.
-- **The After-Action Review** (until Milestone D brings the replay): when
-  the battle ended, and each side's squads, soldiers, casualties and
-  ineffective squads, plus the orders given, completed and failed.
+- **The After-Action Review:** the battle replayed from tick 0 and
+  verified ([05](05-after-action-review.md)).
 
 ## 3. The session
 
@@ -80,7 +79,7 @@ BLUEFOR Planning fights a new one.
 terrain and commands give the same battle tick for tick (tested: a battle
 with a mid-battle order, replayed from its recording, gives every
 per-second hash again). The After-Action Review replays the battle this way
-from tick 0 (Milestone D).
+from tick 0 ([05](05-after-action-review.md)).
 
 The clock moves by real time × speed while playing, never by more than
 0.25 s of real time per frame (a hidden tab is not caught up). The battle
@@ -111,4 +110,4 @@ answers as before, so every run is unchanged:
 
 Result: **0.5 ms per tick** (from 10), and 32× real time keeps up with
 about a fifth of the page idle. The 3D view draws at 60 fps while the battle
-runs at 8×. Benchmarks at 2, 6 and 12 squads are part of Milestone D.
+runs at 8×. Benchmarks at 2, 6 and 12 squads, and the further optimizations of Milestone D, are in [05](05-after-action-review.md#5-benchmarks).
