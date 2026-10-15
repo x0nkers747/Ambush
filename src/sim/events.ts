@@ -1,4 +1,5 @@
 import type { TaskOutcome, TaskPhase } from './behavior/types';
+import type { ForcePhase, FofOutcome, ObservationLevel, SuppressionLevel } from './fof/types';
 import type { SimCommand } from './commands';
 import type { Vec2 } from './geometry';
 import type {
@@ -196,6 +197,83 @@ export interface MemberReleasedEvent {
   readonly reason: 'reordered' | 'individualOrders' | 'incapacitated' | 'cancelled';
 }
 
+// Force-on-force (docs/behavior-lab/force-on-force). Decisions are taken at
+// `atSeconds` on the decision grid, never between.
+
+/** A force's picture of one enemy soldier changed level. */
+export interface ContactObservedEvent {
+  readonly type: 'contactObserved';
+  readonly tick: number;
+  readonly atSeconds: number;
+  /** The observing force (its root unit) and side. */
+  readonly unitId: string;
+  readonly side: Side;
+  readonly targetId: SoldierId;
+  readonly from: ObservationLevel;
+  readonly to: ObservationLevel;
+  /** Who saw him (`null`: the cue was his fire), and from how far (m). */
+  readonly observerId: SoldierId | null;
+  readonly rangeM: number | null;
+  readonly confidence: number;
+}
+
+/** A force changed state (`reason` says why, in words). */
+export interface ForcePhaseChangedEvent {
+  readonly type: 'forcePhaseChanged';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly unitId: string;
+  readonly side: Side;
+  readonly from: ForcePhase;
+  readonly to: ForcePhase;
+  readonly reason: string;
+}
+
+/**
+ * One burst (a fire event, not a bullet): aimed at a soldier the shooter
+ * sees, or area fire at where his force last saw one. `hitId` is who was
+ * hit (the target, or a soldier near the aim point of area fire).
+ */
+export interface FofFireEvent {
+  readonly type: 'fofFire';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly shooterId: SoldierId;
+  readonly unitId: string;
+  readonly side: Side;
+  readonly kind: 'aimed' | 'area';
+  /** The soldier aimed at (area fire: the contact whose last known position is the aim point). */
+  readonly targetId: SoldierId;
+  readonly aimPoint: Vec2;
+  readonly weapon: string;
+  readonly rounds: number;
+  readonly rangeM: number;
+  /** The probability the burst was resolved with (for area fire, against `hitId` or the nearest soldier). */
+  readonly hitProbability: number;
+  readonly hit: boolean;
+  readonly hitId: SoldierId | null;
+  readonly incapacitated: boolean;
+}
+
+/** A soldier's suppression crossed a threshold. */
+export interface SuppressionChangedEvent {
+  readonly type: 'suppressionChanged';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly soldierId: SoldierId;
+  readonly from: SuppressionLevel;
+  readonly to: SuppressionLevel;
+  readonly suppression: number;
+}
+
+/** The experiment ended: its outcome and why. */
+export interface FofEndedEvent {
+  readonly type: 'fofEnded';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly outcome: FofOutcome;
+}
+
 export type SimEvent =
   | OrdersChangedEvent
   | CommandRejectedEvent
@@ -212,4 +290,9 @@ export type SimEvent =
   | UnitOrderedEvent
   | UnitPhaseChangedEvent
   | UnitTaskEndedEvent
-  | MemberReleasedEvent;
+  | MemberReleasedEvent
+  | ContactObservedEvent
+  | ForcePhaseChangedEvent
+  | FofFireEvent
+  | SuppressionChangedEvent
+  | FofEndedEvent;

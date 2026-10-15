@@ -1,5 +1,6 @@
 import type { BehaviorParams } from './behavior/params';
 import type { CombatConfig } from './combat-config';
+import type { FofSetup } from './fof/types';
 import type { TerrainDataset } from './terrain';
 
 /** Movement model parameters, in SI units (docs/adr/0008). */
@@ -21,6 +22,8 @@ export interface SimWorld {
   readonly combat?: CombatSetup;
   /** Unit-movement tuning (docs/behavior-lab/03); absent: `DEFAULT_BEHAVIOR_PARAMS`. */
   readonly behavior?: BehaviorParams;
+  /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
+  readonly fof?: FofSetup;
 }
 
 /**

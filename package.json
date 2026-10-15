@@ -13,6 +13,7 @@
     "#sim/behavior-fixtures": "./src/sim/behavior/test-fixtures.ts",
     "#exercise": "./src/exercise/index.ts",
     "#exercise/behavior-lab": "./src/exercise/behavior-lab/index.ts",
+    "#exercise/force-on-force": "./src/exercise/force-on-force/index.ts",
     "#geo": "./src/geo/index.ts",
     "#geo/fixtures": "./src/geo/test-data/fixtures.ts",
     "#acquire": "./src/acquire/index.ts",

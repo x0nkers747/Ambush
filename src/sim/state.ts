@@ -1,6 +1,7 @@
 import type { Azimuth, Vec2, Vec3 } from './geometry';
 import type { RngState } from './rng';
 import type { BehaviorState } from './behavior/types';
+import type { FofState } from './fof/types';
 import type { PathPoint } from './bridge-navigation';
 
 // Mutable simulation state (docs/adr/0004). Plain data only: no classes,
@@ -244,6 +245,11 @@ export interface SimState {
    * until the first unit order, so states without one hash as before.
    */
   behavior?: BehaviorState;
+  /**
+   * A force-on-force experiment's state (docs/behavior-lab/force-on-force).
+   * Absent unless the world has a force-on-force setup.
+   */
+  fof?: FofState;
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

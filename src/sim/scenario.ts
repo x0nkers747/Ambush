@@ -17,6 +17,8 @@ import {
 } from './state';
 import { isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
 import { validateBehaviorParams, type BehaviorParams } from './behavior/params';
+import { validateFofSetup } from './fof/setup';
+import type { FofSetup } from './fof/types';
 import {
   validateMovementParams,
   type CombatSetup,
@@ -56,6 +58,8 @@ export interface Scenario {
   readonly combat?: CombatSetup;
   /** Unit-movement tuning (docs/behavior-lab/03); absent: the defaults. */
   readonly behavior?: BehaviorParams;
+  /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
+  readonly fof?: FofSetup;
 }
 
 /** Builds the tick-0 simulation state. Throws an Error describing the first invalid entry. */
@@ -136,6 +140,14 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     }
   }
 
+  if (scenario.fof) {
+    try {
+      validateFofSetup(scenario.fof, scenario.units, scenario.soldiers);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   for (const unit of scenario.units) {
     if (unit.leaderId === null) continue;
     const leader =
@@ -191,5 +203,6 @@ export function createWorld(scenario: Scenario): SimWorld {
     ...world,
     ...(scenario.combat ? { combat: deepFreeze(clonePlainData(scenario.combat)) } : {}),
     ...(scenario.behavior ? { behavior: deepFreeze(clonePlainData(scenario.behavior)) } : {}),
+    ...(scenario.fof ? { fof: deepFreeze(clonePlainData(scenario.fof)) } : {}),
   });
 }

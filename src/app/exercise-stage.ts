@@ -162,6 +162,13 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
       case 'memberReleased':
         // Unit orders (docs/behavior-lab) are not given in the exercise.
         return undefined;
+      case 'contactObserved':
+      case 'forcePhaseChanged':
+      case 'fofFire':
+      case 'suppressionChanged':
+      case 'fofEnded':
+        // Force-on-force runs only in its lab (docs/behavior-lab/force-on-force).
+        return undefined;
     }
   };
 

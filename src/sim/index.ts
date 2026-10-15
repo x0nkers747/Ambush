@@ -1,5 +1,6 @@
 // Public API of the simulation layer. Other layers import only from here (`#sim`).
 export * from './behavior/index';
+export * from './fof/index';
 export type {
   BeginEngagementCommand,
   SetEngagementAreaCommand,
@@ -44,6 +45,11 @@ export type {
   EngagementEndedEvent,
   EngagementStartedEvent,
   MemberReleasedEvent,
+  ContactObservedEvent,
+  ForcePhaseChangedEvent,
+  FofFireEvent,
+  SuppressionChangedEvent,
+  FofEndedEvent,
   OpforReactedEvent,
   OrdersChangedEvent,
   ShotFiredEvent,

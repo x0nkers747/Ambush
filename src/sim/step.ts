@@ -3,6 +3,7 @@ import { resolveCombat } from './combat';
 import { applyCommands, type SimCommand } from './commands';
 import { monitorEngagementAreas } from './engagement-areas';
 import type { SimEvent } from './events';
+import { updateForceOnForce } from './fof/system';
 import { moveSoldiers } from './movement';
 import type { SimState } from './state';
 import type { SimWorld } from './world';
@@ -41,6 +42,8 @@ export function stepState(
   const path = moveSoldiers(state, world, time, events);
   monitorEngagementAreas(state, steered.length > 0 ? [...steered, ...path] : path, time, events);
   resolveCombat(state, world, time, events);
+  // Force-on-force experiments (docs/behavior-lab/force-on-force): only with a setup in the world.
+  updateForceOnForce(state, world, time, events);
 
   // 3. Advance the clock.
   state.tick += 1;
