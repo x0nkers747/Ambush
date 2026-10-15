@@ -2,6 +2,7 @@ import {
   buildPreviewScenario,
   createExercise,
   defaultScenarioDefinition,
+  emptyMotionSample,
   type Exercise,
 } from '#exercise';
 import {
@@ -29,6 +30,7 @@ import { createSession, type Session } from '#session';
 import {
   DEFAULT_TICK_RATE_HZ,
   ORDER_KINDS,
+  soldierId,
   type OrderKind,
   type Side,
   type TerrainDataset,
@@ -47,6 +49,8 @@ import {
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
 import { COMBAT_SPEEDS, createCombat, type Combat, type CombatSpeed } from './combat';
 import { createCombatMapEditor, type BattleDisplay, type CombatUi } from './combat-editor';
+import { createLocalDriver, type DriverFactory } from './driver';
+import { createWorkerChannel, createWorkerDriver, type BattleChannel } from './worker-combat';
 import { createReview, type Review, type ReviewSpeed } from './review';
 import {
   momentsHtml,
@@ -216,6 +220,24 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Combat (docs/constructive-simulation/04) ------------------------------
 
+  /**
+   * The battle worker (docs/constructive-simulation/04), started with the
+   * first battle and kept until the page is left: Combat and the review
+   * simulate there, so the page keeps drawing whatever a battle costs.
+   * Where workers are not available, battles are simulated on the page.
+   */
+  let channel: BattleChannel | null = null;
+  let driverFactory: DriverFactory | null = null;
+  const battleDriver = (): DriverFactory => {
+    if (!driverFactory) {
+      if (typeof Worker === 'undefined') driverFactory = createLocalDriver(o.terrain);
+      else {
+        channel = createWorkerChannel();
+        driverFactory = createWorkerDriver(channel, o.terrain);
+      }
+    }
+    return driverFactory;
+  };
   /** The battle being fought (Combat), or fought (until the review replaces it). */
   let combat: Combat | null = null;
   /** The After-Action Review of the battle fought: its replay from tick 0. */
@@ -336,13 +358,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   /** The battle's soldiers where they start, for the 3D view (selected squad highlighted). */
   let combatWeapons: { battle: object; weapons: Record<string, string | null> } | null = null;
+  const figureSample = emptyMotionSample();
   /** The battle the 3D view shows: live (Combat) or at the playhead (the review). */
   const shownBattle = () => {
     const c = inCombat();
     if (c)
       return {
         battle: c.session.battle,
-        state: c.session.battle.sim.state,
         log: c.session.motion,
         combatLog: c.session.combatLog,
         seconds: c.renderSeconds,
@@ -352,7 +374,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (r)
       return {
         battle: r.replay.battle,
-        state: r.view.sim.state,
         log: r.replay.motion,
         combatLog: r.replay.combatLog,
         seconds: r.seconds,
@@ -369,15 +390,22 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         combatWeapons = { battle: c.battle, weapons };
       }
       const selected = combatUi.selected;
-      const units: UnitMarker[] = c.state.soldiers.map((s) => ({
-        id: s.id,
-        affiliation: s.side === 'BLUEFOR' ? 'friendly' : 'enemy',
-        position: s.position,
-        azimuth: s.azimuth,
-        posture: s.posture,
-        status: s.status,
-        selected: selected !== null && s.id.startsWith(`${selected}-`),
-      }));
+      // Where each soldier is at the time drawn (the motion log: the battle may run on elsewhere).
+      const tick = Math.floor(c.seconds * c.log.tickRateHz);
+      const units: UnitMarker[] = c.battle.squads.flatMap((squad) =>
+        squad.soldierIds.map((id) => {
+          c.log.read(c.log.indexOf(id), tick, figureSample);
+          return {
+            id: soldierId(id),
+            affiliation: squad.side === 'BLUEFOR' ? ('friendly' as const) : ('enemy' as const),
+            position: { x: figureSample.x, y: figureSample.y, z: figureSample.z },
+            azimuth: figureSample.azimuth,
+            posture: figureSample.posture,
+            status: figureSample.status,
+            selected: squad.spec.id === selected,
+          };
+        }),
+      );
       return {
         units,
         clock: { log: c.log, combatLog: c.combatLog, seconds: c.seconds, ended: c.ended },
@@ -522,12 +550,20 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const enter = (target: BattleStage) => {
     if (target === 'combat' && (!combat || combat.ended)) {
       // A new battle from the scenario as planned.
-      combat = createCombat({ terrain: o.terrain, definition: planner.definition, notify });
+      combat?.dispose();
+      combat = createCombat({
+        terrain: o.terrain,
+        definition: planner.definition,
+        notify,
+        driver: battleDriver(),
+      });
       combatUi.selected = null;
       combatUi.tool = null;
       lastFrameMs = null;
     }
     if (target === 'scenario' || target === 'bluefor') {
+      combat?.dispose();
+      review?.dispose();
       combat = null;
       review = null;
     }
@@ -547,10 +583,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       action: 'End combat',
       onConfirm: () => {
         c.end();
-        // The review replays the battle from its recording, from tick 0.
-        review = createReview({ terrain: o.terrain, recording: c.session.recording() });
         combatUi.tool = null;
-        enter('aar');
+        notify('Ending the battle…');
+        void c.recording().then((recording) => {
+          if (combat !== c || stopped) return;
+          c.dispose();
+          // The review replays the battle from its recording, from tick 0.
+          review = createReview({ terrain: o.terrain, recording, driver: battleDriver() });
+          notify('');
+          enter('aar');
+        });
       },
     });
     if (wasPlaying) notify('Paused. End the battle, or Cancel to go on.');
@@ -1388,6 +1430,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     map.canvas.style.visibility = '';
     cancelAnimationFrame(frameId);
     window.removeEventListener('keydown', onKeyDown);
+    combat?.dispose();
+    review?.dispose();
+    channel?.close();
+    channel = null;
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('blur', onBlur);
     document.removeEventListener('visibilitychange', onVisibility);

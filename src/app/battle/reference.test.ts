@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { labTerrain } from '#exercise/behavior-lab';
 import {
   newBattleScenario,
@@ -111,7 +111,10 @@ describe('the reference battle, 3 v 3', { timeout: 60_000 }, () => {
   combat.hold('O3');
   until(900);
   combat.end();
-  const recording = combat.session.recording();
+  let recording: BattleRecording;
+  beforeAll(async () => {
+    recording = await combat.recording();
+  });
   const summary = combat.summary();
 
   it('is fought: squads meet, fire is exchanged, soldiers fall, orders run their course', () => {
@@ -132,7 +135,7 @@ describe('the reference battle, 3 v 3', { timeout: 60_000 }, () => {
 
   it('never ends by itself', () => {
     expect(recording.endTick).toBe(900 * 30);
-    expect(combat.session.battle.sim.state.fof?.outcome ?? null).toBeNull();
+    expect(combat.session.events.some((e) => e.event.type === 'fofEnded')).toBe(false);
   });
 
   it('is replayed from tick 0 and every second verified, from the recording as exported', () => {

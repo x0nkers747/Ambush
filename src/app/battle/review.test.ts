@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { labTerrain } from '#exercise/behavior-lab';
 import {
   addOrder,
@@ -9,7 +9,8 @@ import {
 } from '#exercise/battle';
 import { hashSimState } from '#sim';
 import { createCombat, type Combat } from './combat';
-import { createReview } from './review';
+import { createReview, type Review } from './review';
+import type { BattleRecording } from './session';
 
 // The After-Action Review (docs/constructive-simulation/05): the battle
 // replayed from tick 0 by re-simulation from its recording, each second's
@@ -58,7 +59,10 @@ function fought(seconds: number): Combat {
 
 describe('the replay', { timeout: 60_000 }, () => {
   const battle = fought(240);
-  const recording = battle.session.recording();
+  let recording: BattleRecording;
+  beforeAll(async () => {
+    recording = await battle.recording();
+  });
 
   it('re-simulates the whole battle from tick 0, and every second matches the recording', () => {
     const review = createReview({ terrain, recording, budgetMs: Infinity });
@@ -70,9 +74,7 @@ describe('the replay', { timeout: 60_000 }, () => {
     });
     expect(review.endSeconds).toBe(battle.session.seconds);
     expect(review.replay.tick).toBe(recording.endTick);
-    expect(hashSimState(review.replay.battle.sim.state)).toBe(
-      hashSimState(battle.session.battle.sim.state),
-    );
+    expect(review.replay.hashes.at(-1)).toBe(battle.session.hashes.at(-1));
     expect(review.summary()).toEqual(battle.summary());
   });
 
@@ -100,8 +102,12 @@ describe('the replay', { timeout: 60_000 }, () => {
 
 describe('the playhead', { timeout: 60_000 }, () => {
   const battle = fought(180);
-  const recording = battle.session.recording();
-  const review = createReview({ terrain, recording, budgetMs: Infinity });
+  let recording: BattleRecording;
+  let review: Review;
+  beforeAll(async () => {
+    recording = await battle.recording();
+    review = createReview({ terrain, recording, budgetMs: Infinity });
+  });
 
   it('shows the battle as it was at any second, forward or back', () => {
     for (const s of [150, 30, 31, 90, 0, 179, 45]) {
@@ -134,11 +140,11 @@ describe('the playhead', { timeout: 60_000 }, () => {
 });
 
 describe('the timeline', { timeout: 60_000 }, () => {
-  it('marks the user’s orders, contact and casualties, in time order', () => {
+  it('marks the user’s orders, contact and casualties, in time order', async () => {
     const battle = fought(600);
     const review = createReview({
       terrain,
-      recording: battle.session.recording(),
+      recording: await battle.recording(),
       budgetMs: Infinity,
     });
     const markers = review.markers();

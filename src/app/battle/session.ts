@@ -1,4 +1,9 @@
-import { createMotionRecorder, type CombatEvent, type MotionRecorder } from '#exercise';
+import {
+  createMotionRecorder,
+  type CombatEvent,
+  type MotionLog,
+  type MotionRecorder,
+} from '#exercise';
 import {
   createBattle,
   type Battle,
@@ -75,15 +80,27 @@ export function combatEventOf(event: SimEvent): CombatEvent | null {
   };
 }
 
-export interface BattleSession {
-  readonly battle: Battle;
+/**
+ * What the pages read of a battle being simulated: here (`BattleSession`)
+ * or in the battle worker (`worker-combat.ts`, its mirror of the worker's).
+ */
+export interface BattleRun {
+  /** The battle's squads, and every command given (with `origins`). */
+  readonly battle: Pick<Battle, 'squads' | 'commands' | 'origins'>;
   readonly tick: number;
   readonly seconds: number;
-  readonly motion: MotionRecorder;
+  readonly motion: MotionLog;
   readonly combatLog: readonly CombatEvent[];
   readonly events: readonly TimedEvent[];
   readonly keyframes: ReadonlyMap<number, SimSnapshot>;
   readonly hashes: readonly (string | null)[];
+  /** Simulation CPU per tick (ms), over the last ticks. */
+  cpu(): { readonly mean: number; readonly p95: number };
+}
+
+export interface BattleSession extends BattleRun {
+  readonly battle: Battle;
+  readonly motion: MotionRecorder;
   /** One tick; its events. */
   step(): readonly SimEvent[];
   /** Steps toward `tick`, for at most `budgetMs` (at least one tick). The events of the ticks stepped. */
@@ -91,8 +108,6 @@ export interface BattleSession {
   /** A command for the next tick (given now: its tick is the current one). */
   submit(command: SimCommand, origin?: BattleCommandOrigin): void;
   recording(): BattleRecording;
-  /** Simulation CPU per tick (ms), over the last ticks. */
-  cpu(): { readonly mean: number; readonly p95: number };
 }
 
 export function createBattleSession(

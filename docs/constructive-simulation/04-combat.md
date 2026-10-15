@@ -111,3 +111,47 @@ answers as before, so every run is unchanged:
 Result: **0.5 ms per tick** (from 10), and 32× real time keeps up with
 about a fifth of the page idle. The 3D view draws at 60 fps while the battle
 runs at 8×. Benchmarks at 2, 6 and 12 squads, and the further optimizations of Milestone D, are in [05](05-after-action-review.md#5-benchmarks).
+
+## 5. The battle worker
+
+Battles are simulated in a background worker (`battle.worker.ts`,
+`battle-host.ts`), so the page draws at full frame rate whatever a battle
+costs.
+
+**The two sides.** Combat and the review read a battle through a driver
+(`driver.ts`): the battle simulated here (`createLocalDriver`, used by the
+tests and where workers are not available), or in the worker
+(`createWorkerDriver`, `worker-combat.ts`).
+
+**Sending.** The page sends the worker the battlefield's terrain once, when
+the first battle starts; it is plain data, cloned. The worker steps the
+battle toward the tick of the page's clock, in slices of 16 ms. After each
+slice it posts:
+
+- the soldiers' frames: per tick and soldier, position, facing, posture and
+  status;
+- the events;
+- the per-second state hashes;
+- the keyframes;
+- the squads' states;
+- the commands it has applied, with their ticks.
+
+**The page's side.** The page keeps a mirror of the battle: the frames as a
+motion log (`frame-log.ts`), and the events, hashes, keyframes and squads
+as last posted. It draws whatever has arrived and never waits. Orders show
+queued until the worker says it has applied them.
+
+**Exactness.** The worker's battle is the page's, tick for tick. A test
+fights the same battle both ways, with orders given live (some while
+paused). The commands, ticks, per-second hashes, events, squads and every
+soldier's motion are equal.
+
+**The review.** Its replay runs in the worker too. Its seeking restores the
+worker's keyframes in a battle on the page, which is possible because the
+world is the same in both (same terrain, same fingerprint).
+
+**On Quantico, with 12 squads:** 60 fps in 2D and 3D at every speed. The
+battle runs as fast as one core can simulate it, about 10–13× real time
+(2.9 ms per tick, most of it detection's sight lines). The panel gives the
+speed achieved when it is less than the speed asked. A 400-second battle is
+replayed and verified in the worker in about 50 s.

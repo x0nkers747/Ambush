@@ -6,14 +6,9 @@ import {
 } from '#exercise/battle';
 import type { ForcePhase, OrderKind, OrderSpec, SimEvent, TerrainDataset, Vec2 } from '#sim';
 import { BATTLE_TICK_RATE_HZ } from './planner';
-import {
-  squadStatus,
-  summarize,
-  type BattleSummary,
-  type QueuedOrder,
-  type SquadStatus,
-} from './status';
-import { createBattleSession, type BattleSession } from './session';
+import { createLocalDriver, type DriverFactory } from './driver';
+import type { BattleRecording, BattleRun } from './session';
+import { summarize, type BattleSummary, type QueuedOrder, type SquadStatus } from './status';
 
 // The Combat stage (docs/constructive-simulation/04), without the page: the
 // battle the scenario makes, its clock (play, pause, speed), live orders to
@@ -33,7 +28,8 @@ export type { QueuedOrder, SquadStatus } from './status';
 export type CombatSummary = BattleSummary;
 
 export interface Combat {
-  readonly session: BattleSession;
+  /** The battle as known on the page (stepped here, or in the worker). */
+  readonly session: BattleRun;
   readonly playing: boolean;
   readonly speed: CombatSpeed;
   readonly ended: boolean;
@@ -47,7 +43,7 @@ export interface Combat {
    * speed, while playing, and steps the battle toward it. Returns the
    * events of the ticks stepped.
    */
-  frame(dtSeconds: number, budgetMs?: number): SimEvent[];
+  frame(dtSeconds: number, budgetMs?: number): readonly SimEvent[];
   /**
    * The speed the battle has actually kept up lately (simulated seconds per
    * real second, smoothed): below the speed chosen when it is slower to
@@ -63,6 +59,10 @@ export interface Combat {
   /** Ends the battle (for good): the clock stops. */
   end(): void;
   summary(): CombatSummary;
+  /** The battle's recording (once ended: the whole battle). */
+  recording(): Promise<BattleRecording>;
+  /** Stops the battle's simulation (its worker's battle). */
+  dispose(): void;
 }
 
 export interface CombatOptions {
@@ -71,6 +71,8 @@ export interface CombatOptions {
   readonly notify: (message: string) => void;
   /** How long a frame may step the battle (ms; default `ADVANCE_BUDGET_MS`). */
   readonly stepBudgetMs?: number;
+  /** Where the battle is simulated (default: here). */
+  readonly driver?: DriverFactory;
 }
 
 /** Lead the drawn time keeps behind the clock while the battle catches up (s of simulation). */
@@ -78,7 +80,8 @@ const MAX_LAG_SECONDS = 2;
 
 export function createCombat(o: CombatOptions): Combat {
   const spec = battleSpecOf(o.definition, BATTLE_TICK_RATE_HZ);
-  const session = createBattleSession(spec, o.terrain);
+  const driver = (o.driver ?? createLocalDriver(o.terrain))(spec);
+  const session = driver.run;
   const battle = session.battle;
   const rate = spec.tickRateHz;
   let playing = false;
@@ -86,11 +89,28 @@ export function createCombat(o: CombatOptions): Combat {
   let ended = false;
   /** The clock: where play has got to (simulation seconds). */
   let clock = 0;
-  let queued: QueuedOrder[] = [];
+  /** Orders given and not yet applied, with when each was given for (once known). */
+  let queued: (QueuedOrder & { readonly given: () => number | null })[] = [];
   let achieved = 1;
 
   const byId = new Map(battle.squads.map((s) => [s.spec.id, s]));
-  const statusOf = (id: string) => squadStatus(battle, battle.sim.state, id, queued);
+  const statusOf = (id: string): SquadStatus | undefined => {
+    const status = driver.squads().find((q) => q.id === id);
+    return status ? { ...status, queued: queued.filter((q) => q.squadId === id) } : undefined;
+  };
+  /** Gives a command now; it shows queued until its tick has been stepped. */
+  const give = (squadId: string, mode: 'replace' | 'append', orders: OrderSpec[]) => {
+    const squad = byId.get(squadId);
+    if (!squad) return;
+    const given = driver.submit({
+      type: 'orderSquad',
+      tick: session.tick,
+      unitId: squad.unitId,
+      mode,
+      orders,
+    });
+    queued.push({ squadId, mode, orders, tick: session.tick, given });
+  };
 
   const combat: Combat = {
     session,
@@ -127,12 +147,16 @@ export function createCombat(o: CombatOptions): Combat {
         clock = Math.min(clock, session.seconds + MAX_LAG_SECONDS);
       } else clock = Math.min(clock, session.seconds);
       const target = Math.ceil(clock * rate);
-      const events = session.advance(target, budgetMs ?? o.stepBudgetMs);
+      const events = driver.advance(target, budgetMs ?? o.stepBudgetMs);
       if (playing && dtSeconds > 0) {
         const rateNow = (session.seconds - before) / Math.min(dtSeconds, 0.25);
         achieved += (rateNow - achieved) * Math.min(1, dtSeconds / 1.5);
       } else if (!playing) achieved = speed;
-      if (queued.length > 0) queued = queued.filter((q) => q.tick >= session.tick);
+      if (queued.length > 0)
+        queued = queued.filter((q) => {
+          const tick = q.given();
+          return tick === null || tick >= session.tick;
+        });
       for (const event of events) {
         if (event.type === 'commandRejected') {
           const reason =
@@ -156,28 +180,13 @@ export function createCombat(o: CombatOptions): Combat {
         return false;
       }
       if (placed.note !== undefined) o.notify(placed.note);
-      const orders: OrderSpec[] = [{ kind, destination: placed.point }];
-      session.submit({
-        type: 'orderSquad',
-        tick: session.tick,
-        unitId: squad.unitId,
-        mode,
-        orders,
-      });
-      queued.push({ squadId, mode, orders, tick: session.tick });
+      give(squadId, mode, [{ kind, destination: placed.point }]);
       return true;
     },
     hold(squadId) {
       const squad = byId.get(squadId);
       if (ended || !squad) return;
-      session.submit({
-        type: 'orderSquad',
-        tick: session.tick,
-        unitId: squad.unitId,
-        mode: 'replace',
-        orders: [],
-      });
-      queued.push({ squadId, mode: 'replace', orders: [], tick: session.tick });
+      give(squadId, 'replace', []);
       o.notify(`${squad.name} will hold where it is.`);
     },
     squads: () => battle.squads.flatMap((s) => statusOf(s.spec.id) ?? []),
@@ -188,6 +197,10 @@ export function createCombat(o: CombatOptions): Combat {
       clock = session.seconds;
     },
     summary: () => summarize(combat.squads(), session.seconds),
+    recording: () => driver.recording(),
+    dispose: () => {
+      driver.dispose();
+    },
   };
   return combat;
 }

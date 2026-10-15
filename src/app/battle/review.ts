@@ -1,6 +1,7 @@
 import { createBattle, type Battle } from '#exercise/battle';
 import type { Side, TerrainDataset } from '#sim';
-import { createBattleSession, type BattleRecording, type BattleSession } from './session';
+import { createLocalDriver, type DriverFactory } from './driver';
+import type { BattleRecording, BattleRun } from './session';
 import {
   squadStatus,
   squadStatuses,
@@ -60,8 +61,8 @@ export interface PhaseChange {
 
 export interface Review {
   readonly recording: BattleRecording;
-  /** The re-simulation from tick 0. */
-  readonly replay: BattleSession;
+  /** The re-simulation from tick 0 (here, or in the worker). */
+  readonly replay: BattleRun;
   readonly endSeconds: number;
   /** How far the replay has got. */
   readonly replayedSeconds: number;
@@ -87,6 +88,8 @@ export interface Review {
   phases(squadId: string): readonly PhaseChange[];
   /** The battle's results at its end (once replayed), else at the playhead. */
   summary(): BattleSummary;
+  /** Stops the replay (its worker's battle). */
+  dispose(): void;
 }
 
 export interface ReviewOptions {
@@ -94,6 +97,8 @@ export interface ReviewOptions {
   readonly recording: BattleRecording;
   /** How long a frame may re-simulate (ms; default `REVIEW_BUDGET_MS`). */
   readonly budgetMs?: number;
+  /** Where the replay is simulated (default: here). */
+  readonly driver?: DriverFactory;
 }
 
 export function createReview(o: ReviewOptions): Review {
@@ -102,7 +107,8 @@ export function createReview(o: ReviewOptions): Review {
   const spec = recording.spec;
   const rate = spec.tickRateHz;
   const replayCommands = { commands: recording.commands, origins: recording.origins };
-  const replay = createBattleSession(spec, terrain, replayCommands);
+  const driver = (o.driver ?? createLocalDriver(terrain))(spec, replayCommands);
+  const replay = driver.run;
   const view = createBattle(spec, terrain, replayCommands);
   const squadOfUnit = new Map(replay.battle.squads.map((s) => [s.unitId, s]));
   const squadOfSoldier = new Map(
@@ -183,8 +189,10 @@ export function createReview(o: ReviewOptions): Review {
     for (let second = checkedTo + 1; second <= upTo; second += 1) {
       const expected = recording.hashes[second];
       const got = replay.hashes[second];
+      // Not here yet (the worker's next batch has it): checked then.
+      if (got === undefined) break;
       checkedTo = second;
-      if (typeof expected !== 'string' || got === undefined) continue;
+      if (typeof expected !== 'string') continue;
       checked += 1;
       if (got !== expected) {
         mismatches += 1;
@@ -210,13 +218,17 @@ export function createReview(o: ReviewOptions): Review {
   };
 
   const advanceReplay = (budgetMs = budget) => {
-    if (replay.tick < recording.endTick) {
-      replay.advance(recording.endTick, budgetMs);
-      verify();
-      markEvents();
+    if (replay.tick < recording.endTick) driver.advance(recording.endTick, budgetMs);
+    // What has come in since (stepped here, or posted by the worker).
+    verify();
+    markEvents();
+    if (replay.tick >= recording.endTick && !summaryAtEnd) {
+      // The end, as the view has it (brought there from the replay's keyframes).
+      const at = playhead;
+      positionView(recording.endTick);
+      summaryAtEnd = summarize(squadStatuses(view, view.sim.state), endSeconds);
+      positionView(Math.floor(at * rate));
     }
-    if (replay.tick >= recording.endTick && !summaryAtEnd)
-      summaryAtEnd = summarize(squadStatuses(replay.battle, replay.battle.sim.state), endSeconds);
   };
   advanceReplay();
 
@@ -283,6 +295,9 @@ export function createReview(o: ReviewOptions): Review {
       return out;
     },
     summary: () => summaryAtEnd ?? summarize(review.squads(), playhead),
+    dispose: () => {
+      driver.dispose();
+    },
   };
   return review;
 }

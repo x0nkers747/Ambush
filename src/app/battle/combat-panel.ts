@@ -56,8 +56,10 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
 
 export function combatHint(c: Combat, ui: CombatUi): string {
   if (c.ended) return 'The battle has ended.';
+  // The worker first prepares the battlefield (its navigation, sight lines): a moment.
+  if (c.playing && c.session.tick === 0) return 'Starting the battle…';
   const lagging =
-    c.playing && c.achievedSpeed < 0.8 * c.speed
+    c.playing && c.achievedSpeed >= 0.5 && c.achievedSpeed < 0.8 * c.speed
       ? `Running at ${c.achievedSpeed.toFixed(0)}×: the battle is slower to simulate than ${String(c.speed)}× here. `
       : '';
   return lagging + hintFor(c, ui);

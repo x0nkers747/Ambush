@@ -242,9 +242,8 @@ Validation:
 
 - **The legacy ambush exercise** was still reachable at the end of
   Milestone D. It has since been retired (see below).
-- **The simulation runs on the page's thread.** A worker, as the
-  Force-on-Force Lab has, would let 12 squads on real ground run faster than
-  about 10–20× without sharing frames with drawing.
+- **The simulation ran on the page's thread.** It has since moved to a
+  background worker (see below).
 
 ## After Milestone D
 
@@ -272,3 +271,25 @@ The five-stage battle workflow replaces the ambush exercise.
   exercise (`terrainOnlyExercise`), and the terrain preview builds one too.
   Removing it means giving both renderers another source for the terrain
   and their soldiers.
+
+### The battle in a worker
+
+Combat and the review's replay are simulated in a background worker
+([04 §5](04-combat.md#5-the-battle-worker)).
+
+- **How:**
+  - The page reads a battle through a driver: here, or the worker's mirror.
+  - The worker posts compact per-tick frames, the events, the hashes, the
+    keyframes, the squads, and the commands it has applied.
+- **Tested:**
+  - a battle fought through the worker (host and driver wired through a
+    cloning queue) equals the battle fought on the page: commands, ticks,
+    per-second hashes, events, squads and every soldier's motion;
+  - orders show queued until applied;
+  - the review replays and verifies through it, and seeks with its
+    keyframes.
+- **In the browser, on Quantico with 12 squads:**
+  - 60 fps in 2D and 3D at every speed (before: 27–58);
+  - the battle runs at the one-core limit, about 10–13×;
+  - a 405-second battle replayed and verified in the worker, with no
+    mismatch.

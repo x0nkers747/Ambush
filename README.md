@@ -137,7 +137,8 @@ Next says what is missing, and the side panel says the same next to the stage's 
    orders and phases at that moment. **Export recording** saves a file that reproduces the
    battle exactly. **Back to BLUEFOR Planning** fights it again.
 
-A battle runs on the page: see the Combat document for its speed on large battles.
+Battles are simulated in a background worker, so the map keeps drawing at full frame rate
+whatever a battle costs.
 Reloading the page returns to Setup or Planning (a battle is not stored).
 
 **Battlefield Information**, collapsed at the bottom of the side panel, lists each battlefield's
