@@ -18,7 +18,6 @@ import {
   surfaceHeightAt,
   type ActionsOn,
   type FofConfig,
-  type FofForce,
   type Side,
   type SimEvent,
   type VisibilityClass,
@@ -673,7 +672,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
       }
     }
     forcesEl.innerHTML = fof.forces
-      .map((force: FofForce, i) => {
+      .map((force, i) => {
         const members = fof.soldiers.filter((m) => m.force === i);
         const up = members.filter(
           (m) => state.soldiers.find((s) => s.id === m.soldierId)?.status === 'active',

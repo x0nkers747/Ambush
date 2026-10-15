@@ -10,6 +10,7 @@ import {
   withdraw,
   WITHDRAW_RETRY_S,
 } from './force';
+import { activeOrder, endOrder, failPlan } from './orders';
 import type { FofContext } from './system';
 import { forceActive, soldierOf } from './system';
 import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
@@ -23,6 +24,7 @@ import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
 export function updateLifecycle(context: FofContext): void {
   const { t, setup } = context;
   const behavior = setup.config.force;
+  const manual = setup.termination === 'manual';
   context.fof.forces.forEach((force) => {
     if (!forceActive(force)) return;
     const active = force.memberIds.some(
@@ -48,6 +50,17 @@ export function updateLifecycle(context: FofContext): void {
       const quiet =
         force.lastFiredUponAt === null ||
         t - force.lastFiredUponAt >= behavior.withdrawnClearSeconds - 1e-9;
+      if (manual) {
+        // No experiment to end: an ordered withdrawal goes to its point (its
+        // order then ends); one of its own, spent, ends once clear, holding.
+        if (activeOrder(force)?.kind === 'withdraw') {
+          if (!task) enter(context, force, 'atObjective', 'reached the withdrawal point');
+        } else if (!task || (clear && quiet)) {
+          if (task) cancelTask(context, force);
+          enter(context, force, 'holding', task ? 'broke contact' : 'reached its withdrawal point');
+        }
+        return;
+      }
       // Withdrawn (it carries on to its withdrawal point: the outcome is decided).
       if (!task || (clear && quiet)) {
         enter(context, force, 'withdrawn', task ? 'broke contact' : 'reached its withdrawal point');
@@ -72,8 +85,13 @@ export function updateLifecycle(context: FofContext): void {
             : null;
     if (reason && (force.withdrawRetryAt === null || t >= force.withdrawRetryAt - 1e-9)) {
       // Nowhere to go now: it fights on where it is and tries again later.
-      const home = force.actionsOn === 'withdraw' ? force.start : null;
-      if (!withdraw(context, force, reason, home)) {
+      const home = force.actionsOn === 'withdraw' && !force.planned ? force.start : null;
+      const order = force.planned ? activeOrder(force) : null;
+      if (withdraw(context, force, reason, home)) {
+        // Spent, breaking contact on its own: its order has failed; the next waits until it recovers.
+        if (order) endOrder(context, force, order, 'failed', `broke contact: ${reason}`);
+        if (force.planned) force.holdUntilRecovered = true;
+      } else {
         force.withdrawRetryAt = t + WITHDRAW_RETRY_S;
         // An assault that cannot break off halts to fight where it is.
         if (force.phase === 'assaulting') {
@@ -103,6 +121,7 @@ function halt(context: FofContext, force: FofForce): void {
 /** The force is spent: it stops, stays down and no longer fires. */
 function ineffective(context: FofContext, force: FofForce, reason: string): void {
   halt(context, force);
+  if (force.planned) failPlan(context, force, `squad combat ineffective (${reason})`);
   for (const id of force.memberIds) {
     const member = context.fof.soldiers[context.memberIndex.get(id) ?? -1];
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
@@ -134,13 +153,15 @@ function ineffective(context: FofContext, force: FofForce, reason: string): void
 export function adjudicate(context: FofContext): void {
   const { fof, t, setup } = context;
   const term = setup.config.termination;
-  const [a, b] = fof.forces;
-  if (!a || !b) return;
   const problem = invariantProblem(context);
   if (problem) {
     end(context, 'invalid', 'invalid', problem);
     return;
   }
+  // Ended by the player, not by rule: only an invariant ends it.
+  if (setup.termination === 'manual') return;
+  const [a, b] = fof.forces;
+  if (!a || !b) return;
   const sideOf = (f: FofForce) => f.side;
   const victory = (winner: Side): FofOutcomeKind =>
     winner === 'BLUEFOR' ? 'blueforVictory' : 'opforVictory';

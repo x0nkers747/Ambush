@@ -23,6 +23,7 @@ import {
 } from './state';
 import type { Vec2 } from './geometry';
 import { isOnTerrain } from './terrain';
+import { applyOrderSquad, validateOrderSquad, type OrderSquadCommand } from './fof/orders';
 import type { SimWorld } from './world';
 
 // Commands are the only way to change simulation state from outside
@@ -65,7 +66,8 @@ export type SimCommand =
   | SetEngagementAreaCommand
   | BeginEngagementCommand
   | OrderUnitCommand
-  | DisturbAgentCommand;
+  | DisturbAgentCommand
+  | OrderSquadCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -107,6 +109,9 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
       return;
     case 'disturbAgent':
       validateDisturbance(command.disturbance);
+      return;
+    case 'orderSquad':
+      validateOrderSquad(command);
       return;
   }
 }
@@ -167,6 +172,9 @@ export function applyCommands(
         break;
       case 'disturbAgent':
         applyDisturbAgent(state, command, events);
+        break;
+      case 'orderSquad':
+        applyOrderSquad(state, world, command, startSeconds, events);
         break;
     }
   }

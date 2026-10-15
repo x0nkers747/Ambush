@@ -12,7 +12,15 @@ import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
 import { cyclesNeeded, deferLook, scheduleFor, travelled } from './look-schedule';
 import { sightBetween } from './sight-cache';
-import type { FofForce, FofSetup, FofSoldier, FofState, FofTrack, ObservationLevel } from './types';
+import type {
+  FofForce,
+  FofOrder,
+  FofSetup,
+  FofSoldier,
+  FofState,
+  FofTrack,
+  ObservationLevel,
+} from './types';
 
 // The force-on-force system (docs/behavior-lab/force-on-force/03): runs after
 // movement and combat in each tick, and takes its decisions on a fixed grid of
@@ -56,7 +64,7 @@ export function updateForceOnForce(
   const setup = world.fof;
   if (!setup) return;
   const hz = setup.config.decisionHz;
-  const fof = (state.fof ??= createFofState(state, setup));
+  const fof = fofStateOf(state, setup);
   if (fof.outcome) return;
   const tickRateHz = Math.round(1 / time.dtSeconds);
   const lookup = indices(state, fof);
@@ -84,6 +92,11 @@ function ended(fof: FofState): boolean {
   return fof.outcome !== null;
 }
 
+/** The force-on-force state of a simulation (made at its first use: a decision, or an order). */
+export function fofStateOf(state: SimState, setup: FofSetup): FofState {
+  return (state.fof ??= createFofState(state, setup));
+}
+
 function createFofState(state: SimState, setup: FofSetup): FofState {
   const members = setup.forces.map(
     (f) => new Set(forceMembers(f.unitId, state.units, state.soldiers)),
@@ -107,12 +120,34 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       const w = f.weapons[id];
       return sum + (w ? (fofWeapon(setup.config, w)?.basicLoadRounds ?? 0) : 0);
     }, 0);
+    // The initial plan: the scenario's orders, pending, in turn.
+    const orders: FofOrder[] = (f.plan ?? []).map((spec, k) => ({
+      id: `${f.unitId}#${String(k + 1)}`,
+      unitId: f.unitId,
+      sequence: k + 1,
+      kind: spec.kind,
+      destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
+      source: 'scenario',
+      issuedTick: 0,
+      issuedAt: 0,
+      activatedAt: null,
+      endedAt: null,
+      status: 'pending',
+      reason: null,
+    }));
     return {
       unitId: f.unitId,
       side: f.side,
+      name: f.name ?? f.unitId,
       phase: 'moving',
       phaseSince: 0,
       actionsOn: f.actionsOn ?? 'continue',
+      planned: f.plan !== undefined,
+      orders,
+      activeOrderId: null,
+      nextOrderSequence: orders.length + 1,
+      objectiveQuietSince: null,
+      holdUntilRecovered: false,
       start,
       assaultAt: null,
       objective: null,
@@ -188,7 +223,9 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
   const thresholds: number[] = [];
   for (const observer of soldiers) {
     for (const target of soldiers) {
-      thresholds.push(observer.force === target.force ? 1 : nextFloat(state.rng));
+      // Only enemies are detected: a friendly pair (same side) is never drawn.
+      const friendly = forces[observer.force]?.side === forces[target.force]?.side;
+      thresholds.push(friendly ? 1 : nextFloat(state.rng));
     }
   }
   return {
@@ -218,6 +255,11 @@ function indices(state: SimState, fof: FofState) {
     indexCache.set(state.soldiers, known);
   }
   return { soldierIndex: known.soldierIndex, memberIndex: known.memberIndex };
+}
+
+/** Whether two members are enemies: of forces of different sides. */
+export function hostile(fof: FofState, a: FofSoldier, b: FofSoldier): boolean {
+  return fof.forces[a.force]?.side !== fof.forces[b.force]?.side;
 }
 
 /** The soldier of a force member. */
@@ -425,12 +467,15 @@ function quietOf(member: FofSoldier | undefined): FofSoldier | null {
   return member?.lastFiredAt === null ? member : null;
 }
 
-/** Each force's enemies: the members of the other forces, in soldier order (fixed for a run). */
+/** Each force's enemies: the members of the other side's forces, in soldier order (fixed for a run). */
 const enemyLists = new WeakMap<FofState, number[][]>();
 function enemiesOf(fof: FofState): number[][] {
   let lists = enemyLists.get(fof);
   if (!lists) {
-    lists = fof.forces.map((_, f) => fof.soldiers.flatMap((m, j) => (m.force === f ? [] : [j])));
+    // The members of the forces of the other side.
+    lists = fof.forces.map((force) =>
+      fof.soldiers.flatMap((m, j) => (fof.forces[m.force]?.side === force.side ? [] : [j])),
+    );
     enemyLists.set(fof, lists);
   }
   return lists;

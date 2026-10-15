@@ -28,4 +28,12 @@ export {
   type Sighting,
 } from './detection';
 export { ACTIONS_ON, forceMembers, validateFofSetup } from './setup';
+export { ORDER_KINDS } from './types';
 export type * from './types';
+export {
+  activeOrder,
+  validateOrderSquad,
+  type OrderSquadCommand,
+  type OrderSquadRejection,
+} from './orders';
+export { orderSpecProblem } from './setup';

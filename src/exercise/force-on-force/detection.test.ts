@@ -9,7 +9,7 @@ import {
   type SimEvent,
 } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
-import defaultConfig from './fof-v1.json';
+import defaultConfig from '../forces/fof-v1.json';
 import { createFofRun, FOF_DEFAULT_CONFIG, type FofRun, type FofRunSpec } from './run';
 import { headOn, SQUAD } from './test-specs';
 

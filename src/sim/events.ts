@@ -1,5 +1,12 @@
 import type { TaskOutcome, TaskPhase } from './behavior/types';
-import type { ForcePhase, FofOutcome, ObservationLevel, SuppressionLevel } from './fof/types';
+import type {
+  ForcePhase,
+  FofOutcome,
+  ObservationLevel,
+  OrderKind,
+  OrderStatus,
+  SuppressionLevel,
+} from './fof/types';
 import type { SimCommand } from './commands';
 import type { Vec2 } from './geometry';
 import type {
@@ -48,7 +55,9 @@ export interface CommandRejectedEvent {
     | 'destinationBlocked'
     | 'destinationUnreachable'
     | 'notSteered'
-    | 'unitInContact';
+    | 'unitInContact'
+    | 'noForceModel'
+    | 'unitIneffective';
 }
 
 /** A soldier arrived at one of its waypoints. */
@@ -218,6 +227,23 @@ export interface ContactObservedEvent {
   readonly confidence: number;
 }
 
+/**
+ * A squad's order changed state: issued (`from` null, to pending), started,
+ * ended (completed, failed, superseded, canceled). `reason` says why, in words.
+ */
+export interface OrderChangedEvent {
+  readonly type: 'orderChanged';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly unitId: string;
+  readonly side: Side;
+  readonly orderId: string;
+  readonly kind: OrderKind;
+  readonly from: OrderStatus | null;
+  readonly to: OrderStatus;
+  readonly reason: string;
+}
+
 /** A force changed state (`reason` says why, in words). */
 export interface ForcePhaseChangedEvent {
   readonly type: 'forcePhaseChanged';
@@ -294,6 +320,7 @@ export type SimEvent =
   | MemberReleasedEvent
   | ContactObservedEvent
   | ForcePhaseChangedEvent
+  | OrderChangedEvent
   | FofFireEvent
   | SuppressionChangedEvent
   | FofEndedEvent;

@@ -209,7 +209,10 @@
     "boundLengthM": 40,
     "boundPaceMps": 3,
     "boundRestSeconds": 6,
-    "boundSearchDegrees": 60
+    "boundSearchDegrees": 60,
+    "arrivalRadiusM": 40,
+    "attackClearSeconds": 20,
+    "attackTimeoutSeconds": 1800
   },
   "effectiveness": {
     "suppressionWeight": 0.5,

@@ -164,6 +164,7 @@ export function createExerciseStage(o: ExerciseStageOptions): ExerciseStage {
         return undefined;
       case 'contactObserved':
       case 'forcePhaseChanged':
+      case 'orderChanged':
       case 'fofFire':
       case 'suppressionChanged':
       case 'fofEnded':

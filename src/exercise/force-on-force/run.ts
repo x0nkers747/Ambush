@@ -4,19 +4,12 @@ import {
   azimuthOf,
   createSimulation,
   DEFAULT_BEHAVIOR_PARAMS,
-  flattenFormation,
   hashSimState,
   orgUnitId,
-  smoothNoise,
-  validateFofConfig,
   type FofConfig,
   type FofForceSetup,
   type FofOutcome,
-  type FormationNode,
-  type FormationSpec,
   type Scenario,
-  type ScenarioSoldier,
-  type ScenarioUnit,
   type Side,
   type SimCommand,
   type SimEvent,
@@ -25,20 +18,14 @@ import {
   type VisibilityClass,
   type Vec2,
 } from '#sim';
-import { LAB_ORGANIZATIONS, labTerrain, type LabOrganization } from '../behavior-lab/run';
+import { labTerrain, type LabOrganization } from '../behavior-lab/run';
+import {
+  FOF_DEFAULT_CONFIG,
+  formationsForOrganization,
+  instantiateForce,
+  type SquadForce,
+} from '../forces/forces';
 import { urbanFeatures } from '../behavior-lab/urban';
-import {
-  buildFormationSpec,
-  formationsFor,
-  type FormationTemplate,
-} from '../formations/formations';
-import {
-  instantiateOrganization,
-  type OrganizationTemplate,
-  type TemplateSlot,
-  type TraineeOrganization,
-} from '../organization';
-import defaultConfig from './fof-v1.json';
 import { woodsFeatures } from './woods';
 
 // A Force-on-Force Lab run (docs/behavior-lab/force-on-force): the real
@@ -51,8 +38,14 @@ import { woodsFeatures } from './woods';
 /** How long the lab plays on after the outcome while the forces carry on moving (s). */
 export const CARRY_ON_SECONDS = 600;
 
-/** The default experimental configuration (validated). */
-export const FOF_DEFAULT_CONFIG: FofConfig = validateFofConfig(defaultConfig);
+export { FOF_DEFAULT_CONFIG, instantiateForce, weaponCategory } from '../forces/forces';
+export type { ForceInstance } from '../forces/forces';
+
+/** A force of a run: its organization and ids. */
+export type FofRunForce = SquadForce;
+
+/** The formations an organization of the lab can take. */
+export const formationsForLab = formationsForOrganization;
 
 export type FofTerrainKind = 'open' | 'wooded' | 'urban';
 export const FOF_TERRAINS: readonly FofTerrainKind[] = ['open', 'wooded', 'urban'];
@@ -101,18 +94,6 @@ export interface FofRunSpec {
   readonly substepHz?: number;
 }
 
-/** A force of a run: its organization and ids. */
-export interface FofRunForce {
-  readonly side: Side;
-  readonly unitId: string;
-  readonly organization: TraineeOrganization;
-  readonly formation: FormationSpec;
-  readonly soldierIds: readonly string[];
-  /** Weapon category (simulation) and model (display) of each soldier. */
-  readonly weapons: Readonly<Record<string, string | null>>;
-  readonly displayWeapons: Readonly<Record<string, string | null>>;
-}
-
 /** Who issued a command: the run's own setup, or the user (the lab). */
 export type FofCommandOrigin = 'setup' | 'user';
 
@@ -140,13 +121,6 @@ export const LAB_ORGANIZATION_NAMES: Readonly<Record<LabOrganization, string>> =
   squad: '13-Marine squad',
 };
 
-/** The formations an organization of the lab can take. */
-export function formationsForLab(organization: LabOrganization): readonly FormationTemplate[] {
-  const template = LAB_ORGANIZATIONS[organization];
-  const echelon = template.units.find((u) => u.parentId === null)?.echelon ?? '';
-  return formationsFor(echelon, template.slots.length);
-}
-
 /** The visibility class a terrain is observed under by default. */
 export function defaultVisibility(terrain: FofTerrainKind): VisibilityClass {
   return terrain;
@@ -170,15 +144,6 @@ export function fofTerrainFor(spec: FofRunSpec): TerrainDataset {
   terrains.set(key, terrain);
   if (terrains.size > 6) terrains.delete(terrains.keys().next().value ?? '');
   return terrain;
-}
-
-/** The simulation weapon category of a slot (from its primary weapon), or `null`. */
-function weaponCategory(template: OrganizationTemplate, slot: TemplateSlot): string | null {
-  const role = template.roles.find((r) => r.id === slot.roleId);
-  const refs = (slot.loadout ?? role?.defaultLoadout)?.weaponProfileRefs ?? [];
-  if (refs.includes('squad-automatic-weapon')) return 'automaticRifle';
-  if (refs.some((r) => r.includes('rifle'))) return 'rifle';
-  return null;
 }
 
 /** Commands to give instead of the setup's own orders (replay, branching). */
@@ -280,126 +245,25 @@ export function createFofRun(
 }
 
 /** A formation node with its slot ids (and its children's) prefixed: unique across copies. */
-function renameSlots(node: FormationNode, prefix: string): FormationNode {
-  return {
-    ...node,
-    slots: node.slots.map((slot) => ({ ...slot, id: `${prefix}${slot.id}` })),
-    children: node.children.map((child) => renameSlots(child, prefix)),
-  };
-}
-
 function buildForce(side: Side, spec: FofForceSpec, seed: number) {
-  const template = LAB_ORGANIZATIONS[spec.organization];
-  const root = template.units.find((u) => u.parentId === null)?.id ?? '';
   const prefix = side === 'BLUEFOR' ? 'B' : 'O';
-  const count = Math.max(1, Math.floor(spec.count ?? 1));
-  const grouped = count > 1;
-  const groupId = `${prefix}-GRP`;
-  const copies = Array.from({ length: count }, (_, k) => {
-    const unitIdPrefix = grouped ? `${prefix}${String(k + 1)}-` : `${prefix}-`;
-    const members = template.slots.map((slot, i) => ({
-      soldierId: grouped
-        ? `${prefix}${String(k + 1).padStart(2, '0')}${String(i + 1).padStart(2, '0')}`
-        : `${prefix}${String(i + 1).padStart(2, '0')}`,
-      slotId: slot.id,
-    }));
-    const organization: TraineeOrganization = { template, unitIdPrefix, members };
-    const formation = buildFormationSpec(organization, root, spec.formation, {
-      interval: spec.interval,
-      elementSpacing: spec.elementSpacing,
-    });
-    return { unitIdPrefix, members, organization, formation };
-  });
-  const first = copies[0];
-  if (!first) throw new Error('force-on-force force needs an organization');
-  // Copies in a block, abreast and in depth, centred on the start.
-  const across = Math.ceil(Math.sqrt(count));
-  const deep = Math.ceil(count / across);
-  const spacing = spec.groupSpacingM ?? 60;
-  const formation: FormationSpec = grouped
-    ? {
-        interval: first.formation.interval,
-        root: {
-          unitId: orgUnitId(groupId),
-          back: 0,
-          right: 0,
-          slots: [],
-          children: copies.map((c, k) => ({
-            ...renameSlots(c.formation.root, `${String(k + 1)}.`),
-            back: (Math.floor(k / across) - (deep - 1) / 2) * spacing,
-            right: ((k % across) - (across - 1) / 2) * spacing,
-          })),
-        },
-      }
-    : first.formation;
-  const unitId = grouped ? groupId : `${first.unitIdPrefix}${root}`;
   const heading = spec.destination
     ? azimuthOf(spec.destination.x - spec.start.x, spec.destination.y - spec.start.y)
     : azimuthFromDegrees(spec.facingDeg ?? 0);
-  const flat = flattenFormation(formation);
-  const meanBack = flat.back.reduce((a, b) => a + b, 0) / flat.back.length;
-  const meanRight = flat.right.reduce((a, b) => a + b, 0) / flat.right.length;
-  const fx = Math.sin(heading);
-  const fy = Math.cos(heading);
-  const startOf = (member: { soldierId: string }) => {
-    const i = flat.soldierIds.indexOf(member.soldierId);
-    const jitter = Math.min(2, 0.15 * spec.interval);
-    const salt = side === 'BLUEFOR' ? 0 : 50;
-    const jx = smoothNoise(seed, i + salt, 2, 0.5, 1) * jitter;
-    const jy = smoothNoise(seed, i + salt, 3, 0.5, 1) * jitter;
-    const r = (flat.right[i] ?? 0) - meanRight;
-    const b = (flat.back[i] ?? 0) - meanBack;
-    // Right is (fy, −fx) of forward (fx, fy).
-    return {
-      east: spec.start.x + r * fy - b * fx + jx,
-      north: spec.start.y - r * fx - b * fy + jy,
-    };
-  };
-  const units: ScenarioUnit[] = grouped
-    ? [{ id: groupId, echelon: 'group', parentId: null, leaderId: null }]
-    : [];
-  const soldiers: ScenarioSoldier[] = [];
-  const weapons: Record<string, string | null> = {};
-  const displayWeapons: Record<string, string | null> = {};
-  for (const copy of copies) {
-    const instance = {
-      templateId: template.id,
-      templateVersion: template.version,
-      side,
-      unitIdPrefix: copy.unitIdPrefix,
-      facingDeg: (heading * 180) / Math.PI,
-      posture: spec.posture ?? ('standing' as const),
-      members: copy.members,
-    };
-    const built = instantiateOrganization(template, instance, startOf);
-    for (const u of built.units) {
-      units.push(grouped && u.parentId === null ? { ...u, parentId: groupId } : u);
-    }
-    soldiers.push(...built.soldiers);
-    for (const m of copy.members) {
-      const slot = template.slots.find((x) => x.id === m.slotId);
-      const category = slot ? weaponCategory(template, slot) : null;
-      weapons[m.soldierId] = category;
-      displayWeapons[m.soldierId] =
-        category === null
-          ? null
-          : side === 'OPFOR'
-            ? 'ak-assault-rifle'
-            : category === 'automaticRifle'
-              ? 'squad-automatic-weapon'
-              : 'm16-rifle';
-    }
-  }
-  const force: FofRunForce = {
+  const built = instantiateForce({
     side,
-    unitId,
-    organization: first.organization,
-    formation,
-    soldierIds: copies.flatMap((c) => c.members.map((m) => m.soldierId)),
-    weapons,
-    displayWeapons,
-  };
-  return { force, units, soldiers, spec };
+    spec,
+    seed,
+    heading,
+    salt: side === 'BLUEFOR' ? 0 : 50,
+    groupId: `${prefix}-GRP`,
+    unitIdPrefix: (k, grouped) => (grouped ? `${prefix}${String(k + 1)}-` : `${prefix}-`),
+    soldierId: (k, i, grouped) =>
+      grouped
+        ? `${prefix}${String(k + 1).padStart(2, '0')}${String(i + 1).padStart(2, '0')}`
+        : `${prefix}${String(i + 1).padStart(2, '0')}`,
+  });
+  return { ...built, spec };
 }
 
 /** The state hash at every whole second of a run (for replay checks). */

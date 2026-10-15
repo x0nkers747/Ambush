@@ -5,7 +5,7 @@ import type { Posture } from '../state';
 // parameter of the experimental detection, fire, suppression, organizational
 // and termination models, as versioned, validated plain data. The kernel
 // reads these values and nothing else. The defaults live in the exercise
-// layer (src/exercise/force-on-force/fof-v1.json); the research note
+// layer (src/exercise/forces/fof-v1.json); the research note
 // (docs/behavior-lab/force-on-force/02-detection-research.md) says which are
 // taken from the literature and which are experimental.
 //
@@ -188,6 +188,12 @@ export interface ForceBehaviorConfig {
    * positions its force knows of. 0: straight at the enemy, the whole length.
    */
   readonly boundSearchDegrees: number;
+  /** An order's destination is reached within this distance of the squad's centre (m). */
+  readonly arrivalRadiusM: number;
+  /** An attack is done once on its objective with no enemy within reach this long (s). */
+  readonly attackClearSeconds: number;
+  /** An attack not done this long after it began has failed (s): orders never hold a squad forever. */
+  readonly attackTimeoutSeconds: number;
 }
 
 export interface EffectivenessConfig {
@@ -541,6 +547,9 @@ export function validateFofConfig(data: unknown): FofConfig {
     'boundPaceMps',
     'boundRestSeconds',
     'boundSearchDegrees',
+    'arrivalRadiusM',
+    'attackClearSeconds',
+    'attackTimeoutSeconds',
   ]);
   const delay = object(fb['reactionDelay'], '.force.reactionDelay', ['minSeconds', 'maxSeconds']);
   const dmin = number(delay['minSeconds'], '.force.reactionDelay.minSeconds', 0);
@@ -565,6 +574,9 @@ export function validateFofConfig(data: unknown): FofConfig {
     boundPaceMps: [0.1],
     boundRestSeconds: [0],
     boundSearchDegrees: [0, 90],
+    arrivalRadiusM: [1],
+    attackClearSeconds: [0],
+    attackTimeoutSeconds: [1],
   });
   if ((fb['ineffectiveEffectiveness'] as number) > (fb['withdrawEffectiveness'] as number)) {
     fail('.force.ineffectiveEffectiveness', 'must not exceed withdrawEffectiveness');

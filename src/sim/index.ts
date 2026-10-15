@@ -47,6 +47,7 @@ export type {
   MemberReleasedEvent,
   ContactObservedEvent,
   ForcePhaseChangedEvent,
+  OrderChangedEvent,
   FofFireEvent,
   SuppressionChangedEvent,
   FofEndedEvent,

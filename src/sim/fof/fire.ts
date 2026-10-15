@@ -8,7 +8,7 @@ import { fofWeapon, type FofWeapon } from './config';
 import { enter, firingOnTheMove, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
-import { soldierOf } from './system';
+import { hostile, soldierOf } from './system';
 import type { FofSoldier, FofTrack, SuppressionLevel } from './types';
 
 // Abstract fire (docs/behavior-lab/force-on-force/03 §5): a burst is a fire
@@ -240,7 +240,7 @@ function areaBurst(
   let near: Soldier | null = null;
   let nearD = weapon.suppressionRadiusM;
   for (const enemy of fof.soldiers) {
-    if (enemy.force === member.force) continue;
+    if (!hostile(fof, member, enemy)) continue;
     const s = soldierOf(context, enemy);
     if (s.status !== 'active') continue;
     const d = Math.hypot(s.position.x - aim.x, s.position.y - aim.y);
@@ -335,7 +335,7 @@ function burst(
   // Suppression where the burst lands.
   const impact = kind === 'aimed' ? target.position : aimPoint;
   for (const enemy of fof.soldiers) {
-    if (enemy.force === member.force) continue;
+    if (!hostile(fof, member, enemy)) continue;
     const s = soldierOf(context, enemy);
     if (s.status !== 'active') continue;
     const d = Math.hypot(s.position.x - impact.x, s.position.y - impact.y);

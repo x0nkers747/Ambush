@@ -4,7 +4,7 @@
 - Date: 2026-10-14
 - Part of: [Force-on-Force Lab](README.md)
 
-All values are in `src/exercise/force-on-force/fof-v1.json`. They are **experimental,
+All values are in `src/exercise/forces/fof-v1.json`. They are **experimental,
 illustrative parameters** for a constructive simulation prototype, not validated
 lethality or behaviour data. Detection is described in [02](02-detection-research.md).
 

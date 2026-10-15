@@ -1,7 +1,7 @@
 import type { ScenarioSoldier, ScenarioUnit } from '../scenario';
 import type { SimState } from '../state';
 import { fofWeapon, validateFofConfig, VISIBILITY_CLASSES } from './config';
-import type { ActionsOn, FofSetup } from './types';
+import { ORDER_KINDS, type ActionsOn, type FofSetup, type OrderSpec } from './types';
 
 /** The actions on contact a force can be given. */
 export const ACTIONS_ON: readonly ActionsOn[] = ['attack', 'withdraw', 'continue'];
@@ -19,16 +19,28 @@ export function validateFofSetup(
   if (!VISIBILITY_CLASSES.includes(setup.visibility)) {
     fail(`unknown visibility class "${setup.visibility}"`);
   }
-  if (setup.forces.length !== 2) fail('needs exactly two forces');
-  const [a, b] = setup.forces;
-  if (a?.side === b?.side) fail('the two forces must be of opposite sides');
+  const termination: string = setup.termination ?? 'experiment';
+  if (termination !== 'experiment' && termination !== 'manual') {
+    fail(`unknown termination "${termination}"`);
+  }
+  if (termination === 'experiment') {
+    // The lab's adjudicator decides between two opposed forces.
+    if (setup.forces.length !== 2) fail('needs exactly two forces');
+    const [a, b] = setup.forces;
+    if (a?.side === b?.side) fail('the two forces must be of opposite sides');
+  } else if (setup.forces.length === 0) {
+    fail('needs at least one force');
+  }
   const seen = new Set<string>();
+  const forceIds = new Set<string>();
   for (const force of setup.forces) {
+    if (forceIds.has(force.unitId)) fail(`force "${force.unitId}" is given twice`);
+    forceIds.add(force.unitId);
     if (!units.some((u) => u.id === force.unitId)) fail(`unknown unit "${force.unitId}"`);
     const members = new Set(forceMembers(force.unitId, units, soldiers));
     if (members.size === 0) fail(`force "${force.unitId}" has no soldiers`);
     for (const id of members) {
-      if (seen.has(id)) fail(`soldier "${id}" is in both forces`);
+      if (seen.has(id)) fail(`soldier "${id}" is in two forces`);
       seen.add(id);
       const soldier = soldiers.find((s) => s.id === id);
       if (soldier?.side !== force.side) fail(`soldier "${id}" is not of side ${force.side}`);
@@ -44,7 +56,21 @@ export function validateFofSetup(
     if (force.actionsOn !== undefined && !ACTIONS_ON.includes(force.actionsOn)) {
       fail(`force "${force.unitId}" has unknown actions on contact "${force.actionsOn}"`);
     }
+    (force.plan ?? []).forEach((order, k) => {
+      const problem = orderSpecProblem(order);
+      if (problem) fail(`force "${force.unitId}" order ${String(k + 1)}: ${problem}`);
+    });
   }
+}
+
+/** What is wrong with an order as given (its own shape only), or `null`. */
+export function orderSpecProblem(order: OrderSpec): string | null {
+  const kind: string = order.kind;
+  if (!(ORDER_KINDS as readonly string[]).includes(kind)) return `unknown order kind "${kind}"`;
+  const d = order.destination;
+  if (d === null) return `a ${order.kind} order needs a destination`;
+  if (!Number.isFinite(d.x) || !Number.isFinite(d.y)) return 'the destination must be finite';
+  return null;
 }
 
 /** The soldier ids of a unit and the units below it, in soldier order. */

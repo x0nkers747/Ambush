@@ -22,15 +22,8 @@ import {
 } from '#sim';
 import { buildFormationSpec } from '../formations/formations';
 import { urbanFeatures } from './urban';
-import {
-  instantiateOrganization,
-  validateOrganizationTemplate,
-  type OrganizationTemplate,
-  type TraineeOrganization,
-} from '../organization';
-import elementTemplate from '../organizations/three-marine-element.json';
-import fireTeamTemplate from '../organizations/usmc-fire-team-mcwp-3-11-2.json';
-import { USMC_RIFLE_SQUAD_TEMPLATE } from '../squad';
+import { SQUAD_ORGANIZATIONS, type SquadOrganization } from '../forces/forces';
+import { instantiateOrganization, type TraineeOrganization } from '../organization';
 
 // A Behavior Lab run (docs/behavior-lab/04): the real simulation, one
 // organization on synthetic or real terrain, its orders and disturbances as
@@ -38,13 +31,9 @@ import { USMC_RIFLE_SQUAD_TEMPLATE } from '../squad';
 // formation, parameters, seed, tick rate and the commands submitted. Headless:
 // the lab page, the scenario tests and the seed sweeps all use it.
 
-export type LabOrganization = 'element3' | 'fireTeam' | 'squad';
+export type LabOrganization = SquadOrganization;
 
-export const LAB_ORGANIZATIONS: Readonly<Record<LabOrganization, OrganizationTemplate>> = {
-  element3: validateOrganizationTemplate(elementTemplate),
-  fireTeam: validateOrganizationTemplate(fireTeamTemplate),
-  squad: USMC_RIFLE_SQUAD_TEMPLATE,
-};
+export const LAB_ORGANIZATIONS = SQUAD_ORGANIZATIONS;
 
 /** A disturbance by slot (e.g. "FT2.AR"), at a time. */
 export interface LabDisturbance {

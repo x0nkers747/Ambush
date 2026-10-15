@@ -3,11 +3,11 @@ import type { Vec2 } from '../geometry';
 import type { Side, SoldierId } from '../state';
 import type { FofConfig, VisibilityClass } from './config';
 
-// Force-on-force (docs/behavior-lab/force-on-force): two organizations that
-// move on their own orders, look for each other, and fight when they meet.
-// The setup is world data; the state is plain data in `SimState.fof`,
-// absent in every simulation without a force-on-force setup (so their
-// states hash as before).
+// Force-on-force (docs/behavior-lab/force-on-force, docs/constructive-simulation):
+// organizations (squads) of two sides that move on their own orders, look
+// for each other, and fight when they meet. The setup is world data; the
+// state is plain data in `SimState.fof`, absent in every simulation without
+// a force-on-force setup (so their states hash as before).
 
 /**
  * What a force does when it comes into contact (a confirmed contact within
@@ -24,6 +24,58 @@ import type { FofConfig, VisibilityClass } from './config';
  */
 export type ActionsOn = 'attack' | 'withdraw' | 'continue';
 
+/**
+ * A squad's tactical order (docs/constructive-simulation/02): the
+ * commander's intent, carried out by the squad's own behaviour.
+ *
+ * - `move`: to the destination, in formation; on contact it halts and fights,
+ *   then carries on;
+ * - `attack`: toward the destination, assaulting the enemy it meets (fire and
+ *   movement); done on the objective with no enemy within reach for a while;
+ * - `withdraw`: to the destination, breaking contact: it does not halt to
+ *   fight, firing on the move at what it can see.
+ */
+export type OrderKind = 'move' | 'attack' | 'withdraw';
+export const ORDER_KINDS: readonly OrderKind[] = ['move', 'attack', 'withdraw'];
+
+/**
+ * An order's state: `pending` (waiting its turn), `active` (being carried
+ * out), and how it ended: `completed`, `failed` (it could not be: see
+ * `reason`), `superseded` (replaced by a new plan) or `canceled` (the plan
+ * cleared).
+ */
+export type OrderStatus = 'pending' | 'active' | 'completed' | 'failed' | 'superseded' | 'canceled';
+
+/** An order as given: its intent and where (the plan editor's and the command's form). */
+export interface OrderSpec {
+  readonly kind: OrderKind;
+  /** Where to go (a map point). Every order kind has one now; future kinds may not. */
+  readonly destination: Vec2 | null;
+}
+
+/** Who gave an order: the scenario's initial plan, or a player during the run. */
+export type OrderSource = 'scenario' | 'player';
+
+/** An order of a squad's plan, with its life (plain data in the state). */
+export interface FofOrder {
+  /** `${unitId}#${sequence}`. */
+  readonly id: string;
+  readonly unitId: string;
+  /** The squad's orders in the order they were issued (from 1). */
+  readonly sequence: number;
+  readonly kind: OrderKind;
+  readonly destination: Vec2 | null;
+  readonly source: OrderSource;
+  /** When it was issued (tick and seconds), started, and ended. */
+  readonly issuedTick: number;
+  readonly issuedAt: number;
+  activatedAt: number | null;
+  endedAt: number | null;
+  status: OrderStatus;
+  /** Why it ended (or failed), in words; `null` while pending or active. */
+  reason: string | null;
+}
+
 /** One side's organization in the experiment. */
 export interface FofForceSetup {
   /** The organization's root unit: every soldier in it or below it belongs to the force. */
@@ -39,14 +91,31 @@ export interface FofForceSetup {
   readonly actionsOn?: ActionsOn;
   /** Where it starts (a `withdraw` force goes back there); default: its members' centre when the experiment begins. */
   readonly start?: Vec2;
+  /** A name to show (default: the unit id). */
+  readonly name?: string;
+  /**
+   * Its initial plan: orders carried out in turn. A force with a plan (or
+   * given orders by `orderSquad`) is driven by it; without, by its movement
+   * order and actions on contact (the lab's experiments).
+   */
+  readonly plan?: readonly OrderSpec[];
 }
+
+/**
+ * How the experiment ends: `experiment` (the lab: two forces, adjudicated
+ * to an outcome), or `manual` (the constructive simulation: any number of
+ * squads; it runs until the player ends it).
+ */
+export type FofTermination = 'experiment' | 'manual';
 
 export interface FofSetup {
   readonly config: FofConfig;
   /** The observation conditions of the experiment. */
   readonly visibility: VisibilityClass;
-  /** Exactly two forces, of opposite sides. */
+  /** The forces (squads) of both sides: exactly two, opposed, under `experiment` termination. */
   readonly forces: readonly FofForceSetup[];
+  /** Default `experiment`. */
+  readonly termination?: FofTermination;
 }
 
 /** What a force knows about one enemy soldier. */
@@ -126,9 +195,28 @@ export interface FofForceStats {
 export interface FofForce {
   readonly unitId: string;
   readonly side: Side;
+  /** A name to show. */
+  readonly name: string;
   phase: ForcePhase;
   phaseSince: number;
-  readonly actionsOn: ActionsOn;
+  /** What it does on contact: its setup's, or, driven by a plan, its active order's. */
+  actionsOn: ActionsOn;
+  /**
+   * Driven by a plan (`orders`): its movement and actions on contact come
+   * from its active order. Set from the setup's plan, or by the first
+   * `orderSquad` command.
+   */
+  planned: boolean;
+  /** Every order it has been given, in the order given (the plan and its history). */
+  orders: FofOrder[];
+  /** The order being carried out, or `null`. */
+  activeOrderId: string | null;
+  /** The next order's sequence number. */
+  nextOrderSequence: number;
+  /** Attacking, on the objective: since when no enemy has been within reach (`null`: one is). */
+  objectiveQuietSince: number | null;
+  /** Broke contact on its own, spent: its next order waits until it has recovered. */
+  holdUntilRecovered: boolean;
   /** Its centre at the start (where a `withdraw` force goes back to). */
   readonly start: Vec2;
   /** Attacking: when it assaults (after returning fire and locating the enemy), or `null`. */

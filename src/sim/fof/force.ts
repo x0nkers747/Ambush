@@ -10,6 +10,7 @@ import { orgUnitId, type Soldier, type SoldierId } from '../state';
 import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
 import { fofWeapon } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
+import { activeOrder, updatePlan } from './orders';
 import type { FofContext } from './system';
 import { forceActive, glimpse, setLevel, soldierOf } from './system';
 import type { FofForce, ForcePhase, ObservationLevel } from './types';
@@ -77,6 +78,9 @@ export function updateForces(context: FofContext): void {
     if (picture.confirmed) force.lastContactAt = t;
     if (picture.identified) force.hostile = true;
     force.threat = picture.threat;
+    // Its orders first (a planned squad): the active one checked, the next started.
+    updatePlan(context, force, setup.forces[i]?.actionsOn ?? 'continue');
+    if (!forceActive(force)) return;
     const close = picture.nearestConfirmed <= behavior.engageRangeM;
     switch (force.phase) {
       case 'moving':
@@ -155,7 +159,7 @@ export function updateForces(context: FofContext): void {
 }
 
 /** What a force believes: its contacts' nearest range, new possible contacts, and where the threat is. */
-function pictureOf(context: FofContext, force: number) {
+export function pictureOf(context: FofContext, force: number) {
   const { fof, t } = context;
   const own = fof.forces[force];
   const centre = own ? centreOf(context, own) : null;
@@ -669,7 +673,7 @@ function moveTo(
 }
 
 /** The navigation area the force's route is planned from: `from`'s (default its centre), else a member's on routable ground (0: none). */
-function forceArea(context: FofContext, force: FofForce, from?: Vec2): number {
+export function forceArea(context: FofContext, force: FofForce, from?: Vec2): number {
   const terrain = context.world.terrain;
   const centre = from ?? centreOf(context, force);
   if (!centre) return 0;
@@ -753,7 +757,9 @@ export function resume(context: FofContext, force: FofForce, reason: string): vo
   force.bounding = [];
   force.boundUnit = null;
   standUp(context, force);
-  if (force.mission && issue(context, force, force.mission)) {
+  // Driven by a plan, it resumes its active order; with none, it holds where it is.
+  const mission = force.planned && activeOrder(force) === null ? null : force.mission;
+  if (mission && issue(context, force, mission)) {
     enter(context, force, 'moving', reason);
   } else {
     enter(context, force, 'atObjective', reason);

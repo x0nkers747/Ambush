@@ -150,7 +150,7 @@ of magnitude:
 
 ## 4. Parameters and their status
 
-All parameters are in `src/exercise/force-on-force/fof-v1.json` (`detection`,
+All parameters are in `src/exercise/forces/fof-v1.json` (`detection`,
 `visibility`).
 
 | Parameter                                            | Value                        | Status |
