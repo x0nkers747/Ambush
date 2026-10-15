@@ -49,6 +49,7 @@ import {
   type FofSession,
   type TimedEvent,
 } from './session';
+import { createFofWorkerSession, workerChannel } from './worker-session';
 import { createWoodsLayer, type WoodsLayer } from './woods';
 
 // Ambush! Force-on-Force Lab (docs/behavior-lab/force-on-force/05): two
@@ -147,9 +148,6 @@ function settingsFor(id: FofExperimentId, seed: number, tickRateHz: number): Set
     maxDurationSeconds: config.termination.maxDurationSeconds,
   };
 }
-
-/** Simulation stepping per animation frame at most (ms), beyond one tick. */
-const FRAME_STEP_MS = 40;
 
 /** Starts the lab in `root`; returns a function that stops it. */
 export function startForceOnForceLab(root: HTMLElement): () => void {
@@ -272,10 +270,18 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   );
   let overlays: FofOverlayOptions = { ...DEFAULT_FOF_OVERLAYS };
   let perspective: Perspective = 'observer';
-  let session: FofSession = createFofSession(specOf(settings));
+  // The simulation runs in a worker, so the page keeps drawing whatever it
+  // costs (`worker=0` in the address: on the page, as before).
+  const inWorker = typeof Worker !== 'undefined' && params.get('worker') !== '0';
+  const newSession = (spec: FofRunSpec, recording?: FofRecording): FofSession =>
+    inWorker
+      ? createFofWorkerSession(spec, recording, workerChannel())
+      : createFofSession(spec, recording);
+  let session: FofSession = newSession(specOf(settings));
   let playing = false;
   let speed = 4;
-  let pending = 0;
+  /** The tick play has reached (fractional; the head follows it as fast as it can). */
+  let wanted = 0;
   let mode: Mode = 'select';
   let selected: string | null = null;
   let sightLines: SightLine[] = [];
@@ -318,10 +324,9 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   };
   let weapons = weaponMap();
   const restart = (recording?: FofRecording) => {
-    session = recording
-      ? createFofSession(recording.spec, recording)
-      : createFofSession(specOf(settings));
-    pending = 0;
+    session.dispose();
+    session = recording ? newSession(recording.spec, recording) : newSession(specOf(settings));
+    wanted = 0;
     weapons = weaponMap();
     selected = null;
     sightLines = [];
@@ -505,7 +510,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   const actions: Record<string, () => void> = {
     play: () => {
       playing = !playing;
-      pending = 0;
+      wanted = session.viewTick;
     },
     step: () => {
       playing = false;
@@ -1021,10 +1026,11 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
   let disposed = false;
   let last = performance.now();
   let lastPanels = 0;
-  const renderTick = () => {
-    const alpha = playing && !session.scrubbed ? Math.min(1, pending) : 1;
-    return session.viewTick - 1 + alpha;
-  };
+  /** The tick drawn: between the last two ticks of the head while playing (smooth at any rate). */
+  const renderTick = () =>
+    playing && !session.scrubbed
+      ? Math.min(session.headTick, Math.max(session.headTick - 1, wanted - 1))
+      : session.viewTick;
   const resize = () => {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -1048,19 +1054,15 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (playing && !over()) {
-      pending += dt * speed * session.spec.tickRateHz;
-      const budget = Math.max(1, Math.ceil(0.1 * speed * session.spec.tickRateHz));
-      // At most FRAME_STEP_MS of stepping a frame (and at least one tick): a
-      // large run plays below the speed asked for, but the page keeps drawing.
-      const until = performance.now() + FRAME_STEP_MS;
-      let stepped = 0;
-      while (pending >= 1 && stepped < budget && (stepped === 0 || performance.now() < until)) {
-        if (over()) break;
-        session.step();
-        pending -= 1;
-        stepped += 1;
-      }
-      if (pending >= 1) pending = pending % 1;
+      // Play asks for time at the speed chosen; the head follows as fast as it
+      // can (in the worker, without holding up the page), and play waits for it.
+      const rate = session.spec.tickRateHz;
+      const lead = Math.max(rate, 0.5 * speed * rate);
+      wanted = Math.min(
+        Math.max(wanted, session.viewTick) + dt * speed * rate,
+        session.viewTick + lead,
+      );
+      session.advance(Math.floor(wanted));
     } else if (over() && !session.scrubbed) {
       // The experiment has an outcome and the forces have stopped: the run is over.
       playing = false;
@@ -1272,6 +1274,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
 
   return () => {
     disposed = true;
+    session.dispose();
     observer.disconnect();
     window.removeEventListener('keydown', onKey);
     characters.dispose();

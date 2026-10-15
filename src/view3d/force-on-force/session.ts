@@ -5,11 +5,19 @@ import {
   type FofCommandOrigin,
   type FofMetrics,
   type FofMetricsRecorder,
+  type FofReplay,
   type FofRun,
   type FofRunSpec,
   type FofSample,
 } from '#exercise/force-on-force';
-import { hashSimState, type SimCommand, type SimEvent, type SimSnapshot } from '#sim';
+import {
+  hashSimState,
+  type FofOutcome,
+  type SimCommand,
+  type SimEvent,
+  type SimSnapshot,
+  type Simulation,
+} from '#sim';
 
 // A Force-on-Force Lab session (docs/behavior-lab/force-on-force/05): the run
 // being built (the head), the tick shown (live or scrubbed back), and the
@@ -17,6 +25,10 @@ import { hashSimState, type SimCommand, type SimEvent, type SimSnapshot } from '
 // the head steps the real kernel; scrubbing back restores a keyframe and
 // re-simulates to the tick shown; a saved recording is replayed by
 // re-simulation and checked against its per-second state hashes.
+//
+// This session steps the kernel on the calling thread. The lab runs it in a
+// worker (`worker-session.ts`), so that the page keeps drawing whatever the
+// simulation costs; both have this interface.
 
 /** A saved experiment: enough to reproduce every tick of it. */
 export interface FofRecording {
@@ -42,16 +54,35 @@ export interface TimedEvent {
   readonly event: SimEvent;
 }
 
+/** What the lab reads of a run (a real run, or the page's mirror of the worker's). */
+export interface FofRunView {
+  readonly spec: FofRunSpec;
+  readonly forces: FofRun['forces'];
+  readonly sim: Pick<Simulation, 'state' | 'tick' | 'timeSeconds' | 'world'>;
+  readonly commands: readonly SimCommand[];
+  readonly origins: readonly FofCommandOrigin[];
+  readonly done: boolean;
+  readonly settled: boolean;
+  readonly outcome: FofOutcome | null;
+}
+
 /** Seconds between keyframes, per 100 soldiers begun (a snapshot of a large run is large). */
 const KEYFRAME_SECONDS = 5;
 const HISTORY_SECONDS = 2;
 const CPU_SAMPLES = 300;
+/** `advance` steps for at most this long (ms; at least one tick), so a frame keeps drawing. */
+export const ADVANCE_BUDGET_MS = 40;
+
+/** Seconds between keyframes of a run with `soldiers` soldiers. */
+export function keyframeSecondsFor(soldiers: number): number {
+  return KEYFRAME_SECONDS * Math.max(1, Math.ceil(soldiers / 100));
+}
 
 export interface FofSession {
   readonly spec: FofRunSpec;
-  readonly head: FofRun;
+  readonly head: FofRunView;
   /** The run at the tick shown. */
-  readonly view: FofRun;
+  readonly view: FofRunView;
   readonly motion: MotionRecorder;
   /** Shots and casualties up to the tick shown, for the characters (aiming, firing, falling). */
   readonly combatLog: readonly CombatEvent[];
@@ -62,16 +93,22 @@ export interface FofSession {
   readonly scrubbed: boolean;
   metrics(): FofMetrics;
   readonly samples: readonly FofSample[];
+  /** Simulation CPU per tick (ms), over the last ticks. */
   cpu(): { mean: number; p95: number };
   readonly verification: Verification | null;
+  /** One tick. */
   step(): void;
+  /** Steps toward `tick` (at most `ADVANCE_BUDGET_MS` here; the worker keeps going). */
+  advance(tick: number): void;
   seek(tick: number): void;
   submit(command: SimCommand): void;
   recording(): FofRecording;
+  /** Stops the session (its worker, if any). */
+  dispose(): void;
 }
 
 /** Events the lab keeps (its timeline, overlays and the characters). */
-const KEPT: ReadonlySet<SimEvent['type']> = new Set([
+export const KEPT: ReadonlySet<SimEvent['type']> = new Set([
   'contactObserved',
   'forcePhaseChanged',
   'fofFire',
@@ -84,7 +121,7 @@ const KEPT: ReadonlySet<SimEvent['type']> = new Set([
 ]);
 
 /** A burst as the character layer's shot (it reads the shooter and the time). */
-function asCombatEvent(event: SimEvent): CombatEvent | null {
+export function asCombatEvent(event: SimEvent): CombatEvent | null {
   if (event.type === 'soldierIncapacitated') return event;
   if (event.type !== 'fofFire') return null;
   return {
@@ -102,16 +139,82 @@ function asCombatEvent(event: SimEvent): CombatEvent | null {
   };
 }
 
-export function createFofSession(spec: FofRunSpec, recording?: FofRecording): FofSession {
+/** Mean and 95th percentile of CPU samples. */
+export function cpuSummary(cpu: readonly number[]): { mean: number; p95: number } {
+  if (cpu.length === 0) return { mean: 0, p95: 0 };
+  const sorted = [...cpu].sort((a, b) => a - b);
+  return {
+    mean: cpu.reduce((a, b) => a + b, 0) / cpu.length,
+    p95: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
+  };
+}
+
+/**
+ * A run at `tick`, re-simulated from the last keyframe at least
+ * `HISTORY_SECONDS` before it (with its motion over that stretch, for the
+ * characters' recent history).
+ */
+export function runAt(
+  spec: FofRunSpec,
+  commands: readonly SimCommand[],
+  origins: readonly FofCommandOrigin[],
+  keyframes: ReadonlyMap<number, SimSnapshot>,
+  tick: number,
+): { run: FofRun; motion: MotionRecorder } {
+  const rate = spec.tickRateHz;
+  let from = 0;
+  for (const k of keyframes.keys()) if (k <= tick - HISTORY_SECONDS * rate && k > from) from = k;
+  const run = createFofRun(spec, undefined, { commands, origins });
+  const snapshot = keyframes.get(from);
+  if (snapshot) {
+    run.sim.restore(snapshot);
+    for (const command of commands) if (command.tick >= from) run.sim.submit(command);
+  }
+  const motion = createMotionRecorder(rate);
+  motion.record(run.sim.state);
+  while (run.sim.tick < tick) {
+    run.sim.step();
+    motion.record(run.sim.state);
+  }
+  return { run, motion };
+}
+
+/** The commands of a run to keep when it branches at `tick`: the setup's, and the user's before it. */
+export function keptCommands(
+  commands: readonly SimCommand[],
+  origins: readonly FofCommandOrigin[],
+  tick: number,
+): { commands: SimCommand[]; origins: FofCommandOrigin[] } {
+  const keep = commands
+    .map((command, i) => ({ command, origin: origins[i] ?? 'user' }))
+    .filter(({ command, origin }) => origin !== 'user' || command.tick < tick);
+  return { commands: keep.map((c) => c.command), origins: keep.map((c) => c.origin) };
+}
+
+/** Hooks of a session for its worker host: everything it records, as it records it. */
+export interface FofSessionHooks {
+  /** After every tick of the head, with that tick's events. */
+  onTick?(run: FofRun, events: readonly SimEvent[]): void;
+  /** A keyframe taken. */
+  onKeyframe?(tick: number, snapshot: SimSnapshot): void;
+  /** Without a recording: commands to run with instead of the setup's (a branch). */
+  replay?: FofReplay;
+}
+
+export function createFofSession(
+  spec: FofRunSpec,
+  recording?: FofRecording,
+  hooks: FofSessionHooks = {},
+): FofSession {
   const rate = spec.tickRateHz;
   const replay = recording
     ? { commands: recording.commands, origins: recording.origins }
-    : undefined;
+    : hooks.replay;
   let head = createFofRun(spec, undefined, replay);
-  const keyframeSeconds =
-    KEYFRAME_SECONDS * Math.max(1, Math.ceil(head.sim.state.soldiers.length / 100));
-  let view = head;
-  let motion = createMotionRecorder(rate);
+  const keyframeSeconds = keyframeSecondsFor(head.sim.state.soldiers.length);
+  let view: FofRun = head;
+  let headMotion = createMotionRecorder(rate);
+  let viewMotion: MotionRecorder = headMotion;
   let metrics: FofMetricsRecorder = createFofMetrics(head.sim);
   let hashes: string[] = [];
   let keyframes = new Map<number, SimSnapshot>();
@@ -139,9 +242,13 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
         };
       }
     }
-    if (sim.tick % (keyframeSeconds * rate) === 0) keyframes.set(sim.tick, sim.snapshot());
+    if (sim.tick % (keyframeSeconds * rate) === 0) {
+      const snapshot = sim.snapshot();
+      keyframes.set(sim.tick, snapshot);
+      hooks.onKeyframe?.(sim.tick, snapshot);
+    }
   };
-  motion.record(head.sim.state);
+  headMotion.record(head.sim.state);
   atTick();
 
   const stepHead = () => {
@@ -150,7 +257,7 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
     cpu.push(performance.now() - t);
     if (cpu.length > CPU_SAMPLES) cpu.shift();
     metrics.sample(stepped);
-    motion.record(head.sim.state);
+    headMotion.record(head.sim.state);
     for (const event of stepped) {
       if (!KEPT.has(event.type)) continue;
       events.push({ seconds: head.sim.timeSeconds, event });
@@ -158,20 +265,16 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
       if (c) combat.push(c);
     }
     atTick();
+    hooks.onTick?.(head, stepped);
   };
 
   /** Drops the head's future beyond the tick shown, re-simulating from the start. */
   const branch = () => {
     const at = view.sim.tick;
-    const keep = head.commands
-      .map((command, i) => ({ command, origin: head.origins[i] ?? 'user' }))
-      .filter(({ command, origin }) => origin !== 'user' || command.tick < at);
-    head = createFofRun(spec, undefined, {
-      commands: keep.map((c) => c.command),
-      origins: keep.map((c) => c.origin),
-    });
+    head = createFofRun(spec, undefined, keptCommands(head.commands, head.origins, at));
     view = head;
-    motion = createMotionRecorder(rate);
+    headMotion = createMotionRecorder(rate);
+    viewMotion = headMotion;
     metrics = createFofMetrics(head.sim);
     hashes = [];
     keyframes = new Map();
@@ -180,31 +283,12 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
     viewCombat = combat;
     reference = null;
     verification = null;
-    motion.record(head.sim.state);
+    headMotion.record(head.sim.state);
     atTick();
     while (head.sim.tick < at) stepHead();
   };
 
-  /** A run at tick `tick` of the head: from the keyframe before it, re-simulated. */
-  const viewAt = (tick: number): FofRun => {
-    let from = 0;
-    for (const k of keyframes.keys()) if (k <= tick - HISTORY_SECONDS * rate && k > from) from = k;
-    const run = createFofRun(spec, undefined, { commands: head.commands, origins: head.origins });
-    const snapshot = keyframes.get(from);
-    if (snapshot) {
-      run.sim.restore(snapshot);
-      for (const command of head.commands) if (command.tick >= from) run.sim.submit(command);
-    }
-    motion = createMotionRecorder(rate);
-    motion.record(run.sim.state);
-    while (run.sim.tick < tick) {
-      run.sim.step();
-      motion.record(run.sim.state);
-    }
-    return run;
-  };
-
-  return {
+  const session: FofSession = {
     spec,
     get head() {
       return head;
@@ -213,7 +297,7 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
       return view;
     },
     get motion() {
-      return motion;
+      return view === head ? headMotion : viewMotion;
     },
     get combatLog() {
       return view === head ? combat : viewCombat;
@@ -234,14 +318,7 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
     get samples() {
       return metrics.samples;
     },
-    cpu() {
-      if (cpu.length === 0) return { mean: 0, p95: 0 };
-      const sorted = [...cpu].sort((a, b) => a - b);
-      return {
-        mean: cpu.reduce((a, b) => a + b, 0) / cpu.length,
-        p95: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
-      };
-    },
+    cpu: () => cpuSummary(cpu),
     get verification() {
       return verification;
     },
@@ -252,14 +329,22 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
       }
       stepHead();
     },
+    advance(tick) {
+      const until = performance.now() + ADVANCE_BUDGET_MS;
+      for (let n = 0; head.sim.tick < tick && !head.settled; n += 1) {
+        if (n > 0 && performance.now() >= until) break;
+        session.step();
+      }
+    },
     seek(tick) {
       const target = Math.max(0, Math.min(Math.round(tick), head.sim.tick));
       if (target === view.sim.tick) return;
       if (target === head.sim.tick) {
-        viewAt(target);
         view = head;
       } else {
-        view = viewAt(target);
+        const at = runAt(spec, head.commands, head.origins, keyframes, target);
+        view = at.run;
+        viewMotion = at.motion;
         viewCombat = combat.filter((e) => e.tick < target);
       }
     },
@@ -278,7 +363,11 @@ export function createFofSession(spec: FofRunSpec, recording?: FofRecording): Fo
         hashes: [...hashes],
       };
     },
+    dispose() {
+      // Nothing to stop on this thread.
+    },
   };
+  return session;
 }
 
 /** A recording as JSON text (negative zero kept, as in the Behavior Lab). */

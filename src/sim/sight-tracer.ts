@@ -88,6 +88,12 @@ export interface SightLineTracer {
    */
   blocked(a: Vec3, b: Vec3, obstruction?: Obstruction): boolean;
   /**
+   * How many of the sight lines from eye `a` to the points (`x`, `y`,
+   * `zs[i]`) are clear: exactly the number of `zs` for which `blocked` is
+   * false, in one walk of their common map path.
+   */
+  clearCount(a: Vec3, x: number, y: number, zs: readonly number[]): number;
+  /**
    * Whether the terrain or building obstruction of another sight line proves
    * this one obstructed too, at a glance: a point of this line where the
    * ground stands at least `PROOF_MARGIN_M` above it, or where it passes that
@@ -720,29 +726,11 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
   };
 
   /**
-   * Walks the line from `tStart` and returns 1 when it finds an obstruction, 0
-   * when it reaches the end clear, and -1 when it passes `tEnd` without one.
-   *
-   * From 0 this is exactly the reference's trace. From a later cut it is a
-   * proof: every piece that begins after the first cut past `tStart` is
-   * exactly the reference's piece (cuts and their order do not depend on
-   * where the walk starts), and is checked as the reference checks it. Earlier
-   * pieces are only walked through. Vegetation obscuration starts from 0
-   * instead of what the reference had gathered by then: since floating-point
-   * addition is monotonic, it never exceeds the reference's, so an
-   * obstruction found here is found by the reference at the same point or
-   * earlier. A walk from a later start proves obstruction, never clearness.
+   * Starts a walk of the line (ax, ay, az)–(bx, by) from `tStart`: the
+   * terrain cut sequences, the bucket traversal and the candidate lists.
+   * Depends on the line's map positions only, not on its heights.
    */
-  function walk(a: Vec3, b: Vec3, tStart: number, tEnd: number): number {
-    ax = a.x;
-    ay = a.y;
-    az = a.z;
-    bx = b.x;
-    by = b.y;
-    dx = bx - ax;
-    dy = by - ay;
-    dz = b.z - az;
-    const distance = Math.hypot(dx, dy);
+  function begin(tStart: number): void {
     line += 1;
     if (line === 0x7fffffff) {
       featureStamp.fill(0);
@@ -807,6 +795,33 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     tDeltaC = stepC === 0 ? Infinity : BUCKET_M / Math.abs(dx);
     tDeltaR = stepR === 0 ? Infinity : BUCKET_M / Math.abs(dy);
     nextBucketT = tStart;
+  }
+
+  /**
+   * Walks the line from `tStart` and returns 1 when it finds an obstruction, 0
+   * when it reaches the end clear, and -1 when it passes `tEnd` without one.
+   *
+   * From 0 this is exactly the reference's trace. From a later cut it is a
+   * proof: every piece that begins after the first cut past `tStart` is
+   * exactly the reference's piece (cuts and their order do not depend on
+   * where the walk starts), and is checked as the reference checks it. Earlier
+   * pieces are only walked through. Vegetation obscuration starts from 0
+   * instead of what the reference had gathered by then: since floating-point
+   * addition is monotonic, it never exceeds the reference's, so an
+   * obstruction found here is found by the reference at the same point or
+   * earlier. A walk from a later start proves obstruction, never clearness.
+   */
+  function walk(a: Vec3, b: Vec3, tStart: number, tEnd: number): number {
+    ax = a.x;
+    ay = a.y;
+    az = a.z;
+    bx = b.x;
+    by = b.y;
+    dx = bx - ax;
+    dy = by - ay;
+    dz = b.z - az;
+    const distance = Math.hypot(dx, dy);
+    begin(tStart);
 
     // From 0 the first cut is 0 itself; feature cuts at 0 equal it and are skipped.
     let previous = tStart;
@@ -1044,5 +1059,161 @@ function createTracer(terrain: TerrainDataset): SightLineTracer {
     return result === 1;
   }
 
-  return { blocked, provesQuickly, provesByWalking };
+  // Lanes of `clearCount`: one per target height.
+  let laneDz = new Float64Array(4);
+  let laneC0 = new Float64Array(4);
+  let laneObscuration = new Float64Array(4);
+  let laneObscuredFrom = new Float64Array(4);
+  let laneAlive = new Uint8Array(4);
+  const laneParts = new Float64Array(64);
+
+  /**
+   * How many of the sight lines from eye `a` to the points (bx, by, zs[i])
+   * are clear: for each, exactly `!blocked(a, { x: bx, y: by, z: zs[i] })`.
+   * The lines share their map path, so it is walked once: its cuts, feature
+   * buckets and ground heights are the same for every line, and each line's
+   * pieces are checked with its own heights, with the same floating-point
+   * operations in the same order as `walk` checks them.
+   */
+  function clearCount(a: Vec3, tx: number, ty: number, zs: readonly number[]): number {
+    const n = zs.length;
+    if (laneDz.length < n) {
+      laneDz = new Float64Array(n);
+      laneC0 = new Float64Array(n);
+      laneObscuration = new Float64Array(n);
+      laneObscuredFrom = new Float64Array(n);
+      laneAlive = new Uint8Array(n);
+    }
+    ax = a.x;
+    ay = a.y;
+    az = a.z;
+    bx = tx;
+    by = ty;
+    dx = bx - ax;
+    dy = by - ay;
+    dz = 0;
+    const distance = Math.hypot(dx, dy);
+    begin(0);
+    let previous = 0;
+    let t0 = 0;
+    const g0 = ground(ax + t0 * dx, ay + t0 * dy);
+    let alive = n;
+    for (let i = 0; i < n; i += 1) {
+      laneDz[i] = (zs[i] ?? 0) - az;
+      laneC0[i] = az + t0 * (laneDz[i] ?? 0) - g0;
+      laneObscuration[i] = 0;
+      laneObscuredFrom[i] = -1;
+      laneAlive[i] = 1;
+    }
+    for (;;) {
+      const t1 = nextCut();
+      if (t1 === Infinity) return alive;
+      if (!(t1 - previous > 1e-12)) {
+        previous = t1;
+        continue;
+      }
+      previous = t1;
+      const g1 = ground(ax + t1 * dx, ay + t1 * dy);
+      inBuildings.length = 0;
+      inVegetation.length = 0;
+      if (waiting.length + active.length > 0) {
+        const tm = (t0 + t1) / 2;
+        const mx = ax + ((t0 + t1) / 2) * dx;
+        const my = ay + ((t0 + t1) / 2) * dy;
+        collect(tm);
+        for (const c of active) {
+          const id = candId[c] ?? 0;
+          const f = features[id];
+          if (!f || !inside(f, mx, my)) continue;
+          if (id < nb) {
+            const building = buildings[id];
+            if (building) inBuildings.push(building);
+          } else {
+            const area = vegetation[id - nb];
+            if (area) inVegetation.push(area);
+          }
+        }
+      }
+      for (let i = 0; i < n; i += 1) {
+        if (laneAlive[i] === 0) continue;
+        const ldz = laneDz[i] ?? 0;
+        const c0 = laneC0[i] ?? 0;
+        const c1 = az + t1 * ldz - g1;
+        laneC0[i] = c1;
+        if (inBuildings.length + inVegetation.length === 0 && c0 >= 0 && c1 >= 0) continue;
+        if (pieceBlocks(i, t0, t1, c0, c1, ldz, distance)) {
+          laneAlive[i] = 0;
+          alive -= 1;
+        }
+      }
+      if (alive === 0) return 0;
+      t0 = t1;
+    }
+  }
+
+  /** `walk`'s handling of one piece, for lane `i` of `clearCount`: whether it obstructs the lane. */
+  function pieceBlocks(
+    i: number,
+    t0: number,
+    t1: number,
+    c0: number,
+    c1: number,
+    ldz: number,
+    distance: number,
+  ): boolean {
+    const ct0 = t0;
+    const cc0 = c0;
+    let count = 0;
+    const add = (t: number) => {
+      let j = count;
+      while (j > 0 && (laneParts[j - 1] ?? 0) > t) {
+        laneParts[j] = laneParts[j - 1] ?? 0;
+        j -= 1;
+      }
+      laneParts[j] = t;
+      count += 1;
+    };
+    add(t0);
+    add(t1);
+    if ((cc0 - 0) * (c1 - 0) < 0) add(ct0 + ((cc0 - 0) / (cc0 - c1)) * (t1 - ct0));
+    for (const f of inBuildings) {
+      const v0 = az + t0 * ldz - f.roofZ;
+      const v1 = az + t1 * ldz - f.roofZ;
+      if (v0 * v1 < 0) add(t0 + (v0 / (v0 - v1)) * (t1 - t0));
+    }
+    for (const f of inVegetation) {
+      const level = f.canopy;
+      if ((cc0 - level) * (c1 - level) < 0) {
+        add(ct0 + ((cc0 - level) / (cc0 - c1)) * (t1 - ct0));
+      }
+    }
+    for (let j = 0; j + 1 < count; j += 1) {
+      const s0 = laneParts[j] ?? t0;
+      const s1 = laneParts[j + 1] ?? t1;
+      if (s1 <= s0) continue;
+      const sm = (s0 + s1) / 2;
+      const clearance = cc0 + ((sm - ct0) / (t1 - ct0)) * (c1 - cc0);
+      if (clearance < 0) return true;
+      const lineZ = az + sm * ldz;
+      for (const f of inBuildings) if (lineZ < f.roofZ) return true;
+      if (inVegetation.length === 0) continue;
+      let rate = 0;
+      let densest: PreparedVegetation | undefined;
+      for (const f of inVegetation) {
+        if (!(clearance < f.canopy)) continue;
+        const r = 1 / f.seeThrough;
+        rate += r;
+        const best = densest ? 1 / densest.seeThrough : -1;
+        if (!densest || r > best || (r === best && f.id < densest.id)) densest = f;
+      }
+      const length = (s1 - s0) * distance;
+      const obscuration = laneObscuration[i] ?? 0;
+      if (densest && rate > 0 && (laneObscuredFrom[i] ?? -1) < 0) laneObscuredFrom[i] = s0;
+      if (densest && rate > 0 && obscuration + rate * length >= 1) return true;
+      laneObscuration[i] = obscuration + rate * length;
+    }
+    return false;
+  }
+
+  return { blocked, clearCount, provesQuickly, provesByWalking };
 }

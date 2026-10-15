@@ -210,6 +210,31 @@ describe('sightLineTracer', () => {
     expect(blocked).toBeLessThan(3600);
   });
 
+  it('counts clear lines to several heights of one point exactly as one line at a time', () => {
+    const rng = createRngState(11);
+    const r = () => -199 + 398 * nextFloat(rng);
+    const counts = [0, 0, 0, 0];
+    for (let i = 0; i < 4000; i += 1) {
+      const a = point(r(), r(), [0.3, 1.0, 1.65][i % 3] ?? 1.65);
+      const x = r();
+      const y = r();
+      if (a.x === x && a.y === y) continue;
+      const ground = heightAt(t, x, y);
+      const zs = [0.15, 0.55, 1.2, 4 * nextFloat(rng)].slice(0, 1 + (i % 4)).map((h) => ground + h);
+      const one = zs.filter((z) => !tracer.blocked(a, { x, y, z })).length;
+      const reference = zs.filter((z) => traceSightLine(t, a, { x, y, z }) === null).length;
+      const many = tracer.clearCount(a, x, y, zs);
+      expect(
+        many,
+        `${JSON.stringify(a)} → (${String(x)}, ${String(y)}) ${JSON.stringify(zs)}`,
+      ).toBe(one);
+      expect(one).toBe(reference);
+      if (zs.length === 3) counts[many] = (counts[many] ?? 0) + 1;
+    }
+    // Every outcome occurs: none, some and all of the heights clear.
+    for (const c of counts) expect(c).toBeGreaterThan(5);
+  });
+
   it('agrees on sight lines along building edges, grid lines and through grid vertices', () => {
     const lines: [Vec3, Vec3][] = [
       [point(-60, 15, 1.7), point(-40, 15, 1.5)], // along the aligned building's south edge

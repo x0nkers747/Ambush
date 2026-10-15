@@ -45,12 +45,12 @@ function exposure(context: FofContext, shooter: Soldier, target: Soldier): numbe
   };
   const ground = surfaceHeightAt(terrain, target.position.x, target.position.y);
   const heights = detection.targetSampleHeightsM[target.posture];
-  let clear = 0;
-  for (const h of heights) {
-    if (!tracer.blocked(eye, { x: target.position.x, y: target.position.y, z: ground + h })) {
-      clear += 1;
-    }
-  }
+  const clear = tracer.clearCount(
+    eye,
+    target.position.x,
+    target.position.y,
+    heights.map((h) => ground + h),
+  );
   if (clear === 0) return 0;
   return (
     (clear / heights.length) * vegetationTransmission(terrain, shooter.position, target.position)

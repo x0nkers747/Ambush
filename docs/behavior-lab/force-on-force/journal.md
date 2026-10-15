@@ -445,6 +445,57 @@ are in 04 §5.1.
 - **`&soldiers=dots`** (temporary) draws dots instead of characters. That isolates the
   behaviours' cost: 0.65–2.8× real time at 6–14 fps, slowest just before contact.
 
+## The simulation in a worker, and one walk per look (2026-10-15)
+
+**Asked for.** With soldiers drawn as dots, the 988-soldier lab still drew at only 6–14
+fps. The simulation shared the page's thread: a detection tick took over 100 ms. So:
+run the simulation in a worker, and make detection cheaper.
+
+**Built.**
+
+- **The worker** (`sim.worker.ts`, `session-host.ts`, `worker-session.ts`).
+  - The session runs in the worker, which steps toward the tick the page asks for.
+  - It posts batches: soldiers per tick as typed arrays, events, samples, hashes,
+    keyframes, and the state at most every 150 ms (without the 976,000 per-pair
+    thresholds, which the page never reads).
+  - The page keeps a mirror with the session's interface, so the lab's drawing and
+    panels are unchanged.
+  - Scrubbing re-simulates on the page from the keyframes. Stepping or playing from a
+    scrubbed tick branches: the worker re-simulates up to it.
+  - The session interface gained `advance(tick)` and `dispose()`. Its `head` and `view`
+    are now a read-only `FofRunView`.
+- **`clearCount`** in the sight-line tracer: the sight lines from one eye to several
+  heights of one point, in one walk of their common path, exactly as one at a time.
+  Detection and fire's exposure check use it.
+
+**Validation.**
+
+- **The worker** (`worker-session.test.ts`), through a channel that structured-clones
+  like a worker: the same per-second hashes, motion, events, samples, metrics and state
+  as the in-page session over 500 s; recording and replay (in the page and in the
+  worker) with every hash checked; scrubbing back; a step while scrubbed branches.
+- **The tracer:** 4,000 random lines at 1–4 heights agree with `blocked` and with the
+  reference.
+- **Whole runs:** open, wooded and urban, seeds 1–2, default and attacking, are
+  bit-identical before and after. The 988-soldier battle ends the same, at the same
+  moment.
+- **In Chrome:**
+  - 988 soldiers, dots: 60 fps throughout, at 1.2–3.3× real time.
+  - The default demonstration with characters: 60 fps, the same outcome as in Node
+    (mutual disengagement at 933.1 s); replay & verify, 938 s with no mismatch.
+  - Scrubbing back after a full replay, and stepping from there, work.
+  - **Found and fixed:** scrubbing back while play was running branched at once (as on
+    the page). The view then jumped to the start while the worker re-simulated up to
+    the branch. It now stays on the scrubbed tick until the worker is back there
+    (tested).
+  - The production build bundles the worker.
+
+**Measured headless** ([04 §5.1](04-experiments.md)): 988 soldiers run the whole battle
+3× faster than real time (813 s in 268 s; before, 734 s).
+
+- **Corrected:** part of the earlier figure was other load on the machine. Measured
+  side by side, the shared walk is 1.8× faster before contact.
+
 ## Known limitations
 
 **Detection.**

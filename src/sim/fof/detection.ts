@@ -106,11 +106,13 @@ export function traceSight(
   };
   const ground = surfaceHeightAt(terrain, target.position.x, target.position.y);
   const heights = detection.targetSampleHeightsM[target.posture];
-  let clear = 0;
-  for (const h of heights) {
-    if (!tracer.blocked(eye, { x: target.position.x, y: target.position.y, z: ground + h }))
-      clear += 1;
-  }
+  // The sample points share their map path: one walk for all of them.
+  const clear = tracer.clearCount(
+    eye,
+    target.position.x,
+    target.position.y,
+    heights.map((h) => ground + h),
+  );
   const visibleFraction = clear / heights.length;
   const transmission =
     visibleFraction > 0 ? vegetationTransmission(terrain, observer.position, target.position) : 0;

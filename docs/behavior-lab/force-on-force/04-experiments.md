@@ -154,14 +154,16 @@ other's start, and both attack on contact. With squads as its elements, a force
 attacks by fire and movement one squad at a time. Open ground is the worst case for
 detection, since everyone is in view.
 
-The runs are headless in Node, one at a time, at 30 Hz, on the development machine:
+The runs are headless in Node, one at a time, at 30 Hz, on the development machine.
+This is the current code: sight lines that cannot detect are skipped, and a look's
+sight lines are walked together (both below):
 
-| Soldiers (squads a side) | CPU per simulated second, before contact | After contact | Worst tick | Whole run                                                        | Heap   |
-| ------------------------ | ---------------------------------------: | ------------: | ---------: | ---------------------------------------------------------------- | ------ |
-| 52 (2)                   |                                     9 ms |          6 ms |      15 ms | 496 s simulated in 3.8 s (OPFOR victory)                         | 43 MB  |
-| 208 (8)                  |                                    71 ms |         67 ms |      50 ms | first 420 s in 29 s                                              | 95 MB  |
-| 494 (19)                 |                                   353 ms |        266 ms |     155 ms | 983 s simulated in 284 s (BLUEFOR withdrawal)                    | 94 MB  |
-| 988 (38)                 |                                   1.78 s |        0.54 s |     483 ms | 813 s simulated in 734 s, about real time (mutual disengagement) | 146 MB |
+| Soldiers (squads a side) | CPU per simulated second, before contact | After contact | Worst tick | Whole run                                                     | Heap   |
+| ------------------------ | ---------------------------------------: | ------------: | ---------: | ------------------------------------------------------------- | ------ |
+| 52 (2)                   |                                     7 ms |          5 ms |      17 ms | 496 s simulated in 2.9 s (OPFOR victory)                      | 44 MB  |
+| 208 (8)                  |                                    41 ms |         23 ms |      43 ms | 708 s simulated in 21 s (OPFOR victory)                       | 109 MB |
+| 494 (19)                 |                                   153 ms |         73 ms |      75 ms | 983 s simulated in 92 s (BLUEFOR withdrawal)                  | 126 MB |
+| 988 (38)                 |                                   484 ms |        266 ms |     222 ms | 813 s simulated in 268 s, 3× real time (mutual disengagement) | 110 MB |
 
 - **Everything holds at full size.** Every run ended by a stated rule, with no refused
   movement orders and no broken invariants. Squads bounded in turn: 29 bounds at 988
@@ -169,23 +171,25 @@ The runs are headless in Node, one at a time, at 30 Hz, on the development machi
 - **The cost is detection,** and it grows with the square of the soldiers. Each
   observer looks at every enemy in range once a second, and a look traces three sight
   lines.
-  - At 988 soldiers before contact: looking is 85 % of the time (sight lines alone
-    74 %), the movement engine 10 %, and the forces' decisions, bounding included, 2.5 %.
+  - At 988 soldiers before contact, before the shared walk: looking was 85 % of the time
+    (sight lines alone 74 %), the movement engine 10 %, and the forces' decisions,
+    bounding included, 2.5 %.
   - After contact the cost falls as casualties and lost contacts thin the pairs.
 - **Real time.** At 30 Hz a tick has 33 ms.
-  - At 208 soldiers the run is about 14× faster than real time.
-  - At 494, about 3.5×.
-  - At 988 it is about real time over the whole run, but slower before contact
-    (1.8 s per simulated second). Its worst ticks (the decisions, 10 a second) take up
-    to 0.5 s, too slow for an interactive view without spreading the looks over more
-    ticks, or moving the simulation off the page's thread.
-- **The 208- and 494-soldier figures before contact** may include some time shared with
-  another run (a run of the earlier code overlapped the first minutes). The 988-soldier
-  run had the machine to itself.
+  - At 988 soldiers the whole battle runs 3× faster than real time, and 2× before
+    contact.
+  - At 494, 11×; at 208, 34×.
+- **The first measurements were higher, and partly inflated.** The first table (the
+  same runs before both optimizations) gave 1.78 s per simulated second before contact
+  at 988. That run shared the machine with other load. Measured again in the same
+  conditions as the current code, the code with only the first optimization did
+  680 ms. So the shared walk gives about 1.8× on top of it, not the 3.7× the two
+  figures suggest.
 
-**In the browser.** `#force-on-force?experiment=scale` (experiment 14) runs the
-988-soldier battle in the lab. In Chrome on the development machine the page draws at
-about 4 frames a second, and the battle plays at about 0.4–0.5× real time.
+**In the browser** (measured before the worker and the shared walk, below).
+`#force-on-force?experiment=scale` (experiment 14) runs the 988-soldier battle in the
+lab. In Chrome on the development machine the page drew at about 4 frames a second, and
+the battle played at about 0.4–0.5× real time.
 
 - Drawing is the limit, not the simulation. Rendering is 57 % of the time (the soldiers
   drawn one by one, and again for shadows), posing the soldiers 22 %, and the
@@ -197,7 +201,7 @@ about 4 frames a second, and the battle plays at about 0.4–0.5× real time.
 - The motion log keeps every soldier's position at every tick, about 1 MB per
   simulated second at this size. A whole battle is about 1 GB in the page.
 
-**The simulation alone in the browser:**
+**The simulation alone in the browser** (before the worker and the shared walk):
 `#force-on-force?experiment=scale&soldiers=dots`. `soldiers=dots` draws soldiers as
 dots on the overlay instead of animated characters. It is temporary, until the
 characters get levels of detail. In Chrome, playing at 32× (as fast as it goes):
@@ -226,12 +230,45 @@ Only if that clears the threshold does it trace.
   detect (`tracedAttempts`), those with a sight line. Experiment 7 checks that share,
   and gave the same outcomes as before.
 
+**Done since: one walk for a look's sight lines.** A look's three sight lines (to
+the target's feet, middle and head) share their map path. They cross the same grid
+lines and buckets, and the same buildings and vegetation, at the same ground heights.
+Only the heights differ.
+
+- **`clearCount`** walks the path once, with one lane per height. Each lane checks
+  each piece with exactly the operations `walk` uses for that line. A lane stops at its
+  first obstruction; the walk stops when every lane has.
+- **Exact.** A test of 4,000 random lines on rough ground with buildings and
+  vegetation, at 1–4 heights, compares it with `blocked` and the reference
+  `traceSightLine`. The force-on-force runs (open, wooded, urban, seeds 1–2, default
+  and attacking) are bit-identical before and after.
+- **Speed:** about 1.8× before contact at 988 soldiers (680 → 484 ms per simulated
+  second over the first 120 s, both measured in the same conditions). Fire's exposure
+  check uses it too.
+
+**Done since: the simulation runs in a worker.** The lab runs its session in a Web
+Worker (`sim.worker.ts`; `session-host.ts` on the worker side,
+`worker-session.ts` on the page's).
+
+- **The page never waits for the simulation.** It asks for ticks at the speed chosen
+  and draws whatever the worker has posted: each tick's soldiers (packed into typed
+  arrays, for the motion log), events, metrics, hashes, keyframes, and the state at
+  most every 150 ms.
+- **Scrubbing back** re-simulates on the page from the keyframes, as before.
+- **Exact.** A test joins the two sides with a channel that copies messages as a
+  worker does. It checks the same hashes, motion, events, samples, metrics and state as
+  the in-page session, recording and replay with every hash checked, scrubbing, and
+  branching.
+- `&worker=0` in the address runs the session on the page as before.
+
+**In Chrome with both** (988 soldiers, dots, 32×): 60 fps throughout. The battle plays
+at 1.2–3.3× real time (never below real time; before, 0.65× at worst, at 6–14 fps).
+
 **Next, if larger forces are wanted:**
 
-- trace the three heights of a look in one walk of the grid;
-- give looks a spatial index or a nearest-first budget;
-- spread an observer's looks over the ticks between decisions;
-- run the simulation in a worker.
+- give looks a spatial index or a nearest-first budget (no longer exact: the order of
+  draws changes);
+- levels of detail for the characters (with characters, drawing is the limit).
 
 ## 6. Which parameters rest on research
 
