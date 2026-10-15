@@ -1,5 +1,10 @@
 // Public API of the exercise layer. Other layers import only from here (`#exercise`).
-export { combatEventOf, type CombatEvent, type ShotFiredEvent } from './combat-events';
+export {
+  combatEventOf,
+  type CombatEvent,
+  type GrenadeImpactEvent,
+  type ShotFiredEvent,
+} from './combat-events';
 export { DEMO_TERRAIN } from './demo-terrain';
 export {
   createMotionRecorder,

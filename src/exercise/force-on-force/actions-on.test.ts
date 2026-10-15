@@ -204,19 +204,29 @@ describe('actions on contact: attack by fire and movement', () => {
   }
 
   it('a fire team (no subordinate units) bounds in two halves', () => {
-    const base = spec('open', 1, 'attack', 'continue');
-    const run = createFofRun({
-      ...base,
-      blufor: { ...base.blufor, organization: 'fireTeam', formation: 'usmc.fireTeam.wedge' },
-    });
+    // Several seeds: a fire team may also break before it assaults (a grenade among four men).
     const sizes = new Set<number>();
-    finish(run, () => {
-      const blue = run.sim.state.fof?.forces[0];
-      if (blue?.phase === 'assaulting' && blue.bounding.length > 0) sizes.add(blue.bounding.length);
-    });
+    let assaults = 0;
+    for (const seed of [1, 2, 3]) {
+      const base = spec('open', seed, 'attack', 'continue');
+      const run = createFofRun({
+        ...base,
+        blufor: { ...base.blufor, organization: 'fireTeam', formation: 'usmc.fireTeam.wedge' },
+      });
+      const seen = { assaulted: false };
+      finish(run, () => {
+        const blue = run.sim.state.fof?.forces[0];
+        if (blue?.phase === 'assaulting' && blue.bounding.length > 0) {
+          sizes.add(blue.bounding.length);
+          seen.assaulted = true;
+        }
+      });
+      if (seen.assaulted) assaults += 1;
+    }
+    expect(assaults).toBeGreaterThanOrEqual(2);
     expect(sizes.size).toBeGreaterThan(0);
     expect([...sizes].every((n) => n <= 2)).toBe(true);
-  }, 120_000);
+  }, 240_000);
 });
 
 describe('actions on contact: attack, firing positions', () => {

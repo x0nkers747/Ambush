@@ -5,12 +5,13 @@ import type { Posture } from '../state';
 // parameter of the experimental detection, fire, suppression, organizational
 // and termination models, as versioned, validated plain data. The kernel
 // reads these values and nothing else. The defaults live in the exercise
-// layer (src/exercise/forces/fof-v1.json); the research note
+// layer (src/exercise/forces/fof-v2.json); the research note
 // (docs/behavior-lab/force-on-force/02-detection-research.md) says which are
 // taken from the literature and which are experimental.
 
 export const FOF_CONFIG_SCHEMA = 'ambush.fof-config';
-export const FOF_CONFIG_SCHEMA_VERSION = 1;
+/** 2: weapons with feeds, fire modes, reloads and area effects (docs/behavior-lab/force-on-force/06). */
+export const FOF_CONFIG_SCHEMA_VERSION = 2;
 
 /** A uniformly distributed duration, in seconds: min ≤ value < max (or exactly min when equal). */
 export interface UniformSeconds {
@@ -84,22 +85,105 @@ export interface DetectionConfig {
   readonly underFireConfidence: number;
 }
 
-/** An abstract weapon category: one burst (fire event) at a time. */
+/** What a weapon is (docs/behavior-lab/force-on-force/06 §2); categories can be added. */
+export type WeaponCategory = 'rifle' | 'carbine' | 'lightMachineGun' | 'grenadeLauncher';
+export const WEAPON_CATEGORIES: readonly WeaponCategory[] = [
+  'rifle',
+  'carbine',
+  'lightMachineGun',
+  'grenadeLauncher',
+];
+
+/** How a weapon is fed: a magazine, a belt, or one round at a time (a launcher). */
+export type FeedKind = 'magazine' | 'belt' | 'single';
+
+/** A whole number drawn uniformly in [min, max]. */
+export interface IntegerRange {
+  readonly min: number;
+  readonly max: number;
+}
+
+/**
+ * A fire mode: bursts of `roundsPerBurst` rounds, one every
+ * `secondsBetweenBursts` (from one burst's start to the next), both drawn per
+ * burst. Doctrinal rates, not the mechanism's cyclic rate (06 §2).
+ */
+export interface FireMode {
+  readonly roundsPerBurst: IntegerRange;
+  readonly secondsBetweenBursts: UniformSeconds;
+}
+
+/**
+ * An area-effect weapon (a grenade launcher): where it may be fired, how its
+ * rounds land and what they do (06 §4). Its rounds are resolved by area, not
+ * by the hit curve.
+ */
+export interface AreaEffect {
+  /** Not fired closer than this (arming and safety distance), m. */
+  readonly minRangeM: number;
+  /** Radial landing error: up to `atZeroM + range / 100 × per100M` metres, uniformly in area. */
+  readonly dispersionM: { readonly atZeroM: number; readonly per100M: number };
+  /** Incapacitation probability at the burst, at `casualtyRadiusM`, and none beyond `maxEffectRadiusM` (linear between). */
+  readonly incapacitationAtCentre: number;
+  readonly casualtyRadiusM: number;
+  readonly incapacitationAtCasualtyRadius: number;
+  readonly maxEffectRadiusM: number;
+  /** Prone soldiers' incapacitation probability is × this. */
+  readonly proneFactor: number;
+  /** Not fired when a friendly soldier is this close to the aim point, m. */
+  readonly friendlyClearanceM: number;
+  /** Chance of choosing it at a firing opportunity when it may be fired: at a target in sight, or area fire. */
+  readonly employProbability: { readonly aimed: number; readonly area: number };
+  /** Least time between two rounds of it (s). */
+  readonly minSecondsBetweenShots: number;
+}
+
+/**
+ * A weapon (06): its feed and ammunition, fire modes, reload, accuracy and
+ * effect. Fire events stay abstract: a burst is one event.
+ */
 export interface FofWeapon {
   readonly id: string;
   readonly label: string;
-  /** Hit probability of one round at a standing, fully visible target, by range (`hitProbabilityAt`). */
+  readonly category: WeaponCategory;
+  /** The ammunition it fires (a label, e.g. "5.56×45 mm"). */
+  readonly ammunition: string;
+  readonly feed: FeedKind;
+  /** Rounds a full magazine, belt or launcher holds. */
+  readonly capacity: number;
+  /** Rounds carried at the start, the loaded ones included (one full feed loaded). */
+  readonly basicLoadRounds: number;
+  /** Time to reload it (s). */
+  readonly reloadSeconds: UniformSeconds;
+  /**
+   * In a lull, a magazine below this share of its capacity is changed for a
+   * full one (its rounds go back to the reserve); 0: never (belts, launchers).
+   */
+  readonly tacticalReloadBelow: number;
+  readonly sustained: FireMode;
+  readonly rapid: FireMode;
+  /** A burst of n rounds counts as 1 + (n − 1) × this aimed rounds toward its hit chance (rounds of a burst are not independent). */
+  readonly burstRoundWeight: number;
+  /** Hit probability of one round at a standing, fully visible target, by range (`hitProbabilityAt`); empty for area weapons. */
   readonly hitProbabilityByRange: readonly RangeProbability[];
   readonly maxEngagementRangeM: number;
-  readonly roundsPerBurst: number;
-  readonly secondsBetweenBursts: number;
-  /** Rounds carried at the start. */
-  readonly basicLoadRounds: number;
   /** Probability that a hit incapacitates. */
   readonly incapacitationProbabilityOnHit: number;
   /** Suppression a burst adds to the soldier aimed at, and to soldiers within `suppressionRadiusM` of the impact (fading out). */
   readonly suppressionPerBurst: number;
   readonly suppressionRadiusM: number;
+  /** Area effect (grenade launchers); `null` for direct-fire weapons. */
+  readonly area: AreaEffect | null;
+}
+
+/** When a soldier fires at his weapon's rapid rate rather than its sustained one (06 §3). */
+export interface RapidFireConfig {
+  /** For this long after his force opened fire (s). */
+  readonly afterOpeningSeconds: number;
+  /** At targets this close (m). */
+  readonly withinRangeM: number;
+  /** While his force assaults. */
+  readonly whenAssaulting: boolean;
 }
 
 export interface FireConfig {
@@ -108,8 +192,10 @@ export interface FireConfig {
   readonly postureHitMultipliers: Readonly<Record<Posture, number>>;
   /** Hit multiplier when the shooter is moving. */
   readonly movingShooterFactor: number;
-  /** Burst interval multiplier per soldier, drawn uniformly per burst (variation between soldiers). */
-  readonly cadenceJitter: { readonly min: number; readonly max: number };
+  /** When fire is at the rapid rate. */
+  readonly rapidFire: RapidFireConfig;
+  /** A soldier who has not fired for this long changes a part-empty magazine (s; `FofWeapon.tacticalReloadBelow`). */
+  readonly lullReloadSeconds: number;
   /** Leaders fire this much less often (they observe and command). */
   readonly leaderCadenceFactor: number;
   /** Rules of engagement: fire at confirmed contacts (`detected`) or only at identified ones (`identified`). */
@@ -423,7 +509,8 @@ export function validateFofConfig(data: unknown): FofConfig {
     'weapons',
     'postureHitMultipliers',
     'movingShooterFactor',
-    'cadenceJitter',
+    'rapidFire',
+    'lullReloadSeconds',
     'leaderCadenceFactor',
     'engageLevel',
     'areaFireMemorySeconds',
@@ -433,28 +520,77 @@ export function validateFofConfig(data: unknown): FofConfig {
   if (!Array.isArray(f['weapons']) || f['weapons'].length === 0) {
     fail('.fire.weapons', 'must be a non-empty array');
   }
+  const integer = (value: unknown, path: string, min: number) => {
+    const n = number(value, path, min);
+    if (!Number.isInteger(n)) fail(path, 'must be an integer');
+    return n;
+  };
+  const seconds = (value: unknown, path: string, min = 0) => {
+    const r = object(value, path, ['minSeconds', 'maxSeconds']);
+    const lo = number(r['minSeconds'], `${path}.minSeconds`, min);
+    if (number(r['maxSeconds'], `${path}.maxSeconds`, min) < lo)
+      fail(path, 'minSeconds > maxSeconds');
+    if (lo <= 0 && min > 0) fail(`${path}.minSeconds`, 'must be > 0');
+  };
+  const mode = (value: unknown, path: string) => {
+    const m = object(value, path, ['roundsPerBurst', 'secondsBetweenBursts']);
+    const r = object(m['roundsPerBurst'], `${path}.roundsPerBurst`, ['min', 'max']);
+    const lo = integer(r['min'], `${path}.roundsPerBurst.min`, 1);
+    if (integer(r['max'], `${path}.roundsPerBurst.max`, 1) < lo)
+      fail(`${path}.roundsPerBurst`, 'min > max');
+    seconds(m['secondsBetweenBursts'], `${path}.secondsBetweenBursts`, 1e-9);
+  };
   const ids = new Set<string>();
   (f['weapons'] as unknown[]).forEach((w, i) => {
     const path = `.fire.weapons[${String(i)}]`;
     const weapon = object(w, path, [
       'id',
       'label',
+      'category',
+      'ammunition',
+      'feed',
+      'capacity',
+      'basicLoadRounds',
+      'reloadSeconds',
+      'tacticalReloadBelow',
+      'sustained',
+      'rapid',
+      'burstRoundWeight',
       'hitProbabilityByRange',
       'maxEngagementRangeM',
-      'roundsPerBurst',
-      'secondsBetweenBursts',
-      'basicLoadRounds',
       'incapacitationProbabilityOnHit',
       'suppressionPerBurst',
       'suppressionRadiusM',
+      'area',
     ]);
     const id = string(weapon['id'], `${path}.id`);
     if (ids.has(id)) fail(`${path}.id`, `"${id}" is used twice`);
     ids.add(id);
     string(weapon['label'], `${path}.label`);
+    string(weapon['ammunition'], `${path}.ammunition`);
+    if (!(WEAPON_CATEGORIES as readonly unknown[]).includes(weapon['category']))
+      fail(`${path}.category`, `must be one of ${WEAPON_CATEGORIES.join(', ')}`);
+    const feed = weapon['feed'];
+    if (feed !== 'magazine' && feed !== 'belt' && feed !== 'single')
+      fail(`${path}.feed`, 'must be "magazine", "belt" or "single"');
+    const capacity = integer(weapon['capacity'], `${path}.capacity`, 1);
+    if (feed === 'single' && capacity !== 1)
+      fail(`${path}.capacity`, 'must be 1 for a single-round feed');
+    integer(weapon['basicLoadRounds'], `${path}.basicLoadRounds`, 0);
+    seconds(weapon['reloadSeconds'], `${path}.reloadSeconds`, 1e-9);
+    number(weapon['tacticalReloadBelow'], `${path}.tacticalReloadBelow`, 0, 1);
+    if (feed !== 'magazine' && (weapon['tacticalReloadBelow'] as number) > 0)
+      fail(`${path}.tacticalReloadBelow`, 'only magazines are changed part-empty');
+    mode(weapon['sustained'], `${path}.sustained`);
+    mode(weapon['rapid'], `${path}.rapid`);
+    number(weapon['burstRoundWeight'], `${path}.burstRoundWeight`, 0, 1);
+    const area = weapon['area'];
     const curve = weapon['hitProbabilityByRange'];
-    if (!Array.isArray(curve) || curve.length === 0)
-      fail(`${path}.hitProbabilityByRange`, 'must be a non-empty array');
+    if (!Array.isArray(curve) || (curve.length === 0 && area === null))
+      fail(
+        `${path}.hitProbabilityByRange`,
+        'must be a non-empty array (empty only for area weapons)',
+      );
     let last = -1;
     (curve as unknown[]).forEach((point, j) => {
       const pp = `${path}.hitProbabilityByRange[${String(j)}]`;
@@ -468,11 +604,6 @@ export function validateFofConfig(data: unknown): FofConfig {
     if (number(weapon['maxEngagementRangeM'], `${path}.maxEngagementRangeM`, 0) < last) {
       fail(`${path}.maxEngagementRangeM`, 'must be at least the last curve range');
     }
-    const rounds = positive(weapon['roundsPerBurst'], `${path}.roundsPerBurst`);
-    if (!Number.isInteger(rounds)) fail(`${path}.roundsPerBurst`, 'must be an integer');
-    positive(weapon['secondsBetweenBursts'], `${path}.secondsBetweenBursts`);
-    const load = number(weapon['basicLoadRounds'], `${path}.basicLoadRounds`, 0);
-    if (!Number.isInteger(load)) fail(`${path}.basicLoadRounds`, 'must be an integer');
     number(
       weapon['incapacitationProbabilityOnHit'],
       `${path}.incapacitationProbabilityOnHit`,
@@ -481,6 +612,42 @@ export function validateFofConfig(data: unknown): FofConfig {
     );
     number(weapon['suppressionPerBurst'], `${path}.suppressionPerBurst`, 0, 1);
     number(weapon['suppressionRadiusM'], `${path}.suppressionRadiusM`, 0);
+    if (area !== null) {
+      const ap = `${path}.area`;
+      const a = object(area, ap, [
+        'minRangeM',
+        'dispersionM',
+        'incapacitationAtCentre',
+        'casualtyRadiusM',
+        'incapacitationAtCasualtyRadius',
+        'maxEffectRadiusM',
+        'proneFactor',
+        'friendlyClearanceM',
+        'employProbability',
+        'minSecondsBetweenShots',
+      ]);
+      if (number(a['minRangeM'], `${ap}.minRangeM`, 0) > (weapon['maxEngagementRangeM'] as number))
+        fail(`${ap}.minRangeM`, 'must not exceed maxEngagementRangeM');
+      const d = object(a['dispersionM'], `${ap}.dispersionM`, ['atZeroM', 'per100M']);
+      number(d['atZeroM'], `${ap}.dispersionM.atZeroM`, 0);
+      number(d['per100M'], `${ap}.dispersionM.per100M`, 0);
+      const centre = number(a['incapacitationAtCentre'], `${ap}.incapacitationAtCentre`, 0, 1);
+      const radius = positive(a['casualtyRadiusM'], `${ap}.casualtyRadiusM`);
+      if (
+        number(a['incapacitationAtCasualtyRadius'], `${ap}.incapacitationAtCasualtyRadius`, 0, 1) >
+        centre
+      )
+        fail(`${ap}.incapacitationAtCasualtyRadius`, 'must not exceed incapacitationAtCentre');
+      if (number(a['maxEffectRadiusM'], `${ap}.maxEffectRadiusM`, 0) < radius)
+        fail(`${ap}.maxEffectRadiusM`, 'must be at least casualtyRadiusM');
+      number(a['proneFactor'], `${ap}.proneFactor`, 0, 1);
+      number(a['friendlyClearanceM'], `${ap}.friendlyClearanceM`, 0);
+      const e = object(a['employProbability'], `${ap}.employProbability`, ['aimed', 'area']);
+      number(e['aimed'], `${ap}.employProbability.aimed`, 0, 1);
+      number(e['area'], `${ap}.employProbability.area`, 0, 1);
+      number(a['minSecondsBetweenShots'], `${ap}.minSecondsBetweenShots`, 0);
+      if (feed !== 'single') fail(`${path}.feed`, 'area weapons are single-round launchers');
+    }
   });
   byPosture(f['postureHitMultipliers'], '.fire.postureHitMultipliers', (v, p) =>
     number(v, p, 0, 1),
@@ -491,11 +658,17 @@ export function validateFofConfig(data: unknown): FofConfig {
     areaFireMemorySeconds: [0],
     areaFireCadenceFactor: [1, 100],
     areaFireHitFactor: [0, 1],
+    lullReloadSeconds: [0],
   });
-  const jitter = object(f['cadenceJitter'], '.fire.cadenceJitter', ['min', 'max']);
-  const jmin = positive(jitter['min'], '.fire.cadenceJitter.min');
-  if (number(jitter['max'], '.fire.cadenceJitter.max', jmin) < jmin)
-    fail('.fire.cadenceJitter', 'min > max');
+  const rapid = object(f['rapidFire'], '.fire.rapidFire', [
+    'afterOpeningSeconds',
+    'withinRangeM',
+    'whenAssaulting',
+  ]);
+  number(rapid['afterOpeningSeconds'], '.fire.rapidFire.afterOpeningSeconds', 0);
+  number(rapid['withinRangeM'], '.fire.rapidFire.withinRangeM', 0);
+  if (typeof rapid['whenAssaulting'] !== 'boolean')
+    fail('.fire.rapidFire.whenAssaulting', 'must be true or false');
   if (f['engageLevel'] !== 'detected' && f['engageLevel'] !== 'identified') {
     fail('.fire.engageLevel', 'must be "detected" or "identified"');
   }

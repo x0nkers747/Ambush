@@ -229,6 +229,7 @@ export function battleScenario(
     side: b.squad.side,
     name: b.squad.name,
     weapons: b.squad.weapons,
+    secondaryWeapons: b.squad.secondaryWeapons,
     formation: b.squad.formation,
     pace: b.pace,
     // Its home (where it falls back to on its own): its centre, or the clear ground nearest it.

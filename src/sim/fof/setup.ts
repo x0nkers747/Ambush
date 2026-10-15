@@ -51,6 +51,18 @@ export function validateFofSetup(
         fail(`soldier "${id}" fires "${weapon}", which is not a configured weapon`);
       }
     }
+    for (const [id, weapon] of Object.entries(force.secondaryWeapons ?? {})) {
+      if (!members.has(id)) fail(`force "${force.unitId}" arms "${id}", who is not a member`);
+      if (weapon === null) continue;
+      const w = fofWeapon(setup.config, weapon);
+      if (!w) fail(`soldier "${id}" carries "${weapon}", which is not a configured weapon`);
+      else if (w.area === null)
+        fail(
+          `soldier "${id}"'s secondary weapon "${weapon}" is not an area weapon (a grenade launcher)`,
+        );
+      if ((force.weapons[id] ?? null) === null)
+        fail(`soldier "${id}" has a secondary weapon but no primary one`);
+    }
     if (force.pace !== undefined && !(force.pace > 0))
       fail(`force "${force.unitId}" pace must be > 0`);
     if (force.actionsOn !== undefined && !ACTIONS_ON.includes(force.actionsOn)) {

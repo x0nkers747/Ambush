@@ -26,7 +26,7 @@ import {
 import elementTemplate from '../organizations/three-marine-element.json';
 import fireTeamTemplate from '../organizations/usmc-fire-team-mcwp-3-11-2.json';
 import { USMC_RIFLE_SQUAD_TEMPLATE } from '../squad';
-import defaultConfig from './fof-v1.json';
+import defaultConfig from './fof-v2.json';
 
 // Forces (docs/constructive-simulation/01): the organizations a force can
 // be, and how one is built into units and soldiers loosely in formation,
@@ -62,6 +62,16 @@ export function weaponCategory(template: OrganizationTemplate, slot: TemplateSlo
   return null;
 }
 
+/** The simulation weapon of a slot's second weapon (an underslung grenade launcher), or `null`. */
+export function secondaryWeaponCategory(
+  template: OrganizationTemplate,
+  slot: TemplateSlot,
+): string | null {
+  const role = template.roles.find((r) => r.id === slot.roleId);
+  const refs = (slot.loadout ?? role?.defaultLoadout)?.weaponProfileRefs ?? [];
+  return refs.includes('m203-grenade-launcher') ? 'grenadeLauncher' : null;
+}
+
 /** A force as built: its side, organization, ids, formation and weapons. */
 export interface SquadForce {
   readonly side: Side;
@@ -71,6 +81,8 @@ export interface SquadForce {
   readonly soldierIds: readonly string[];
   /** Weapon category (simulation) and model (display) of each soldier. */
   readonly weapons: Readonly<Record<string, string | null>>;
+  /** The second weapon (simulation) each soldier carries, if any (a grenade launcher). */
+  readonly secondaryWeapons: Readonly<Record<string, string | null>>;
   readonly displayWeapons: Readonly<Record<string, string | null>>;
 }
 
@@ -185,6 +197,7 @@ export function instantiateForce(o: ForceInstance): {
     : [];
   const soldiers: ScenarioSoldier[] = [];
   const weapons: Record<string, string | null> = {};
+  const secondaryWeapons: Record<string, string | null> = {};
   const displayWeapons: Record<string, string | null> = {};
   for (const copy of copies) {
     const instance = {
@@ -205,6 +218,8 @@ export function instantiateForce(o: ForceInstance): {
       const slot = template.slots.find((x) => x.id === m.slotId);
       const category = slot ? weaponCategory(template, slot) : null;
       weapons[m.soldierId] = category;
+      secondaryWeapons[m.soldierId] =
+        slot && category !== null ? secondaryWeaponCategory(template, slot) : null;
       displayWeapons[m.soldierId] =
         category === null
           ? null
@@ -222,6 +237,7 @@ export function instantiateForce(o: ForceInstance): {
     formation,
     soldierIds: copies.flatMap((c) => c.members.map((m) => m.soldierId)),
     weapons,
+    secondaryWeapons,
     displayWeapons,
   };
   return { force, units, soldiers };

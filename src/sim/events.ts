@@ -184,6 +184,8 @@ export interface FofFireEvent {
   readonly targetId: SoldierId;
   readonly aimPoint: Vec2;
   readonly weapon: string;
+  /** The fire mode: sustained, or rapid (docs/behavior-lab/force-on-force/06 §3). */
+  readonly mode: 'sustained' | 'rapid';
   readonly rounds: number;
   readonly rangeM: number;
   /** The probability the burst was resolved with (for area fire, against `hitId` or the nearest soldier). */
@@ -191,6 +193,49 @@ export interface FofFireEvent {
   readonly hit: boolean;
   readonly hitId: SoldierId | null;
   readonly incapacitated: boolean;
+}
+
+/**
+ * A grenade fired (docs/behavior-lab/force-on-force/06 §4): aimed at
+ * `aimPoint`, it burst at `impact`; `exposed` soldiers were within its
+ * effect and not behind cover, and these were incapacitated.
+ */
+export interface FofGrenadeEvent {
+  readonly type: 'fofGrenade';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly shooterId: SoldierId;
+  readonly unitId: string;
+  readonly side: Side;
+  readonly kind: 'aimed' | 'area';
+  readonly targetId: SoldierId;
+  readonly aimPoint: Vec2;
+  readonly impact: Vec2;
+  readonly weapon: string;
+  readonly rangeM: number;
+  readonly exposed: number;
+  readonly incapacitated: readonly SoldierId[];
+}
+
+/** A soldier began or finished reloading a weapon; `loaded` and `reserve` are its rounds then. */
+export interface FofReloadEvent {
+  readonly type: 'fofReload';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly soldierId: SoldierId;
+  readonly weapon: string;
+  readonly phase: 'started' | 'completed';
+  readonly loaded: number;
+  readonly reserve: number;
+}
+
+/** A soldier's weapon is empty with nothing in reserve. */
+export interface AmmunitionExhaustedEvent {
+  readonly type: 'ammunitionExhausted';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly soldierId: SoldierId;
+  readonly weapon: string;
 }
 
 /** A soldier's suppression crossed a threshold. */
@@ -226,5 +271,8 @@ export type SimEvent =
   | ForcePhaseChangedEvent
   | OrderChangedEvent
   | FofFireEvent
+  | FofGrenadeEvent
+  | FofReloadEvent
+  | AmmunitionExhaustedEvent
   | SuppressionChangedEvent
   | FofEndedEvent;

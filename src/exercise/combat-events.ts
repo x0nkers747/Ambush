@@ -19,11 +19,28 @@ export interface ShotFiredEvent {
   readonly incapacitated: boolean;
 }
 
-export type CombatEvent = ShotFiredEvent | SoldierIncapacitatedEvent;
+/** A grenade's burst, where it landed (the 3D view shows it). */
+export interface GrenadeImpactEvent {
+  readonly type: 'grenadeImpact';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly shooterId: SoldierId;
+  readonly impact: { readonly x: number; readonly y: number };
+}
+
+export type CombatEvent = ShotFiredEvent | SoldierIncapacitatedEvent | GrenadeImpactEvent;
 
 /** A burst or a casualty as the character layer's combat event (it reads the shooter and the time). */
 export function combatEventOf(event: SimEvent): CombatEvent | null {
   if (event.type === 'soldierIncapacitated') return event;
+  if (event.type === 'fofGrenade')
+    return {
+      type: 'grenadeImpact',
+      tick: event.tick,
+      atSeconds: event.atSeconds,
+      shooterId: event.shooterId,
+      impact: event.impact,
+    };
   if (event.type !== 'fofFire') return null;
   return {
     type: 'shotFired',

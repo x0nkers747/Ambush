@@ -107,6 +107,7 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
       <dt>State</dt><dd class="phase-${s.phase}">${PHASE_LABELS[s.phase]}</dd>
       <dt>Soldiers</dt><dd>${String(s.up)} of ${String(s.total)} active</dd>
       <dt>Effectiveness</dt><dd>${String(Math.round(s.effectiveness * 100))} %</dd>
+      ${ammunitionHtml(s)}
       <dt>Order</dt><dd>${s.active ? escapeHtml(describeOrder(s.active)) : '<span class="muted">none: holding</span>'}</dd>
       <dt>Then</dt><dd>${s.pending.length === 0 ? '<span class="muted">nothing</span>' : s.pending.map((x) => escapeHtml(describeOrder(x))).join('; ')}</dd>
     </dl>
@@ -142,6 +143,32 @@ export function combatRosterHtml(c: { squads(): readonly SquadStatus[] }, ui: Co
     .join('');
 }
 
+/** What each weapon is called in the panels. */
+export const WEAPON_LABELS: Readonly<Record<string, string>> = {
+  rifle: 'Rifles',
+  automaticRifle: 'M249 SAWs',
+  grenadeLauncher: 'M203 grenades',
+};
+
+/** The squad's rounds by weapon, and who is reloading or out (docs/behavior-lab/force-on-force/06). */
+function ammunitionHtml(s: SquadStatus): string {
+  const rows = s.ammunition
+    .map(
+      (a) =>
+        `<dt>${escapeHtml(WEAPON_LABELS[a.weapon] ?? a.weapon)}</dt><dd>${(a.loaded + a.reserve).toLocaleString('en')} rd <span class="muted">(${a.loaded.toLocaleString('en')} loaded, ${String(a.carriers)} carrying)</span></dd>`,
+    )
+    .join('');
+  const state = [
+    s.reloading > 0 ? `${String(s.reloading)} reloading` : '',
+    s.outOfAmmunition > 0
+      ? `<span class="warn">${String(s.outOfAmmunition)} out of ammunition</span>`
+      : '',
+  ]
+    .filter((x) => x !== '')
+    .join(' · ');
+  return `${rows}${state ? `<dt>Weapons</dt><dd>${state}</dd>` : ''}`;
+}
+
 /** An event in words, or `null` for one the log does not show. */
 export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>): string | null {
   const ev = e.event;
@@ -153,6 +180,10 @@ export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>)
       return `${name(ev.unitId)}: ${PHASE_LABELS[ev.to]}${ev.reason ? ` (${ev.reason})` : ''}`;
     case 'soldierIncapacitated':
       return `${ev.soldierId} hit by ${ev.byId}`;
+    case 'fofGrenade':
+      return `${ev.shooterId} fired a grenade (${String(Math.round(ev.rangeM))} m)${ev.incapacitated.length > 0 ? `: ${ev.incapacitated.join(', ')} down` : ''}`;
+    case 'ammunitionExhausted':
+      return `${ev.soldierId} is out of ${WEAPON_LABELS[ev.weapon]?.toLowerCase() ?? ev.weapon} ammunition`;
     case 'commandRejected':
       return `An order was refused (${ev.reason})`;
     default:

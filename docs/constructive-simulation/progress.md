@@ -346,3 +346,15 @@ simulation kernel.
       (urban) for those battles;
     - 3D frames: median 6.6 ms in both, uncapped.
 - `npm run check` and `npm run build` pass.
+
+### Weapons and ammunition
+
+The force-on-force model's weapons are realistic in their ammunition and
+rates ([06](../behavior-lab/force-on-force/06-weapons-and-ammunition.md)):
+magazines, belts and single rounds, finite and conserved; sustained and
+rapid fire at doctrinal rates (FM 3-22.9, FM 3-22.68, FM 3-22.31); reloads
+that interrupt fire; the fire team leader's M203, employed by decision and
+resolved as an area effect. Same engine, same determinism; battles and their
+review show bursts, reloads and grenades (2D arcs and effect circles, 3D
+bursts); the selected squad's panel shows its ammunition. No measurable
+simulation cost.

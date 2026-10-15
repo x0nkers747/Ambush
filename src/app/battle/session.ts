@@ -52,6 +52,9 @@ export const SHOWN_EVENTS: ReadonlySet<SimEvent['type']> = new Set([
   'forcePhaseChanged',
   'orderChanged',
   'fofFire',
+  'fofGrenade',
+  'fofReload',
+  'ammunitionExhausted',
   'soldierIncapacitated',
   'commandRejected',
 ]);

@@ -6,6 +6,7 @@ import {
   type FofOutcome,
   type ForcePhaseChangedEvent,
   type SimEvent,
+  roundsLeft,
 } from '#sim';
 import { createFofRun, FOF_DEFAULT_CONFIG, type FofRun, type FofRunSpec } from './run';
 import { headOn, SQUAD } from './test-specs';
@@ -36,7 +37,14 @@ function config(patch: (c: DeepMutable<FofConfig>) => void): FofConfig {
 
 /** No round ever hits. */
 function blind(c: DeepMutable<FofConfig>): void {
-  for (const w of c.fire.weapons) for (const p of w.hitProbabilityByRange) p.probability = 0;
+  for (const w of c.fire.weapons) {
+    for (const p of w.hitProbabilityByRange) p.probability = 0;
+    // Grenades too: their area effect strikes no one.
+    if (w.area) {
+      w.area.incapacitationAtCentre = 0;
+      w.area.incapacitationAtCasualtyRadius = 0;
+    }
+  }
 }
 
 /** No force withdraws or is spent: they fight on to an adjudicated end. */
@@ -210,7 +218,8 @@ describe('adjudicated ends', () => {
     const outcome = checkEnded(run, finish(run));
     expect(outcome.outcome).toBe('stalemate');
     expect(outcome.reason).toBe('ammunition exhausted on both sides');
-    for (const m of run.sim.state.fof?.soldiers ?? []) expect(m.rounds).toBeGreaterThanOrEqual(0);
+    for (const m of run.sim.state.fof?.soldiers ?? [])
+      expect(roundsLeft(m)).toBeGreaterThanOrEqual(0);
   }, 60_000);
 
   it('the time limit: adjudicated, with the advantage by the stated margin', () => {
@@ -270,14 +279,14 @@ describe('invalid states', () => {
     const run = createFofRun(headOn('open', 1));
     for (let i = 0; i < 30 * 30; i += 1) run.step();
     const snapshot = JSON.parse(JSON.stringify(run.sim.snapshot())) as {
-      state: { fof: { soldiers: { rounds: number }[] } };
+      state: { fof: { soldiers: { arms: { loaded: number }[] }[] } };
     };
-    const first = snapshot.state.fof.soldiers[0];
-    if (first) first.rounds = -5;
+    const first = snapshot.state.fof.soldiers[0]?.arms[0];
+    if (first) first.loaded = -5;
     run.sim.restore(snapshot as never);
     const events = finish(run, 5);
     expect(run.outcome?.outcome).toBe('invalid');
-    expect(run.outcome?.reason).toMatch(/-5 rounds/);
+    expect(run.outcome?.reason).toMatch(/-5 \+ \d+ rounds/);
     expect(events.filter((e) => e.type === 'fofEnded')).toHaveLength(1);
   });
 });

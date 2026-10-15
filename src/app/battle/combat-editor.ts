@@ -41,6 +41,9 @@ export interface CombatUi {
 
 /** How long a burst stays drawn (s of simulation). */
 const BURST_SECONDS = 0.6;
+/** How long a grenade shows on the map (s), and its effect radius drawn (m; the M203's). */
+const GRENADE_SECONDS = 2;
+const GRENADE_EFFECT_M = 10;
 const SQUAD_HIT_PX = 16;
 const SOLDIER_HIT_PX = 6;
 
@@ -206,6 +209,46 @@ export function createCombatMapEditor(
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
         ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 1;
+
+      // Grenades of the last moments: an arc from the grenadier to the burst, and its effect radius.
+      for (let i = log.length - 1; i >= 0; i -= 1) {
+        const e = log[i];
+        if (!e) continue;
+        if (e.seconds < now - GRENADE_SECONDS) break;
+        if (e.seconds > now || e.event.type !== 'fofGrenade') continue;
+        const from = where.get(e.event.shooterId);
+        if (!from) continue;
+        const a = toScreen(from);
+        const b = toScreen(e.event.impact);
+        const edge = toScreen({ x: e.event.impact.x + GRENADE_EFFECT_M, y: e.event.impact.y });
+        const radius = Math.max(3, Math.hypot(edge.x - b.x, edge.y - b.y));
+        const fade = 1 - (now - e.seconds) / GRENADE_SECONDS;
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = e.event.side === 'BLUEFOR' ? '#9fd8ff' : '#ffb0a0';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        // A shallow arc: the grenade's high trajectory, seen from above.
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(
+          mx - ((b.y - a.y) / Math.max(1, len)) * len * 0.15,
+          my + ((b.x - a.x) / Math.max(1, len)) * len * 0.15,
+          b.x,
+          b.y,
+        );
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255, 196, 90, 0.35)';
+        ctx.strokeStyle = '#ffc45a';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, radius, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
       }
       ctx.globalAlpha = 1;
 

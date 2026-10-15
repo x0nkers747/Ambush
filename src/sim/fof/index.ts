@@ -39,3 +39,5 @@ export {
 } from './orders';
 export { orderSpecProblem } from './setup';
 export { hitProbabilityAt, type RangeProbability } from './hit-probability';
+export { armed, roundsLeft } from './weapons';
+export { areaIncapacitation } from './fire';

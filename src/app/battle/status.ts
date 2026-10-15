@@ -39,6 +39,22 @@ export interface SquadStatus {
   /** Every order it was given, in turn. */
   readonly orders: readonly DeepReadonly<FofOrder>[];
   readonly queued: readonly QueuedOrder[];
+  /**
+   * Its ammunition by weapon (docs/behavior-lab/force-on-force/06): rounds
+   * loaded and in reserve among its active soldiers, and how many carry it.
+   */
+  readonly ammunition: readonly WeaponAmmunition[];
+  /** Active soldiers reloading now, and out of ammunition for their primary weapon. */
+  readonly reloading: number;
+  readonly outOfAmmunition: number;
+}
+
+/** A squad's rounds of one weapon. */
+export interface WeaponAmmunition {
+  readonly weapon: string;
+  readonly loaded: number;
+  readonly reserve: number;
+  readonly carriers: number;
 }
 
 export interface BattleSummary {
@@ -76,6 +92,24 @@ export function squadStatus(
         }
       : squad.spec.position;
   const orders = force?.orders ?? [];
+  const active = new Set<string>(up.map((s) => s.id));
+  const ammunition = new Map<string, { loaded: number; reserve: number; carriers: number }>();
+  let reloading = 0;
+  let outOfAmmunition = 0;
+  for (const m of state.fof?.soldiers ?? []) {
+    if (!active.has(m.soldierId)) continue;
+    if (m.reloadUntil !== null) reloading += 1;
+    const primary = m.arms[0];
+    if (primary && primary.loaded + primary.reserve === 0) outOfAmmunition += 1;
+    for (const a of m.arms) {
+      const w = ammunition.get(a.id) ?? { loaded: 0, reserve: 0, carriers: 0 };
+      ammunition.set(a.id, {
+        loaded: w.loaded + a.loaded,
+        reserve: w.reserve + a.reserve,
+        carriers: w.carriers + 1,
+      });
+    }
+  }
   return {
     id,
     name: squad.name,
@@ -90,6 +124,9 @@ export function squadStatus(
     pending: orders.filter((x) => x.status === 'pending'),
     orders,
     queued: queued.filter((q) => q.squadId === id),
+    ammunition: [...ammunition.entries()].map(([weapon, a]) => ({ weapon, ...a })),
+    reloading,
+    outOfAmmunition,
   };
 }
 

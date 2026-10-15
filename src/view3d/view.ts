@@ -48,6 +48,7 @@ import { createMotionRecorder, emptyMotionSample } from '#exercise';
 import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
 import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
+import { createImpactLayer } from './impacts';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -311,6 +312,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     ? createCharacterLayer(o.characterAssets ?? new URL('characters/', document.baseURI).href)
     : null;
   if (characters) scene.add(characters.group);
+  const impacts = createImpactLayer();
+  scene.add(impacts.group);
   const aftermath = createAftermath();
   /** A stand-in crowd for measuring (`ambushBenchCharacters`), replacing the soldiers while set. */
   let bench: { crowd: BenchCrowd; startMs: number } | null = null;
@@ -779,6 +782,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         });
         markers.update([], eye, height);
       } else markers.update(units, eye, height);
+      // Grenade bursts, on the battle's clock.
+      if (figures && !bench)
+        impacts.update(figures.clock.combatLog, figures.clock.seconds, surfaceAt);
+      else impacts.update([], 0, surfaceAt);
       const drawing = performance.now();
       renderer.render(scene, eye);
       if (overlayContext) {
@@ -856,6 +863,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       textures.dispose();
       sun.shadow.dispose();
       markers.dispose();
+      impacts.dispose();
       characters?.dispose();
       sky.geometry.dispose();
       sky.material.dispose();

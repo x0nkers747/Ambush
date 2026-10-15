@@ -11,6 +11,7 @@ import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../beh
 import { fofWeapon } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
 import { activeOrder, updatePlan } from './orders';
+import { roundsLeft } from './weapons';
 import type { FofContext } from './system';
 import { forceActive, glimpse, setLevel, soldierOf } from './system';
 import type { FofForce, ForcePhase, ObservationLevel } from './types';
@@ -835,9 +836,9 @@ function carryOut(
         firingOnTheMove(force.phase) &&
         member.nextFireAt === null &&
         member.weapon !== null &&
-        member.rounds > 0 &&
+        roundsLeft(member) > 0 &&
         (force.phase !== 'withdrawing' ||
-          member.rounds >=
+          roundsLeft(member) >=
             (fofWeapon(context.setup.config, member.weapon)?.basicLoadRounds ?? 0) *
               context.setup.config.force.withdrawAmmunitionFraction)
       ) {
@@ -851,7 +852,7 @@ function carryOut(
     if (!member.reacted && member.reactAt !== null && t >= member.reactAt - 1e-9) {
       member.reacted = true;
       member.reactAt = null;
-      if (force.phase !== 'possibleContact' && member.weapon !== null && member.rounds > 0) {
+      if (force.phase !== 'possibleContact' && member.weapon !== null && roundsLeft(member) > 0) {
         member.nextFireAt = t;
       }
     }
@@ -867,7 +868,7 @@ function carryOut(
       (force.phase === 'contact' || force.phase === 'engaged' || assaulting) &&
       member.nextFireAt === null &&
       member.weapon !== null &&
-      member.rounds > 0
+      roundsLeft(member) > 0
     ) {
       member.nextFireAt = t;
     }
@@ -994,7 +995,7 @@ export function updateEffectiveness(context: FofContext): void {
     let rounds = 0;
     for (const member of fof.soldiers) {
       if (member.force !== i) continue;
-      rounds += member.rounds;
+      rounds += roundsLeft(member);
       if (soldierOf(context, member).status !== 'active') continue;
       active += 1;
       suppression += member.suppression;

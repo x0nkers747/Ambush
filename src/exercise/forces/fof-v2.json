@@ -1,13 +1,14 @@
 {
   "schema": "ambush.fof-config",
-  "schemaVersion": 1,
-  "id": "fof-v1",
-  "version": "1.0.0",
-  "name": "Force-on-force experimental model v1",
+  "schemaVersion": 2,
+  "id": "fof-v2",
+  "version": "2.0.0",
+  "name": "Force-on-force experimental model v2 (weapons and ammunition)",
   "notes": [
     "Experimental parameters for a constructive simulation prototype. They are not validated military detection or lethality data.",
     "Detection structure (cycles across the target, the target transfer probability function, an exponential search-time law, Koschmieder haze) follows the published target-acquisition literature; every value applied to the naked eye, and every contrast, clutter and attention factor, is an experimental assumption (docs/behavior-lab/force-on-force/02-detection-research.md).",
-    "Weapon, suppression, effectiveness and termination values are illustrative and chosen to give interpretable engagements, not tuned for either side."
+    "Weapon, suppression, effectiveness and termination values are illustrative and chosen to give interpretable engagements, not tuned for either side.",
+    "Weapons (v2): feeds, basic loads, doctrinal sustained and rapid rates and burst lengths from FM 3-22.9 (M16A4), FM 3-22.68 (M249) and FM 3-22.31 (M203); reload times, the burst-round weight, the M203 basic load and its incapacitation falloff are modelling assumptions (docs/behavior-lab/force-on-force/06-weapons-and-ammunition.md)."
   ],
   "decisionHz": 10,
   "visibility": {
@@ -79,7 +80,38 @@
     "weapons": [
       {
         "id": "rifle",
-        "label": "Rifle",
+        "label": "M16A4 rifle",
+        "category": "rifle",
+        "ammunition": "5.56×45 mm",
+        "feed": "magazine",
+        "capacity": 30,
+        "basicLoadRounds": 210,
+        "reloadSeconds": {
+          "minSeconds": 3,
+          "maxSeconds": 5
+        },
+        "tacticalReloadBelow": 0.34,
+        "sustained": {
+          "roundsPerBurst": {
+            "min": 1,
+            "max": 2
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 5,
+            "maxSeconds": 9
+          }
+        },
+        "rapid": {
+          "roundsPerBurst": {
+            "min": 1,
+            "max": 3
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 2,
+            "maxSeconds": 3.4
+          }
+        },
+        "burstRoundWeight": 0.8,
         "hitProbabilityByRange": [
           {
             "rangeM": 0,
@@ -111,16 +143,45 @@
           }
         ],
         "maxEngagementRangeM": 550,
-        "roundsPerBurst": 2,
-        "secondsBetweenBursts": 3,
-        "basicLoadRounds": 210,
         "incapacitationProbabilityOnHit": 0.5,
         "suppressionPerBurst": 0.12,
-        "suppressionRadiusM": 4
+        "suppressionRadiusM": 4,
+        "area": null
       },
       {
         "id": "automaticRifle",
-        "label": "Automatic rifle",
+        "label": "M249 SAW",
+        "category": "lightMachineGun",
+        "ammunition": "5.56×45 mm (linked)",
+        "feed": "belt",
+        "capacity": 200,
+        "basicLoadRounds": 600,
+        "reloadSeconds": {
+          "minSeconds": 7,
+          "maxSeconds": 11
+        },
+        "tacticalReloadBelow": 0,
+        "sustained": {
+          "roundsPerBurst": {
+            "min": 6,
+            "max": 9
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 8,
+            "maxSeconds": 10
+          }
+        },
+        "rapid": {
+          "roundsPerBurst": {
+            "min": 6,
+            "max": 9
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 4,
+            "maxSeconds": 5
+          }
+        },
+        "burstRoundWeight": 0.35,
         "hitProbabilityByRange": [
           {
             "rangeM": 0,
@@ -152,12 +213,68 @@
           }
         ],
         "maxEngagementRangeM": 800,
-        "roundsPerBurst": 5,
-        "secondsBetweenBursts": 4,
-        "basicLoadRounds": 600,
         "incapacitationProbabilityOnHit": 0.5,
         "suppressionPerBurst": 0.3,
-        "suppressionRadiusM": 8
+        "suppressionRadiusM": 8,
+        "area": null
+      },
+      {
+        "id": "grenadeLauncher",
+        "label": "M203 grenade launcher",
+        "category": "grenadeLauncher",
+        "ammunition": "40×46 mm HE (M406)",
+        "feed": "single",
+        "capacity": 1,
+        "basicLoadRounds": 18,
+        "reloadSeconds": {
+          "minSeconds": 4,
+          "maxSeconds": 6
+        },
+        "tacticalReloadBelow": 0,
+        "sustained": {
+          "roundsPerBurst": {
+            "min": 1,
+            "max": 1
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 9,
+            "maxSeconds": 12
+          }
+        },
+        "rapid": {
+          "roundsPerBurst": {
+            "min": 1,
+            "max": 1
+          },
+          "secondsBetweenBursts": {
+            "minSeconds": 9,
+            "maxSeconds": 12
+          }
+        },
+        "burstRoundWeight": 1,
+        "hitProbabilityByRange": [],
+        "maxEngagementRangeM": 350,
+        "incapacitationProbabilityOnHit": 0,
+        "suppressionPerBurst": 0.5,
+        "suppressionRadiusM": 15,
+        "area": {
+          "minRangeM": 31,
+          "dispersionM": {
+            "atZeroM": 1,
+            "per100M": 2.5
+          },
+          "incapacitationAtCentre": 0.75,
+          "casualtyRadiusM": 5,
+          "incapacitationAtCasualtyRadius": 0.5,
+          "maxEffectRadiusM": 10,
+          "proneFactor": 0.5,
+          "friendlyClearanceM": 35,
+          "employProbability": {
+            "aimed": 0.15,
+            "area": 0.35
+          },
+          "minSecondsBetweenShots": 9
+        }
       }
     ],
     "postureHitMultipliers": {
@@ -166,10 +283,12 @@
       "prone": 0.3
     },
     "movingShooterFactor": 0.3,
-    "cadenceJitter": {
-      "min": 0.8,
-      "max": 1.25
+    "rapidFire": {
+      "afterOpeningSeconds": 45,
+      "withinRangeM": 100,
+      "whenAssaulting": true
     },
+    "lullReloadSeconds": 5,
     "leaderCadenceFactor": 0.5,
     "engageLevel": "detected",
     "areaFireMemorySeconds": 20,

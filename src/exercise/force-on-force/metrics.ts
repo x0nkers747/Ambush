@@ -7,6 +7,7 @@ import {
   type SimEvent,
   type SimState,
   type Simulation,
+  roundsLeft,
 } from '#sim';
 
 // Force-on-force metrics (docs/behavior-lab/force-on-force/04): what the lab
@@ -95,7 +96,7 @@ export function sampleState(
     let rounds = 0;
     for (const m of fof.soldiers) {
       if (m.force !== i) continue;
-      rounds += m.rounds;
+      rounds += roundsLeft(m);
       if (state.soldiers.find((s) => s.id === m.soldierId)?.status === 'active') active += 1;
     }
     const counts = { possible: 0, detected: 0, identified: 0, lost: 0 };

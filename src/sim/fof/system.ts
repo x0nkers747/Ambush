@@ -7,6 +7,7 @@ import type { SimWorld } from '../world';
 import { fofWeapon } from './config';
 import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, ttpf } from './detection';
 import { resolveFire, updateSuppression } from './fire';
+import { armed, updateReloads } from './weapons';
 import { updateEffectiveness, updateForces } from './force';
 import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
@@ -186,6 +187,8 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
         rounds: 0,
         hits: 0,
         casualtiesInflicted: 0,
+        grenades: 0,
+        reloads: 0,
       },
     };
   });
@@ -194,12 +197,19 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
     const force = members.findIndex((m) => m.has(s.id));
     if (force < 0) continue;
     const weapon = setup.forces[force]?.weapons[s.id] ?? null;
+    const second = weapon === null ? null : (setup.forces[force]?.secondaryWeapons?.[s.id] ?? null);
+    const arms = [weapon, second].flatMap((id) => {
+      const arm = id === null ? null : armed(setup.config, id);
+      return arm ? [arm] : [];
+    });
     soldiers.push({
       soldierId: s.id,
       force,
       weapon,
       leader: forces[force]?.leaderIds.includes(s.id) ?? false,
-      rounds: weapon ? (fofWeapon(setup.config, weapon)?.basicLoadRounds ?? 0) : 0,
+      arms,
+      reloading: -1,
+      reloadUntil: null,
       nextFireAt: null,
       reactAt: null,
       reacted: false,
@@ -213,6 +223,8 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
         bursts: 0,
         rounds: 0,
         hits: 0,
+        grenades: 0,
+        reloads: 0,
         timesTargeted: 0,
         timesHit: 0,
         suppressedSeconds: 0,
@@ -275,6 +287,7 @@ function decide(context: FofContext): void {
   scan(context);
   updateTracks(context);
   updateForces(context);
+  updateReloads(context);
   resolveFire(context);
   updateEffectiveness(context);
   updateLifecycle(context);

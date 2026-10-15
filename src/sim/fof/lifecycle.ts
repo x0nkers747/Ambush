@@ -11,7 +11,9 @@ import {
   WITHDRAW_RETRY_S,
 } from './force';
 import { activeOrder, endOrder, failPlan } from './orders';
+import { fofWeapon } from './config';
 import type { FofContext } from './system';
+import { roundsLeft } from './weapons';
 import { forceActive, soldierOf } from './system';
 import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
 
@@ -108,7 +110,7 @@ export function ammunitionShare(context: FofContext, force: FofForce): number {
   if (force.initialRounds <= 0) return 0;
   let rounds = 0;
   for (const member of context.fof.soldiers) {
-    if (context.fof.forces[member.force] === force) rounds += member.rounds;
+    if (context.fof.forces[member.force] === force) rounds += roundsLeft(member);
   }
   return rounds / force.initialRounds;
 }
@@ -308,8 +310,22 @@ function invariantProblem(context: FofContext): string | null {
   const { fof } = context;
   for (const member of fof.soldiers) {
     const soldier = soldierOf(context, member);
-    if (!(member.rounds >= 0) || !Number.isInteger(member.rounds)) {
-      return `soldier ${member.soldierId} has ${String(member.rounds)} rounds`;
+    for (const arm of member.arms) {
+      const weapon = fofWeapon(context.setup.config, arm.id);
+      const counts = [arm.loaded, arm.reserve, arm.fired];
+      if (!weapon || counts.some((n) => !(n >= 0) || !Number.isInteger(n))) {
+        return `soldier ${member.soldierId} has ${String(arm.loaded)} + ${String(arm.reserve)} rounds of ${arm.id}`;
+      }
+      // Ammunition is conserved: nothing made or lost by firing and reloading.
+      if (
+        arm.loaded > weapon.capacity ||
+        arm.loaded + arm.reserve + arm.fired !== weapon.basicLoadRounds
+      ) {
+        return `soldier ${member.soldierId}'s ${arm.id} has ${String(arm.loaded)} loaded, ${String(arm.reserve)} in reserve and ${String(arm.fired)} fired of ${String(weapon.basicLoadRounds)}`;
+      }
+    }
+    if (member.reloadUntil !== null && !member.arms[member.reloading]) {
+      return `soldier ${member.soldierId} reloads a weapon he does not have`;
     }
     if (!(member.suppression >= 0 && member.suppression <= 1)) {
       return `soldier ${member.soldierId} has suppression ${String(member.suppression)}`;

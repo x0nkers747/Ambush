@@ -81,8 +81,10 @@ export interface FofForceSetup {
   /** The organization's root unit: every soldier in it or below it belongs to the force. */
   readonly unitId: string;
   readonly side: Side;
-  /** The weapon category each member fires (`FofConfig.fire.weapons`), by soldier id; `null`: unarmed. */
+  /** The weapon each member fires (`FofConfig.fire.weapons`), by soldier id; `null`: unarmed. */
   readonly weapons: Readonly<Record<string, string | null>>;
+  /** A second weapon some members carry (a grenade launcher, docs/behavior-lab/force-on-force/06 §4), by soldier id. */
+  readonly secondaryWeapons?: Readonly<Record<string, string | null>>;
   /** The formation it withdraws in when it has no movement order to take one from. */
   readonly formation?: FormationSpec;
   /** Pace of a withdrawal (m/s); default: the world's movement speed. */
@@ -190,6 +192,9 @@ export interface FofForceStats {
   hits: number;
   /** Enemies this force incapacitated. */
   casualtiesInflicted: number;
+  /** Grenades fired, and reloads done. */
+  grenades: number;
+  reloads: number;
 }
 
 export interface FofForce {
@@ -273,6 +278,9 @@ export interface FofSoldierStats {
   bursts: number;
   rounds: number;
   hits: number;
+  /** Grenades fired, and reloads done. */
+  grenades: number;
+  reloads: number;
   /** Bursts aimed at him, and hits on him. */
   timesTargeted: number;
   timesHit: number;
@@ -280,14 +288,37 @@ export interface FofSoldierStats {
   suppressedSeconds: number;
 }
 
+/**
+ * A weapon a soldier carries and its ammunition (docs/behavior-lab/force-on-force/06):
+ * always `loaded + reserve + fired` = its basic load, `loaded` at most its capacity.
+ */
+export interface FofWeaponState {
+  /** The weapon (`FofConfig.fire.weapons`). */
+  readonly id: string;
+  /** Rounds in the magazine, belt or launcher. */
+  loaded: number;
+  /** Rounds carried besides. */
+  reserve: number;
+  /** Rounds fired so far. */
+  fired: number;
+  /** It may not fire again before this (s): a launcher's least interval. */
+  readyAt: number;
+  /** It has run out (reported once). */
+  exhausted: boolean;
+}
+
 export interface FofSoldier {
   readonly soldierId: SoldierId;
   readonly force: number;
+  /** His primary weapon's id, or `null` when unarmed (`arms[0]`). */
   readonly weapon: string | null;
   /** A leader of his force or of one of its units. */
   readonly leader: boolean;
-  /** Rounds left (never negative). */
-  rounds: number;
+  /** His weapons: the primary, then a secondary (a grenade launcher) if any. */
+  arms: FofWeaponState[];
+  /** The arm he is reloading (index), or -1; and when he is done (`null`: not reloading). */
+  reloading: number;
+  reloadUntil: number | null;
   /** His next burst, or `null` when he does not fire. */
   nextFireAt: number | null;
   /** When he takes up his contact posture (after his reaction delay), or `null`. */

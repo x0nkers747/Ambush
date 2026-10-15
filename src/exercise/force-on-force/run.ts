@@ -171,6 +171,7 @@ export function createFofRun(
     unitId: f.force.unitId,
     side: f.force.side,
     weapons: f.force.weapons,
+    secondaryWeapons: f.force.secondaryWeapons,
     formation: f.force.formation,
     pace: f.spec.pace,
     ...(f.spec.actionsOn !== undefined ? { actionsOn: f.spec.actionsOn } : {}),

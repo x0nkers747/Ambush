@@ -21,6 +21,7 @@ import {
   type Side,
   type SimEvent,
   type VisibilityClass,
+  roundsLeft,
 } from '#sim';
 import { Vector3 } from 'three';
 import { createCharacterLayer } from '../characters/layer';
@@ -677,7 +678,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         const up = members.filter(
           (m) => state.soldiers.find((s) => s.id === m.soldierId)?.status === 'active',
         );
-        const rounds = members.reduce((s, m) => s + m.rounds, 0);
+        const rounds = members.reduce((s, m) => s + roundsLeft(m), 0);
         const levels = { possible: 0, detected: 0, identified: 0, lost: 0 };
         for (const t of fof.tracks) if (t.force === i) levels[t.level] += 1;
         const m = metrics.sides[force.side];
@@ -745,7 +746,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
     detail.innerHTML = `<h2>${escape(soldier.side)} ${escape(soldier.id)}</h2><dl>
       <dt>Unit</dt><dd>${escape(soldier.unitId)}${member.leader ? ' · leader' : ''}</dd>
       <dt>Status · posture</dt><dd>${soldier.status} · ${soldier.posture}</dd>
-      <dt>Weapon · rounds</dt><dd>${escape(member.weapon ?? 'none')} · ${String(member.rounds)}</dd>
+      ${member.arms.map((a) => `<dt>${escape(a.id)}</dt><dd>${String(a.loaded)} loaded · ${String(a.reserve)} in reserve${member.reloadUntil !== null && member.arms[member.reloading] === a ? ' · reloading' : ''}</dd>`).join('') || '<dt>Weapon</dt><dd>none</dd>'}
       <dt>Suppression</dt><dd>${pct(member.suppression)} (${member.level})</dd>
       <dt>Bursts · hits</dt><dd>${String(member.stats.bursts)} · ${String(member.stats.hits)}</dd>
       <dt>Targeted · hit</dt><dd>${String(member.stats.timesTargeted)} · ${String(member.stats.timesHit)}</dd>

@@ -133,7 +133,11 @@ Next says what is missing, and the side panel says the same next to the stage's 
    of either side, and give it orders live: **M**, **A** or **W**, then click; **Replace plan**
    or **Append** (Shift for the other, for one click); **H** holds. With an order tool, clicking
    an enemy squad targets it. Orders given while paused apply when play resumes. The battle never
-   ends by itself: **End combat** ends it.
+   ends by itself: **End combat** ends it. Soldiers carry finite ammunition and fire at their
+   weapons' doctrinal rates: riflemen in short aimed bursts, automatic riflemen in 6–9-round
+   bursts, reloading when a magazine or belt runs dry; fire team leaders sometimes fire their M203
+   grenade launchers ([docs](docs/behavior-lab/force-on-force/06-weapons-and-ammunition.md)).
+   The selected squad's panel shows its rounds by weapon.
 5. **After-Action Review** ([docs/constructive-simulation/05](docs/constructive-simulation/05-after-action-review.md)).
    The battle is replayed from its start by re-simulation and every second verified against the
    battle fought. Play, pause, ±5 s, jump to markers (contact, casualties, squads combat

@@ -86,20 +86,27 @@ describe('two squads meeting in the open', () => {
     }
     const fof = run.sim.state.fof;
     for (const member of fof?.soldiers ?? []) {
-      expect(member.rounds).toBeGreaterThanOrEqual(0);
+      // Every round of the primary weapon is loaded, in reserve, or fired in a burst.
+      const primary = member.arms[0];
+      const left = primary ? primary.loaded + primary.reserve : 0;
+      expect(left).toBeGreaterThanOrEqual(0);
       const load = member.weapon === 'automaticRifle' ? 600 : member.weapon === 'rifle' ? 210 : 0;
-      expect(member.rounds + (rounds.get(member.soldierId) ?? 0)).toBe(load);
+      expect(left + (rounds.get(member.soldierId) ?? 0)).toBe(load);
     }
   });
 
-  it('casualties: each soldier falls once, by a hit, and never moves, fires or is seen again', () => {
+  it('casualties: each soldier falls once, by a hit or a grenade, and never moves, fires or is seen again', () => {
     const down = of(events, 'soldierIncapacitated');
     expect(down.length).toBeGreaterThan(0);
     expect(new Set(down.map((e) => e.soldierId)).size).toBe(down.length);
+    const grenades = of(events, 'fofGrenade');
     for (const e of down) {
       const shot = fire.find((f) => f.atSeconds === e.atSeconds && f.hitId === e.soldierId);
-      expect(shot?.incapacitated).toBe(true);
-      expect(shot?.shooterId).toBe(e.byId);
+      const burst = grenades.find(
+        (g) => g.atSeconds === e.atSeconds && g.incapacitated.includes(e.soldierId),
+      );
+      expect(shot?.incapacitated === true || burst !== undefined).toBe(true);
+      expect((shot ?? burst)?.shooterId).toBe(e.byId);
     }
     expect(movedAfterFalling).toBe(0);
     for (const t of run.sim.state.fof?.tracks ?? []) {
