@@ -1,11 +1,9 @@
 import { emptyMotionSample } from '#exercise';
 import {
-  battleScenarioId,
   clearPlan,
   formationsForOrganization,
   ORDER_LABELS,
   ORGANIZATION_LABELS,
-  parseBattleScenario,
   renameSquad,
   reorderOrder,
   scenarioSummary,
@@ -88,6 +86,32 @@ export interface BattlePageOptions {
   /** Back to terrain selection, handing the map over (the page has stopped by then). */
   readonly leave: (map: TacticalMap) => void;
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
+  /** Scenario management (docs/scenarios.md): only in the planning stages. */
+  readonly scenarios: ScenarioMenu;
+}
+
+/** What the Scenario menu does; the page's scenario is passed to each action. */
+export interface ScenarioMenu {
+  /** Its saved state: the saved scenario it is, and whether it has unsaved changes. */
+  status(definition: BattleScenarioDefinition): {
+    readonly savedName: string | null;
+    readonly dirty: boolean;
+  };
+  run(action: ScenarioAction, scenario: PageScenario): Promise<void>;
+  /** New scenario: the working scenario is no longer the saved one it was. */
+  detach(): void;
+}
+
+export type ScenarioAction = 'save' | 'saveAs' | 'load' | 'import' | 'export';
+
+/** The page's scenario, as the Scenario menu's actions see it. */
+export interface PageScenario {
+  definition(): BattleScenarioDefinition;
+  stage(): 'scenario' | 'bluefor';
+  /** Renames the scenario (an edit, saved as edits are). */
+  rename(name: string): void;
+  /** Leaves for terrain selection, handing the map over. */
+  leave(): void;
 }
 
 const PLACE_ORGANIZATIONS: readonly SquadOrganization[] = ['squad', 'fireTeam', 'element3'];
@@ -156,11 +180,20 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     <section class="sec" data-sec="scenario">
       <h2>Scenario</h2>
       <div data-ui="scenario"></div>
+      <p class="scn-status" data-ui="scn-status"></p>
       <div class="tool-row">
-        <button class="small" data-act="export" title="Download the scenario as a file">Export…</button>
-        <button class="small" data-act="import" title="Load a scenario file (version 1 or 2) for this battlefield">Import…</button>
+        <details class="scn-menu" data-ui="scn-menu">
+          <summary title="Save, load, import or export scenarios">Scenario ▾</summary>
+          <div class="scn-menu-items" role="menu">
+            <button role="menuitem" data-act="scn-save" title="Save this scenario in the browser">Save scenario</button>
+            <button role="menuitem" data-act="scn-saveAs" title="Save a copy under a new name">Save as…</button>
+            <button role="menuitem" data-act="scn-load" title="Open a saved scenario (from terrain selection)">Load scenario…</button>
+            <button role="menuitem" data-act="scn-import" title="Load a scenario file (.ambush.json)">Import scenario…</button>
+            <button role="menuitem" data-act="scn-export" title="Download this scenario as a file">Export scenario…</button>
+          </div>
+        </details>
+        <button class="small" data-act="scn-save" title="Save this scenario in the browser">Save</button>
         <button class="small" data-act="new-scenario" data-ui="new-scenario" title="Start again: no squads">New scenario</button>
-        <input type="file" accept=".json,application/json" data-ui="import-file" hidden>
       </div>
     </section>
     <details class="sec collapsible" data-sec="events" open>
@@ -977,11 +1010,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'centre':
         if (s) centreOn({ x: s.position.east, y: s.position.north });
         return;
-      case 'export':
-        exportScenario();
-        return;
-      case 'import':
-        (ui('import-file') as HTMLInputElement).click();
+      case 'scn-save':
+      case 'scn-saveAs':
+      case 'scn-load':
+      case 'scn-import':
+      case 'scn-export':
+        runScenarioAction(act.slice(4) as ScenarioAction);
         return;
       case 'new-scenario':
         if (planner.stage !== 'scenario') return;
@@ -991,6 +1025,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           onConfirm: () => {
             planner.edit((d) => ({ ok: true, definition: { ...d, squads: [] } }));
             planner.select(null);
+            o.scenarios.detach();
+            scenarioEpoch += 1;
           },
         });
         return;
@@ -1028,56 +1064,49 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     lastVersion = -1;
   });
 
-  // --- Export and import ------------------------------------------------------
+  // --- Scenario management (docs/scenarios.md) ------------------------------
 
-  const exportScenario = () => {
-    const d = planner.definition;
-    const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${d.name.replace(/[^\w.-]+/g, '-') || 'scenario'}.scenario.json`;
-    a.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(a.href);
-    }, 1000);
+  /** Bumped when the saved state may have changed without an edit (a save). */
+  let scenarioEpoch = 0;
+  let scenarioBusy = false;
+  const pageScenario: PageScenario = {
+    definition: () => planner.definition,
+    stage: () => (planner.stage === 'bluefor' ? 'bluefor' : 'scenario'),
+    rename: (name) => {
+      planner.edit((d) => ({ ok: true, definition: { ...d, name } }));
+    },
+    leave: () => {
+      leave();
+    },
   };
-  const importFile = ui('import-file') as HTMLInputElement;
-  importFile.addEventListener('change', () => {
-    const file = importFile.files?.[0];
-    importFile.value = '';
-    if (!file) return;
-    void file.text().then((text) => {
-      let read: BattleScenarioDefinition;
-      try {
-        read = parseBattleScenario(JSON.parse(text) as unknown);
-      } catch (error) {
-        notify(error instanceof Error ? error.message : String(error));
-        return;
-      }
-      const own = planner.definition;
-      const other = read.battlefieldId !== own.battlefieldId;
-      const adopted: BattleScenarioDefinition = {
-        ...read,
-        id: battleScenarioId(own.battlefieldId),
-        battlefieldId: own.battlefieldId,
-        ...(own.terrainModel !== undefined ? { terrainModel: own.terrainModel } : {}),
-      };
-      confirm({
-        message: `Replace this scenario with “${read.name}” (${scenarioSummary(read)})?${other ? ' It was made for another battlefield: its positions are taken as this one’s map coordinates.' : ''}`,
-        action: 'Replace scenario',
-        onConfirm: () => {
-          planner.edit(() => ({ ok: true, definition: adopted }));
-          planner.select(null);
-          const issues = planner.issues().length;
-          notify(
-            issues === 0
-              ? `Loaded “${read.name}”.`
-              : `Loaded “${read.name}”: ${String(issues)} thing${issues === 1 ? '' : 's'} to fix before it can be played.`,
-          );
-        },
+  /** Scenario actions belong to planning: none in Combat or the review. */
+  const runScenarioAction = (action: ScenarioAction) => {
+    const menu = ui('scn-menu') as HTMLDetailsElement;
+    menu.open = false;
+    if (planner.stage !== 'scenario' && planner.stage !== 'bluefor') return;
+    if (scenarioBusy) return;
+    scenarioBusy = true;
+    void o.scenarios
+      .run(action, pageScenario)
+      .catch((error: unknown) => {
+        if (!stopped) notify(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        scenarioBusy = false;
+        scenarioEpoch += 1;
       });
-    });
-  });
+  };
+  let shownStatus: { definition: BattleScenarioDefinition; epoch: number } | null = null;
+  const updateScenarioStatus = () => {
+    const d = planner.definition;
+    if (shownStatus?.definition === d && shownStatus.epoch === scenarioEpoch) return;
+    shownStatus = { definition: d, epoch: scenarioEpoch };
+    const { savedName, dirty } = o.scenarios.status(d);
+    setHtml(
+      ui('scn-status'),
+      `${savedName === null ? '<span class="muted">Not saved in the browser yet.</span>' : `Saved as <b>${escapeHtml(savedName)}</b>.`}${dirty ? ' <span class="warn" data-ui="unsaved">Unsaved changes.</span>' : ''}`,
+    );
+  };
 
   // --- Keys ---------------------------------------------------------------
 
@@ -1223,7 +1252,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const events = app.querySelector<HTMLElement>('[data-sec="events"]');
     if (events) events.hidden = !c && !r;
     const scenarioSection = app.querySelector<HTMLElement>('[data-sec="scenario"]');
-    if (scenarioSection) scenarioSection.hidden = c !== null || r !== null;
+    // Scenario management is a planning activity: none in Combat or the review.
+    const planning = stage === 'scenario' || stage === 'bluefor';
+    if (scenarioSection) scenarioSection.hidden = !planning || c !== null || r !== null;
+    if (planning) updateScenarioStatus();
     if (c) {
       updateCombatPanels(c);
       return;

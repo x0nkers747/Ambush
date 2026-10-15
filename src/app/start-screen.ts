@@ -54,6 +54,8 @@ export interface SelectionOptions {
   readonly openBattlefield: (id: string, map: TacticalMap | null) => void;
   /** A map handed back by battlefield `id`'s workspace: the preview keeps showing it. */
   readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
+  /** Saved scenarios (docs/scenarios.md): the library, and importing a file. */
+  readonly scenarios: { readonly load: () => void; readonly import: () => void };
 }
 
 export interface BattlefieldSelection {
@@ -237,6 +239,14 @@ export function startBattlefieldSelection(
         </div>
         <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </div>
+      <section class="sec scn-entry">
+        <h2>Scenarios</h2>
+        <div class="bf-row">
+          <button class="scn-load-btn grow" data-ui="scn-load" title="Open a saved scenario on its battlefield">Load scenario…</button>
+          <button data-ui="scn-import" title="Load a scenario file (.ambush.json)">Import JSON…</button>
+        </div>
+        <p class="hint">A saved scenario opens on its own battlefield, generated again if it is not saved here.</p>
+      </section>
       <section class="sec">
         <h2>Find a place</h2>
         <form class="bf-row" data-ui="search-form">
@@ -673,7 +683,7 @@ export function startBattlefieldSelection(
     if (armed?.button !== bin) {
       disarm();
       bin.dataset['confirm'] = 'yes';
-      const ask = `Click the bin again to delete ${summary.name} and its scenario.`;
+      const ask = `Click the bin again to delete ${summary.name} and its working scenario. Saved scenarios are kept: loading one generates the battlefield again.`;
       bin.title = ask;
       notify(ask);
       armed = { button: bin, timer: setTimeout(disarm, 4000) };
@@ -688,6 +698,13 @@ export function startBattlefieldSelection(
       if (wasSelected) select({ kind: 'none' });
       void refresh(selection.kind === 'saved' ? selection.summary.id : undefined);
     });
+  });
+
+  ui('scn-load').addEventListener('click', () => {
+    o.scenarios.load();
+  });
+  ui('scn-import').addEventListener('click', () => {
+    o.scenarios.import();
   });
 
   ui('primary').addEventListener('click', () => {

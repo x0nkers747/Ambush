@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { newBattleScenario } from '#exercise/battle';
-import { terrainModelId } from '#sim';
+import { battleSpecOf, createBattle, newBattleScenario } from '#exercise/battle';
+import { hashSimState, terrainModelId } from '#sim';
 import {
   editableFingerprint,
   hasWork,
@@ -95,6 +95,26 @@ describe('the saved-scenario document', () => {
     });
     expect(working.squads).toEqual(plannedScenario().squads);
   });
+
+  it('a scenario saved and loaded again fights the same battle (deterministic)', () => {
+    const original = plannedScenario();
+    const reloaded = workingScenario(
+      parseScenarioDocument(serializeScenarioDocument(document())),
+      pkg.id,
+      model,
+    );
+    expect(battleSpecOf(reloaded, 30)).toEqual(battleSpecOf(original, 30));
+    const fight = (d: typeof original) => {
+      const battle = createBattle(battleSpecOf(d, 30), pkg.terrain);
+      const hashes: string[] = [];
+      for (let tick = 1; tick <= 900; tick += 1) {
+        battle.step();
+        if (tick % 150 === 0) hashes.push(hashSimState(battle.sim.state));
+      }
+      return hashes;
+    };
+    expect(fight(reloaded)).toEqual(fight(original));
+  }, 60_000);
 
   it('names its file after the scenario', () => {
     expect(scenarioFileName('Woodland Encounter')).toBe('woodland-encounter.ambush.json');

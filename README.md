@@ -112,15 +112,19 @@ Next says what is missing, and the side panel says the same next to the stage's 
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
    network needed; double-click to open it; the bin beside it deletes it, on a second click): it
    is previewed with its scenario's squads and plans, and opens with **Open battlefield**.
-   **3D** on the preview's map bar shows the terrain in 3D.
+   **3D** on the preview's map bar shows the terrain in 3D. **Load scenario…** opens the
+   scenario library, and **Import JSON…** a scenario file: a scenario opens on its own
+   battlefield, which is generated again if it is not saved in this browser (see
+   [Saved scenarios](#saved-scenarios)).
 2. **Scenario Setup** ([docs/constructive-simulation/03](docs/constructive-simulation/03-scenario-setup-and-planning.md)).
    Place BLUEFOR and OPFOR squads, fire teams and three-man elements (**P**, or the Place
    buttons), one per click. Drag a squad to move it and the white knob to turn it; rename it,
    change its organization or formation in the side panel. Soldiers that would stand in water or
    a building step out to the nearest clear ground. Give OPFOR its plans: select an OPFOR squad,
    press **M**, **A** or **W** (Move, Attack, Withdraw) and click the map once per order. The
-   scenario (with its seed) is saved as you edit; **Export…** / **Import…** move it as a file,
-   and an older ambush scenario is converted on opening.
+   scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
+   (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
+   ambush scenario is converted on opening.
 3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,
    or hidden with **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
    change an order's kind, order and deletion in the plan list.
@@ -140,6 +144,21 @@ Next says what is missing, and the side panel says the same next to the stage's 
 Battles are simulated in a background worker, so the map keeps drawing at full frame rate
 whatever a battle costs.
 Reloading the page returns to Setup or Planning (a battle is not stored).
+
+### Saved scenarios
+
+Scenarios are saved in the browser's scenario library, any number per battlefield, and survive
+closing the browser ([docs/scenarios.md](docs/scenarios.md)). The **Scenario** menu in Scenario
+Setup and BLUEFOR Planning has **Save scenario** (asks for a name the first time; plans need not
+be complete), **Save as…** (a new copy; the original is unchanged), **Load scenario…**,
+**Import scenario…** and **Export scenario…** (downloads `<name>.ambush.json`, saved or not).
+The panel says whether the scenario is saved and has unsaved changes; loading or importing
+another asks to **Save**, **Discard** or **Cancel** them first. The library (**Load scenario…**
+in terrain selection) lists the scenarios, newest first, with their battlefield and forces, to
+**Load**, **Rename**, **Duplicate** or delete. A file holds the scenario and a reference to its
+battlefield, never the terrain: loading finds that battlefield, or generates it again, and says
+so when the ground generated is not the same as the one the scenario was made on. Combat and
+the review have no scenario controls.
 
 **Battlefield Information**, collapsed at the bottom of the side panel, lists each battlefield's
 sources, their resolution and accuracy, and the credits their licences require. Service endpoints can be changed per browser: see

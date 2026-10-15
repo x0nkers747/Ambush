@@ -1,6 +1,8 @@
 import { authoritativeTerrain } from './terrain-grading';
 import {
   createMemoryStore,
+  decodePngInBrowser,
+  generateBattlefield,
   loadServiceConfig,
   openIndexedDbStore,
   type BattlefieldStore,
@@ -22,7 +24,18 @@ import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from
 import { parseStage, stageHash, type Stage } from './stages';
 import { battleOverlay } from './battle/overlay';
 import { battleNextBlocker } from './battle/planner';
-import { startBattlePage } from './battle/page';
+import { startBattlePage, type PageScenario, type ScenarioMenu } from './battle/page';
+import type { BattlefieldSelection } from './start-screen';
+import { createScenarioLibrary } from './scenarios/library';
+import { createScenarioManager, type LeaveDecision, type OpenScenario } from './scenarios/manager';
+import type { TerrainSources } from './scenarios/terrain';
+import {
+  browserDialogs,
+  downloadText,
+  openLibraryDialog,
+  pickScenarioFile,
+  windowToast,
+} from './scenarios/ui';
 
 // Composition root: the five-stage workflow (docs/adr/0025). Terrain
 // selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a
@@ -152,7 +165,7 @@ function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition):
     caption:
       battle.squads.length === 0
         ? 'No scenario yet: place the squads in Scenario Setup'
-        : `Saved scenario: ${scenarioSummary(battle)}`,
+        : `Current scenario: ${scenarioSummary(battle)}`,
     overlay: battleOverlay(pkg.terrain, battle),
   };
 }
@@ -175,6 +188,76 @@ async function main(root: HTMLElement): Promise<void> {
     window.location.reload();
   });
 
+  // --- Saved scenarios (docs/scenarios.md) ---------------------------------
+  const library = createScenarioLibrary(store);
+  const terrainSources: TerrainSources = {
+    config,
+    openId: () => loaded?.pkg.id ?? null,
+    isSaved: async (id) => {
+      if (!(await store.list()).some((b) => b.id === id)) return false;
+      // A damaged or incompatible battlefield is generated again rather than used.
+      return store.get(id).then(
+        () => true,
+        () => false,
+      );
+    },
+    generate: (request, settings, allowMissingOsm, onProgress, signal) =>
+      generateBattlefield(request, {
+        config: settings,
+        store,
+        fetch: (u, i) => window.fetch(u, i),
+        decodePng: decodePngInBrowser,
+        allowMissingOsm,
+        onProgress,
+        ...(signal ? { signal } : {}),
+      }),
+  };
+  const scenarios = createScenarioManager({
+    store,
+    library,
+    dialogs: browserDialogs(windowToast()),
+    terrain: terrainSources,
+    open: (battlefieldId, stage, notice) =>
+      showBattle(battlefieldId, stage, null, selection, notice),
+  });
+  /** The terrain-selection page while it is shown (a scenario loaded from it replaces it). */
+  let selection: BattlefieldSelection | null = null;
+
+  /** The scenario library, from terrain selection (after `decision` about the scenario left, if any). */
+  const openLibrary = (decision?: LeaveDecision) => {
+    openLibraryDialog({
+      list: async () => {
+        const { entries, damaged } = await library.list();
+        const savedBattlefields = new Set((await store.list()).map((b) => b.id));
+        return { entries, damaged: damaged.length, savedBattlefields };
+      },
+      load: (id) => {
+        void scenarios.load(id, decision);
+      },
+      import: () => {
+        void importScenario(decision);
+      },
+      rename: async (id, name) => {
+        await library.rename(id, name);
+      },
+      duplicate: async (id) => {
+        await library.duplicate(id);
+      },
+      remove: async (id) => {
+        await library.remove(id);
+      },
+    });
+  };
+  /** Import: a file chosen, read and checked, then loaded (`before`: just before loading). */
+  const importScenario = async (decision?: LeaveDecision, before?: () => void) => {
+    const file = await pickScenarioFile();
+    if (!file) return;
+    const doc = await scenarios.read(file.text);
+    if (!doc) return;
+    before?.();
+    await scenarios.importDocument(doc, decision);
+  };
+
   /**
    * The battlefield last loaded for the preview or left on its battle page,
    * with its battle scenario. Opening it again reuses it, so the preview's
@@ -194,6 +277,14 @@ async function main(root: HTMLElement): Promise<void> {
       store,
       persistent,
       ...o,
+      scenarios: {
+        load: () => {
+          openLibrary();
+        },
+        import: () => {
+          void importScenario();
+        },
+      },
       loadPreview: async (id) => {
         const mine = (previewLoads += 1);
         const pkg = await openBattlefield(store, id);
@@ -205,6 +296,7 @@ async function main(root: HTMLElement): Promise<void> {
         void showBattle(id, 'scenario', map, page);
       },
     });
+    selection = page;
   };
 
   /** Back to terrain selection from a battlefield's page, the map handed back to the preview. */
@@ -224,20 +316,23 @@ async function main(root: HTMLElement): Promise<void> {
     stage: 'scenario' | 'bluefor',
     handed: TacticalMap | null,
     previous: { dispose(): void } | null,
+    loadNotice: string | null = null,
   ): Promise<void> => {
     let map = handed;
     try {
       let pkg: OpenedBattlefield;
-      let definition: BattleScenarioDefinition;
-      let notice: string | null = null;
-      if (loaded?.pkg.id === id) ({ pkg, battle: definition } = loaded);
+      if (loaded?.pkg.id === id) pkg = loaded.pkg;
       else {
         pkg = await openBattlefield(store, id);
-        ({ definition, notice } = await loadBattle(store, pkg));
         // A map of another load of this battlefield shows another terrain object.
         map?.dispose();
         map = null;
       }
+      // The working scenario as stored (a scenario just loaded has replaced it).
+      const read = await loadBattle(store, pkg);
+      const definition = read.definition;
+      const notice = [loadNotice, read.notice].filter((n) => n !== null).join(' ') || null;
+      await scenarios.attach(pkg.id);
       let latest = definition;
       const save = (d: BattleScenarioDefinition) => {
         latest = d;
@@ -256,6 +351,53 @@ async function main(root: HTMLElement): Promise<void> {
       if (handed || previous) pushAddress(address(initialStage));
       else setAddress(address(initialStage));
       previous?.dispose();
+      if (previous === selection) selection = null;
+      const open = (page: PageScenario): OpenScenario => ({
+        battlefield: pkg,
+        terrainModel: terrainModelId(pkg.terrain),
+        definition: () => page.definition(),
+        stage: () => page.stage(),
+        rename: (name) => {
+          page.rename(name);
+        },
+      });
+      const menu: ScenarioMenu = {
+        status: (d) => scenarios.status(pkg.id, d),
+        detach: () => {
+          void scenarios.detach(pkg.id);
+        },
+        run: async (action, page) => {
+          switch (action) {
+            case 'save':
+              await scenarios.save(open(page));
+              return;
+            case 'saveAs':
+              await scenarios.saveAs(open(page));
+              return;
+            case 'export': {
+              const file = scenarios.exportFile(open(page));
+              downloadText(file.name, file.text);
+              return;
+            }
+            case 'load': {
+              // Unsaved changes first; then terrain selection and the library.
+              const decision = await scenarios.beforeLeaving(open(page));
+              if (!decision) return;
+              page.leave();
+              openLibrary(decision);
+              return;
+            }
+            case 'import': {
+              const decision = await scenarios.beforeLeaving(open(page));
+              if (!decision) return;
+              await importScenario(decision, () => {
+                page.leave();
+              });
+              return;
+            }
+          }
+        },
+      };
       startBattlePage(root, {
         title: pkg.name,
         terrain: pkg.terrain,
@@ -273,6 +415,7 @@ async function main(root: HTMLElement): Promise<void> {
         setAddress: (s) => {
           setAddress(address(s));
         },
+        scenarios: menu,
       });
     } catch (error) {
       previous?.dispose();

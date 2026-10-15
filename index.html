@@ -431,6 +431,159 @@
         margin-top: 10px;
       }
 
+      /* Scenario dialogs (docs/scenarios.md): modal panels over the page. */
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 50;
+      }
+      .modal {
+        width: min(460px, 92vw);
+        max-height: 86vh;
+        overflow: auto;
+        padding: 14px 18px;
+        border-radius: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+      }
+      .modal.wide {
+        width: min(780px, 94vw);
+      }
+      .modal h2 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      .modal p {
+        margin: 0 0 8px;
+      }
+      .modal-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .modal-buttons .primary-btn {
+        width: auto;
+      }
+      .modal-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .modal-form input {
+        width: 100%;
+      }
+      .modal-progress {
+        min-height: 2.6em;
+      }
+      .scn-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .scn-head p {
+        margin: 0;
+      }
+      .scn-list {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+        max-height: 56vh;
+        overflow-y: auto;
+        border-top: 1px solid var(--line);
+      }
+      .scn-list > li {
+        padding: 8px 4px;
+        border-bottom: 1px solid var(--line);
+      }
+      .scn-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .scn-main {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .scn-main .muted {
+        font-size: 12px;
+      }
+      .scn-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .scn-actions .primary-btn {
+        width: auto;
+        padding: 3px 12px;
+      }
+      .scn-rename {
+        display: flex;
+        gap: 6px;
+      }
+      .toast.window-toast {
+        position: fixed;
+        z-index: 60;
+      }
+      .scn-load-btn {
+        background: var(--blue-bg);
+        border-color: var(--blue);
+        color: #fff;
+        font-weight: 600;
+      }
+      .scn-status {
+        margin: 6px 0;
+      }
+      .scn-menu {
+        position: relative;
+      }
+      .scn-menu > summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 3px 9px;
+        font-size: 12px;
+        border: 1px solid var(--blue);
+        border-radius: 4px;
+        background: #2a3036;
+      }
+      .scn-menu > summary::-webkit-details-marker {
+        display: none;
+      }
+      .scn-menu[open] > summary {
+        background: var(--blue-bg);
+        color: #fff;
+      }
+      .scn-menu-items {
+        position: absolute;
+        bottom: calc(100% + 4px);
+        left: 0;
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        min-width: 190px;
+        padding: 4px;
+        border-radius: 6px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+      }
+      .scn-menu-items button {
+        text-align: left;
+        border: 0;
+        background: transparent;
+      }
+
       /* Side panel. */
       .side {
         grid-row: 2;
