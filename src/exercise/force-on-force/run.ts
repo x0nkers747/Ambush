@@ -11,8 +11,11 @@ import {
   type FofConfig,
   type FofForceSetup,
   type FofOutcome,
+  type FormationNode,
   type FormationSpec,
   type Scenario,
+  type ScenarioSoldier,
+  type ScenarioUnit,
   type Side,
   type SimCommand,
   type SimEvent,
@@ -70,6 +73,14 @@ export interface FofForceSpec {
   readonly posture?: 'standing' | 'kneeling' | 'prone';
   /** What it does on contact (default `continue`). */
   readonly actionsOn?: ActionsOn;
+  /**
+   * How many of the organization (default 1). More than one: copies under
+   * one parent unit (`B-GRP` / `O-GRP`, no leader), in a block of
+   * `ceil(√count)` abreast, `groupSpacingM` apart (default 60 m), each
+   * copy in `formation`. Soldier ids get the copy's number (`B0105`).
+   */
+  readonly count?: number;
+  readonly groupSpacingM?: number;
 }
 
 export interface FofRunSpec {
@@ -259,21 +270,60 @@ export function createFofRun(
   };
 }
 
+/** A formation node with its slot ids (and its children's) prefixed: unique across copies. */
+function renameSlots(node: FormationNode, prefix: string): FormationNode {
+  return {
+    ...node,
+    slots: node.slots.map((slot) => ({ ...slot, id: `${prefix}${slot.id}` })),
+    children: node.children.map((child) => renameSlots(child, prefix)),
+  };
+}
+
 function buildForce(side: Side, spec: FofForceSpec, seed: number) {
   const template = LAB_ORGANIZATIONS[spec.organization];
   const root = template.units.find((u) => u.parentId === null)?.id ?? '';
   const prefix = side === 'BLUEFOR' ? 'B' : 'O';
-  const unitIdPrefix = `${prefix}-`;
-  const members = template.slots.map((slot, i) => ({
-    soldierId: `${prefix}${String(i + 1).padStart(2, '0')}`,
-    slotId: slot.id,
-  }));
-  const organization: TraineeOrganization = { template, unitIdPrefix, members };
-  const unitId = `${unitIdPrefix}${root}`;
-  const formation = buildFormationSpec(organization, root, spec.formation, {
-    interval: spec.interval,
-    elementSpacing: spec.elementSpacing,
+  const count = Math.max(1, Math.floor(spec.count ?? 1));
+  const grouped = count > 1;
+  const groupId = `${prefix}-GRP`;
+  const copies = Array.from({ length: count }, (_, k) => {
+    const unitIdPrefix = grouped ? `${prefix}${String(k + 1)}-` : `${prefix}-`;
+    const members = template.slots.map((slot, i) => ({
+      soldierId: grouped
+        ? `${prefix}${String(k + 1).padStart(2, '0')}${String(i + 1).padStart(2, '0')}`
+        : `${prefix}${String(i + 1).padStart(2, '0')}`,
+      slotId: slot.id,
+    }));
+    const organization: TraineeOrganization = { template, unitIdPrefix, members };
+    const formation = buildFormationSpec(organization, root, spec.formation, {
+      interval: spec.interval,
+      elementSpacing: spec.elementSpacing,
+    });
+    return { unitIdPrefix, members, organization, formation };
   });
+  const first = copies[0];
+  if (!first) throw new Error('force-on-force force needs an organization');
+  // Copies in a block, abreast and in depth, centred on the start.
+  const across = Math.ceil(Math.sqrt(count));
+  const deep = Math.ceil(count / across);
+  const spacing = spec.groupSpacingM ?? 60;
+  const formation: FormationSpec = grouped
+    ? {
+        interval: first.formation.interval,
+        root: {
+          unitId: orgUnitId(groupId),
+          back: 0,
+          right: 0,
+          slots: [],
+          children: copies.map((c, k) => ({
+            ...renameSlots(c.formation.root, `${String(k + 1)}.`),
+            back: (Math.floor(k / across) - (deep - 1) / 2) * spacing,
+            right: ((k % across) - (across - 1) / 2) * spacing,
+          })),
+        },
+      }
+    : first.formation;
+  const unitId = grouped ? groupId : `${first.unitIdPrefix}${root}`;
   const heading = spec.destination
     ? azimuthOf(spec.destination.x - spec.start.x, spec.destination.y - spec.start.y)
     : azimuthFromDegrees(spec.facingDeg ?? 0);
@@ -296,37 +346,47 @@ function buildForce(side: Side, spec: FofForceSpec, seed: number) {
       north: spec.start.y - r * fx - b * fy + jy,
     };
   };
-  const instance = {
-    templateId: template.id,
-    templateVersion: template.version,
-    side,
-    unitIdPrefix,
-    facingDeg: (heading * 180) / Math.PI,
-    posture: spec.posture ?? ('standing' as const),
-    members,
-  };
-  const { units, soldiers } = instantiateOrganization(template, instance, startOf);
+  const units: ScenarioUnit[] = grouped
+    ? [{ id: groupId, echelon: 'group', parentId: null, leaderId: null }]
+    : [];
+  const soldiers: ScenarioSoldier[] = [];
   const weapons: Record<string, string | null> = {};
   const displayWeapons: Record<string, string | null> = {};
-  for (const m of members) {
-    const slot = template.slots.find((s) => s.id === m.slotId);
-    const category = slot ? weaponCategory(template, slot) : null;
-    weapons[m.soldierId] = category;
-    displayWeapons[m.soldierId] =
-      category === null
-        ? null
-        : side === 'OPFOR'
-          ? 'ak-assault-rifle'
-          : category === 'automaticRifle'
-            ? 'squad-automatic-weapon'
-            : 'm16-rifle';
+  for (const copy of copies) {
+    const instance = {
+      templateId: template.id,
+      templateVersion: template.version,
+      side,
+      unitIdPrefix: copy.unitIdPrefix,
+      facingDeg: (heading * 180) / Math.PI,
+      posture: spec.posture ?? ('standing' as const),
+      members: copy.members,
+    };
+    const built = instantiateOrganization(template, instance, startOf);
+    for (const u of built.units) {
+      units.push(grouped && u.parentId === null ? { ...u, parentId: groupId } : u);
+    }
+    soldiers.push(...built.soldiers);
+    for (const m of copy.members) {
+      const slot = template.slots.find((x) => x.id === m.slotId);
+      const category = slot ? weaponCategory(template, slot) : null;
+      weapons[m.soldierId] = category;
+      displayWeapons[m.soldierId] =
+        category === null
+          ? null
+          : side === 'OPFOR'
+            ? 'ak-assault-rifle'
+            : category === 'automaticRifle'
+              ? 'squad-automatic-weapon'
+              : 'm16-rifle';
+    }
   }
   const force: FofRunForce = {
     side,
     unitId,
-    organization,
+    organization: first.organization,
     formation,
-    soldierIds: members.map((m) => m.soldierId),
+    soldierIds: copies.flatMap((c) => c.members.map((m) => m.soldierId)),
     weapons,
     displayWeapons,
   };

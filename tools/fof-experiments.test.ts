@@ -132,7 +132,7 @@ describe.skipIf(!on)('Force-on-Force experiments', () => {
       for (let i = 0; i < 30 * 200; i += 1) r.step();
       const f = r.sim.state.fof?.forces[0];
       expect(
-        (f?.stats.visibleAttempts ?? 1) / Math.max(1, f?.stats.detectionAttempts ?? 1),
+        (f?.stats.visibleAttempts ?? 1) / Math.max(1, f?.stats.tracedAttempts ?? 1),
       ).toBeLessThan(0.5);
     }
   }, 900_000);

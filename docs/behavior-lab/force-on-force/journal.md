@@ -399,6 +399,43 @@ line to any active enemy, the truth):
   - the force-on-force suite passes;
   - the default (`continue`) runs are untouched (only attacking forces bound).
 
+## Scalability test: 988 soldiers (2026-10-15)
+
+**Asked for.** A scalability test with about 1,000 soldiers in the most demanding
+behaviour: both forces attacking by fire and movement.
+
+**Built.**
+
+- **`count` in a force's run spec:** N copies of the organization under one parent unit,
+  in a block. Soldier ids and slot ids are numbered by copy. A single copy is exactly
+  the run as before (identical states).
+- **`tools/fof-scale.test.ts`** (opt-in): N squads a side, 1 km apart, both attacking.
+  It reports CPU per simulated second every 30 s, before and after contact, the worst
+  tick, bounds, refused orders and the outcome.
+- **`scale.test.ts`:** the copies build correctly, and two squads a side attack a squad
+  at a time with no refused orders.
+
+**Results** ([04 §5.1](04-experiments.md)):
+
+- **988 soldiers:** the whole 813 s battle in 734 s of CPU, about real time. Before
+  contact it runs at 1.8× real time; the worst tick is 0.5 s.
+- **494 soldiers:** about 3.5× faster than real time.
+- **Everything held at full size:** no refused orders, no invalid states, 29 bounds, an
+  outcome by rule.
+
+**Found by profiling: detection is the cost.** At 208 soldiers, 91 % of the time was
+sight lines traced for looks that could not have detected anyway. P∞ was tested
+against the pair's threshold only after tracing.
+
+- A look now tests the best case first and traces only if it could detect.
+- This is exact: the runs are identical, since no random number is drawn below the
+  threshold.
+- It is 5× faster before contact. One diagnostic count, `visibleAttempts`, is now taken
+  among the looks that could detect (`tracedAttempts`).
+
+At 988 soldiers, detection is still 85 % of the time. The next steps for larger forces
+are in 04 §5.1.
+
 ## Known limitations
 
 **Detection.**

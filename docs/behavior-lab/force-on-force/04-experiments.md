@@ -12,11 +12,12 @@ which force sees the other first.
 
 ## 1. Running them
 
-| What                                         | Command                                                                                             | Time                                             |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Unit and scenario tests (in `npm run check`) | `npx vitest run src/sim/fof src/exercise/force-on-force src/view3d/force-on-force`                  | ~30 s                                            |
-| The thirteen experiments, seeds 1–3          | `AMBUSH_FOF_EXPERIMENTS=1 npx vitest run tools/fof-experiments.test.ts --silent=false`              | ~10 min                                          |
-| A 50-seed sweep of one terrain               | `AMBUSH_FOF_SWEEP=50 AMBUSH_FOF_TERRAIN=open npx vitest run tools/fof-sweep.test.ts --silent=false` | ~6 min each (run the three terrains in parallel) |
+| What                                                   | Command                                                                                             | Time                                             |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Unit and scenario tests (in `npm run check`)           | `npx vitest run src/sim/fof src/exercise/force-on-force src/view3d/force-on-force`                  | ~30 s                                            |
+| The thirteen experiments, seeds 1–3                    | `AMBUSH_FOF_EXPERIMENTS=1 npx vitest run tools/fof-experiments.test.ts --silent=false`              | ~10 min                                          |
+| A 50-seed sweep of one terrain                         | `AMBUSH_FOF_SWEEP=50 AMBUSH_FOF_TERRAIN=open npx vitest run tools/fof-sweep.test.ts --silent=false` | ~6 min each (run the three terrains in parallel) |
+| The scalability test (N squads a side, both attacking) | `AMBUSH_FOF_SCALE=38 npx vitest run tools/fof-scale.test.ts --silent=false`                         | ~13 min at 38 squads (988 soldiers)              |
 
 The experiment definitions are in `src/exercise/force-on-force/experiments.ts`; the lab
 offers the same list.
@@ -31,7 +32,7 @@ offers the same list.
 | 4   | Simultaneous detection                      | Mirror-image squads, both moving                                                                          | First confirmed detections within 60 s of each other in most seeds                                                                                           | ✓ 2/3 (Δ 2 s, 51 s; 194 s in seed 3)                                                                                                                                                                                                       |
 | 5   | Delayed detection in wooded terrain         | The approach on wooded and on open ground                                                                 | Confirmed detection later and closer in the woods, every seed                                                                                                | ✓ 3/3; outcomes in the woods: mutual disengagement, BLUEFOR withdrawal, stalemate                                                                                                                                                          |
 | 6   | Temporary loss of contact                   | BLUEFOR still, watching; OPFOR walks across 450 m away (beyond engagement range) through woods            | Contacts lost and regained; no contact (engagement) at all                                                                                                   | ✓ 2/3 cycling (up to 38 lost, 26 regained); `noContact` ×3                                                                                                                                                                                 |
-| 7   | Urban line-of-sight obstruction             | The approach through the urban district                                                                   | Under half of the looks have any sight line                                                                                                                  | ✓ every seed                                                                                                                                                                                                                               |
+| 7   | Urban line-of-sight obstruction             | The approach through the urban district                                                                   | Under half of the looks that could detect have any sight line                                                                                                | ✓ every seed                                                                                                                                                                                                                               |
 | 8   | One organization becomes combat ineffective | A squad (13) against a fire team (4)                                                                      | The fire team is broken in most seeds                                                                                                                        | ✓ 3/3 BLUEFOR victory                                                                                                                                                                                                                      |
 | 9   | Ammunition exhaustion                       | Light load: rifles 40 rounds, automatic rifles 120                                                        | Most of the load fired, never below zero                                                                                                                     | ✓ outcomes: mutual disengagement ×3 (withdrawals for low ammunition)                                                                                                                                                                       |
 | 10  | Engagement reaching a bounded stalemate     | Squads prone and still, 560 m apart, engage range 600 m (only the automatic rifles reach)                 | Adjudicated stalemate in most seeds, with the real casualties                                                                                                | ✓ 3/3 stalemate ("no hits" in the window)                                                                                                                                                                                                  |
@@ -143,6 +144,66 @@ development machine, with three sweeps running in parallel.
 - **Where the cost goes:** looks. Each soldier looks every second at every enemy in range
   and in his field of regard, with three sight lines per look. They use the fast tracer
   that is proven equal to the reference.
+
+### 5.1 Scalability: up to 988 soldiers, both forces attacking (2026-10-15)
+
+`tools/fof-scale.test.ts` (opt-in) builds two forces of N rifle squads each
+(`count` in the run spec: the copies under one parent unit, in a block of squads
+60 m apart). The blocks start 1 km apart on open ground, each is ordered to the
+other's start, and both attack on contact. With squads as its elements, a force
+attacks by fire and movement one squad at a time. Open ground is the worst case for
+detection, since everyone is in view.
+
+The runs are headless in Node, one at a time, at 30 Hz, on the development machine:
+
+| Soldiers (squads a side) | CPU per simulated second, before contact | After contact | Worst tick | Whole run                                                        | Heap   |
+| ------------------------ | ---------------------------------------: | ------------: | ---------: | ---------------------------------------------------------------- | ------ |
+| 52 (2)                   |                                     9 ms |          6 ms |      15 ms | 496 s simulated in 3.8 s (OPFOR victory)                         | 43 MB  |
+| 208 (8)                  |                                    71 ms |         67 ms |      50 ms | first 420 s in 29 s                                              | 95 MB  |
+| 494 (19)                 |                                   353 ms |        266 ms |     155 ms | 983 s simulated in 284 s (BLUEFOR withdrawal)                    | 94 MB  |
+| 988 (38)                 |                                   1.78 s |        0.54 s |     483 ms | 813 s simulated in 734 s, about real time (mutual disengagement) | 146 MB |
+
+- **Everything holds at full size.** Every run ended by a stated rule, with no refused
+  movement orders and no broken invariants. Squads bounded in turn: 29 bounds at 988
+  soldiers.
+- **The cost is detection,** and it grows with the square of the soldiers. Each
+  observer looks at every enemy in range once a second, and a look traces three sight
+  lines.
+  - At 988 soldiers before contact: looking is 85 % of the time (sight lines alone
+    74 %), the movement engine 10 %, and the forces' decisions, bounding included, 2.5 %.
+  - After contact the cost falls as casualties and lost contacts thin the pairs.
+- **Real time.** At 30 Hz a tick has 33 ms.
+  - At 208 soldiers the run is about 14× faster than real time.
+  - At 494, about 3.5×.
+  - At 988 it is about real time over the whole run, but slower before contact
+    (1.8 s per simulated second). Its worst ticks (the decisions, 10 a second) take up
+    to 0.5 s, too slow for an interactive view without spreading the looks over more
+    ticks, or moving the simulation off the page's thread.
+- **The 208- and 494-soldier figures before contact** may include some time shared with
+  another run (a run of the earlier code overlapped the first minutes). The 988-soldier
+  run had the machine to itself.
+
+**Found and fixed: sight lines traced for nothing.** A pair can only detect while its
+P∞ exceeds its threshold (drawn at the start). Every look traced its three sight
+lines before that test, so most looks at long range traced for nothing. A look now
+first computes P∞ for the best case: all of the target in view, nothing in the way.
+Only if that clears the threshold does it trace.
+
+- **Nothing in the run changes.** Below the threshold no random number is drawn. Open,
+  wooded and urban seeds 1–2, default and attacking, gave identical states, outcomes,
+  glimpses, bursts and hits before and after.
+- **Speed:** 5× at 208 soldiers before contact (366 → 71 ms per simulated second).
+  The 494-soldier run before contact went from 1.98 s to 0.35 s per simulated second.
+- **One statistic changed.** `visibleAttempts` now counts, among the looks that could
+  detect (`tracedAttempts`), those with a sight line. Experiment 7 checks that share,
+  and gave the same outcomes as before.
+
+**Next, if larger forces are wanted:**
+
+- trace the three heights of a look in one walk of the grid;
+- give looks a spatial index or a nearest-first budget;
+- spread an observer's looks over the ticks between decisions;
+- run the simulation in a worker.
 
 ## 6. Which parameters rest on research
 

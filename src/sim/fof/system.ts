@@ -4,7 +4,16 @@ import type { TickTime } from '../movement';
 import type { SimState, Soldier, SoldierId } from '../state';
 import type { SimWorld } from '../world';
 import { fofWeapon } from './config';
-import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, sight, ttpf } from './detection';
+import {
+  chanceIn,
+  confidenceAt,
+  cyclesOnTarget,
+  draw,
+  glance,
+  levelAt,
+  traceSight,
+  ttpf,
+} from './detection';
 import { resolveFire, updateSuppression } from './fire';
 import { updateEffectiveness, updateForces } from './force';
 import { adjudicate, updateLifecycle } from './lifecycle';
@@ -138,6 +147,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       firstFireAt: null,
       stats: {
         detectionAttempts: 0,
+        tracedAttempts: 0,
         visibleAttempts: 0,
         glimpses: 0,
         bursts: 0,
@@ -277,23 +287,34 @@ function scan(context: FofContext): void {
       const threshold = fof.thresholds[i * fof.soldiers.length + j] ?? 1;
       const target = soldierOf(context, enemy);
       if (target.status !== 'active') return;
-      const seen = sight(world.terrain, observer, target, detection, conditions);
-      if (!seen) return;
+      const looked = glance(observer, target, detection, conditions);
+      if (!looked) return;
       force.stats.detectionAttempts += 1;
-      if (seen.visibleFraction <= 0 || seen.transmission <= 0) return;
-      force.stats.visibleAttempts += 1;
       const cue =
         (enemy.speed > detection.movingSpeedMps ? detection.movingTargetFactor : 1) *
         (enemy.lastFiredAt !== null && t - enemy.lastFiredAt <= detection.firingSignatureSeconds
           ? detection.firingSignatureFactor
           : 1);
-      const cycles = cyclesOnTarget(
-        seen,
-        detection.criticalDimensionM[target.posture],
-        detection,
-        conditions,
-        cue,
+      const dimension = detection.criticalDimensionM[target.posture];
+      // The best case first (all of him in view, nothing in the way): when even
+      // that is not detectable to this observer, the sight lines are not traced
+      // (the result would be the same: no draw is taken below the threshold).
+      const best = ttpf(
+        cyclesOnTarget(
+          { ...looked, visibleFraction: 1, transmission: 1 },
+          dimension,
+          detection,
+          conditions,
+          cue,
+        ),
+        detection.detectionCycles50,
       );
+      if (best <= threshold - 1e-9) return;
+      force.stats.tracedAttempts += 1;
+      const seen = traceSight(world.terrain, observer, target, detection, looked);
+      if (seen.visibleFraction <= 0 || seen.transmission <= 0) return;
+      force.stats.visibleAttempts += 1;
+      const cycles = cyclesOnTarget(seen, dimension, detection, conditions, cue);
       // Detectable to this observer only while P∞ exceeds the pair's threshold;
       // then found at rate P∞ / searchSeconds (the time law's asymptote is P∞).
       const pInf = ttpf(cycles, detection.detectionCycles50);

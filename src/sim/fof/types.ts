@@ -101,6 +101,11 @@ export type ForcePhase =
 export interface FofForceStats {
   /** Observer–target pairs looked at (in range and field of regard). */
   detectionAttempts: number;
+  /**
+   * Of those, the ones that could detect (the best case, all of the target
+   * in view, above the pair's threshold): only these are traced.
+   */
+  tracedAttempts: number;
   /** Of those, with a clear sight line to some part of the target. */
   visibleAttempts: number;
   /** Successful glimpses. */

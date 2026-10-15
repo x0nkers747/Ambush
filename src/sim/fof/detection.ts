@@ -46,6 +46,33 @@ export interface Sighting {
   readonly attention: number;
 }
 
+/** Where the target is for the observer, before any sight line: range and attention. */
+export interface Glance {
+  readonly rangeM: number;
+  readonly attention: number;
+}
+
+/**
+ * The target's range and the observer's attention toward him, or `null`
+ * when he is out of range or outside the observer's field of regard (no
+ * attempt). Cheap: no sight line.
+ */
+export function glance(
+  observer: Soldier,
+  target: Soldier,
+  detection: DetectionConfig,
+  conditions: VisibilityConditions,
+): Glance | null {
+  const dx = target.position.x - observer.position.x;
+  const dy = target.position.y - observer.position.y;
+  const rangeM = Math.hypot(dx, dy);
+  if (rangeM > conditions.maxObservationRangeM || rangeM < 1e-6) return null;
+  const off = Math.abs(azimuthDelta(observer.azimuth, azimuthOf(dx, dy))) * (180 / Math.PI);
+  if (off > detection.regardHalfAngleDeg) return null;
+  const attention = off <= detection.centralHalfAngleDeg ? 1 : detection.peripheralFactor;
+  return { rangeM, attention };
+}
+
 /**
  * The observer's view of the target, or `null` when the target is out of
  * range or outside his field of regard (no attempt).
@@ -57,13 +84,18 @@ export function sight(
   detection: DetectionConfig,
   conditions: VisibilityConditions,
 ): Sighting | null {
-  const dx = target.position.x - observer.position.x;
-  const dy = target.position.y - observer.position.y;
-  const rangeM = Math.hypot(dx, dy);
-  if (rangeM > conditions.maxObservationRangeM || rangeM < 1e-6) return null;
-  const off = Math.abs(azimuthDelta(observer.azimuth, azimuthOf(dx, dy))) * (180 / Math.PI);
-  if (off > detection.regardHalfAngleDeg) return null;
-  const attention = off <= detection.centralHalfAngleDeg ? 1 : detection.peripheralFactor;
+  const seen = glance(observer, target, detection, conditions);
+  return seen ? traceSight(terrain, observer, target, detection, seen) : null;
+}
+
+/** The sight lines of a glance: the share of the target in clear sight, and the light through vegetation. */
+export function traceSight(
+  terrain: TerrainDataset,
+  observer: Soldier,
+  target: Soldier,
+  detection: DetectionConfig,
+  { rangeM, attention }: Glance,
+): Sighting {
   const tracer = sightLineTracer(terrain);
   const eye = {
     x: observer.position.x,
