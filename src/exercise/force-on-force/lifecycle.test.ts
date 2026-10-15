@@ -74,6 +74,8 @@ function checkEnded(run: FofRun, events: readonly SimEvent[]): FofOutcome {
   expect(outcome.casualties).toEqual(down);
   const fallen = events.filter((e) => e.type === 'soldierIncapacitated').length;
   expect(fallen).toBe(down.BLUEFOR + down.OPFOR);
+  // The model's own orders never fail visibly (a refused attempt is retried elsewhere or later).
+  expect(events.filter((e) => e.type === 'commandRejected')).toEqual([]);
   const ended = events.filter((e) => e.type === 'fofEnded');
   expect(ended).toHaveLength(1);
   // Nothing fires after the end, even if the simulation is stepped on.

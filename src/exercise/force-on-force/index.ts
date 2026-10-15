@@ -38,3 +38,4 @@ export {
   type FofExperimentId,
   type FofVariant,
 } from './experiments';
+export { runFof, spread, summarize, type FofRunResult, type FofSweepSummary } from './sweep';

@@ -136,7 +136,7 @@ The cases covered:
 | Wooded  |    20 | 3 BLUEFOR, 3 OPFOR   | 4 BLUEFOR, 8 OPFOR | 1                    | 1         | —          |
 | Urban   |    12 | 4 BLUEFOR, 1 OPFOR   | 2 BLUEFOR, 2 OPFOR | 1                    | 1         | 1          |
 
-## F4: the visual lab (2026-10-14)
+## F4: the visual lab (2026-10-14) — `95cca8d`
 
 **Built** ([05](05-lab.md)): the page at `#force-on-force` (`src/view3d/force-on-force`),
 with:
@@ -173,3 +173,87 @@ The page is isolated from the game: loaded lazily only at its address, checked b
 - The isolation test.
 - Browser: the default demonstration, and wooded and urban runs ([05](05-lab.md)); replay
   verified over 793 s with no mismatch; 57 fps at 32×.
+
+## F5: scenario suite and hardening (2026-10-14)
+
+**Built** ([04](04-experiments.md)):
+
+- the twelve experiments, automated over seeds 1–3, each checking its own property
+  (`tools/fof-experiments.test.ts`, opt-in);
+- the 50-seed sweep per terrain, with distributions, determinism re-runs, invariant and
+  rejected-command counts, CPU, ticks per second and heap (`tools/fof-sweep.test.ts`,
+  opt-in);
+- the sweep runner and summary (`sweep.ts`);
+- a fast check that every experiment builds and runs (`experiments.test.ts`, in the
+  regular suite).
+
+**Found by the sweeps.**
+
+- **Repeated withdrawal attempts in town.** A force in town tried to withdraw every
+  decision (25,424 refused orders in one run). Its withdrawal point was chosen in a
+  member's navigation area, but the movement engine plans from the force's centre, which
+  stood in another.
+  - Withdrawal points are now chosen in the centre's area.
+  - A failed attempt waits 10 s before the next.
+  - The force's own refused attempts are no longer reported as rejected commands.
+  - Sweeps and lifecycle tests now require zero rejected commands.
+- **Cross-engine determinism.** Node and Chrome differ in the last bit of the movement
+  engine's trigonometry. Bit-identity is documented as holding within one JavaScript
+  engine build only ([04 §4](04-experiments.md)).
+
+**Validation.**
+
+- **The experiments:** all twelve pass.
+- **The sweeps** (150 runs):
+  - all ended by a stated rule;
+  - 0 invalid, 0 invariant failures, 0 rejected commands;
+  - 15 of 15 determinism re-runs identical.
+- **The full repository check** passes.
+
+## Known limitations
+
+**Detection.**
+
+- The eye-model values are experimental ([02 §6](02-detection-research.md)).
+- There is no reporting delay inside a force, and no localisation error.
+- There is no night or sensor model.
+- Identification needs recognition-level cycles. In this lab it is informational: forces
+  engage confirmed contacts (the rules can require identification).
+
+**Behaviour.**
+
+- A force fights where it halts. There is no cover-seeking, bounding, flanking or
+  pursuit (out of scope by design).
+- A withdrawal is one 250 m move away from the known threat. In town it can fail (no
+  reachable point); the force then fights on and retries.
+- One force per side; the adjudicator assumes two.
+
+**Fire.**
+
+- One burst is one draw.
+- There are no grenades or other area weapons beyond area fire at last known positions.
+- Hit curves and loads are illustrative.
+
+**Determinism.** It is bit-identical only within one JavaScript engine build.
+
+**View.**
+
+- Woods are simple instanced trees: the game's forest renderer needs its terrain-field
+  pipeline.
+- Organizational panels are omniscient (labelled so); only the 3D view and its overlays
+  follow the chosen perspective.
+
+## Recommendations for the next iteration
+
+1. **Calibrate detection against data.** Field detection trials, or published ranges for
+   personnel at known contrast. Replace the experimental eye values, and add a reporting
+   delay and localisation error.
+2. **Model cover in the halt.** Each soldier takes the nearest covered position within a
+   few metres (the clearance field and sight lines already exist). This is the next
+   largest effect on outcomes, and it is defensive, not offensive optimisation.
+3. **Make detection deterministic across engines.** Use correctly rounded (or table)
+   trigonometry in the movement engine's facing, so recordings replay anywhere.
+4. **Add a platoon scale** (three squads, several engagements). The decision cost is
+   per soldier pair: measure it, and add a spatial index for looks.
+5. **Run sensitivity sweeps over the experimental parameters** (contrast, engage range,
+   suppression), reporting how outcome frequencies move rather than tuning them.

@@ -116,6 +116,8 @@ export interface FofForce {
   lastFiredUponAt: number | null;
   /** Since when its mean suppression has stayed above `withdrawSuppression`. */
   suppressedSince: number | null;
+  /** A withdrawal found no way: when to try again (`null`: at once). */
+  withdrawRetryAt: number | null;
   /** Times it entered contact (a regained contact after holding counts again). */
   contactCycles: number;
   /** Hostile intent established: it has identified an enemy or been fired on (rules of engagement). */

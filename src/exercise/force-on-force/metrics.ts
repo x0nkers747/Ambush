@@ -66,7 +66,7 @@ export interface FofMetrics {
   readonly outcome: FofOutcome | null;
   /** Simulated seconds so far. */
   readonly seconds: number;
-  /** Transitions the model refused or reported as invalid (always 0 in a healthy run). */
+  /** Runs ended by a broken invariant (0 or 1; always 0 in a healthy run). */
   readonly invalidTransitions: number;
 }
 
@@ -158,8 +158,6 @@ export function createFofMetrics(sim: Simulation): FofMetricsRecorder {
           engagementStart ??= e.atSeconds;
           fired.add(e.shooterId);
         } else if (e.type === 'fofEnded' && e.outcome.basis === 'invalid') {
-          invalid += 1;
-        } else if (e.type === 'commandRejected' && e.reason !== 'unitInContact') {
           invalid += 1;
         }
       }

@@ -94,6 +94,12 @@ npm run dev
 organizations moving in formation on their own orders, through a seeded urban district (or open ground,
 `?ground=open`) ([docs/behavior-lab](docs/behavior-lab/README.md)).
 
+**Force-on-Force Lab:** http://localhost:5173/#force-on-force, an experimental constructive
+simulation of two organizations that move, detect each other, engage and reach an adjudicated
+outcome (press **Run the default demonstration**;
+[docs/behavior-lab/force-on-force](docs/behavior-lab/force-on-force/README.md)). Not part of the
+game: its parameters are experimental, not validated combat data.
+
 It is also published to GitHub Pages, at https://x0nkers747.github.io/Ambush/, on every push to
 `main`: see [docs/GITHUB_PAGES_DEPLOYMENT.md](docs/GITHUB_PAGES_DEPLOYMENT.md).
 

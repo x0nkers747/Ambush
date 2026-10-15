@@ -15,6 +15,8 @@ import type { FofForce, FofOutcome, FofOutcomeKind } from './types';
 
 /** Headings tried for a withdrawal, in degrees from straight away from the threat. */
 const WITHDRAW_OFFSETS_DEG: readonly number[] = [0, 30, -30, 60, -60, 90, -90];
+/** After a withdrawal found no way, how long before trying again (s). */
+const WITHDRAW_RETRY_S = 10;
 
 /** Each force's lifecycle decision: withdraw, withdrawn, ineffective. */
 export function updateLifecycle(context: FofContext): void {
@@ -62,7 +64,10 @@ export function updateLifecycle(context: FofContext): void {
           : ammunition < behavior.withdrawAmmunitionFraction
             ? 'ammunition low'
             : null;
-    if (reason) withdraw(context, force, reason);
+    if (reason && (force.withdrawRetryAt === null || t >= force.withdrawRetryAt - 1e-9)) {
+      // Nowhere to go now: it fights on where it is and tries again later.
+      if (!withdraw(context, force, reason)) force.withdrawRetryAt = t + WITHDRAW_RETRY_S;
+    }
   });
 }
 
@@ -99,24 +104,25 @@ function ineffective(context: FofContext, force: FofForce, reason: string): void
  * Breaks contact: orders the force `withdrawDistanceM` away from the threat
  * it knows of (the first heading of `WITHDRAW_OFFSETS_DEG` with ground it
  * can reach), in its formation, through the movement engine. With nowhere
- * to go it stays where it is.
+ * to go it stays where it is (returns `false`).
  */
-function withdraw(context: FofContext, force: FofForce, reason: string): void {
+function withdraw(context: FofContext, force: FofForce, reason: string): boolean {
   const { world, setup } = context;
   const centre = centreOf(context, force);
-  if (!centre) return;
+  if (!centre) return false;
   const forceSetup = setup.forces.find((f) => f.unitId === force.unitId);
   const formation = force.mission?.formation ?? forceSetup?.formation;
-  if (!formation) return;
-  // A member standing on routable ground: the withdrawal must be reachable from there.
-  let area = 0;
-  for (const id of force.memberIds) {
+  if (!formation) return false;
+  // The withdrawal must be reachable from where the movement engine plans the
+  // route (the force's centre), or else from a member on routable ground.
+  let area = navArea(world.terrain, centre);
+  for (const id of area > 0 ? [] : force.memberIds) {
     const s = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
     if (s?.status !== 'active') continue;
     area = navArea(world.terrain, s.position);
     if (area > 0) break;
   }
-  if (area === 0) return;
+  if (area === 0) return false;
   // Away from the threat it knows of; without one, back the way it faces.
   const threat = force.threat;
   const facing = context.state.soldiers[context.soldierIndex.get(force.memberIds[0] ?? '') ?? -1];
@@ -143,8 +149,10 @@ function withdraw(context: FofContext, force: FofForce, reason: string): void {
     });
     if (!ok) continue;
     enter(context, force, 'withdrawing', reason);
-    return;
+    force.withdrawRetryAt = null;
+    return true;
   }
+  return false;
 }
 
 /**

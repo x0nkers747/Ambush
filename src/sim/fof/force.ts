@@ -242,12 +242,11 @@ export function issue(context: FofContext, force: FofForce, order: UnitOrder): b
     context.t,
     events,
   );
+  // A refused attempt changes nothing and is not reported: it is the force's
+  // own planning (the caller tries elsewhere or later), not an outside command.
+  if (events.some((e) => e.type === 'commandRejected')) return false;
   context.events.push(...events);
-  return (
-    !events.some((e) => e.type === 'commandRejected') &&
-    (state.behavior?.tasks.length ?? 0) >= before &&
-    runningTask(context, force) !== undefined
-  );
+  return (state.behavior?.tasks.length ?? 0) >= before && runningTask(context, force) !== undefined;
 }
 
 /** The force's soldiers stand, stop firing and are no longer held. */

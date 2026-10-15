@@ -110,6 +110,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       lastFireAt: null,
       lastFiredUponAt: null,
       suppressedSince: null,
+      withdrawRetryAt: null,
       contactCycles: 0,
       hostile: false,
       observedUntil: 0,
