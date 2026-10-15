@@ -34,8 +34,117 @@ export function isOnPolygonBoundary(p: Vec2, vertices: readonly Vec2[]): boolean
   return false;
 }
 
-/** Whether `p` lies inside the closed polygon: boundary points count as inside. */
+/**
+ * A large polygon's edges by horizontal band (CSR layout: band `k`, from
+ * `minY + k·BAND_M`, holds edge indices `edges[start[k]] … edges[start[k + 1] − 1]`;
+ * edge `i` runs from vertex `i` to vertex `i + 1`). An edge is listed in
+ * every band its y-range touches (inclusive, with a hair of margin), so a
+ * band lists every edge that reaches any height within it. Built once per
+ * vertex array (polygons are immutable).
+ */
+export interface PolygonBands {
+  readonly minY: number;
+  readonly maxY: number;
+  readonly count: number;
+  readonly start: Int32Array;
+  readonly edges: Int32Array;
+}
+
+/** Polygons with at least this many vertices get bands (smaller ones are scanned whole). */
+const BANDED_MIN_VERTICES = 48;
+/** Band height, in metres. */
+const BAND_M = 8;
+const bandCache = new WeakMap<readonly Vec2[], PolygonBands | null>();
+
+/** The polygon's edge bands, or `null` for a small polygon. */
+export function polygonBands(vertices: readonly Vec2[]): PolygonBands | null {
+  const known = bandCache.get(vertices);
+  if (known !== undefined) return known;
+  const n = vertices.length;
+  if (n < BANDED_MIN_VERTICES) {
+    bandCache.set(vertices, null);
+    return null;
+  }
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const v of vertices) {
+    minY = Math.min(minY, v.y);
+    maxY = Math.max(maxY, v.y);
+  }
+  const count = Math.max(1, Math.ceil((maxY - minY) / BAND_M) + 1);
+  const eps = BAND_M * 1e-6;
+  const range = (i: number): [number, number] => {
+    const a = vertices[i] ?? { x: 0, y: 0 };
+    const b = vertices[(i + 1) % n] ?? a;
+    const lo = Math.floor((Math.min(a.y, b.y) - minY - eps) / BAND_M);
+    const hi = Math.floor((Math.max(a.y, b.y) - minY + eps) / BAND_M);
+    return [Math.max(0, lo), Math.min(count - 1, hi)];
+  };
+  const start = new Int32Array(count + 1);
+  for (let i = 0; i < n; i += 1) {
+    const [lo, hi] = range(i);
+    for (let k = lo; k <= hi; k += 1) start[k + 1] = (start[k + 1] ?? 0) + 1;
+  }
+  for (let k = 1; k <= count; k += 1) start[k] = (start[k] ?? 0) + (start[k - 1] ?? 0);
+  const fill = start.slice(0, count);
+  const edges = new Int32Array(start[count] ?? 0);
+  for (let i = 0; i < n; i += 1) {
+    const [lo, hi] = range(i);
+    for (let k = lo; k <= hi; k += 1) {
+      const at = fill[k] ?? 0;
+      edges[at] = i;
+      fill[k] = at + 1;
+    }
+  }
+  const bands: PolygonBands = { minY, maxY, count, start, edges };
+  bandCache.set(vertices, bands);
+  return bands;
+}
+
+/**
+ * The bands covering heights `y0`…`y1`: `[first, last]` (empty, `first >
+ * last`, when the range misses the polygon's heights altogether).
+ */
+export function bandRange(bands: PolygonBands, y0: number, y1: number): [number, number] {
+  if (y1 < bands.minY || y0 > bands.maxY) return [1, 0];
+  const first = Math.max(0, Math.floor((y0 - bands.minY) / BAND_M));
+  const last = Math.min(bands.count - 1, Math.floor((y1 - bands.minY) / BAND_M));
+  return [first, last];
+}
+
+/**
+ * Whether `p` lies inside the closed polygon: boundary points count as inside.
+ * A large polygon is tested on its band at `p`'s height alone (`polygonBands`):
+ * only edges reaching that height can hold `p` or cross the ray from it, so
+ * the answer is the whole scan's.
+ */
 export function pointInPolygon(p: Vec2, vertices: readonly Vec2[]): boolean {
+  const bands = polygonBands(vertices);
+  if (bands) {
+    if (p.y < bands.minY || p.y > bands.maxY) return false;
+    const k = Math.min(bands.count - 1, Math.floor((p.y - bands.minY) / BAND_M));
+    const from = bands.start[k] ?? 0;
+    const to = bands.start[k + 1] ?? 0;
+    const n = vertices.length;
+    for (let j = from; j < to; j += 1) {
+      const i = bands.edges[j] ?? 0;
+      const a = vertices[i];
+      const b = vertices[(i + 1) % n];
+      if (a && b && onSegment(p, a, b)) return true;
+    }
+    let inside = false;
+    for (let j = from; j < to; j += 1) {
+      const i = bands.edges[j] ?? 0;
+      const a = vertices[i];
+      const b = vertices[(i + 1) % n];
+      if (!a || !b) continue;
+      if (a.y > p.y !== b.y > p.y) {
+        const x = a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y);
+        if (x > p.x) inside = !inside;
+      }
+    }
+    return inside;
+  }
   if (isOnPolygonBoundary(p, vertices)) return true;
   // Even-odd ray cast toward +X. Off the boundary the half-open rule is exact.
   let inside = false;

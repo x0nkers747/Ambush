@@ -142,7 +142,7 @@ export function battleNextBlocker(
     case 'bluefor':
       return issues[0]?.message ?? null;
     case 'combat':
-      return 'Combat comes in the next milestone (docs/constructive-simulation/progress.md).';
+      return 'End the combat first: the battle runs until you end it.';
     case 'aar':
       return 'This is the last stage.';
   }

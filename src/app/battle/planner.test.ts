@@ -193,7 +193,7 @@ describe('the stage gates', () => {
     const { p } = planner('scenario', bad);
     expect(battleNextBlocker('scenario', p.issues(), bad)).toBeNull();
     expect(battleNextBlocker('bluefor', p.issues(), bad)).toMatch(/destination must be on the map/);
-    expect(battleNextBlocker('combat', p.issues(), bad)).toMatch(/next milestone/);
+    expect(battleNextBlocker('combat', p.issues(), bad)).toMatch(/End the combat first/);
   });
 });
 

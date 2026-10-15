@@ -34,7 +34,7 @@ import {
   type TerrainDataset,
   type Vec2,
 } from '#sim';
-import { createTacticalMap, type MapBinding, type TacticalMap } from '#view2d';
+import { createTacticalMap, type MapBinding, type MapEditor, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d, UnitMarker } from '#view3d';
 import {
   createConfirm,
@@ -44,14 +44,26 @@ import {
   htmlSetter,
   wireHeader,
 } from '../shell';
-import { STAGE_NAMES } from '../workflow';
+import { STAGE_NAMES, type WorkflowRules } from '../workflow';
+import { COMBAT_SPEEDS, createCombat, type Combat, type CombatSpeed } from './combat';
+import { createCombatMapEditor, type CombatUi } from './combat-editor';
+import {
+  aarSummaryHtml,
+  clockText,
+  combatEventsHtml,
+  combatHint,
+  combatRosterHtml,
+  combatSquadHtml,
+  combatToolsHtml,
+} from './combat-panel';
 import { createBattleMapEditor, ORDER_INITIALS } from './map-editor';
 import { createPlanner, type BattleStage, type PlannerTool } from './planner';
 
-// Stages 2–5 of a battle on one battlefield (docs/constructive-simulation/03):
-// Scenario Setup (place both sides' squads, give OPFOR its plans), BLUEFOR
-// Planning (give BLUEFOR's squads their plans), Combat and the After-Action
-// Review (next milestones). The workflow header, the map (2D, or 3D through
+// Stages 2–5 of a battle on one battlefield (docs/constructive-simulation/03,
+// 04): Scenario Setup (place both sides' squads, give OPFOR its plans),
+// BLUEFOR Planning (give BLUEFOR's squads their plans), Combat (the battle
+// fought live: play, pause, speed, orders to either side, End Combat) and
+// the After-Action Review (its summary; the full replay is milestone D). The workflow header, the map (2D, or 3D through
 // the same editor), and a side panel: the stage's tools, the selected squad
 // and its plan, the roster by force, and the scenario. Every edit goes
 // through the planner (planner.ts) and is saved as it is made.
@@ -161,6 +173,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         <input type="file" accept=".json,application/json" data-ui="import-file" hidden>
       </div>
     </section>
+    <details class="sec collapsible" data-sec="events" open>
+      <summary>Event log</summary>
+      <ul class="events" data-ui="events"></ul>
+    </details>
     <details class="sec collapsible" data-sec="help">
       <summary>Help</summary>
       ${HELP_HTML}
@@ -193,6 +209,48 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   });
   const editor = createBattleMapEditor(planner);
 
+  // --- Combat (docs/constructive-simulation/04) ------------------------------
+
+  /** The battle being fought (Combat), or fought (the After-Action Review). */
+  let combat: Combat | null = null;
+  const combatUi: CombatUi = { selected: null, tool: null, append: false, shift: false };
+  const combatEditor = createCombatMapEditor(
+    () => combat,
+    combatUi,
+    notify,
+    (id) => planner.squad(id)?.organization ?? 'squad',
+  );
+  const inCombat = (): Combat | null =>
+    planner.stage === 'combat' || planner.stage === 'aar' ? combat : null;
+  const current = (): MapEditor => (inCombat() ? combatEditor : editor);
+  /** The map's editor: the planner's, or in Combat and the review, the battle's. */
+  const mapEditor: MapEditor = {
+    press: (point, screen, button) => current().press?.(point, screen, button) ?? false,
+    drag: (point) => current().drag?.(point),
+    drop: (point) => current().drop?.(point),
+    click: (point, screen) => {
+      current().click(point, screen);
+    },
+    cursor: (point, screen) => current().cursor?.(point, screen) ?? null,
+    draw: (ctx, toScreen) => current().draw?.(ctx, toScreen),
+  };
+  /** The page's gates: the planner's, and the battle's own (it ends only when the user ends it). */
+  const rules: WorkflowRules = {
+    next: (stage) =>
+      stage === 'combat'
+        ? combat?.ended === true
+          ? null
+          : 'End the combat first: the battle runs until you end it.'
+        : planner.rules.next(stage),
+    back: (to) => {
+      if (planner.stage === 'combat' && combat && !combat.ended)
+        return 'End the combat first: leaving now would discard the battle.';
+      if (planner.stage === 'aar' && to === 'combat')
+        return 'The battle has ended: go back to BLUEFOR Planning to fight it again.';
+      return null;
+    },
+  };
+
   // --- Map --------------------------------------------------------------
 
   let session: Session = createSession();
@@ -206,7 +264,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       session = next;
     },
     notify,
-    editor,
+    editor: mapEditor,
     hideTrainee: () => true,
   };
   const adopt = (handed: TacticalMap): TacticalMap => {
@@ -244,7 +302,36 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     else map.centreOn(point);
   };
   /** The battle's soldiers where they start, for the 3D view (selected squad highlighted). */
+  let combatWeapons: { combat: Combat; weapons: Record<string, string | null> } | null = null;
   const figures = () => {
+    const c = inCombat();
+    if (c) {
+      if (combatWeapons?.combat !== c) {
+        const weapons: Record<string, string | null> = {};
+        for (const squad of c.session.battle.squads) Object.assign(weapons, squad.displayWeapons);
+        combatWeapons = { combat: c, weapons };
+      }
+      const selected = combatUi.selected;
+      const units: UnitMarker[] = c.session.battle.sim.state.soldiers.map((s) => ({
+        id: s.id,
+        affiliation: s.side === 'BLUEFOR' ? 'friendly' : 'enemy',
+        position: s.position,
+        azimuth: s.azimuth,
+        posture: s.posture,
+        status: s.status,
+        selected: selected !== null && s.id.startsWith(`${selected}-`),
+      }));
+      return {
+        units,
+        clock: {
+          log: c.session.motion,
+          combatLog: c.session.combatLog,
+          seconds: c.renderSeconds,
+          ended: c.ended,
+        },
+        weapons: combatWeapons.weapons,
+      };
+    }
     const f = planner.figures();
     const selected = planner.selection.squadId;
     const hidden = (side: Side) =>
@@ -381,9 +468,33 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     blocked: notify,
   });
   const enter = (target: BattleStage) => {
+    if (target === 'combat' && (!combat || combat.ended)) {
+      // A new battle from the scenario as planned.
+      combat = createCombat({ terrain: o.terrain, definition: planner.definition, notify });
+      combatUi.selected = null;
+      combatUi.tool = null;
+      lastFrameMs = null;
+    }
+    if (target === 'scenario' || target === 'bluefor') combat = null;
     planner.setStage(target);
     if (target === 'scenario' || target === 'bluefor') o.setAddress(target);
     lastVersion = -1;
+  };
+  /** Ends the battle (after asking) and opens the review. */
+  const endCombat = () => {
+    const c = combat;
+    if (!c || c.ended) return;
+    const wasPlaying = c.playing;
+    c.pause();
+    confirm({
+      message: `End the battle at ${clockText(c.session.seconds)}? It cannot be resumed.`,
+      action: 'End combat',
+      onConfirm: () => {
+        c.end();
+        enter('aar');
+      },
+    });
+    if (wasPlaying) notify('Paused. End the battle, or Cancel to go on.');
   };
   const leave = () => {
     stop();
@@ -392,7 +503,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const PRIMARY: Readonly<Record<BattleStage, string>> = {
     scenario: 'Continue to BLUEFOR Planning →',
     bluefor: 'Continue to Combat →',
-    combat: 'After-Action Review →',
+    combat: 'End combat and review →',
     aar: '← Back to BLUEFOR Planning',
   };
   const NEXT: Readonly<Record<BattleStage, BattleStage>> = {
@@ -403,7 +514,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   ui('primary').addEventListener('click', () => {
     const stage = planner.stage;
-    const reason = stage === 'aar' ? null : planner.rules.next(stage);
+    if (stage === 'combat' && combat && !combat.ended) {
+      endCombat();
+      return;
+    }
+    const reason = stage === 'aar' ? null : rules.next(stage);
     if (reason) notify(reason);
     else enter(NEXT[stage]);
   });
@@ -462,12 +577,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'bluefor':
         return `<h3>BLUEFOR orders</h3>${orderTools()}`;
       case 'combat':
-        return `<p class="coming-soon">Combat comes next</p>
-          <p>The plans are ready: ${escapeHtml(scenarioSummary(planner.definition))}. Running them
-          live, with orders to either side, pause and speed, is the next milestone
-          (docs/constructive-simulation/progress.md).</p>`;
+        return combat ? combatToolsHtml(combat, combatUi) : '';
       case 'aar':
-        return '<p class="coming-soon">The After-Action Review comes after Combat.</p>';
+        return combat
+          ? aarSummaryHtml(combat.summary())
+          : `<p class="muted">No battle fought yet: ${escapeHtml(scenarioSummary(planner.definition))}.</p>`;
     }
   };
 
@@ -642,11 +756,43 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       }`;
   };
 
+  /** A click on the Combat stage's panel; `true` when it was one. */
+  const combatClick = (target: HTMLElement, clicks: number): boolean => {
+    const c = inCombat();
+    if (!c) return false;
+    const el = target.closest<HTMLElement>(
+      '[data-ctool], [data-cmode], [data-speed], [data-cact], [data-squad]',
+    );
+    if (!el) return false;
+    const { ctool, cmode, speed, cact, squad } = el.dataset;
+    if (ctool !== undefined) {
+      const kind = ctool === 'select' ? null : (ctool as OrderKind);
+      combatUi.tool = combatUi.tool === kind ? null : kind;
+    } else if (cmode !== undefined) combatUi.append = cmode === 'append';
+    else if (speed !== undefined) c.setSpeed(Number(speed) as CombatSpeed);
+    else if (cact === 'play') {
+      if (c.playing) c.pause();
+      else c.play();
+    } else if (cact === 'end') endCombat();
+    else if (cact === 'hold') {
+      if (combatUi.selected !== null) c.hold(combatUi.selected);
+    } else if (cact === 'centre') {
+      const s = c.squad(combatUi.selected);
+      if (s) centreOn(s.centre);
+    } else if (squad !== undefined && !el.hasAttribute('data-act')) {
+      combatUi.selected = squad;
+      const s = c.squad(squad);
+      if (s && clicks >= 2) centreOn(s.centre);
+    } else return false;
+    return true;
+  };
+
   // Clicks and changes in the side panel.
   const aside = app.querySelector<HTMLElement>('aside.side');
   if (!aside) throw new Error('Missing side panel');
   aside.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    if (combatClick(target, event.detail)) return;
     const toolEl = target.closest<HTMLElement>('[data-tool]');
     if (toolEl?.dataset['tool']) {
       const t = JSON.parse(toolEl.dataset['tool']) as PlannerTool;
@@ -819,6 +965,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       return;
     }
     const key = event.key.toLowerCase();
+    if (key === 'shift') combatUi.shift = true;
+    const c = inCombat();
+    if (c) {
+      combatKey(c, key, event);
+      return;
+    }
     const order = ORDER_KEYS[key];
     if (order && (planner.stage === 'scenario' || planner.stage === 'bluefor')) {
       planner.setTool({ kind: 'order', order });
@@ -853,7 +1005,53 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       }
     }
   };
+  /** The Combat stage's and the review's keys. */
+  const combatKey = (c: Combat, key: string, event: KeyboardEvent) => {
+    const order = ORDER_KEYS[key];
+    if (order && !c.ended) {
+      combatUi.tool = order;
+      return;
+    }
+    const speedAt = COMBAT_SPEEDS.indexOf(c.speed);
+    switch (key) {
+      case ' ':
+        if (c.ended) break;
+        event.preventDefault();
+        if (c.playing) c.pause();
+        else c.play();
+        break;
+      case 'f':
+        fitView();
+        break;
+      case 's':
+        combatUi.tool = null;
+        break;
+      case 'h':
+        if (combatUi.selected !== null) c.hold(combatUi.selected);
+        break;
+      case '+':
+      case '=':
+        c.setSpeed(COMBAT_SPEEDS[Math.min(COMBAT_SPEEDS.length - 1, speedAt + 1)] ?? c.speed);
+        break;
+      case '-':
+      case '_':
+        c.setSpeed(COMBAT_SPEEDS[Math.max(0, speedAt - 1)] ?? c.speed);
+        break;
+      case 'escape':
+        if (combatUi.tool !== null) combatUi.tool = null;
+        else combatUi.selected = null;
+        break;
+    }
+  };
+  const onKeyUp = (event: KeyboardEvent) => {
+    if (event.key === 'Shift') combatUi.shift = false;
+  };
+  const onBlur = () => {
+    combatUi.shift = false;
+  };
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onBlur);
   let lastPlace: PlannerTool = { kind: 'place', side: 'BLUEFOR', organization: 'squad' };
 
   // --- Frame loop -------------------------------------------------------------
@@ -861,12 +1059,23 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   let lastVersion = -1;
   const updatePanels = () => {
     const stage = planner.stage;
-    header.update(stage, planner.rules);
-    const reason = stage === 'aar' ? null : planner.rules.next(stage);
+    header.update(stage, rules);
+    const fighting = stage === 'combat' && combat !== null && !combat.ended;
+    const reason = stage === 'aar' || fighting ? null : rules.next(stage);
     const primary = ui('primary') as HTMLButtonElement;
     setText(primary, PRIMARY[stage]);
+    primary.classList.toggle('danger-solid', fighting);
     primary.setAttribute('aria-disabled', String(reason !== null));
     setText(ui('primary-reason'), reason ?? '');
+    const c = inCombat();
+    const events = app.querySelector<HTMLElement>('[data-sec="events"]');
+    if (events) events.hidden = !c;
+    const scenarioSection = app.querySelector<HTMLElement>('[data-sec="scenario"]');
+    if (scenarioSection) scenarioSection.hidden = c !== null;
+    if (c) {
+      updateCombatPanels(c);
+      return;
+    }
     const pointer = map.pointer;
     setText(
       ui('pointer'),
@@ -900,7 +1109,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           : '',
     );
     const squadSection = app.querySelector<HTMLElement>('[data-sec="squad"]');
-    if (squadSection) squadSection.hidden = stage === 'combat' || stage === 'aar';
+    if (squadSection) squadSection.hidden = stage === 'aar';
     // Not while the user is typing in it.
     const squadEl = ui('squad');
     if (!squadEl.contains(document.activeElement) || document.activeElement === document.body)
@@ -910,8 +1119,42 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (!scenarioEl.contains(document.activeElement)) setHtml(scenarioEl, scenarioHtml());
   };
 
+  /** The Combat stage's and the review's panels: the clock every frame, the rest a few times a second. */
+  let combatPanelsAt = -Infinity;
+  const updateCombatPanels = (c: Combat) => {
+    const clock = app.querySelector<HTMLElement>('[data-ui="combat-clock"]');
+    if (clock) setText(clock, clockText(c.renderSeconds));
+    const now = performance.now();
+    if (now - combatPanelsAt < 150 && lastVersion === planner.version) return;
+    combatPanelsAt = now;
+    lastVersion = planner.version;
+    app.dataset['stage'] = planner.stage;
+    ui('opfor-toggle').hidden = true;
+    setText(ui('tools-title'), STAGE_NAMES[planner.stage]);
+    setHtml(ui('tools'), toolsHtml());
+    setText(ui('tool-hint'), planner.stage === 'combat' ? combatHint(c, combatUi) : '');
+    setText(
+      ui('tool-label'),
+      combatUi.tool === null
+        ? ''
+        : `${ORDER_LABELS[combatUi.tool]} orders (${combatUi.append !== combatUi.shift ? 'append' : 'replace'})`,
+    );
+    setHtml(ui('squad'), combatSquadHtml(c.squad(combatUi.selected)));
+    setHtml(ui('roster'), combatRosterHtml(c, combatUi));
+    setHtml(ui('events'), combatEventsHtml(c));
+  };
+
   let frameId = 0;
-  const frame = () => {
+  let lastFrameMs: number | null = null;
+  // rAF stops in hidden tabs; the gap is dropped on return rather than caught up.
+  const onVisibility = () => {
+    lastFrameMs = null;
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  const frame = (nowMs: number) => {
+    const c = planner.stage === 'combat' ? combat : null;
+    if (c) c.frame(lastFrameMs === null ? 0 : (nowMs - lastFrameMs) / 1000);
+    lastFrameMs = nowMs;
     if (viewMode === '3d' && view3d) {
       map.update();
       view3d.render();
@@ -926,6 +1169,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     map.canvas.style.visibility = '';
     cancelAnimationFrame(frameId);
     window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', onBlur);
+    document.removeEventListener('visibilitychange', onVisibility);
   };
 
   // For automated browser checks: the planner's state, whichever view is shown. Read-only.
@@ -938,7 +1184,34 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       selection: planner.selection,
       definition: JSON.parse(JSON.stringify(planner.definition)) as unknown,
       issues: planner.issues().map((i) => ({ ...i })),
-      blocker: planner.stage === 'aar' ? null : planner.rules.next(planner.stage),
+      blocker: planner.stage === 'aar' ? null : rules.next(planner.stage),
+      combat: combat
+        ? {
+            playing: combat.playing,
+            speed: combat.speed,
+            ended: combat.ended,
+            tick: combat.session.tick,
+            seconds: combat.session.seconds,
+            renderSeconds: combat.renderSeconds,
+            ui: { ...combatUi },
+            commands: combat.session.battle.commands.length,
+            cpu: combat.session.cpu(),
+            squads: combat.squads().map((q) => ({
+              id: q.id,
+              side: q.side,
+              up: q.up,
+              total: q.total,
+              phase: q.phase,
+              centre: q.centre,
+              active: q.active ? { kind: q.active.kind, destination: q.active.destination } : null,
+              pending: q.pending.length,
+              orders: q.orders.map((x) => `${x.kind}:${x.status}`),
+              queued: q.queued.length,
+            })),
+            summary: combat.summary(),
+            hash: combat.session.hashes.at(-1) ?? null,
+          }
+        : null,
     }),
   });
 

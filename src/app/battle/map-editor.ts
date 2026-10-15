@@ -16,12 +16,12 @@ import type { Planner } from './planner';
 //   drag the knob        turn the selected squad (its facing at the start)
 //   right-click a waypoint  delete the order
 
-const SIDE_COLORS: Readonly<Record<Side, string>> = {
+export const SIDE_COLORS: Readonly<Record<Side, string>> = {
   BLUEFOR: AFFILIATION_COLORS.friendly,
   OPFOR: AFFILIATION_COLORS.enemy,
 };
 const ISSUE_COLOR = '#e0a63a';
-const OUTLINE = '#0b0d0f';
+export const OUTLINE = '#0b0d0f';
 
 /** Hit radii and handle distance, CSS pixels. */
 const WAYPOINT_HIT_PX = 11;
@@ -256,7 +256,7 @@ function drawBattle(
   ctx.restore();
 }
 
-function chevron(
+export function chevron(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -280,7 +280,7 @@ function chevron(
 }
 
 /** A waypoint: its order's kind by shape and initial (move ●, attack ◆, withdraw ■) and its number. */
-function waypoint(
+export function waypoint(
   ctx: CanvasRenderingContext2D,
   p: Vec2,
   kind: OrderKind,
@@ -317,7 +317,7 @@ function waypoint(
   ctx.fillText(label, p.x + r + 5, p.y);
 }
 
-function ring(ctx: CanvasRenderingContext2D, p: Vec2, r: number): void {
+export function ring(ctx: CanvasRenderingContext2D, p: Vec2, r: number): void {
   ctx.save();
   ctx.setLineDash([4, 3]);
   ctx.lineWidth = 2;
@@ -333,10 +333,10 @@ function ring(ctx: CanvasRenderingContext2D, p: Vec2, r: number): void {
  * friendly, a diamond for hostile, the infantry cross, and the echelon above
  * (squad ●, fire team and element Ø).
  */
-function unitSymbol(
+export function unitSymbol(
   ctx: CanvasRenderingContext2D,
   c: Vec2,
-  s: ScenarioSquad,
+  s: Pick<ScenarioSquad, 'side' | 'organization'>,
   isSelected: boolean,
   issue: boolean,
 ): void {

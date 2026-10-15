@@ -5,9 +5,9 @@
 | Milestone | Scope                                                                         | State | Commit                                         |
 | --------- | ----------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
 | A         | Generalized forces, orders and plans, battle builder, architecture            | Done  | e6957eb                                        |
-| B         | Scenario Setup and BLUEFOR Planning UI, schema v2 and v1 migration, save/load | Done  | see git log: `feat(constructive): milestone B` |
-| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Next  | —                                              |
-| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | —     | —                                              |
+| B         | Scenario Setup and BLUEFOR Planning UI, schema v2 and v1 migration, save/load | Done  | acae397                                        |
+| C         | Interactive Combat stage: live orders, pause and speed, End Combat            | Done  | see git log: `feat(constructive): milestone C` |
+| D         | Full AAR: replay from tick 0, timeline, markers, inspection; benchmarks       | Next  | —                                              |
 
 ## Milestone A: generalized forces, orders and architecture
 
@@ -105,4 +105,69 @@ Validation:
   - Show OPFOR worked;
   - leaving for Terrain showed the battle in the preview;
   - the legacy ambush exercise opened with its own scenario.
+- `npm run check` and `npm run build` pass.
+
+### After Milestone B
+
+- `fbafab8`, `a60e842`: a soldier whose start would be in water or a
+  building stands on the nearest clear ground. The rest of the squad stays in
+  formation, and the squad where it was put. This holds when a squad is
+  placed, dragged, turned or reorganized.
+
+## Milestone C: the Combat stage
+
+Delivered ([04](04-combat.md)):
+
+- **The Combat stage:**
+  - The battle the plans make, started paused.
+  - Play, pause, and speeds from ½× to 32×.
+  - Live orders to the squads of either side: Move, Attack and Withdraw,
+    replacing or appending (with Shift for one click), or Hold.
+  - Orders given while paused are queued and apply in turn.
+  - Clicking an enemy squad with an order tool targets it.
+  - End Combat, after asking; the battle never ends by itself.
+- **Shown in 2D and 3D through one editor:**
+  - soldiers interpolated between ticks, and casualties;
+  - squad symbols with their strength and state;
+  - active, pending and queued orders;
+  - bursts of fire;
+  - in 3D, the soldiers as characters posed from the battle.
+- **The side panel:**
+  - the selected squad's state, orders and order history;
+  - the roster by force with each squad's state;
+  - the event log in words.
+- **The After-Action Review's summary:** casualties, ineffective squads and
+  orders by side. The replay is Milestone D.
+- **The battle session:** commands with origins, keyframes every 5 s, a
+  state hash every second, motion and events recorded. A recording replays
+  the battle exactly.
+- **Movement on real ground, 20 times faster**, with exactly the same
+  results: banded tests for large polygons, and a shorter nearest-in-area
+  search. On Quantico, 0.5 ms per tick for 52 soldiers (from 10); 32× keeps
+  up.
+
+Validation:
+
+- Unit tests:
+  - `src/app/battle/combat.test.ts`: the clock; orders to either side,
+    replace and append, while paused, hold, refused destinations; ending;
+    the session's recording replayed to the same hashes;
+  - `src/sim/polygon-bands.test.ts`: banded and whole-scan answers equal on
+    10,000+ points and 3,000 segments;
+  - `src/sim/behavior/nearest-in-area.test.ts`: equal to the full search
+    on 3,000 points.
+- The full suite, including the Behavior and Force-on-Force Labs' scenario
+  expectations, passes unchanged.
+- The browser, on Quantico with 2 BLUEFOR and 2 OPFOR squads (Chrome, 2D and
+  3D):
+  - plans made, then fought;
+  - play at 8× and 32×;
+  - an OPFOR squad ordered onto a BLUEFOR squad by clicking it;
+  - orders queued while paused, then applied (replace then append);
+  - contact at 8:10, with an assault on both sides and casualties logged;
+  - an OPFOR squad selected in 3D and given a Withdraw, which superseded its
+    attack;
+  - 60 fps in 3D during the battle;
+  - End Combat and the summary;
+  - the header blocked going back into the ended battle.
 - `npm run check` and `npm run build` pass.

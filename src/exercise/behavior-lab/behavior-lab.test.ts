@@ -86,7 +86,10 @@ function scenario(id: Parameters<typeof scenarioSpec>[0], options: ScenarioOptio
   return runScenario(scenarioSpec(id, options));
 }
 
-describe.each(ORGS)('scenarios, %s', (kind) => {
+// Each scenario runs the real simulation for minutes of simulated time: alone
+// about a second, but several times that while the whole suite runs in
+// parallel, so the default 5 s limit is too tight.
+describe.each(ORGS)('scenarios, %s', { timeout: 30_000 }, (kind) => {
   const d = 10;
 
   it('1. straight line: formation error, completion, no collisions, no oscillation', () => {

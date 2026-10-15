@@ -1048,6 +1048,80 @@
         cursor: pointer;
       }
 
+      .battle .combat-clock {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .battle .combat-clock .clock {
+        flex: 1;
+        font-size: 18px;
+      }
+      .battle .mode-row button[aria-pressed='true'] {
+        border-color: var(--blue);
+      }
+      .battle ol.order-history {
+        margin: 4px 0;
+        padding-left: 18px;
+        font-size: 12px;
+      }
+      .battle ol.order-history .o-status {
+        display: inline-block;
+        min-width: 70px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .battle ol.order-history li.active .o-status {
+        color: var(--blue);
+      }
+      .battle ol.order-history li.ok .o-status {
+        color: var(--green);
+      }
+      .battle ol.order-history li.alert .o-status {
+        color: #ff8a80;
+      }
+      .battle ol.order-history li.queued {
+        color: #fff;
+        font-style: italic;
+      }
+      .battle .phase-engaged,
+      .battle .phase-contact,
+      .battle .phase-assaulting {
+        color: #ff8a80;
+      }
+      .battle .phase-ineffective,
+      .battle .phase-withdrawn {
+        color: var(--muted);
+      }
+      .battle .phase-withdrawing,
+      .battle .phase-possibleContact {
+        color: var(--amber);
+      }
+      .battle table.aar-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 8px 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .battle table.aar-table th,
+      .battle table.aar-table td {
+        padding: 3px 6px;
+        border-bottom: 1px solid var(--line);
+        text-align: right;
+      }
+      .battle table.aar-table th:first-child {
+        text-align: left;
+      }
+      .battle table.aar-table tr.blue th:first-child {
+        border-left: 3px solid var(--blue);
+      }
+      .battle table.aar-table tr.red th:first-child {
+        border-left: 3px solid var(--red);
+      }
+
       /* Roster. */
       .roster-unit {
         margin-left: calc(var(--depth) * 8px);

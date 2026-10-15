@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geometry';
-import { navArea } from '../navigation';
+import { navArea, navAreaAt, navAreaDistance } from '../navigation';
 import type { TerrainDataset } from '../terrain';
 import type { BehaviorParams } from './params';
 import { flattenFormation, type FlatFormation } from './formation-spec';
@@ -167,12 +167,20 @@ export function slotTargetAt(frame: TaskFrame, i: number, out: SlotTarget): Slot
  * the smallest ring); `null` when there is none. Deterministic.
  */
 export function nearestInArea(terrain: TerrainDataset, p: Vec2, area: number): Vec2 | null {
+  // Rings nearer than the area's nearest cell cannot reach it: they are
+  // skipped (the rings are 0.5 m multiples, exact in floating point, so the
+  // rings tried, and the point found, are those of the full search).
+  const nearest = navAreaDistance(terrain, p, area, CLEAR_SEARCH_M);
+  if (nearest === Infinity) return null;
   for (let r = 0.5; r <= CLEAR_SEARCH_M; r += 0.5) {
+    // (With a micrometre to spare for the rounding of the ring's points.)
+    if (r < nearest - 1e-6) continue;
     const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 0.75));
     for (let k = 0; k < steps; k += 1) {
       const a = (2 * Math.PI * k) / steps;
-      const q = { x: p.x + r * Math.sin(a), y: p.y + r * Math.cos(a) };
-      if (navArea(terrain, q) === area) return q;
+      const x = p.x + r * Math.sin(a);
+      const y = p.y + r * Math.cos(a);
+      if (navAreaAt(terrain, x, y) === area) return { x, y };
     }
   }
   return null;

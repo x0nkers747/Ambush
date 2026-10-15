@@ -557,7 +557,7 @@ export function destinationProblem(terrain: TerrainDataset, point: Vec2): string
  * stand there, otherwise the nearest point out of the water or building
  * (`nearestClearPoint`), with a note; or why there is none.
  */
-function placeDestination(
+export function placeDestination(
   terrain: TerrainDataset,
   point: Vec2,
 ): { readonly point: Vec2; readonly note?: string } | { readonly problem: string } {

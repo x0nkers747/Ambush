@@ -7,7 +7,7 @@ import {
 } from './bridge-navigation';
 import { boundsOf, impassableWater, type Box, type Building, type WaterArea } from './environment';
 import type { Vec2 } from './geometry';
-import { pointInPolygon, segmentIntersectionParams } from './polygon';
+import { bandRange, pointInPolygon, polygonBands, segmentIntersectionParams } from './polygon';
 import { planRoadPath } from './road-network';
 import { deepFreeze } from './shared-terrain';
 import { isOnTerrain, type TerrainDataset } from './terrain';
@@ -650,30 +650,42 @@ function segmentClearOfPolygon(
   const sMaxY = Math.max(a.y, b.y);
   const reach = clearance + EDGE_SKIP_SLACK_M;
   const n = polygon.length;
-  for (let i = 0; i < n; i += 1) {
+  /** Whether edge `i` crosses the segment or comes within the clearance of it. */
+  const blocks = (i: number): boolean => {
     const p = polygon[i];
     const q = polygon[(i + 1) % n] ?? p;
-    if (!p || !q) continue;
+    if (!p || !q) return false;
     if (
       Math.min(p.x, q.x) - sMaxX > reach ||
       sMinX - Math.max(p.x, q.x) > reach ||
       Math.min(p.y, q.y) - sMaxY > reach ||
       sMinY - Math.max(p.y, q.y) > reach
     )
-      continue;
-    if (segmentIntersectionParams(a, b, p, q).length > 0) return false;
+      return false;
+    if (segmentIntersectionParams(a, b, p, q).length > 0) return true;
     // Non-intersecting segments are closest at one of the four endpoints.
-    if (
+    return (
       Math.min(
         distanceToSegment(a, p, q),
         distanceToSegment(b, p, q),
         distanceToSegment(p, a, b),
         distanceToSegment(q, a, b),
       ) < clearance
-    ) {
-      return false;
+    );
+  };
+  // A large polygon: only the edges in the bands the segment's reach spans
+  // (any other edge's bounds are beyond the reach, and would be skipped).
+  const bands = polygonBands(polygon);
+  if (bands) {
+    const [first, last] = bandRange(bands, sMinY - reach, sMaxY + reach);
+    for (let k = first; k <= last; k += 1) {
+      for (let j = bands.start[k] ?? 0; j < (bands.start[k + 1] ?? 0); j += 1) {
+        if (blocks(bands.edges[j] ?? 0)) return false;
+      }
     }
+    return true;
   }
+  for (let i = 0; i < n; i += 1) if (blocks(i)) return false;
   return true;
 }
 
@@ -1025,6 +1037,54 @@ export function navArea(terrain: TerrainDataset, p: Vec2): number {
   if (c < 0 || r < 0 || c >= grid.columns || r >= grid.rows) return 0;
   grid.areas ??= labelAreas(grid);
   return grid.areas[r * grid.columns + c] ?? 0;
+}
+
+/** `navArea` at (x, y), without a point object (for hot loops). */
+export function navAreaAt(terrain: TerrainDataset, x: number, y: number): number {
+  const grid = navGrid(terrain);
+  const c = Math.floor((x - grid.originX) / NAV_CELL_M);
+  const r = Math.floor((y - grid.originY) / NAV_CELL_M);
+  if (c < 0 || r < 0 || c >= grid.columns || r >= grid.rows) return 0;
+  grid.areas ??= labelAreas(grid);
+  return grid.areas[r * grid.columns + c] ?? 0;
+}
+
+/**
+ * The least distance from `p` to a navigation cell of area `area` (the cell's
+ * square, edges included), among the cells within `maxDistance`; `Infinity`
+ * when none is. A point of the area at distance `r` from `p` lies in such a
+ * cell, so no point closer than this is in the area.
+ */
+export function navAreaDistance(
+  terrain: TerrainDataset,
+  p: Vec2,
+  area: number,
+  maxDistance: number,
+): number {
+  const grid = navGrid(terrain);
+  grid.areas ??= labelAreas(grid);
+  const areas = grid.areas;
+  const c0 = Math.max(0, Math.floor((p.x - maxDistance - grid.originX) / NAV_CELL_M));
+  const c1 = Math.min(
+    grid.columns - 1,
+    Math.floor((p.x + maxDistance - grid.originX) / NAV_CELL_M),
+  );
+  const r0 = Math.max(0, Math.floor((p.y - maxDistance - grid.originY) / NAV_CELL_M));
+  const r1 = Math.min(grid.rows - 1, Math.floor((p.y + maxDistance - grid.originY) / NAV_CELL_M));
+  let best = Infinity;
+  for (let r = r0; r <= r1; r += 1) {
+    const y0 = grid.originY + r * NAV_CELL_M;
+    const dy = p.y < y0 ? y0 - p.y : p.y > y0 + NAV_CELL_M ? p.y - y0 - NAV_CELL_M : 0;
+    if (dy >= best) continue;
+    for (let c = c0; c <= c1; c += 1) {
+      if (areas[r * grid.columns + c] !== area) continue;
+      const x0 = grid.originX + c * NAV_CELL_M;
+      const dx = p.x < x0 ? x0 - p.x : p.x > x0 + NAV_CELL_M ? p.x - x0 - NAV_CELL_M : 0;
+      const d = Math.hypot(dx, dy);
+      if (d < best) best = d;
+    }
+  }
+  return best <= maxDistance ? best : Infinity;
 }
 
 function cellCentre(grid: NavGrid, cell: number): Vec2 {

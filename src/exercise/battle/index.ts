@@ -35,6 +35,7 @@ export {
   ORDER_LABELS,
   ORGANIZATION_LABELS,
   parseBattleScenario,
+  placeDestination,
   renameSquad,
   reorderOrder,
   scenarioIssues,
