@@ -174,7 +174,7 @@ The page is isolated from the game: loaded lazily only at its address, checked b
 - Browser: the default demonstration, and wooded and urban runs ([05](05-lab.md)); replay
   verified over 793 s with no mismatch; 57 fps at 32×.
 
-## F5: scenario suite and hardening (2026-10-14)
+## F5: scenario suite and hardening (2026-10-14) — `b5661a2`
 
 **Built** ([04](04-experiments.md)):
 
