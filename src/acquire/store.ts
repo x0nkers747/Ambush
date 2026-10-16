@@ -88,6 +88,13 @@ export interface BattlefieldStore {
   putScenarioLink(battlefieldId: string, link: unknown): Promise<void>;
   /** Every scenario link, by battlefield. */
   listScenarioLinks(): Promise<{ readonly battlefieldId: string; readonly link: unknown }[]>;
+  /**
+   * A battlefield's prepared (authoritative) terrain as last saved, if it was
+   * prepared by terrain model `model` (docs/adr/0049); else `undefined`.
+   * Only the latest model's is kept: preparing it again replaces it.
+   */
+  getPrepared(battlefieldId: string, model: string): Promise<unknown>;
+  putPrepared(battlefieldId: string, model: string, data: unknown): Promise<void>;
 }
 
 export function summarize(pkg: BattlefieldPackage): BattlefieldSummary {
@@ -114,6 +121,7 @@ export function createMemoryStore(): BattlefieldStore {
   const scenarios = new Map<string, { battlefieldId: string; data: unknown }>();
   const library = new Map<string, unknown>();
   const links = new Map<string, unknown>();
+  const prepared = new Map<string, { model: string; data: unknown }>();
   return {
     list: () =>
       Promise.resolve(
@@ -135,6 +143,7 @@ export function createMemoryStore(): BattlefieldStore {
       sources.delete(id);
       for (const [key, s] of scenarios) if (s.battlefieldId === id) scenarios.delete(key);
       links.delete(id);
+      prepared.delete(id);
       return Promise.resolve();
     },
     listScenarios: (battlefieldId) =>
@@ -171,21 +180,31 @@ export function createMemoryStore(): BattlefieldStore {
           link: structuredClone(link),
         })),
       ),
+    getPrepared: (battlefieldId, model) => {
+      const entry = prepared.get(battlefieldId);
+      return Promise.resolve(entry?.model === model ? structuredClone(entry.data) : undefined);
+    },
+    putPrepared: (battlefieldId, model, data) => {
+      prepared.set(battlefieldId, { model, data: structuredClone(data) });
+      return Promise.resolve();
+    },
   };
 }
 
 const DB_NAME = 'ambush';
 /**
  * 2 added the scenarios store; 3 the scenario library and the working
- * scenarios' links to it (existing data is kept).
+ * scenarios' links to it; 4 the battlefields' prepared terrain (existing
+ * data is kept).
  */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const SUMMARIES = 'battlefieldSummaries';
 const PACKAGES = 'battlefieldPackages';
 const SOURCES = 'battlefieldSources';
 const SCENARIOS = 'scenarios';
 const LIBRARY = 'savedScenarios';
 const LINKS = 'scenarioLinks';
+const PREPARED = 'preparedTerrain';
 
 const request = <T>(r: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -217,7 +236,7 @@ export async function openIndexedDbStore(
   const open = factory.open(DB_NAME, DB_VERSION);
   open.onupgradeneeded = () => {
     const db = open.result;
-    for (const name of [SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LIBRARY, LINKS]) {
+    for (const name of [SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LIBRARY, LINKS, PREPARED]) {
       if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
     }
   };
@@ -250,8 +269,12 @@ export async function openIndexedDbStore(
       await done(tx);
     },
     async delete(id) {
-      const tx = db.transaction([SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LINKS], 'readwrite');
-      for (const name of [SUMMARIES, PACKAGES, SOURCES, LINKS]) tx.objectStore(name).delete(id);
+      const tx = db.transaction(
+        [SUMMARIES, PACKAGES, SOURCES, SCENARIOS, LINKS, PREPARED],
+        'readwrite',
+      );
+      for (const name of [SUMMARIES, PACKAGES, SOURCES, LINKS, PREPARED])
+        tx.objectStore(name).delete(id);
       const scenarios = tx.objectStore(SCENARIOS);
       const keys = (await request(scenarios.getAllKeys())) as string[];
       const values = (await request(scenarios.getAll())) as { battlefieldId: string }[];
@@ -310,6 +333,17 @@ export async function openIndexedDbStore(
       const keys = (await request(store.getAllKeys())) as string[];
       const values = (await request(store.getAll())) as unknown[];
       return keys.map((battlefieldId, i) => ({ battlefieldId, link: values[i] }));
+    },
+    async getPrepared(battlefieldId, model) {
+      const tx = db.transaction(PREPARED, 'readonly');
+      const entry = (await request(tx.objectStore(PREPARED).get(battlefieldId))) as
+        { model: string; data: unknown } | undefined;
+      return entry?.model === model ? entry.data : undefined;
+    },
+    async putPrepared(battlefieldId, model, data) {
+      const tx = db.transaction(PREPARED, 'readwrite');
+      tx.objectStore(PREPARED).put({ model, data }, battlefieldId);
+      await done(tx);
     },
   };
 }

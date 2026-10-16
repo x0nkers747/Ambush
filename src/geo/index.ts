@@ -148,3 +148,14 @@ export {
   type TracedWood,
   type WoodGrid,
 } from './woods';
+export {
+  BUNDLE_SCHEMA,
+  BUNDLE_VERSION,
+  decodeBundle,
+  decodeTypedJson,
+  encodeBundle,
+  encodeTypedJson,
+  preparedTerrainFrom,
+  type BattlefieldBundle,
+  type BundledPreparedTerrain,
+} from './bundle';

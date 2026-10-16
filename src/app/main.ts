@@ -1,4 +1,5 @@
 import { authoritativeTerrain } from './terrain-grading';
+import { localSeedMemory, seedBundledBattlefields } from './bundled-battlefields';
 import {
   createMemoryStore,
   decodePngInBrowser,
@@ -136,13 +137,21 @@ async function loadBattle(
  * stored package keeps the source terrain.
  */
 async function openBattlefield(store: BattlefieldStore, id: string): Promise<OpenedBattlefield> {
+  const start = performance.now();
   const pkg = await store.get(id);
   const { terrain, quality } = await authoritativeTerrain(
     pkg.id,
     pkg.terrain,
     pkg.elevation.cleaning ?? null,
+    {
+      get: (model) => store.getPrepared(id, model),
+      put: (model, prepared) => store.putPrepared(id, model, prepared),
+    },
   );
-  return { ...pkg, terrain: shareTerrain(terrain), quality };
+  const opened = { ...pkg, terrain: shareTerrain(terrain), quality };
+  // For the browser's performance tools: how long opening it took (prepared, or read back).
+  performance.measure('battlefield: opened', { start, duration: performance.now() - start });
+  return opened;
 }
 
 /** An opened battlefield: its package with the authoritative terrain, and that terrain's DEM quality report. */
@@ -166,6 +175,15 @@ function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition):
         ? 'Open the battlefield to set up a scenario, or load one'
         : `Current scenario: ${scenarioSummary(battle)}`,
   };
+}
+
+/** The browser's local storage, or `null` where it is unavailable (private modes, tests). */
+function storageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 function showFatal(root: HTMLElement, message: string): void {
@@ -285,6 +303,7 @@ async function main(root: HTMLElement): Promise<void> {
         },
       },
       loadPreview: async (id) => {
+        lastBattlefield.set(id);
         const mine = (previewLoads += 1);
         const pkg = await openBattlefield(store, id);
         const { definition } = await loadBattle(store, pkg);
@@ -443,11 +462,36 @@ async function main(root: HTMLElement): Promise<void> {
     }
   };
 
+  /** The battlefield last looked at in terrain selection (reopened there next time). */
+  const lastBattlefield = {
+    get: (): string | null => storageOrNull()?.getItem('ambush.lastBattlefield') ?? null,
+    set: (id: string) => {
+      try {
+        storageOrNull()?.setItem('ambush.lastBattlefield', id);
+      } catch {
+        // Not remembered: harmless.
+      }
+    },
+  };
+  // The battlefields that come with the game, on a first visit (docs/bundled-battlefields.md).
+  const seeded = await seedBundledBattlefields(
+    store,
+    // Without a lasting store nothing survives a reload: seeded on every visit.
+    persistent ? localSeedMemory(storageOrNull()) : { has: () => false, add: () => undefined },
+    (file) => window.fetch(new URL(file, document.baseURI)),
+  );
   const stage = parseStage(window.location.hash);
   switch (stage.kind) {
-    case 'select':
-      showSelection(stage.selected === undefined ? {} : { selected: stage.selected });
+    case 'select': {
+      // A first visit opens on the battlefield just seeded (Quantico); later ones on
+      // the battlefield last looked at, or else the newest saved.
+      const saved = await store.list().catch(() => []);
+      const last = lastBattlefield.get();
+      const remembered = saved.find((b) => b.id === last)?.id;
+      const selected = stage.selected ?? seeded[0] ?? remembered ?? saved[0]?.id;
+      showSelection(selected === undefined ? {} : { selected });
       return;
+    }
 
     case 'setup':
     case 'plan':

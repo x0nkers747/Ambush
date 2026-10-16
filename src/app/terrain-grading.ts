@@ -9,6 +9,7 @@ import {
   type SourceCorrections,
   type TerrainDataset,
 } from '#sim';
+import { preparedTerrainFrom } from '#geo';
 import type { TerrainJob, TerrainJobResult } from './grading.worker';
 
 // The authoritative terrain of a battlefield (docs/adr/0033, docs/adr/0049):
@@ -30,23 +31,51 @@ const BAND_ROWS = 24;
 const MAX_WORKERS = 8;
 
 /**
+ * Where prepared terrain is kept between visits (the battlefield store's
+ * `getPrepared` / `putPrepared` for one battlefield), so a battlefield is
+ * prepared once, not on every page load.
+ */
+export interface PreparedTerrainCache {
+  get(model: string): Promise<unknown>;
+  put(model: string, prepared: PreparedTerrain): Promise<void>;
+}
+
+/** A prepared terrain read back from storage, or `null` when it is not one (damaged: prepared again). */
+export const preparedFrom = (data: unknown): PreparedTerrain | null => preparedTerrainFrom(data);
+
+/**
  * The authoritative terrain of battlefield `id`, whose stored (raw) terrain is
  * `source` and import-time DEM corrections `corrections`. Cached by id and by
  * terrain model (cleaning and field versions), so a terrain prepared by
- * other rules is never reused.
+ * other rules is never reused: in memory for the page, and in `cache` (the
+ * battlefield store) across visits, where it is saved once prepared.
  */
 export function authoritativeTerrain(
   id: string,
   source: TerrainDataset,
   corrections: SourceCorrections | null,
+  cache?: PreparedTerrainCache,
 ): Promise<PreparedTerrain> {
   const key = `${id}|${TERRAIN_MODEL}`;
   let pending = prepared.get(key);
   if (!pending) {
-    pending =
+    const prepare = () =>
       typeof Worker === 'undefined'
         ? Promise.resolve(prepareInline(source, corrections))
         : prepareOffThread(source, corrections);
+    pending = cache
+      ? cache
+          .get(TERRAIN_MODEL)
+          .catch(() => undefined)
+          .then(async (stored) => {
+            const known = preparedFrom(stored);
+            if (known) return known;
+            const made = await prepare();
+            // Saving is a convenience: a failure only means preparing it again next time.
+            await cache.put(TERRAIN_MODEL, made).catch(() => undefined);
+            return made;
+          })
+      : prepare();
     // Only the latest battlefield is kept.
     prepared.clear();
     prepared.set(key, pending);
