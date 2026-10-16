@@ -12,6 +12,9 @@ import {
   type SimState,
   type Vec2,
   type VehicleDestination,
+  conditionOf,
+  type VehicleCombat,
+  type VehicleCondition,
 } from '#sim';
 
 // What the pages show of a battle's squads (docs/constructive-simulation/04,
@@ -328,6 +331,40 @@ export interface VehicleStatus {
   readonly speed: number;
   /** Where it still drives: its active order's destination, then the pending ones (each preferring roads or not). */
   readonly route: readonly VehicleDestination[];
+  /** Its platform (`m113`, `m1a1`, `bmp2`, `t72b`…). */
+  readonly kind: string;
+  /** Its combat state (docs/combined-arms.md): condition, crew, mounts, weapons, targets, damage. */
+  readonly condition: VehicleCondition;
+  readonly crew: readonly { readonly role: string; readonly state: string }[];
+  readonly mounts: readonly {
+    readonly id: string;
+    readonly azimuth: number;
+    readonly elevation: number;
+    readonly disabled: boolean;
+  }[];
+  readonly weapons: readonly {
+    readonly id: string;
+    readonly ammo: string;
+    readonly loads: readonly {
+      readonly ammo: string;
+      readonly ready: number;
+      readonly stowed: number;
+    }[];
+    readonly reloading: boolean;
+    readonly disabled: boolean;
+    readonly fired: number;
+  }[];
+  readonly engagements: readonly {
+    readonly mount: string;
+    readonly targetId: string;
+    readonly weapon: string;
+    readonly ammo: string;
+  }[];
+  readonly immobilized: boolean;
+  readonly sensors: number;
+  /** A destroyed vehicle burns until this (s). */
+  readonly burningUntil: number | null;
+  readonly hits: number;
 }
 
 /** The vehicles of a battle state. */
@@ -346,6 +383,33 @@ export function vehicleStatuses(state: DeepReadonly<SimState>): VehicleStatus[] 
         y: o.destination.y,
         ...(o.followRoads ? { followRoads: true } : {}),
       })),
+    kind: v.kind,
+    condition: conditionOf(v.combat as VehicleCombat),
+    crew: v.combat.crew.map((c) => ({ role: c.role, state: c.state })),
+    mounts: v.combat.mounts.map((m) => ({
+      id: m.id,
+      azimuth: m.azimuth,
+      elevation: m.elevation,
+      disabled: m.disabled,
+    })),
+    weapons: v.combat.weapons.map((w) => ({
+      id: w.id,
+      ammo: w.ammo,
+      loads: w.loads.map((l) => ({ ammo: l.ammo, ready: l.ready, stowed: l.stowed })),
+      reloading: w.reloadUntil !== null,
+      disabled: w.disabled,
+      fired: w.fired,
+    })),
+    engagements: v.combat.engagements.map((e) => ({
+      mount: e.mount,
+      targetId: e.targetId,
+      weapon: e.weapon,
+      ammo: e.ammo,
+    })),
+    immobilized: v.combat.damage.mobility,
+    sensors: v.combat.damage.sensors,
+    burningUntil: v.combat.damage.burningUntil,
+    hits: v.combat.damage.hits,
   }));
 }
 

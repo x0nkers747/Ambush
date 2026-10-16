@@ -5,6 +5,7 @@ import {
   nearestClearPoint,
   orgUnitId,
   pointProblem,
+  INFANTRY_ANTI_TANK,
   type FofConfig,
   type FofForceSetup,
   type OrderSpec,
@@ -50,6 +51,53 @@ export interface SquadSpec {
   readonly posture?: 'standing' | 'kneeling' | 'prone';
   /** Its initial plan (OPFOR's from the scenario, BLUEFOR's from planning). */
   readonly plan: readonly OrderSpec[];
+  /**
+   * Its anti-tank weapons (docs/combined-arms.md §9): `none`; `rockets` (each
+   * fire team's rifleman an AT4 or RPG-7); `rocketsAndMissile` (and the first
+   * team's assistant automatic rifleman a Javelin or 9K111). Default: rockets
+   * when the enemy has vehicles, else none.
+   */
+  readonly antiTank?: AntiTankLoadout;
+}
+
+export type AntiTankLoadout = 'none' | 'rockets' | 'rocketsAndMissile';
+export const ANTI_TANK_LOADOUTS: readonly AntiTankLoadout[] = [
+  'none',
+  'rockets',
+  'rocketsAndMissile',
+];
+
+/** The loadout a squad carries in a battle: its own, or by default rockets when the enemy has vehicles. */
+export function antiTankLoadoutOf(
+  spec: SquadSpec,
+  battle: Pick<BattleSpec, 'vehicles'>,
+): AntiTankLoadout {
+  if (spec.antiTank) return spec.antiTank;
+  return (battle.vehicles ?? []).some((v) => v.side !== spec.side) ? 'rockets' : 'none';
+}
+
+/** The anti-tank weapon (a `CombatWeaponSpec` id) of each soldier of a squad that carries one. */
+export function antiTankWeapons(
+  squad: SquadForce,
+  loadout: AntiTankLoadout,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (loadout === 'none') return out;
+  const arms = INFANTRY_ANTI_TANK[squad.side];
+  const members = squad.organization.members;
+  for (const m of members) {
+    const role = squad.organization.template.slots.find((s) => s.id === m.slotId)?.roleId;
+    if (role === 'rifleman') out[m.soldierId] = arms.rocket;
+  }
+  if (loadout === 'rocketsAndMissile') {
+    const gunner =
+      members.find((m) => {
+        const role = squad.organization.template.slots.find((s) => s.id === m.slotId)?.roleId;
+        return role === 'assistantAutomaticRifleman';
+      }) ?? members.find((m) => out[m.soldierId] === undefined);
+    if (gunner) out[gunner.soldierId] = arms.missile;
+  }
+  return out;
 }
 
 export interface BattleSpec {
@@ -227,24 +275,29 @@ export function battleScenario(
     const cleared = clearStarts(terrain, b.soldiers);
     return b.soldiers.map((m, k) => ({ ...m, position: cleared[k]?.position ?? m.position }));
   });
-  const forces: FofForceSetup[] = built.map((b) => ({
-    unitId: b.squad.unitId,
-    side: b.squad.side,
-    name: b.squad.name,
-    weapons: b.squad.weapons,
-    secondaryWeapons: b.squad.secondaryWeapons,
-    formation: b.squad.formation,
-    ...(b.squad.assaultFormation ? { assaultFormation: b.squad.assaultFormation } : {}),
-    ...(b.squad.roadFormation ? { roadFormation: b.squad.roadFormation } : {}),
-    pace: b.pace,
-    // Its home (where it falls back to on its own): its centre, or the clear ground nearest it.
-    start:
-      pointProblem(terrain, b.squad.spec.position) === null
-        ? b.squad.spec.position
-        : (nearestClearPoint(terrain, b.squad.spec.position, undefined, CLEAR_START_SEARCH_M) ??
-          b.squad.spec.position),
-    plan: b.squad.spec.plan,
-  }));
+  const forces: FofForceSetup[] = built.map((b) => {
+    const antiTank = antiTankWeapons(b.squad, antiTankLoadoutOf(b.squad.spec, spec));
+    return {
+      unitId: b.squad.unitId,
+      side: b.squad.side,
+      name: b.squad.name,
+      weapons: b.squad.weapons,
+      secondaryWeapons: b.squad.secondaryWeapons,
+      // Only when it carries any, so battles without them are as before.
+      ...(Object.keys(antiTank).length > 0 ? { antiTank } : {}),
+      formation: b.squad.formation,
+      ...(b.squad.assaultFormation ? { assaultFormation: b.squad.assaultFormation } : {}),
+      ...(b.squad.roadFormation ? { roadFormation: b.squad.roadFormation } : {}),
+      pace: b.pace,
+      // Its home (where it falls back to on its own): its centre, or the clear ground nearest it.
+      start:
+        pointProblem(terrain, b.squad.spec.position) === null
+          ? b.squad.spec.position
+          : (nearestClearPoint(terrain, b.squad.spec.position, undefined, CLEAR_START_SEARCH_M) ??
+            b.squad.spec.position),
+      plan: b.squad.spec.plan,
+    };
+  });
   const speed = Math.max(1.4, ...built.map((b) => b.pace));
   const scenario: Scenario = {
     id: 'battle',

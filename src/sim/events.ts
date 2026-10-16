@@ -8,7 +8,7 @@ import type {
   SuppressionLevel,
 } from './fof/types';
 import type { SimCommand } from './commands';
-import type { Vec2 } from './geometry';
+import type { Vec2, Vec3 } from './geometry';
 import type { Orders, OrgUnitId, Side, SoldierId, WaypointId } from './state';
 
 // Domain events: plain, tick-stamped facts about what happened during a tick.
@@ -72,7 +72,8 @@ export interface SoldierIncapacitatedEvent {
   readonly tick: number;
   readonly atSeconds: number;
   readonly soldierId: SoldierId;
-  readonly byId: SoldierId;
+  /** The shooter: a soldier, or a vehicle (its id). */
+  readonly byId: string;
 }
 
 /**
@@ -130,7 +131,8 @@ export interface ContactObservedEvent {
   /** The observing force (its root unit) and side. */
   readonly unitId: string;
   readonly side: Side;
-  readonly targetId: SoldierId;
+  /** The enemy seen: a soldier, or a vehicle (docs/combined-arms.md §5). */
+  readonly targetId: string;
   readonly from: ObservationLevel;
   readonly to: ObservationLevel;
   /** Who saw him (`null`: the cue was his fire), and from how far (m). */
@@ -250,6 +252,88 @@ export interface SuppressionChangedEvent {
   readonly suppression: number;
 }
 
+/**
+ * A shot at or from a vehicle, or an anti-tank weapon's (docs/combined-arms.md
+ * §7): one round, missile or burst. `missileId` is set for a missile, which is
+ * resolved when it arrives (`missileImpact`); otherwise `hit` is the outcome.
+ */
+export interface VehicleFireEvent {
+  readonly type: 'vehicleFire';
+  readonly tick: number;
+  readonly atSeconds: number;
+  /** A vehicle or a soldier (an anti-tank weapon). */
+  readonly shooterId: string;
+  readonly shooter: 'vehicle' | 'soldier';
+  readonly side: Side;
+  /** The weapon's slot on the vehicle (`main`, `coax`…), or the soldier's weapon. */
+  readonly slot: string;
+  readonly weapon: string;
+  readonly ammo: string;
+  readonly rounds: number;
+  readonly targetId: string;
+  readonly target: 'soldier' | 'vehicle';
+  /** The muzzle and where it was aimed (m, with height). */
+  readonly from: Vec3;
+  readonly aimPoint: Vec3;
+  readonly rangeM: number;
+  readonly hitProbability: number;
+  readonly hit: boolean;
+  /** A soldier struck down (direct fire at soldiers). */
+  readonly incapacitated: readonly SoldierId[];
+  readonly missileId: string | null;
+  readonly impactAt: number | null;
+  /** Where it landed: on the target when it hit, beside it when not. */
+  readonly impact: Vec3;
+}
+
+/** A missile arrived (docs/combined-arms.md §7): it hit its target or missed. */
+export interface MissileImpactEvent {
+  readonly type: 'missileImpact';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly missileId: string;
+  readonly shooterId: string;
+  readonly targetId: string;
+  readonly hit: boolean;
+  /** Why it missed when it did: the draw, the gunner lost, the target gone. */
+  readonly reason: 'hit' | 'missed' | 'guidanceLost' | 'targetGone';
+  readonly impact: Vec3;
+}
+
+/**
+ * A vehicle was hit (docs/combined-arms.md §8): the face, whether it
+ * perforated, and what that did; `condition` is its state after.
+ */
+export interface VehicleHitEvent {
+  readonly type: 'vehicleHit';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly vehicleId: string;
+  readonly byId: string;
+  readonly weapon: string;
+  readonly ammo: string;
+  readonly zone: 'front' | 'side' | 'rear' | 'top';
+  readonly penetrationMm: number;
+  readonly protectionMm: number;
+  readonly perforated: boolean;
+  readonly catastrophic: boolean;
+  readonly mobility: boolean;
+  readonly firepower: readonly string[];
+  readonly sensorsLost: number;
+  readonly crew: readonly { readonly role: string; readonly to: string }[];
+  readonly condition: 'operational' | 'damaged' | 'missionKill' | 'destroyed';
+}
+
+/** A vehicle's condition changed (`operational` → `damaged` → `missionKill`, or `destroyed`). */
+export interface VehicleConditionEvent {
+  readonly type: 'vehicleCondition';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly vehicleId: string;
+  readonly from: 'operational' | 'damaged' | 'missionKill' | 'destroyed';
+  readonly to: 'operational' | 'damaged' | 'missionKill' | 'destroyed';
+}
+
 /** The experiment ended: its outcome and why. */
 export interface FofEndedEvent {
   readonly type: 'fofEnded';
@@ -276,4 +360,8 @@ export type SimEvent =
   | FofReloadEvent
   | AmmunitionExhaustedEvent
   | SuppressionChangedEvent
-  | FofEndedEvent;
+  | FofEndedEvent
+  | VehicleFireEvent
+  | MissileImpactEvent
+  | VehicleHitEvent
+  | VehicleConditionEvent;

@@ -167,6 +167,11 @@ export interface FofForceSetup {
   readonly weapons: Readonly<Record<string, string | null>>;
   /** A second weapon some members carry (a grenade launcher, docs/behavior-lab/force-on-force/06 §4), by soldier id. */
   readonly secondaryWeapons?: Readonly<Record<string, string | null>>;
+  /**
+   * The anti-tank weapon some members carry (a `CombatWeaponSpec` id: an AT4,
+   * a Javelin, an RPG-7…), by soldier id (docs/combined-arms.md §9).
+   */
+  readonly antiTank?: Readonly<Record<string, string>>;
   /** The formation it withdraws in when it has no movement order to take one from. */
   readonly formation?: FormationSpec;
   /** The formation it assaults in (an extended line); default: its formation. */
@@ -210,11 +215,12 @@ export interface FofSetup {
 export type TrackLevel = 'possible' | 'detected' | 'identified' | 'lost';
 export type ObservationLevel = 'unaware' | TrackLevel;
 
-/** A force's track on one enemy soldier: its own picture, not the truth. */
+/** A force's track on one enemy soldier or vehicle: its own picture, not the truth. */
 export interface FofTrack {
   /** Index of the observing force. */
   readonly force: number;
-  readonly targetId: SoldierId;
+  /** A soldier's id, or a vehicle's (docs/combined-arms.md §5). */
+  readonly targetId: string;
   /** Confidence when last seen (it halves every `confidenceHalfLifeSeconds` since). */
   confidence: number;
   lastSeenAt: number;

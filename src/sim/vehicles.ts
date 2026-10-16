@@ -1,12 +1,18 @@
 import { surfaceHeightAt } from './bridge-navigation';
 import type { SimEvent } from './events';
 import { azimuthOf, normalizeAzimuth, type Vec2 } from './geometry';
-import { isSegmentWalkable, planPath } from './navigation';
+import { isSegmentWalkable, OBSTACLE_CLEARANCE_M, planPath } from './navigation';
 import { pointInPolygon } from './polygon';
 import { roadNetwork, roadPointAt } from './road-network';
 import type { Side, SimState } from './state';
 import { heightAt, isOnTerrain, type TerrainDataset } from './terrain';
 import type { SimWorld } from './world';
+import type { TickTime } from './movement';
+import { VEHICLE_PLATFORMS } from './combat/catalog';
+import { slewMounts } from './combat/mounts';
+import { builtInCatalog, catalogOf, platformOf, type CombatCatalog } from './combat/registry';
+import { crewState, initialVehicleCombat, type VehicleCombat } from './combat/state';
+import type { PlatformSpec } from './combat/types';
 
 // Vehicles (prototype, docs/vehicles.md): a tracked armoured personnel
 // carrier (an M113) driving from waypoint to waypoint. Each order's route is
@@ -15,10 +21,12 @@ import type { SimWorld } from './world';
 // face a turn it cannot drive round, steers otherwise at a rate its speed
 // allows, accelerates to the speed the ground allows (a road, open ground,
 // woods; slower uphill), slows for bends, and brakes to stop on its waypoint.
-// No crew, no weapons, not seen or shot at: it drives.
+// Its crew, weapons and damage are the combat system's (docs/combined-arms.md):
+// here it drives, as its platform's mobility allows, unless it cannot.
 
-/** A vehicle type's driving characteristics. */
+/** A vehicle type's driving characteristics (from its platform's mobility, `vehicleTypeOf`). */
 export interface VehicleType {
+  readonly kind: 'tracked' | 'wheeled';
   /** Top speeds (m/s): on a paved road, on a dirt track or open ground, in woods. */
   readonly roadSpeed: number;
   readonly openSpeed: number;
@@ -26,33 +34,63 @@ export interface VehicleType {
   /** Accelerating and braking (m/s²). */
   readonly accel: number;
   readonly decel: number;
-  /** Turning on the spot (rad/s), and the most sideways acceleration in a turn (m/s²). */
+  /** Turning on the spot (rad/s; 0: it cannot, it is wheeled), and the most sideways acceleration in a turn (m/s²). */
   readonly pivotRate: number;
   readonly lateralAccel: number;
-  /** The fastest it turns at speed (rad/s). */
+  /** The fastest it turns at speed (rad/s), and (wheeled) its least turning radius (m). */
   readonly maxTurnRate: number;
-  /** Hull length and width (m): for drawing, and how close to a point is "there". */
+  readonly minTurnRadius: number;
+  /** Speed lost per unit of grade uphill, and the most it loses (a share). */
+  readonly climbLoss: number;
+  readonly maxClimbLoss: number;
+  /** Hull length and width (m): for drawing, its route's clearance, and how close to a point is "there". */
   readonly length: number;
   readonly width: number;
 }
 
-export type VehicleKind = 'm113';
+/** A platform id (`PlatformSpec.id`: `m113`, `m1a1`, `bmp2`, `t72b`, or a scenario's own). */
+export type VehicleKind = string;
 
-export const VEHICLE_TYPES: Readonly<Record<VehicleKind, VehicleType>> = {
-  // M113A2/A3: about 64 km/h on roads, 30–40 km/h across country; 4.86 × 2.69 m.
-  m113: {
-    roadSpeed: 14,
-    openSpeed: 8.5,
-    woodsSpeed: 2.8,
-    accel: 1.2,
-    decel: 2.5,
-    pivotRate: (35 * Math.PI) / 180,
-    lateralAccel: 2.5,
-    maxTurnRate: (40 * Math.PI) / 180,
-    length: 4.86,
-    width: 2.69,
-  },
-};
+const DEG = Math.PI / 180;
+
+/** The driving characteristics of a platform. */
+export function vehicleTypeOf(platform: PlatformSpec): VehicleType {
+  const m = platform.mobility;
+  return {
+    kind: m.kind,
+    roadSpeed: m.roadSpeedMps,
+    openSpeed: m.offRoadSpeedMps,
+    woodsSpeed: m.woodsSpeedMps,
+    accel: m.accelMps2,
+    decel: m.decelMps2,
+    pivotRate: m.kind === 'tracked' ? m.pivotRateDegS * DEG : 0,
+    lateralAccel: m.lateralAccelMps2,
+    maxTurnRate: m.turnRateDegS * DEG,
+    minTurnRadius: m.minTurnRadiusM,
+    climbLoss: m.climbLoss,
+    maxClimbLoss: m.maxClimbLoss,
+    length: platform.dimensions.lengthM,
+    width: platform.dimensions.widthM,
+  };
+}
+
+/** The built-in platforms. */
+export type BuiltInPlatformId = 'm113' | 'm1a1' | 'bmp2' | 't72b';
+
+/** The built-in platforms' driving characteristics, by id. */
+export const VEHICLE_TYPES = Object.freeze(
+  Object.fromEntries(VEHICLE_PLATFORMS.map((p) => [p.id, vehicleTypeOf(p)])),
+) as Readonly<Record<BuiltInPlatformId, VehicleType>>;
+
+const typeCache = new WeakMap<PlatformSpec, VehicleType>();
+function typeOf(platform: PlatformSpec): VehicleType {
+  let t = typeCache.get(platform);
+  if (!t) {
+    t = vehicleTypeOf(platform);
+    typeCache.set(platform, t);
+  }
+  return t;
+}
 
 /** Where a vehicle is sent: a point, and whether it prefers the roads on the way. */
 export interface VehicleDestination {
@@ -88,6 +126,8 @@ export interface VehicleState {
   /** The active order's route: the points to drive through, its destination last. */
   route: Vec2[];
   routeIndex: number;
+  /** Its crew, mounts, weapons, targets and damage (docs/combined-arms.md). */
+  combat: VehicleCombat;
 }
 
 /** A vehicle as a scenario gives it. */
@@ -127,6 +167,7 @@ const SHARP_BEND_RAD = (60 * Math.PI) / 180;
 export function initialVehicles(
   terrain: TerrainDataset,
   vehicles: readonly ScenarioVehicle[],
+  catalog: CombatCatalog = builtInCatalog(),
 ): VehicleState[] {
   return vehicles.map((v) => ({
     id: v.id,
@@ -150,6 +191,7 @@ export function initialVehicles(
     nextOrder: v.destinations.length + 1,
     route: [],
     routeIndex: 0,
+    combat: initialVehicleCombat(platformOf(catalog, v.kind), v.position),
   }));
 }
 
@@ -203,31 +245,110 @@ export function activeVehicleOrder(v: {
   return v.orders.find((o) => o.status === 'active');
 }
 
-/** Moves every vehicle by one tick. */
-export function updateVehicles(state: SimState, world: SimWorld, dt: number): void {
+/**
+ * Moves every vehicle by one tick: its mounts turn toward where they are
+ * being laid, and it drives, unless it cannot (immobilized, destroyed, its
+ * driver out) or has halted to fire.
+ */
+export function updateVehicles(state: SimState, world: SimWorld, time: TickTime): void {
   const vehicles = state.vehicles;
   if (!vehicles) return;
-  for (const v of vehicles) drive(v, world.terrain, dt);
+  const catalog = catalogOf(world);
+  for (const v of vehicles) {
+    const platform = platformOf(catalog, v.kind);
+    slewMounts(platform, v.combat, time.dtSeconds);
+    drive(v, world.terrain, typeOf(platform), time.dtSeconds, time.startSeconds);
+  }
 }
 
-function startNext(v: VehicleState, terrain: TerrainDataset): void {
+/** Whether a vehicle can drive: not destroyed or immobilized, its driver able. */
+export function canDrive(v: VehicleState): boolean {
+  return (
+    !v.combat.damage.destroyed &&
+    !v.combat.damage.mobility &&
+    crewState(v.combat, 'driver') !== 'incapacitated'
+  );
+}
+
+/** Its orders end: it cannot drive any more (`reason`). */
+function failOrders(v: VehicleState, reason: string): void {
+  for (const o of v.orders) {
+    if (o.status !== 'active' && o.status !== 'pending') continue;
+    o.status = 'failed';
+    o.reason = reason;
+  }
+  v.route = [];
+  v.routeIndex = 0;
+}
+
+/**
+ * Whether a hull `width` wide can drive straight from `a` to `b`: its centre
+ * line and both its sides clear of buildings and water (`isSegmentWalkable`
+ * keeps `OBSTACLE_CLEARANCE_M` itself).
+ */
+export function hullClear(terrain: TerrainDataset, a: Vec2, b: Vec2, width: number): boolean {
+  if (!isSegmentWalkable(terrain, a, b)) return false;
+  const offset = width / 2 - OBSTACLE_CLEARANCE_M;
+  if (offset <= 0) return true;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 1e-6) return true;
+  // Right of the leg's direction, and left.
+  const rx = ((b.y - a.y) / len) * offset;
+  const ry = (-(b.x - a.x) / len) * offset;
+  return (
+    isSegmentWalkable(terrain, { x: a.x + rx, y: a.y + ry }, { x: b.x + rx, y: b.y + ry }) &&
+    isSegmentWalkable(terrain, { x: a.x - rx, y: a.y - ry }, { x: b.x - rx, y: b.y - ry })
+  );
+}
+
+/** Whether every leg of a route is clear for the hull. */
+function routeClear(
+  terrain: TerrainDataset,
+  from: Vec2,
+  route: readonly Vec2[],
+  width: number,
+): boolean {
+  let at = from;
+  for (const p of route) {
+    if (!hullClear(terrain, at, p, width)) return false;
+    at = p;
+  }
+  return true;
+}
+
+function startNext(v: VehicleState, terrain: TerrainDataset, type: VehicleType): void {
   while (!activeVehicleOrder(v)) {
     const next = v.orders.find((o) => o.status === 'pending');
     if (!next) return;
+    if (!canDrive(v)) {
+      failOrders(v, v.combat.damage.destroyed ? 'destroyed' : 'immobilized');
+      return;
+    }
     const from = { x: v.position.x, y: v.position.y };
-    const path = planPath(terrain, from, next.destination, {
-      followRoads: next.followRoads === true,
-    });
-    if (!path.ok) {
+    // As ordered; and if that is too narrow for the hull somewhere, by the roads.
+    const tries = next.followRoads === true ? [true] : [false, true];
+    let route: Vec2[] | null = null;
+    let reason = 'no way there';
+    for (const followRoads of tries) {
+      const path = planPath(terrain, from, next.destination, { followRoads });
+      if (!path.ok) continue;
+      const planned = widenTurns(terrain, from, [
+        ...path.turns.map((p) => ({ x: p.x, y: p.y })),
+        { ...next.destination },
+      ]);
+      if (routeClear(terrain, from, planned, type.width)) {
+        route = planned;
+        break;
+      }
+      reason = 'no way there wide enough for the vehicle';
+    }
+    if (!route) {
       next.status = 'failed';
-      next.reason = 'no way there';
+      next.reason = reason;
       continue;
     }
     next.status = 'active';
-    v.route = widenTurns(terrain, from, [
-      ...path.turns.map((p) => ({ x: p.x, y: p.y })),
-      { ...next.destination },
-    ]);
+    v.route = route;
     v.routeIndex = 0;
   }
 }
@@ -269,9 +390,26 @@ function bendAt(route: readonly Vec2[], i: number, from: Vec2): number {
   return Math.abs(d);
 }
 
-function drive(v: VehicleState, terrain: TerrainDataset, dt: number): void {
-  const type = VEHICLE_TYPES[v.kind];
-  startNext(v, terrain);
+function drive(
+  v: VehicleState,
+  terrain: TerrainDataset,
+  type: VehicleType,
+  dt: number,
+  now: number,
+): void {
+  if (!canDrive(v)) {
+    // Immobilized, destroyed or without its driver: it stops where it is.
+    if (activeVehicleOrder(v) || v.orders.some((o) => o.status === 'pending'))
+      failOrders(v, v.combat.damage.destroyed ? 'destroyed' : 'immobilized');
+    v.speed = Math.max(0, v.speed - type.decel * 2 * dt);
+    advance(v, terrain, dt);
+    return;
+  }
+  // Halted to fire (a missile): it brakes and waits.
+  const halted = v.combat.haltUntil !== null && now < v.combat.haltUntil - 1e-9;
+  // A wounded driver drives slower.
+  const driverFactor = crewState(v.combat, 'driver') === 'degraded' ? 0.7 : 1;
+  startNext(v, terrain, type);
   const order = activeVehicleOrder(v);
   const here = { x: v.position.x, y: v.position.y };
   let wanted = 0;
@@ -295,7 +433,7 @@ function drive(v: VehicleState, terrain: TerrainDataset, dt: number): void {
       order.reason = 'arrived';
       v.route = [];
       v.routeIndex = 0;
-      startNext(v, terrain);
+      startNext(v, terrain, type);
     }
   }
   const current = activeVehicleOrder(v);
@@ -324,12 +462,23 @@ function drive(v: VehicleState, terrain: TerrainDataset, dt: number): void {
     } else {
       let error = azimuthOf(dx, dy) - v.heading;
       error -= 2 * Math.PI * Math.round(error / (2 * Math.PI));
-      if (Math.abs(error) > PIVOT_FROM_RAD && v.speed < 1) {
+      if (Math.abs(error) > PIVOT_FROM_RAD && v.speed < 1 && type.pivotRate > 0) {
         // Facing well away: stop and pivot on the spot.
         wanted = 0;
         turn = Math.sign(error) * Math.min(Math.abs(error), type.pivotRate * dt);
+      } else if (Math.abs(error) > PIVOT_FROM_RAD && type.pivotRate <= 0) {
+        // Wheeled, facing well away: round, slowly, on its tightest circle.
+        wanted = BEND_SPEED * 0.6;
+        const rate = Math.max(v.speed, 0.5) / Math.max(type.minTurnRadius, 1);
+        turn = Math.sign(error) * Math.min(Math.abs(error), Math.min(type.maxTurnRate, rate) * dt);
       } else {
-        const rate = Math.min(type.maxTurnRate, type.lateralAccel / Math.max(v.speed, 0.5));
+        const radiusRate =
+          type.minTurnRadius > 0 ? Math.max(v.speed, 0.5) / type.minTurnRadius : Infinity;
+        const rate = Math.min(
+          type.maxTurnRate,
+          type.lateralAccel / Math.max(v.speed, 0.5),
+          radiusRate,
+        );
         turn = Math.sign(error) * Math.min(Math.abs(error), rate * dt);
         // The ground's speed; slower while still turning toward the way on.
         wanted = groundSpeed(terrain, type, here.x, here.y, v.heading);
@@ -345,11 +494,21 @@ function drive(v: VehicleState, terrain: TerrainDataset, dt: number): void {
       }
     }
   }
+  wanted *= driverFactor;
+  if (halted) {
+    wanted = 0;
+    turn = 0;
+  }
   // Speed toward what is wanted, within its acceleration and braking.
   const dv = wanted - v.speed;
   v.speed += dv > 0 ? Math.min(dv, type.accel * dt) : Math.max(dv, -type.decel * dt);
   if (v.speed < 1e-3 && wanted === 0) v.speed = 0;
   v.heading = normalizeAzimuth(v.heading + turn);
+  advance(v, terrain, dt);
+}
+
+/** It moves on at its speed along its heading, for `dt`, and stands on the surface. */
+function advance(v: VehicleState, terrain: TerrainDataset, dt: number): void {
   const step = v.speed * dt;
   if (step > 0) {
     const x = v.position.x + Math.sin(v.heading) * step;
@@ -423,6 +582,9 @@ export function groundSpeed(
   const ay = y + Math.cos(heading) * ahead;
   if (!isOnTerrain(terrain, ax, ay)) return top;
   const grade = (heightAt(terrain, ax, ay) - heightAt(terrain, x, y)) / ahead;
-  const slow = grade > 0 ? Math.max(0.3, 1 - grade * 2.5) : Math.max(0.6, 1 + grade);
+  const slow =
+    grade > 0
+      ? Math.max(1 - type.maxClimbLoss, 1 - grade * type.climbLoss)
+      : Math.max(0.6, 1 + grade);
   return top * slow;
 }

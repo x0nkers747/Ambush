@@ -1,6 +1,7 @@
 // Public API of the simulation layer. Other layers import only from here (`#sim`).
 export * from './behavior/index';
 export * from './fof/index';
+export * from './combat/index';
 export type { SetOrdersCommand, SimCommand } from './commands';
 export {
   DEFAULT_TICK_RATE_HZ,
@@ -17,6 +18,10 @@ export type {
   OrderChangedEvent,
   FofFireEvent,
   FofGrenadeEvent,
+  VehicleFireEvent,
+  MissileImpactEvent,
+  VehicleHitEvent,
+  VehicleConditionEvent,
   FofReloadEvent,
   AmmunitionExhaustedEvent,
   SuppressionChangedEvent,
@@ -285,7 +290,11 @@ export {
 export {
   VEHICLE_TYPES,
   activeVehicleOrder,
+  canDrive,
   groundSpeed,
+  hullClear,
+  vehicleTypeOf,
+  type BuiltInPlatformId,
   type OrderVehicleCommand,
   type ScenarioVehicle,
   type VehicleDestination,

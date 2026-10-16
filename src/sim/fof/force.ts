@@ -1140,7 +1140,11 @@ function nearestKnown(known: KnownContacts, from: Soldier): number {
  * gets a cue on the shooter (sound, impacts), and unless it is breaking
  * contact or done, it halts in contact.
  */
-export function underFire(context: FofContext, force: number, shooter: Soldier): void {
+export function underFire(
+  context: FofContext,
+  force: number,
+  shooter: { readonly id: string; readonly position: Vec2 },
+): void {
   const own = context.fof.forces[force];
   if (!own || !forceActive(own)) return;
   own.lastFiredUponAt = context.t;

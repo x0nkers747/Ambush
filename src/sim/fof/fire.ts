@@ -10,6 +10,7 @@ import { dugInFactor, effectiveDugIn } from './defence';
 import { enter, firingOnTheMove, pressingOn, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
+import { fireCombat } from '../combat/system';
 import { hostile, soldierOf } from './system';
 import type { FofSoldier, FofTrack, FofWeaponState, SuppressionLevel } from './types';
 import {
@@ -121,7 +122,7 @@ interface Volley {
   /** Soldiers incapacitated, by whom (in the order of the bursts). */
   readonly down: Map<
     string,
-    { readonly victim: Soldier; readonly by: Soldier; readonly force: number }
+    { readonly victim: Soldier; readonly by: { readonly id: string }; readonly force: number }
   >;
 }
 
@@ -220,6 +221,8 @@ export function resolveFire(context: FofContext): void {
     }
     burst(context, volley, member, shooter, weapon, primary, aim);
   });
+  // Vehicles and anti-tank weapons fire in the same volley (docs/combined-arms.md §7).
+  fireCombat(context, volley);
   for (const member of fof.soldiers) {
     const add = volley.suppression.get(member);
     if (add !== undefined) member.suppression = Math.min(1, member.suppression + add);
@@ -335,6 +338,8 @@ function areaTarget(
   for (const track of fof.tracks) {
     if (track.force !== member.force || !track.confirmed || !engageable(context, track)) continue;
     if (t - track.lastSeenAt > memory) continue;
+    // A rifle's area fire is at soldiers (vehicles are anti-tank weapons' targets).
+    if (!context.soldierIndex.has(track.targetId)) continue;
     const range = Math.hypot(
       track.lastKnown.x - shooter.position.x,
       track.lastKnown.y - shooter.position.y,

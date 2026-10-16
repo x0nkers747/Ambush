@@ -9,6 +9,7 @@ import {
   type TerrainDataset,
   type Vec2,
   type VehicleKind,
+  VEHICLE_PLATFORMS,
 } from '#sim';
 import { CLEAR_START_SEARCH_M } from './battle';
 import {
@@ -43,7 +44,16 @@ export interface PlannedVehicle {
 /** A waypoint of a vehicle's route: where, and whether it prefers the roads on the way there. */
 export type RouteWaypoint = MapPoint & { readonly followRoads?: true };
 
-export const VEHICLE_LABELS: Readonly<Record<VehicleKind, string>> = { m113: 'M113 APC' };
+/** The vehicles a scenario can place: the catalog's platforms, in order. */
+export const VEHICLE_KINDS: readonly VehicleKind[] = VEHICLE_PLATFORMS.map((p) => p.id);
+
+/** Each platform's name, by id. */
+export const VEHICLE_LABELS: Readonly<Record<string, string | undefined>> = Object.fromEntries(
+  VEHICLE_PLATFORMS.map((p) => [p.id, p.name]),
+);
+
+/** A platform's name (its id when it is not the catalog's). */
+export const vehicleLabel = (kind: VehicleKind): string => VEHICLE_LABELS[kind] ?? kind;
 
 const toVec = (p: MapPoint): Vec2 => ({ x: p.east, y: p.north });
 const toPoint = (p: Vec2): MapPoint => ({ east: p.x, north: p.y });

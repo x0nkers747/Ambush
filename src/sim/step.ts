@@ -40,8 +40,9 @@ export function stepState(
   updateBehavior(state, world, time, events);
   moveSoldiers(state, world, time, events);
   updateForceOnForce(state, world, time, events);
-  // Vehicles (docs/vehicles.md) only drive: nothing else sees them yet.
-  updateVehicles(state, world, time.dtSeconds);
+  // Vehicles (docs/vehicles.md) turn their mounts and drive; they look and
+  // fire in the force-on-force decisions (docs/combined-arms.md).
+  updateVehicles(state, world, time);
 
   // 3. Advance the clock.
   state.tick += 1;

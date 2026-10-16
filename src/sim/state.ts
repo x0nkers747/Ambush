@@ -3,6 +3,7 @@ import type { RngState } from './rng';
 import type { BehaviorState } from './behavior/types';
 import type { FofState } from './fof/types';
 import type { VehicleState } from './vehicles';
+import type { CombatState } from './combat/state';
 import type { PathPoint } from './bridge-navigation';
 
 // Mutable simulation state (docs/adr/0004). Plain data only: no classes,
@@ -138,6 +139,12 @@ export interface SimState {
   fof?: FofState;
   /** Vehicles (docs/vehicles.md). Absent unless the scenario has any. */
   vehicles?: VehicleState[];
+  /**
+   * Combined arms (docs/combined-arms.md): anti-tank weapons, missiles in
+   * flight, the detection thresholds of pairs with a vehicle. Absent until a
+   * battle with vehicles or anti-tank weapons takes its first decision.
+   */
+  combat?: CombatState;
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

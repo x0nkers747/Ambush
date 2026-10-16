@@ -19,6 +19,8 @@ import { validateBehaviorParams, type BehaviorParams } from './behavior/params';
 import { validateFofSetup } from './fof/setup';
 import type { FofSetup } from './fof/types';
 import { initialVehicles, type ScenarioVehicle } from './vehicles';
+import { catalogOf, validateCombatWeapon, validatePlatform } from './combat/registry';
+import type { CombatWeaponSpec, PlatformSpec } from './combat/types';
 import { validateMovementParams, type MovementParams, type SimWorld } from './world';
 
 // Scenario: the human-authored, plain-data description of a simulation's
@@ -55,6 +57,9 @@ export interface Scenario {
   readonly fof?: FofSetup;
   /** Vehicles (docs/vehicles.md); absent or empty: none. */
   readonly vehicles?: readonly ScenarioVehicle[];
+  /** Vehicle platforms and weapons of its own (docs/combined-arms.md §15); absent: the catalog's. */
+  readonly platforms?: readonly PlatformSpec[];
+  readonly combatWeapons?: readonly CombatWeaponSpec[];
 }
 
 /** Builds the tick-0 simulation state. Throws an Error describing the first invalid entry. */
@@ -161,8 +166,25 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     orders: null,
   }));
 
+  const catalog = catalogOf(scenario);
+  try {
+    for (const w of scenario.combatWeapons ?? []) validateCombatWeapon(w);
+    for (const p of scenario.platforms ?? []) validatePlatform(p, catalog);
+    for (const force of scenario.fof?.forces ?? []) {
+      for (const [soldier, weapon] of Object.entries(force.antiTank ?? {})) {
+        if (!soldiersById.has(soldier))
+          throw new Error(`anti-tank weapon of unknown soldier "${soldier}"`);
+        if (!catalog.weapons.has(weapon))
+          throw new Error(`soldier "${soldier}" carries an unknown anti-tank weapon "${weapon}"`);
+      }
+    }
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   const vehicleIds = new Set<string>();
   for (const vehicle of scenario.vehicles ?? []) {
+    if (!catalog.platforms.has(vehicle.kind))
+      fail(`vehicle "${vehicle.id}" is of an unknown platform "${vehicle.kind}"`);
     if (vehicleIds.has(vehicle.id) || soldiersById.has(vehicle.id))
       fail(`duplicate vehicle id "${vehicle.id}"`);
     vehicleIds.add(vehicle.id);
@@ -178,7 +200,7 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
   }
   // Vehicles are absent unless there are any, so states without them hash as before.
   const vehicles = scenario.vehicles?.length
-    ? { vehicles: initialVehicles(terrain, scenario.vehicles) }
+    ? { vehicles: initialVehicles(terrain, scenario.vehicles, catalog) }
     : {};
 
   return { tick: 0, rng: createRngState(seed), units, soldiers, ...vehicles };
@@ -203,5 +225,11 @@ export function createWorld(scenario: Scenario): SimWorld {
     ...world,
     ...(scenario.behavior ? { behavior: deepFreeze(clonePlainData(scenario.behavior)) } : {}),
     ...(scenario.fof ? { fof: deepFreeze(clonePlainData(scenario.fof)) } : {}),
+    ...(scenario.platforms?.length
+      ? { platforms: deepFreeze(clonePlainData(scenario.platforms)) }
+      : {}),
+    ...(scenario.combatWeapons?.length
+      ? { combatWeapons: deepFreeze(clonePlainData(scenario.combatWeapons)) }
+      : {}),
   });
 }

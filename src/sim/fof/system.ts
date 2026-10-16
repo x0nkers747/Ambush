@@ -15,6 +15,8 @@ import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
 import { cyclesNeeded, deferLook, scheduleFor, travelled } from './look-schedule';
 import { sightBetween } from './sight-cache';
+import { isVehicleId, scanCombat, vehicleTargetable } from '../combat/system';
+import type { Vec2 } from '../geometry';
 import type {
   FofForce,
   FofOrder,
@@ -306,6 +308,8 @@ function decide(context: FofContext): void {
   updateMotion(context);
   updateSuppression(context);
   scan(context);
+  // Combined arms (docs/combined-arms.md): soldiers look at vehicles, and vehicles at them.
+  scanCombat(context);
   updateTracks(context);
   updateForces(context);
   updateReloads(context);
@@ -536,7 +540,7 @@ function enemiesOf(fof: FofState): number[][] {
 export function glimpse(
   context: FofContext,
   force: number,
-  target: Soldier,
+  target: { readonly id: string; readonly position: Vec2 },
   existing: FofTrack | undefined,
   gain: number,
   by: SoldierId | null,
@@ -624,7 +628,10 @@ function updateTracks(context: FofContext): void {
   const { fof } = context;
   for (const track of [...fof.tracks]) {
     const target = context.state.soldiers[context.soldierIndex.get(track.targetId) ?? -1];
-    if (target?.status !== 'active') {
+    const gone = target
+      ? target.status !== 'active'
+      : !isVehicleId(context, track.targetId) || !vehicleTargetable(context, track.targetId);
+    if (gone) {
       fof.tracks.splice(fof.tracks.indexOf(track), 1);
       const force = fof.forces[track.force];
       if (force) {

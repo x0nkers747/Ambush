@@ -147,7 +147,11 @@ export function chanceIn(rate: number, seconds: number): number {
 }
 
 /** A track's confidence at time `t` (it halves every half-life since it was last seen). */
-export function confidenceAt(track: FofTrack, t: number, halfLifeSeconds: number): number {
+export function confidenceAt(
+  track: { readonly confidence: number; readonly lastSeenAt: number },
+  t: number,
+  halfLifeSeconds: number,
+): number {
   return track.confidence * Math.pow(2, -(t - track.lastSeenAt) / halfLifeSeconds);
 }
 

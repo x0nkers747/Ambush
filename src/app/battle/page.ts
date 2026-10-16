@@ -10,7 +10,7 @@ import {
   clearVehicleRoute,
   renameVehicle,
   setVehicleFacing,
-  VEHICLE_LABELS,
+  vehicleLabel,
   vehiclesOf,
   type PlannedVehicle,
   formationsForOrganization,
@@ -1055,7 +1055,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               <span class="place-side ${sideClass(side)}">${side}</span>
               ${toolButton(
                 { kind: 'placeVehicle', side },
-                VEHICLE_LABELS.m113,
+                vehicleLabel('m113'),
                 `Click the map to place a ${side} M113 armoured personnel carrier`,
                 sideClass(side),
               )}
@@ -1287,7 +1287,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         <span class="squad-name">${escapeHtml(v.name)}</span>
       </div>
       <dl class="kv">
-        <dt>Type</dt><dd>${VEHICLE_LABELS.m113} (tracked; drives only)</dd>
+        <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
         <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
       </dl>
       <h3>Route${route.length > 0 ? ` (${String(route.length)} waypoint${route.length === 1 ? '' : 's'})` : ''}</h3>
@@ -1350,7 +1350,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         }
       </div>
       <dl class="kv">
-        <dt>Type</dt><dd>${VEHICLE_LABELS[v.kind]} (tracked; drives only)</dd>
+        <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
         <dt>Facing</dt><dd>${
           placing || routing
             ? `<input type="number" class="facing-input" data-act="vehicle-facing" min="0" max="359" step="1" value="${String(v.facingDeg)}" aria-label="Facing, degrees from north">°`

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMotionRecorder } from '#exercise';
+import { builtInCatalog, initialVehicleCombat, platformOf } from '#sim';
 import { addTravel, alongLoop, fitHull, loopLengths, M113, trackPath } from './vehicles';
 
 // The M113's running gear in 3D (docs/vehicles.md): its tracks' path round
@@ -58,6 +59,7 @@ describe('M113 running gear', () => {
           nextOrder: 1,
           route: [],
           routeIndex: 0,
+          combat: initialVehicleCombat(platformOf(builtInCatalog(), 'm113'), { x: 0, y }),
         },
       ],
     });

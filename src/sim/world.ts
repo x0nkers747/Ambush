@@ -1,5 +1,6 @@
 import type { BehaviorParams } from './behavior/params';
 import type { FofSetup } from './fof/types';
+import type { CombatWeaponSpec, PlatformSpec } from './combat/types';
 import type { TerrainDataset } from './terrain';
 
 /** Movement model parameters, in SI units (docs/adr/0008). */
@@ -21,6 +22,12 @@ export interface SimWorld {
   readonly behavior?: BehaviorParams;
   /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
   readonly fof?: FofSetup;
+  /**
+   * Vehicle platforms and weapons of the scenario's own, added to the
+   * catalog's or replacing them by id (docs/combined-arms.md §15); absent: none.
+   */
+  readonly platforms?: readonly PlatformSpec[];
+  readonly combatWeapons?: readonly CombatWeaponSpec[];
 }
 
 /** Throws a RangeError describing the first invalid field. */
