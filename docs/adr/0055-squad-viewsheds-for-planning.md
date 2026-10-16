@@ -110,7 +110,7 @@ So each frame only one viewshed asks for work:
 - the selected one (being dragged) first, then the latest turned on;
 - the others show what the cache already holds (`cachedUnion`, `cachedRefined`).
 
-**While dragging.** Jobs up to 30,000 cells (a 5 km battlefield's 32 m grid) now finish before the
-next request starts. A dragged waypoint's viewshed keeps its last few positions. Until its own is
-in, it shows the latest finished from them. A drag therefore shows a stream of first looks, one
-every 0.1–0.2 s, trailing the pointer slightly. Full detail follows about 2 s after the drop.
+**While dragging.** Nothing is worked out while a squad, a waypoint or a kill zone's corner is
+dragged: following the pointer slowed the drag badly. The dragged squad's viewsheds are hidden and
+the others stay as they are. On release its viewsheds are worked out again from where it was
+dropped: a first look in a fraction of a second, full detail in about 2 s.

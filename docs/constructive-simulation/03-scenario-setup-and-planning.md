@@ -206,7 +206,8 @@ of either side, in Scenario Setup and BLUEFOR Planning.
 - **Colours:** BLUEFOR's are light blue and OPFOR's light red; ground both sides see is purple. They
   are drawn over the 2D map and on the 3D ground. Each one that is on is ringed on the map.
 - **Speed:** a coarse look comes first and is refined to 4 m detail in about two seconds (ADR 0055).
-  Dragging a waypoint whose viewshed is on updates it as it moves.
+  While a squad or waypoint is dragged its viewsheds are hidden; they are
+  worked out again when it is dropped.
 - **Following orders:** they follow their orders when orders are added, moved or deleted.
 - **Show or hide:** the **Viewsheds** box on the map bar shows or hides them all. In BLUEFOR
   Planning, OPFOR's are hidden with OPFOR.

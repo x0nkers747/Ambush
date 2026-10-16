@@ -91,12 +91,6 @@ interface ViewshedLayer {
   readonly side: ViewshedSide;
   readonly observers: readonly Vec2[] | null;
   shown: Viewshed | null;
-  /**
-   * Where it looked from before, latest first (a dragged waypoint's last few
-   * positions): their results, finished after it moved on, are shown until
-   * its own is in.
-   */
-  readonly before: readonly (readonly Vec2[])[];
 }
 import {
   SQUAD_VIEWSHED_CELLS_M,
@@ -303,6 +297,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     composed: [] as (Viewshed | null)[],
     overlay: null as ViewshedOverlay | null,
     pending: false,
+    /** Whether something on the map is being dragged (a squad, a waypoint, a kill zone's corner). */
+    dragging: false,
     /** The 3D view the overlay was given to. */
     on3d: null as BattlefieldView3d | null,
   };
@@ -377,9 +373,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const current = (): MapEditor => (display() ? combatEditor : editor);
   /** The map's editor: the planner's, or in Combat and the review, the battle's. */
   const mapEditor: MapEditor = {
-    press: (point, screen, button) => current().press?.(point, screen, button) ?? false,
+    press: (point, screen, button) => {
+      // A press the editor claims starts a drag (others pan the map).
+      viewshed.dragging = current().press?.(point, screen, button) ?? false;
+      return viewshed.dragging;
+    },
     drag: (point) => current().drag?.(point),
-    drop: (point) => current().drop?.(point),
+    drop: (point) => {
+      viewshed.dragging = false;
+      current().drop?.(point);
+    },
     click: (point, screen) => {
       current().click(point, screen);
     },
@@ -659,8 +662,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           stage !== 'bluefor' || showOpfor.checked || planner.squad(p.squadId)?.side !== 'OPFOR',
       );
   };
-  /** How many earlier positions of a viewshed are looked up while it is dragged. */
-  const RECENT_OBSERVERS = 24;
   const pinKey = (p: ViewshedPin) => `${p.squadId}|${String(p.orderIndex)}`;
   /** As far as a layer's viewshed is ready (the first look, then each refinement), working on it if `work`. */
   const layerResult = (layer: ViewshedLayer, service: ViewshedService, work: boolean) => {
@@ -697,6 +698,21 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       viewshed.service = createViewshedService(o.terrain);
       viewshed.service.warmUp();
     }
+    // While a squad, a waypoint or a kill zone's corner is dragged nothing is
+    // worked out (it slowed the drag): the dragged squad's viewsheds are hidden,
+    // the rest stay as they are; on release they are worked out again.
+    if (viewshed.dragging) {
+      const squadId = planner.selection.squadId;
+      if ([...viewshed.layers.values()].some((l) => l.pin.squadId === squadId)) {
+        viewshed.layers = new Map(
+          [...viewshed.layers].filter(([, l]) => l.pin.squadId !== squadId),
+        );
+        showComposed();
+      }
+      viewshed.pending = false;
+      setText(ui('viewshed-status'), '');
+      return;
+    }
     const pins = shownPins();
     const key = `${String(planner.version)}|${pins.map(pinKey).join(',')}`;
     if (key !== viewshed.key) {
@@ -710,9 +726,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           side: planner.squad(pin.squadId)?.side === 'OPFOR' ? 'red' : 'blue',
           observers: viewshedObservers(o.terrain, planner.definition, pin.squadId, pin.orderIndex),
           shown: old?.shown ?? null,
-          before: old?.observers
-            ? [old.observers, ...old.before].slice(0, RECENT_OBSERVERS)
-            : (old?.before ?? []),
         });
       }
       viewshed.layers = layers;
@@ -736,22 +749,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           best = layerResult(layer, service, true) ?? best;
         }
       }
-      // Until its first look is in: the latest finished from where it looked
-      // before (a dragged waypoint's, as it is dragged), else what it showed.
-      if (!best) {
-        for (const earlier of layer.before) {
-          const sectors = earlier.map(() => SQUAD_VIEWSHED_SECTOR);
-          const found = service.cachedUnion(earlier, SQUAD_VIEWSHED_CELLS_M[0], sectors);
-          if (found) {
-            best = found;
-            break;
-          }
-        }
-      }
+      // Until its first look is in, what it showed last.
       if (best) layer.shown = best;
     }
     if (viewshed.layers.size === 0) service?.cancel();
-    // Composed again when any result shown has changed; given again to a new 3D view.
+    showComposed();
+    setText(ui('viewshed-status'), viewshed.pending ? 'Working out viewsheds…' : '');
+    ui('viewshed-toggle').hidden = stage !== 'scenario' && stage !== 'bluefor';
+  };
+  /** Composes the layers' results again when any has changed, and gives them to a new 3D view. */
+  const showComposed = () => {
     const results = [...viewshed.layers.values()].map((l) => l.shown);
     const changed =
       results.length !== viewshed.composed.length ||
@@ -777,8 +784,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       viewshed.on3d = view3d;
       view3d?.setGroundOverlay(viewshed.overlay);
     }
-    setText(ui('viewshed-status'), viewshed.pending ? 'Working out viewsheds…' : '');
-    ui('viewshed-toggle').hidden = stage !== 'scenario' && stage !== 'bluefor';
   };
   /** A dashed ring round each squad start or waypoint whose viewshed is shown, in its side's colour. */
   // (A declaration: the map draws before this point of the page is reached.)

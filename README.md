@@ -133,7 +133,7 @@ Next says what is missing, and the side panel says the same next to the stage's 
    **Viewsheds:** the eye beside a squad's start, or beside any of its waypoints, in the squad
    panel (or **V** for the selected one) shows what its soldiers can see from there, all round to
    1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple, on the map and on
-   the 3D ground; any number can be on, and a dragged waypoint's follows it
+   the 3D ground; any number can be on, and a dragged squad's or waypoint's is worked out again when it is dropped
    ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). The **Viewsheds** box on the map
    bar shows or hides them all.
 3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,

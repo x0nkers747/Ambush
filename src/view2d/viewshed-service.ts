@@ -47,12 +47,12 @@ const PASSES = 2;
 const CACHE_ENTRIES = 32;
 const CACHE_CELLS = 12_500_000;
 /**
- * Jobs up to this many cells (quick previews: a 5 km battlefield at 32 m is
- * about 24,000) finish before the next request starts, so a continuous drag
- * yields a steady stream of updates instead of every update being cancelled
- * by the next pointer move. Larger jobs give way to a new request at once.
+ * Jobs up to this many cells (quick previews) finish before the next request
+ * starts, so a continuous drag yields a steady stream of updates instead of
+ * every update being cancelled by the next pointer move. Larger jobs give way
+ * to a new request at once.
  */
-const FINISH_FIRST_MAX_CELLS = 30_000;
+const FINISH_FIRST_MAX_CELLS = 10_000;
 
 /** What the service needs of a worker: a Web Worker running viewshed.worker.ts. */
 export interface ViewshedWorker {
