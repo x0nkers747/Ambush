@@ -130,6 +130,11 @@ Next says what is missing, and the side panel says the same next to the stage's 
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
+   **Viewshed:** the selected squad's soldiers' viewshed is shaded purple on the map and on the 3D
+   ground, all round to 1,200 m: from where they start or, with a waypoint selected, from where
+   they will stand there ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). A coarse
+   first look comes in a fraction of a second, full detail in about two; **V** or the
+   **Viewshed** box on the map bar turns it off.
 3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,
    or hidden with **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
    change an order's kind, order and deletion in the plan list. Each order's **On contact**
@@ -279,6 +284,7 @@ Decisions are recorded in [`docs/adr`](docs/adr):
 52. [Animated soldiers in the 3D view](docs/adr/0052-animated-soldiers.md) ([how it works](docs/character-animation.md))
 53. [Unit tasks and formation movement in the simulation kernel](docs/adr/0053-unit-tasks-and-formation-movement.md) ([Behavior Lab](docs/behavior-lab/README.md))
 54. [The Behavior Lab](docs/adr/0054-behavior-lab.md)
+55. [Squad viewsheds for planning](docs/adr/0055-squad-viewsheds-for-planning.md)
 
 Animated 3D soldiers: background to ADR 0052 —
 [framework evaluation](docs/character-animation-framework-evaluation.md) (recommendation),

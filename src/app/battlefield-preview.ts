@@ -1,6 +1,6 @@
 import type { TerrainDataset } from '#sim';
 import { createTacticalMap, type MapEditor, type MapSurface, type TacticalMap } from '#view2d';
-import type { BattlefieldView3d } from '#view3d';
+import type { BattlefieldView3d, CameraPose } from '#view3d';
 import { saveScreenshot, screenshotName } from './screenshot';
 
 // The terrain-selection preview (docs/adr/0025): the selected battlefield on
@@ -42,6 +42,14 @@ export interface BattlefieldPreview {
    * when no map is shown yet. The preview is empty afterwards.
    */
   release(): TacticalMap | null;
+  /** How the battlefield is being looked at (2D or 3D, and the 3D camera), for the page it opens on. */
+  viewState(): HandedView;
+}
+
+/** The view handed from the preview to the battle's page: the mode, and in 3D the camera. */
+export interface HandedView {
+  readonly mode: '2d' | '3d';
+  readonly pose: CameraPose | null;
 }
 
 export function createBattlefieldPreview(container: HTMLElement): BattlefieldPreview {
@@ -323,6 +331,9 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       shownId = null;
       stopMap();
       container.hidden = true;
+    },
+    viewState() {
+      return { mode: viewMode, pose: showing3d() ? (view3d?.cameraPose() ?? null) : null };
     },
     release() {
       generation += 1;

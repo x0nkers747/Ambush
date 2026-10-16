@@ -265,3 +265,18 @@ export {
   roadWaypoints,
   type RoadNetwork,
 } from './road-network';
+export {
+  cellCentre,
+  computeViewshed,
+  computeUnionRows,
+  computeViewshedRows,
+  prepareViewsheds,
+  refinementOf,
+  viewshedGrid,
+  visibleCellsIn,
+  inSector,
+  sectorRows,
+  type ViewSector,
+  type Viewshed,
+  type ViewshedGrid,
+} from './viewshed';

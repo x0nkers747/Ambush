@@ -61,7 +61,11 @@ import {
 import { installShadowEdgeFade } from './shadow-fade';
 import { apronElevation, surroundings } from './surroundings';
 import { createTacticalCamera, type TacticalCamera } from './tactical-camera';
-import { createTerrainRenderer, type TerrainRenderer } from './terrain-renderer';
+import {
+  createTerrainRenderer,
+  type GroundOverlay,
+  type TerrainRenderer,
+} from './terrain-renderer';
 import { createTilePool, type TilePool } from './tile-pool';
 import type { UnitMarker } from './unit-markers';
 import type { VegetationLayer } from './vegetation-layer';
@@ -138,6 +142,8 @@ export interface BattlefieldView3d {
   setPointerHandler(handler: PointerHandler | null): void;
   /** Draws the 2D overlay after each frame (on `overlay`, cleared first, in CSS pixels). */
   setOverlayPainter(paint: ((ctx: CanvasRenderingContext2D) => void) | null): void;
+  /** Paints a raster on the ground (a viewshed), or none; kept across terrain reloads. */
+  setGroundOverlay(overlay: GroundOverlay | null): void;
   /** The map point the camera looks at, and how far it is from it (metres), or null before the first frame. */
   focus(): { readonly point: MapPoint; readonly distance: number } | null;
   /** Looks at a map point (keeping the angle), from `distance` metres if given. */
@@ -161,8 +167,18 @@ export interface BattlefieldView3d {
     readonly pitch: number;
     readonly azimuth: number;
   } | null;
+  /** The camera exactly (scene coordinates), to hand to another view of the terrain; null before the first frame. */
+  cameraPose(): CameraPose | null;
+  /** Puts the camera where another view's `cameraPose` had it. */
+  setCameraPose(pose: CameraPose): void;
   /** Frees the GPU resources and listeners. The view cannot be used afterwards. */
   dispose(): void;
+}
+
+/** Where the camera stands and what it looks at, in the 3D scene's coordinates. */
+export interface CameraPose {
+  readonly target: { readonly x: number; readonly y: number; readonly z: number };
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
 }
 
 /** What the view knows about one terrain, built once. */
@@ -246,6 +262,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   overlay.setAttribute('aria-hidden', 'true');
   const overlayContext = overlay.getContext('2d');
   let paintOverlay: ((ctx: CanvasRenderingContext2D) => void) | null = null;
+  /** The raster painted on the ground (`setGroundOverlay`). */
+  let groundOverlay: GroundOverlay | null = null;
   let pointerHandler: PointerHandler | null = null;
   let pointerGround: { x: number; y: number; z: number } | null = null;
   // WebGLRenderer is WebGL 2 only in current Three.js.
@@ -458,6 +476,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         buildMs.workers = ms;
         const ground = createTerrainRenderer(surface, pool, textures);
         entry.ground = ground;
+        ground.setOverlay(groundOverlay);
         applyGroundQuality(entry);
         group.add(ground.mesh);
         if (generation.stage === 'ground') generation.stage = entry.features ? 'done' : 'features';
@@ -713,10 +732,30 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     setOverlayPainter(paint) {
       paintOverlay = paint;
     },
+    setGroundOverlay(overlay) {
+      groundOverlay = overlay;
+      current?.ground?.setOverlay(overlay);
+    },
     focus() {
       if (!current) return null;
       const { target, position } = current.camera.pose();
       return { point: { x: target.x, y: -target.z }, distance: position.distanceTo(target) };
+    },
+    cameraPose() {
+      if (!current) return null;
+      const { target, position } = current.camera.pose();
+      return {
+        target: { x: target.x, y: target.y, z: target.z },
+        position: { x: position.x, y: position.y, z: position.z },
+      };
+    },
+    setCameraPose(pose) {
+      if (!current) return;
+      const { target, position } = pose;
+      current.camera.setPose(
+        new Vector3(target.x, target.y, target.z),
+        new Vector3(position.x, position.y, position.z),
+      );
     },
     focusOn(point, distance) {
       if (!current) return;

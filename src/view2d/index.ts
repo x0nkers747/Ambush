@@ -22,3 +22,5 @@ export {
   type TacticalMap,
   type TacticalMapOptions,
 } from './map';
+export { createViewshedService, type ViewshedService } from './viewshed-service';
+export { drawViewshed, viewshedPixels } from './viewshed-overlay';

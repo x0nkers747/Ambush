@@ -25,7 +25,7 @@ import {
   type BattlefieldPackage,
   type LatLon,
 } from '#geo';
-import { createBattlefieldPreview, type PreviewData } from './battlefield-preview';
+import { createBattlefieldPreview, type HandedView, type PreviewData } from './battlefield-preview';
 import { createToast, escapeHtml, headerHtml, TRASH_ICON, wireHeader } from './shell';
 import type { WorkflowRules } from './workflow';
 
@@ -51,7 +51,7 @@ export interface SelectionOptions {
    * Opens battlefield `id` (stage 2), on `map` when the preview showed it
    * (otherwise `null`). Terrain selection is disposed by then.
    */
-  readonly openBattlefield: (id: string, map: TacticalMap | null) => void;
+  readonly openBattlefield: (id: string, map: TacticalMap | null, view: HandedView) => void;
   /** A map handed back by battlefield `id`'s workspace: the preview keeps showing it. */
   readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
   /** Saved scenarios (docs/scenarios.md): the library, and importing a file. */
@@ -676,7 +676,9 @@ export function startBattlefieldSelection(
   const openSelection = () => {
     if (opening || selection.kind !== 'saved') return;
     opening = true;
-    o.openBattlefield(selection.summary.id, preview.release());
+    // The page opens as the preview was looked at: in 3D, from the same camera.
+    const view = preview.viewState();
+    o.openBattlefield(selection.summary.id, preview.release(), view);
   };
 
   // Each saved battlefield's bin. Two clicks: the first arms it (red), the

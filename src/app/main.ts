@@ -18,7 +18,7 @@ import {
 import type { BattlefieldPackage } from '#geo';
 import { demQualitySummary, shareTerrain, terrainModelId, type DemQualityReport } from '#sim';
 import type { TacticalMap } from '#view2d';
-import type { PreviewData } from './battlefield-preview';
+import type { HandedView, PreviewData } from './battlefield-preview';
 import { installFeedbackButton } from './feedback';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
@@ -292,8 +292,8 @@ async function main(root: HTMLElement): Promise<void> {
         if (mine === previewLoads) loaded = { pkg, battle: definition };
         return previewData(pkg, definition);
       },
-      openBattlefield: (id, map) => {
-        void showBattle(id, 'scenario', map, page);
+      openBattlefield: (id, map, view) => {
+        void showBattle(id, 'scenario', map, page, null, view);
       },
     });
     selection = page;
@@ -317,6 +317,7 @@ async function main(root: HTMLElement): Promise<void> {
     handed: TacticalMap | null,
     previous: { dispose(): void } | null,
     loadNotice: string | null = null,
+    view: HandedView | null = null,
   ): Promise<void> => {
     let map = handed;
     try {
@@ -409,6 +410,7 @@ async function main(root: HTMLElement): Promise<void> {
         initialStage,
         notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
         map,
+        view,
         leave: (m) => {
           backToSelection(pkg, latest, m);
         },

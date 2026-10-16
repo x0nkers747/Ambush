@@ -1,0 +1,679 @@
+import {
+  computeUnionRows,
+  refinementOf,
+  sectorRows,
+  viewshedGrid,
+  type TerrainDataset,
+  type Vec2,
+  type ViewSector,
+  type Viewshed,
+  type ViewshedGrid,
+} from '#sim';
+import { unionViewsheds } from './group-viewshed';
+import type { WorkerReply, WorkerRequest } from './viewshed.worker';
+
+// Computes viewsheds for the planning display without blocking the UI
+// (docs/adr/0020): rows are split into bands and handed to a small pool of
+// persistent Web Workers, which run the simulation's own visibility code.
+// Each worker holds its own copy of the terrain and its visibility index, so
+// the pool is started only when the first viewshed is needed, and is smaller
+// on a heavy battlefield (docs/adr/0045): a page's workers share one memory
+// limit with it.
+// A fire team's visible area, the union of its Marines' viewsheds, is
+// computed the same way as one job (docs/adr/0022): each band of rows is
+// computed for one Marine after another, each skipping cells an earlier one
+// already sees.
+// A viewshed may be limited to a sector, the observer's firing arc: only its
+// cells are decided, and only the bands of rows it reaches are computed, so a
+// 35° arc out to a rifle's range costs a small fraction of the whole grid.
+// Results are cached by exact observer position, sector and cell size. The latest
+// request wins: bands of superseded work are never handed out, and replies
+// for them are dropped. Results are identical however the work is split.
+
+/**
+ * Rows spanned by a band handed to a worker. A viewshed is computed in two
+ * passes: every other row first, then the rows between. Half-way, those rows
+ * make a preview at no extra cost; each band's rows are close enough together
+ * for the proofs to work well.
+ */
+const BAND_ROWS = 64;
+/**
+ * A refinement's bands are narrower: its work is where the ground is visible,
+ * often a few bands' worth, which narrower bands share among the workers.
+ */
+const REFINED_BAND_ROWS = 16;
+const PASSES = 2;
+/** Cached viewsheds: at most this many, and at most this many cells in all (≈ 8 full-detail 5 km viewsheds). */
+const CACHE_ENTRIES = 32;
+const CACHE_CELLS = 12_500_000;
+/**
+ * Jobs up to this many cells (quick previews) finish before the next request
+ * starts, so a continuous drag yields a steady stream of updates instead of
+ * every update being cancelled by the next pointer move. Larger jobs give way
+ * to a new request at once.
+ */
+const FINISH_FIRST_MAX_CELLS = 10_000;
+
+/** What the service needs of a worker: a Web Worker running viewshed.worker.ts. */
+export interface ViewshedWorker {
+  postMessage(message: WorkerRequest): void;
+  onmessage: ((event: { readonly data: WorkerReply }) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  terminate(): void;
+}
+
+export interface ViewshedServiceOptions {
+  /**
+   * Workers to start (when the first viewshed is requested); 0 computes
+   * synchronously (tests, or no Worker support). Defaults to `defaultWorkerCount`.
+   */
+  readonly workerCount?: number;
+  /** Starts one worker; defaults to a module Web Worker. */
+  readonly createWorker?: () => ViewshedWorker;
+}
+
+export interface ViewshedRequest {
+  /** The requested viewshed if ready, else the most recent finished one (possibly another observer's). */
+  readonly viewshed: Viewshed | null;
+  /** Whether the requested viewshed is still being computed. */
+  readonly pending: boolean;
+  /** Whether viewsheds cannot be computed: every worker has failed. */
+  readonly failed: boolean;
+  /**
+   * Whether `viewshed` is the requested one half-computed: every other row
+   * is computed, and the rows between are copies of the row below them.
+   */
+  readonly preview: boolean;
+}
+
+/** Timings of the last completed viewshed, for diagnostics and benchmarks. */
+export interface ViewshedTimings {
+  readonly cellSize: number;
+  readonly cells: number;
+  /** From the request to the last band's arrival, in milliseconds. */
+  readonly elapsedMs: number;
+  /** Computing time summed over workers. */
+  readonly computeMs: number;
+  readonly bands: number;
+  readonly workers: number;
+}
+
+export interface ViewshedService {
+  /**
+   * The viewshed from `observer` on a grid of `cellSize` metres if it is ready.
+   * Otherwise starts computing it and returns the most recent finished
+   * viewshed (possibly for another observer or resolution) with `pending`.
+   */
+  request(observer: Vec2, cellSize: number, sector?: ViewSector | null): ViewshedRequest;
+  /** Whether that viewshed is cached (ready), without starting any work. */
+  has(observer: Vec2, cellSize: number, sector?: ViewSector | null): boolean;
+  /**
+   * The union of the viewsheds from `observers` (a fire team's visible area:
+   * visible where any of them sees), exactly as `unionViewsheds` of each
+   * one's viewshed, on a grid of `cellSize` metres, if it is ready; otherwise
+   * as `request`. Single viewsheds already cached are used as they are; the
+   * rest are computed as one job, each band one observer after another, each
+   * skipping the cells an earlier one already sees (`computeViewshedRows`'s
+   * `alreadyVisible`), which is where most of the work would be. The result's
+   * observer is the first one. It is cached by the exact observers, in order.
+   */
+  requestUnion(
+    observers: readonly Vec2[],
+    cellSize: number,
+    /** Each observer's sector (firing arc), or `null`/absent for the whole grid. */
+    sectors?: readonly (ViewSector | null)[],
+  ): ViewshedRequest;
+  /**
+   * The union as `requestUnion`, on a grid of `cellSize` metres, refined from
+   * `coarse` (the same observers' union on a coarser grid): only cells along
+   * the edges of what `coarse` shows visible, and near the observers, are
+   * decided (`refinementOf`); the rest take `coarse`'s value. Several times
+   * faster than the whole union, and the same along every edge.
+   */
+  requestRefined(
+    observers: readonly Vec2[],
+    cellSize: number,
+    sectors: readonly (ViewSector | null)[],
+    coarse: Viewshed,
+  ): ViewshedRequest;
+  /** Starts the workers now (each prepares the terrain), so the first viewshed does not wait for them. */
+  warmUp(): void;
+  /** Drops work in progress, e.g. when no viewshed is shown any more. Cached results stay. */
+  cancel(): void;
+  /** Number of cached viewsheds. */
+  readonly cached: number;
+  /** Timings of the last completed viewshed, or `null`. */
+  readonly lastTimings: ViewshedTimings | null;
+  dispose(): void;
+}
+
+interface Band {
+  readonly rowStart: number;
+  readonly rowEnd: number;
+  readonly rowStep: number;
+  readonly pass: number;
+}
+
+/** What a job computes: one viewshed, or a union of several (`requestUnion`). */
+interface JobSpec {
+  readonly key: string;
+  /** The result's observer. */
+  readonly observer: Vec2;
+  /** The observers whose viewsheds are computed, in order (one for a single viewshed). */
+  readonly observers: readonly Vec2[];
+  /** Their sectors, in the same order (`null`: the whole grid). */
+  readonly sectors: readonly (ViewSector | null)[];
+  /** The single viewshed's sector, kept with the result. */
+  readonly sector: ViewSector | null;
+  /** Cells already known to be visible (from cached viewsheds), the whole grid; or none. */
+  readonly known: Uint8Array | null;
+  /** Cells not to decide (refining a coarser viewshed, `refinementOf`), the whole grid; or none. */
+  readonly settled: Uint8Array | null;
+  readonly grid: ViewshedGrid;
+}
+
+interface Job {
+  readonly id: number;
+  readonly key: string;
+  readonly observer: Vec2;
+  readonly observers: readonly Vec2[];
+  readonly sectors: readonly (ViewSector | null)[];
+  readonly sector: ViewSector | null;
+  readonly known: Uint8Array | null;
+  readonly settled: Uint8Array | null;
+  readonly grid: ViewshedGrid;
+  readonly visible: Uint8Array;
+  readonly bands: number;
+  /** Bands not yet handed out: every first-pass band before any second-pass band. */
+  readonly queue: Band[];
+  outstanding: number;
+  /** First-pass bands not yet received. */
+  firstPassOutstanding: number;
+  /** The first pass's rows, the rows between filled from below; set once the first pass is in. */
+  preview: Viewshed | null;
+  readonly startedAt: number;
+  computeMs: number;
+}
+
+/** The cache key: the exact observer position, sector and cell size, never rounded. */
+export function viewshedKey(observer: Vec2, cellSize: number, sector?: ViewSector | null): string {
+  const arc = sector
+    ? `@${String(sector.azimuth)},${String(sector.halfWidth)},${String(sector.rangeM)}`
+    : '';
+  return `${String(cellSize)}:${String(observer.x)},${String(observer.y)}${arc}`;
+}
+
+/** The cache key of a union: every observer's key, in order. A single observer's is `viewshedKey`. */
+export function unionKey(
+  observers: readonly Vec2[],
+  cellSize: number,
+  sectors: readonly (ViewSector | null)[] = [],
+): string {
+  return observers.length === 1 && observers[0]
+    ? viewshedKey(observers[0], cellSize, sectors[0])
+    : `union:${observers.map((o, i) => viewshedKey(o, cellSize, sectors[i])).join('|')}`;
+}
+
+/** The rows a job must compute: all, or those its observers' sectors reach (empty when none). */
+function rowsToCompute(
+  observers: readonly Vec2[],
+  sectors: readonly (ViewSector | null)[],
+  grid: ViewshedGrid,
+): { readonly first: number; readonly last: number } {
+  let first = Infinity;
+  let last = -Infinity;
+  for (let i = 0; i < observers.length; i += 1) {
+    const o = observers[i];
+    const sector = sectors[i];
+    if (!o) continue;
+    if (!sector) return { first: 0, last: grid.rows - 1 };
+    const span = sectorRows(sector, o, grid);
+    first = Math.min(first, span.first);
+    last = Math.max(last, span.last);
+  }
+  return { first, last };
+}
+
+export function createViewshedService(
+  terrain: TerrainDataset,
+  options: ViewshedServiceOptions = {},
+): ViewshedService {
+  const canUseWorkers = typeof Worker !== 'undefined' || options.createWorker !== undefined;
+  const workerCount = canUseWorkers
+    ? (options.workerCount ??
+      defaultWorkerCount(
+        typeof navigator === 'undefined' ? 2 : navigator.hardwareConcurrency,
+        featurePoints(terrain),
+      ))
+    : 0;
+  const createWorker = options.createWorker ?? defaultWorker;
+  const cache = new Map<string, Viewshed>();
+  let cachedCells = 0;
+  let latest: Viewshed | null = null;
+  let job: Job | null = null;
+  let nextJobId = 1;
+  let lastTimings: ViewshedTimings | null = null;
+
+  const remember = (key: string, viewshed: Viewshed) => {
+    const old = cache.get(key);
+    if (old) {
+      cache.delete(key);
+      cachedCells -= old.visible.length;
+    }
+    cache.set(key, viewshed);
+    cachedCells += viewshed.visible.length;
+    // Least recently used first.
+    for (const [oldest, value] of cache) {
+      if (cache.size <= CACHE_ENTRIES && cachedCells <= CACHE_CELLS) break;
+      if (oldest === key) break;
+      cache.delete(oldest);
+      cachedCells -= value.visible.length;
+    }
+    latest = viewshed;
+  };
+
+  const workers: ViewshedWorker[] = [];
+  const idle: ViewshedWorker[] = [];
+  /** The band each busy worker is computing. */
+  const assigned = new Map<ViewshedWorker, { jobId: number; band: Band }>();
+  let failed = false;
+
+  /** The latest request, waiting for a quick job to finish. */
+  let next: JobSpec | null = null;
+  /** The latest refinement's starting point (`requestRefined`). */
+  let refining: { key: string; known: Uint8Array; settled: Uint8Array } | null = null;
+
+  const start = ({ key, observer, observers, sectors, sector, known, settled, grid }: JobSpec) => {
+    const queue: Band[] = [];
+    // Only the rows the sectors reach; the rest stay as known (or not visible).
+    const { first, last } = rowsToCompute(observers, sectors, grid);
+    const from = first - (first % PASSES);
+    for (let pass = 0; pass < PASSES; pass += 1) {
+      const rowsPerBand = settled ? REFINED_BAND_ROWS : BAND_ROWS;
+      for (let r = from; r <= last; r += rowsPerBand) {
+        if (r + pass <= last) {
+          queue.push({
+            rowStart: r + pass,
+            rowEnd: Math.min(r + rowsPerBand, last + 1),
+            rowStep: PASSES,
+            pass,
+          });
+        }
+      }
+    }
+    job = {
+      id: nextJobId,
+      key,
+      observer: { x: observer.x, y: observer.y },
+      observers: observers.map((o) => ({ x: o.x, y: o.y })),
+      sectors,
+      sector,
+      known,
+      settled,
+      grid,
+      visible: known ? known.slice() : new Uint8Array(grid.rows * grid.columns),
+      bands: queue.length,
+      queue,
+      outstanding: queue.length,
+      firstPassOutstanding: queue.filter((b) => b.pass === 0).length,
+      preview: null,
+      startedAt: performance.now(),
+      computeMs: 0,
+    };
+    nextJobId += 1;
+    next = null;
+    // Nothing to compute (a sector entirely off the grid): done at once.
+    if (queue.length === 0) {
+      finish(job);
+      return;
+    }
+    dispatch();
+  };
+
+  const dispatch = () => {
+    while (job && job.queue.length > 0 && idle.length > 0) {
+      const worker = idle.pop();
+      const band = job.queue.shift();
+      if (!worker || band === undefined) break;
+      assigned.set(worker, { jobId: job.id, band });
+      worker.postMessage({
+        type: 'rows',
+        jobId: job.id,
+        observers: job.observers,
+        ...(job.sectors.some((s) => s !== null) ? { sectors: job.sectors } : {}),
+        ...(job.known ? { known: bandRows(job.known, job.grid, band) } : {}),
+        ...(job.settled ? { settled: bandRows(job.settled, job.grid, band) } : {}),
+        grid: job.grid,
+        rowStart: band.rowStart,
+        rowEnd: band.rowEnd,
+        rowStep: band.rowStep,
+      });
+    }
+  };
+
+  const finish = (current: Job) => {
+    const viewshed: Viewshed = {
+      grid: current.grid,
+      observer: current.observer,
+      ...(current.sector ? { sector: current.sector } : {}),
+      visible: current.visible,
+    };
+    remember(current.key, viewshed);
+    const elapsedMs = performance.now() - current.startedAt;
+    lastTimings = {
+      cellSize: current.grid.cellSize,
+      cells: current.visible.length,
+      elapsedMs,
+      computeMs: current.computeMs,
+      bands: current.bands,
+      workers: workers.length,
+    };
+    try {
+      performance.measure(`viewshed ${String(current.grid.cellSize)} m`, {
+        start: current.startedAt,
+        duration: elapsedMs,
+        detail: lastTimings,
+      });
+    } catch {
+      // Diagnostics only.
+    }
+    job = null;
+    const waiting = next;
+    next = null;
+    if (waiting && !cache.has(waiting.key)) start(waiting);
+  };
+
+  const onReply = (worker: ViewshedWorker, reply: WorkerReply) => {
+    if (reply.type === 'ready') {
+      try {
+        performance.measure('viewshed worker ready', {
+          start: performance.now() - reply.prepareMs,
+          duration: reply.prepareMs,
+        });
+      } catch {
+        // Diagnostics only.
+      }
+      return;
+    }
+    const band = assigned.get(worker)?.band;
+    assigned.delete(worker);
+    idle.push(worker);
+    const current = job;
+    // Replies for superseded jobs are dropped: they can never overwrite newer results.
+    if (current?.id === reply.jobId) {
+      const { columns } = current.grid;
+      for (let k = 0, r = reply.rowStart; r < reply.rowEnd; r += reply.rowStep, k += 1) {
+        current.visible.set(reply.data.subarray(k * columns, (k + 1) * columns), r * columns);
+      }
+      current.computeMs += reply.computeMs;
+      current.outstanding -= 1;
+      if (band?.pass === 0) {
+        current.firstPassOutstanding -= 1;
+        if (current.firstPassOutstanding === 0 && current.outstanding > 0) {
+          current.preview = previewOf(current);
+        }
+      }
+      if (current.outstanding === 0) finish(current);
+    }
+    dispatch();
+  };
+
+  const onFailure = (worker: ViewshedWorker) => {
+    worker.terminate();
+    workers.splice(workers.indexOf(worker), 1);
+    const at = idle.indexOf(worker);
+    if (at >= 0) idle.splice(at, 1);
+    const band = assigned.get(worker);
+    assigned.delete(worker);
+    // Its band goes back to the queue for another worker.
+    if (band && job?.id === band.jobId) job.queue.unshift(band.band);
+    if (workers.length === 0) {
+      failed = true;
+      job = null;
+      next = null;
+      return;
+    }
+    dispatch();
+  };
+
+  /** Starts the pool, once: when the first viewshed must be computed. Whether any worker runs. */
+  let started = false;
+  let disposed = false;
+  const startWorkers = (): boolean => {
+    if (started || disposed) return workers.length > 0;
+    started = true;
+    for (let i = 0; i < workerCount; i += 1) {
+      let worker: ViewshedWorker;
+      try {
+        worker = createWorker();
+      } catch {
+        continue;
+      }
+      worker.onmessage = (event) => {
+        onReply(worker, event.data);
+      };
+      worker.onerror = () => {
+        onFailure(worker);
+      };
+      worker.postMessage({ type: 'terrain', terrain });
+      workers.push(worker);
+      idle.push(worker);
+    }
+    if (workers.length === 0) failed = true;
+    return workers.length > 0;
+  };
+
+  /** The result of `spec` if cached; otherwise starts (or continues) computing it. */
+  const requestJob = (spec: JobSpec): ViewshedRequest => {
+    const { key, grid } = spec;
+    const cached = cache.get(key);
+    if (cached) {
+      remember(key, cached);
+      return { viewshed: cached, pending: false, failed: false, preview: false };
+    }
+    if (failed) return { viewshed: latest, pending: false, failed: true, preview: false };
+    if (workerCount === 0) {
+      // No workers (e.g. tests): compute synchronously.
+      const viewshed: Viewshed = {
+        grid,
+        observer: { x: spec.observer.x, y: spec.observer.y },
+        ...(spec.sector ? { sector: spec.sector } : {}),
+        visible: computeUnionRows(
+          terrain,
+          spec.observers,
+          grid,
+          0,
+          grid.rows,
+          1,
+          spec.known,
+          {},
+          spec.sectors,
+          spec.settled,
+        ),
+      };
+      remember(key, viewshed);
+      return { viewshed, pending: false, failed: false, preview: false };
+    }
+    if (!startWorkers()) return { viewshed: latest, pending: false, failed: true, preview: false };
+    if (job?.key !== key) {
+      const running = job;
+      if (running && running.grid.rows * running.grid.columns <= FINISH_FIRST_MAX_CELLS) {
+        next = spec;
+      } else {
+        start(spec);
+      }
+    }
+    const half = job?.key === key ? job.preview : null;
+    return half
+      ? { viewshed: half, pending: true, failed: false, preview: true }
+      : { viewshed: latest, pending: true, failed: false, preview: false };
+  };
+
+  return {
+    request(observer, cellSize, sector = null) {
+      const key = viewshedKey(observer, cellSize, sector);
+      const grid = viewshedGrid(terrain, cellSize);
+      return requestJob({
+        key,
+        observer,
+        observers: [observer],
+        sectors: [sector],
+        sector,
+        known: null,
+        settled: null,
+        grid,
+      });
+    },
+    requestUnion(observers, cellSize, sectors = []) {
+      const first = observers[0];
+      if (!first) throw new RangeError('a union needs at least one observer');
+      const sectorOf = (i: number) => sectors[i] ?? null;
+      const key = unionKey(observers, cellSize, sectors);
+      const cachedUnion = cache.get(key);
+      if (cachedUnion) {
+        remember(key, cachedUnion);
+        return { viewshed: cachedUnion, pending: false, failed: false, preview: false };
+      }
+      const grid = viewshedGrid(terrain, cellSize);
+      // Viewsheds already cached count as they are; only the rest are computed.
+      const keys = observers.map((o, i) => viewshedKey(o, cellSize, sectorOf(i)));
+      const ready = keys.flatMap((k) => cache.get(k) ?? []);
+      const missingAt = observers.flatMap((_, i) => (cache.has(keys[i] ?? '') ? [] : [i]));
+      const missing = missingAt.flatMap((i) => observers[i] ?? []);
+      const known = ready.length > 0 ? unionViewsheds(ready).visible : null;
+      if (missing.length === 0 && known) {
+        const viewshed = { grid, observer: { x: first.x, y: first.y }, visible: known };
+        remember(key, viewshed);
+        return { viewshed, pending: false, failed: false, preview: false };
+      }
+      return requestJob({
+        key,
+        observer: first,
+        observers: missing,
+        sectors: missingAt.map(sectorOf),
+        sector: observers.length === 1 ? sectorOf(0) : null,
+        known,
+        settled: null,
+        grid,
+      });
+    },
+    requestRefined(observers, cellSize, sectors, coarse) {
+      const first = observers[0];
+      if (!first) throw new RangeError('a union needs at least one observer');
+      const key = `refined:${unionKey(observers, cellSize, sectors)}`;
+      const cached = cache.get(key);
+      if (cached) {
+        remember(key, cached);
+        return { viewshed: cached, pending: false, failed: false, preview: false };
+      }
+      const grid = viewshedGrid(terrain, cellSize);
+      // Worked out once per refinement, not on every request while it is computed.
+      if (refining?.key !== key) refining = { key, ...refinementOf(coarse, grid, observers) };
+      const { known, settled } = refining;
+      return requestJob({
+        key,
+        observer: first,
+        observers,
+        sectors: observers.map((_, i) => sectors[i] ?? null),
+        sector: null,
+        known,
+        settled,
+        grid,
+      });
+    },
+    has(observer, cellSize, sector = null) {
+      return cache.has(viewshedKey(observer, cellSize, sector));
+    },
+    warmUp() {
+      if (workerCount > 0) startWorkers();
+    },
+    cancel() {
+      job = null;
+      next = null;
+    },
+    get cached() {
+      return cache.size;
+    },
+    get lastTimings() {
+      return lastTimings;
+    },
+    dispose() {
+      disposed = true;
+      for (const worker of workers) worker.terminate();
+      workers.length = 0;
+      idle.length = 0;
+      job = null;
+      next = null;
+    },
+  };
+}
+
+/** The first pass's rows of a job, each row between them filled from the row below. */
+function previewOf(job: Job): Viewshed {
+  const { columns, rows } = job.grid;
+  const visible = job.visible.slice();
+  for (let r = 1; r < rows; r += PASSES) {
+    visible.copyWithin(r * columns, (r - 1) * columns, r * columns);
+  }
+  return { grid: job.grid, observer: job.observer, visible };
+}
+
+/** The rows of a whole-grid mask that a band covers, packed as the band's result is. */
+function bandRows(mask: Uint8Array, grid: ViewshedGrid, band: Band): Uint8Array {
+  const { columns } = grid;
+  const out = new Uint8Array(Math.ceil((band.rowEnd - band.rowStart) / band.rowStep) * columns);
+  for (let k = 0, r = band.rowStart; r < band.rowEnd; r += band.rowStep, k += 1) {
+    out.set(mask.subarray(r * columns, (r + 1) * columns), k * columns);
+  }
+  return out;
+}
+
+function defaultWorker(): ViewshedWorker {
+  return new Worker(new URL('./viewshed.worker.ts', import.meta.url), {
+    type: 'module',
+  }) as unknown as ViewshedWorker;
+}
+
+/**
+ * Battlefields with more feature points than these get at most two workers,
+ * or one (docs/adr/0045). Each worker holds the terrain and its visibility
+ * index (about 0.45 GB on central Amsterdam, 600,000 points), and every
+ * worker of a page shares one memory limit with it, as do the 3D view's
+ * generation workers.
+ */
+export const HEAVY_TERRAIN_POINTS = { two: 100_000, one: 300_000 } as const;
+
+/**
+ * Below this many map points a battlefield is light: its workers hold little
+ * (tens of megabytes each), so on a machine with many cores more of them run
+ * (a squad's viewshed is 13 soldiers' work).
+ */
+export const LIGHT_TERRAIN_POINTS = 60_000;
+
+/**
+ * How many viewshed workers to start: one per spare core, at most 4, fewer on
+ * a heavy battlefield; on a light one, up to half the cores, at most 8.
+ */
+export function defaultWorkerCount(cores: number, points: number): number {
+  const byCores = Math.min(4, Math.max(1, cores - 1));
+  if (points < LIGHT_TERRAIN_POINTS) return Math.max(byCores, Math.min(8, Math.floor(cores / 2)));
+  if (points > HEAVY_TERRAIN_POINTS.one) return 1;
+  if (points > HEAVY_TERRAIN_POINTS.two) return Math.min(2, byCores);
+  return byCores;
+}
+
+/** The map points of a terrain's features (outlines, centre lines): its size as workers hold it. */
+export function featurePoints(terrain: TerrainDataset): number {
+  let points = 0;
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+    } else if (typeof value === 'object' && value !== null) {
+      const v = value as { x?: unknown; y?: unknown };
+      if (typeof v.x === 'number' && typeof v.y === 'number') points += 1;
+      else for (const item of Object.values(value)) walk(item);
+    }
+  };
+  walk(terrain.features);
+  return points;
+}

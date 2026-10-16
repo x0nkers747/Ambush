@@ -69,6 +69,7 @@ export {
   type ScenarioSquad,
 } from './scenario';
 export {
+  assaultFormationId,
   FOF_DEFAULT_CONFIG,
   formationsForOrganization,
   SQUAD_ORGANIZATIONS,

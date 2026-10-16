@@ -5,6 +5,7 @@
 export {
   createBattlefieldView3d,
   type BattlefieldView3d,
+  type CameraPose,
   type BattlefieldView3dOptions,
   type PointerHandler,
   type ViewFigures,
@@ -14,3 +15,4 @@ export type { AnimationClock } from './characters/layer';
 export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projection';
 export type { QualityLevel } from './quality';
 export { terrainGround, type GroundAt } from './camera-math';
+export type { GroundOverlay } from './terrain-renderer';

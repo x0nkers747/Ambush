@@ -31,9 +31,20 @@ import {
   type Side,
   type TerrainDataset,
   type Vec2,
+  type Viewshed,
 } from '#sim';
-import { createTacticalMap, type MapBinding, type MapEditor, type TacticalMap } from '#view2d';
-import type { BattlefieldView3d, UnitMarker } from '#view3d';
+import {
+  createTacticalMap,
+  createViewshedService,
+  drawViewshed,
+  viewshedPixels,
+  type MapBinding,
+  type MapEditor,
+  type TacticalMap,
+  type ViewshedService,
+} from '#view2d';
+import type { BattlefieldView3d, CameraPose, UnitMarker } from '#view3d';
+import type { HandedView } from '../battlefield-preview';
 import {
   createConfirm,
   createToast,
@@ -71,6 +82,7 @@ import {
 } from './combat-panel';
 import { createBattleMapEditor, ORDER_INITIALS } from './map-editor';
 import { createPlanner, type BattleStage, type PlannerTool } from './planner';
+import { SQUAD_VIEWSHED_CELLS_M, SQUAD_VIEWSHED_SECTOR, viewshedObservers } from './squad-viewshed';
 
 // Stages 2–5 of a battle on one battlefield (docs/constructive-simulation/03,
 // 04): Scenario Setup (place both sides' squads, give OPFOR its plans),
@@ -94,6 +106,8 @@ export interface BattlePageOptions {
   readonly notice?: string | null;
   /** The terrain-selection preview's map of this battlefield, kept as it is; otherwise a new one. */
   readonly map?: TacticalMap | null;
+  /** How terrain selection's preview was looked at: in 3D, the page opens in 3D from that camera. */
+  readonly view?: HandedView | null;
   /** Back to terrain selection, handing the map over (the page has stopped by then). */
   readonly leave: (map: TacticalMap) => void;
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
@@ -142,6 +156,7 @@ const HELP_HTML = `<dl class="kv help">
   <dt>Drag</dt><dd>A squad to move it (Setup), a waypoint to move its destination, the white knob to turn the selected squad</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
   <dt>Delete</dt><dd>The selected order, or else the selected squad (Setup)</dd>
+  <dt>V</dt><dd>Show or hide the selected squad's viewshed (purple): what its soldiers can see, all round to 1,200 m, from where they stand or, a waypoint selected, from there</dd>
   <dt>F</dt><dd>Fit the map (2D) or return to the overhead view (3D)</dd>
 </dl>
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
@@ -166,6 +181,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     <div class="mapbar">
       <span class="pointer" data-ui="pointer"></span>
       <span class="spacer"></span>
+      <span class="mapbar-tool" data-ui="viewshed-status"></span>
+      <label class="mapbar-check" data-ui="viewshed-toggle" title="What the selected squad can see, all round to 1,200 m: from where it stands, or with a waypoint selected, from there (V)">
+        <input type="checkbox" data-ui="show-viewshed" checked> Viewshed
+      </label>
       <label class="mapbar-check" data-ui="opfor-toggle" title="Show the OPFOR squads and their plans while BLUEFOR plans">
         <input type="checkbox" data-ui="show-opfor" checked> Show OPFOR
       </label>
@@ -249,6 +268,18 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   });
   const editor = createBattleMapEditor(planner);
 
+  /** The selected squad's viewshed ("Viewshed", below); declared first, as the map draws it. */
+  const viewshed = {
+    service: null as ViewshedService | null,
+    shown: null as Viewshed | null,
+    /** The observers asked for, and what they were worked out from. */
+    key: '',
+    observers: null as Vec2[] | null,
+    pending: false,
+    /** The 3D view the overlay was given to. */
+    on3d: null as BattlefieldView3d | null,
+  };
+
   // --- Combat (docs/constructive-simulation/04) ------------------------------
 
   /**
@@ -326,7 +357,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       current().click(point, screen);
     },
     cursor: (point, screen) => current().cursor?.(point, screen) ?? null,
-    draw: (ctx, toScreen, perspective) => current().draw?.(ctx, toScreen, perspective),
+    draw: (ctx, toScreen, perspective) => {
+      // The selected squad's viewshed under everything (in 3D it is on the ground itself).
+      if (!perspective && viewshed.shown) drawViewshed(ctx, viewshed.shown, toScreen);
+      current().draw?.(ctx, toScreen, perspective);
+    },
   };
   /** The page's gates: the planner's, and the battle's own (it ends only when the user ends it). */
   const rules: WorkflowRules = {
@@ -368,6 +403,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   let view3d: BattlefieldView3d | null = null;
   let loading3d = false;
   let stopped = false;
+  /** Terrain selection's 3D camera, for the 3D view when it opens. */
+  let handedPose: CameraPose | null = null;
   const FOV_HALF_TAN = Math.tan((22.5 * Math.PI) / 180);
   const carryFocus = (to: '2d' | '3d') => {
     if (!view3d) return;
@@ -515,8 +552,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         viewMode = '3d';
         showViewMode();
         const opened = view3d;
+        const pose = handedPose;
+        handedPose = null;
         requestAnimationFrame(() => {
-          if (view3d === opened && viewMode === '3d') carryFocus('3d');
+          if (view3d !== opened || viewMode !== '3d') return;
+          // From terrain selection's 3D camera, exactly; else where the 2D map looked.
+          if (pose) opened.setCameraPose(pose);
+          else carryFocus('3d');
         });
         notify('');
       })
@@ -556,6 +598,82 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     ui('attribution').title = lines.join('\n');
   };
   showAttribution();
+  // --- Viewshed (planning) --------------------------------------------------
+
+  /**
+   * What the selected squad can see (squad-viewshed.ts): the union of its
+   * soldiers' viewsheds, from where they start or, a waypoint selected, from
+   * there. Computed by the viewshed workers: a coarse look first, then full
+   * detail; shown on the 2D map and draped on the 3D ground.
+   */
+  const showViewshed = ui('show-viewshed') as HTMLInputElement;
+  showViewshed.addEventListener('change', () => {
+    showViewshed.blur();
+  });
+  const updateViewshed = () => {
+    const stage = planner.stage;
+    const sel = planner.selection;
+    const planning = (stage === 'scenario' || stage === 'bluefor') && showViewshed.checked;
+    // Planning with the viewshed on: the workers start now, before a squad is selected.
+    if (planning && !viewshed.service) {
+      viewshed.service = createViewshedService(o.terrain);
+      viewshed.service.warmUp();
+    }
+    const squadId = planning ? sel.squadId : null;
+    const key =
+      squadId !== null ? `${String(planner.version)}|${squadId}|${String(sel.orderIndex)}` : '';
+    if (key !== viewshed.key) {
+      viewshed.key = key;
+      viewshed.observers =
+        squadId !== null
+          ? viewshedObservers(o.terrain, planner.definition, squadId, sel.orderIndex)
+          : null;
+    }
+    const observers = viewshed.observers;
+    let next: Viewshed | null = null;
+    viewshed.pending = false;
+    if (observers && observers.length > 0) {
+      viewshed.service ??= createViewshedService(o.terrain);
+      const service = viewshed.service;
+      const sectors = observers.map(() => SQUAD_VIEWSHED_SECTOR);
+      const first = observers[0];
+      const mine = (v: Viewshed | null) =>
+        first !== undefined && v?.observer.x === first.x && v.observer.y === first.y ? v : null;
+      const [firstCell, ...finer] = SQUAD_VIEWSHED_CELLS_M;
+      const coarse = service.requestUnion(observers, firstCell, sectors);
+      if (coarse.pending) {
+        // Until the first look is in: its half-way rows, or what was shown for these observers.
+        next = (coarse.preview ? coarse.viewshed : null) ?? mine(viewshed.shown);
+        viewshed.pending = true;
+      } else {
+        // Each finer grid refined from the one before; shown as each is in.
+        let best = coarse.viewshed;
+        for (const cell of finer) {
+          if (!best) break;
+          const fine = service.requestRefined(observers, cell, sectors, best);
+          if (fine.pending) {
+            viewshed.pending = true;
+            if (fine.preview) best = fine.viewshed;
+            break;
+          }
+          best = fine.viewshed;
+        }
+        next = best;
+      }
+    } else if (viewshed.shown) viewshed.service?.cancel();
+    // Draped on the 3D ground too (a 3D view opened since included).
+    if (next !== viewshed.shown || view3d !== viewshed.on3d) {
+      viewshed.shown = next;
+      viewshed.on3d = view3d;
+      view3d?.setGroundOverlay(next ? { grid: next.grid, pixels: viewshedPixels(next) } : null);
+    }
+    setText(
+      ui('viewshed-status'),
+      viewshed.observers && viewshed.pending ? 'Working out the viewshed…' : '',
+    );
+    ui('viewshed-toggle').hidden = stage !== 'scenario' && stage !== 'bluefor';
+  };
+
   const showOpfor = ui('show-opfor') as HTMLInputElement;
   showOpfor.addEventListener('change', () => {
     editor.showOpfor = showOpfor.checked;
@@ -1260,6 +1378,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'k':
         if (planner.stage === 'scenario' || planner.stage === 'bluefor') planner.armKillZone();
         break;
+      case 'v':
+        showViewshed.checked = !showViewshed.checked;
+        break;
       case 'p':
         if (planner.stage === 'scenario') {
           const last = lastPlace;
@@ -1526,6 +1647,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     inCombat()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     inReview()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     lastFrameMs = nowMs;
+    updateViewshed();
     if (viewMode === '3d' && view3d) view3d.render();
     else map.render();
     updatePanels();
@@ -1533,6 +1655,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   const stop = () => {
     stopped = true;
+    viewshed.service?.dispose();
+    viewshed.service = null;
     view3d?.dispose();
     view3d = null;
     map.canvas.style.visibility = '';
@@ -1553,6 +1677,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     value: () => ({
       stage: planner.stage,
       view: viewMode,
+      camera: viewMode === '3d' ? (view3d?.view() ?? null) : null,
+      viewshed: viewshed.shown
+        ? {
+            cellSize: viewshed.shown.grid.cellSize,
+            visible: viewshed.shown.visible.reduce((n, v) => n + v, 0),
+            pending: viewshed.pending,
+            observers: viewshed.observers?.length ?? 0,
+          }
+        : null,
       tool: planner.tool,
       selection: planner.selection,
       definition: JSON.parse(JSON.stringify(planner.definition)) as unknown,
@@ -1633,6 +1766,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   enter(o.initialStage);
   if (o.notice) notify(o.notice);
+  // Terrain selection was in 3D: so is the page, its camera where it was.
+  if (o.view?.mode === '3d') {
+    handedPose = o.view.pose;
+    setViewMode('3d');
+  }
   frameId = requestAnimationFrame(frame);
   return stop;
 }
