@@ -5,6 +5,7 @@ import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
 import type { AreaEffect, FofWeapon } from './config';
+import { ambushSectors } from './ambush';
 import { enter, firingOnTheMove, pressingOn, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
@@ -238,7 +239,7 @@ export function resolveFire(context: FofContext): void {
   }
 }
 
-/** The nearest engageable contact the shooter can see, in range. */
+/** The nearest engageable contact the shooter can see, in range (fighting an ambush: in his sector first). */
 function aimedTarget(
   context: FofContext,
   member: FofSoldier,
@@ -260,16 +261,33 @@ function aimedTarget(
     if (range <= weapon.maxEngagementRangeM) candidates.push({ track, target, range });
   }
   // Nearest first (then in soldier order), as sorting would give: taken one at a
-  // time, since the first in sight is usually among the first few.
+  // time, since the first in sight is usually among the first few. Fighting an
+  // ambush it sprang, each ambusher takes his own sector of the kill zone first.
   const order = (c: { target: Soldier; range: number }) =>
     context.soldierIndex.get(c.target.id) ?? 0;
+  const force = fof.forces[member.force];
+  const sector = force
+    ? ambushSectors(
+        context,
+        force,
+        shooter,
+        candidates.map((c) => c.target),
+      )
+    : null;
+  const key = (c: { target: Soldier; range: number }) => (sector ? sector(c.target) : c.range);
   for (let left = candidates.length; left > 0; left -= 1) {
     let best = 0;
     for (let k = 1; k < left; k += 1) {
       const a = candidates[k];
       const b = candidates[best];
       if (!a || !b) continue;
-      if (a.range < b.range || (a.range === b.range && order(a) < order(b))) best = k;
+      const ka = key(a);
+      const kb = key(b);
+      if (
+        ka < kb ||
+        (ka === kb && (a.range < b.range || (a.range === b.range && order(a) < order(b))))
+      )
+        best = k;
     }
     const chosen = candidates[best];
     if (!chosen) break;

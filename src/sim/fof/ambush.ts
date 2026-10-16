@@ -1,7 +1,7 @@
 import { nearestInArea } from '../behavior/slots';
 import type { FormationNode, FormationSpec } from '../behavior/types';
 import { azimuthOf, type Vec2 } from '../geometry';
-import type { SoldierId } from '../state';
+import type { Soldier, SoldierId } from '../state';
 import { isOnTerrain } from '../terrain';
 import { centreOf, enter, forceArea, halt, issue, runningTask } from './force';
 import { activeOrder } from './orders';
@@ -223,4 +223,45 @@ export function springAmbush(
     const member = fof.soldiers[context.memberIndex.get(id) ?? -1];
     if (member) member.reactAt = t;
   }
+}
+
+/**
+ * An ambush's sectors of fire: while a force fights the ambush it sprang (its
+ * ambush order still active), each ambusher takes the enemy at his own place
+ * across the kill zone, so that its fire spreads over the enemy in it instead
+ * of every man firing at the nearest. Ambushers and `targets` are each ranked
+ * across the kill zone (its width, from the same side); the shooter at rank
+ * i of n takes the target at the same share of the m targets, then the next
+ * nearest in that order. Returns each target's place in the shooter's order
+ * (lower first), or `null` when the force is not fighting an ambush.
+ */
+export function ambushSectors(
+  context: FofContext,
+  force: FofForce,
+  shooter: Soldier,
+  targets: readonly Soldier[],
+): ((target: Soldier) => number) | null {
+  if (force.ambushSprungAt === null || targets.length === 0) return null;
+  const zone = activeOrder(force)?.killZone;
+  if (!zone) return null;
+  const { state, soldierIndex } = context;
+  const across = (p: Vec2) =>
+    (p.x - zone.centre.x) * Math.cos(zone.facing) - (p.y - zone.centre.y) * Math.sin(zone.facing);
+  const ranked = (list: readonly Soldier[]) =>
+    list
+      .map((s) => ({ s, a: across(s.position), k: soldierIndex.get(s.id) ?? 0 }))
+      .sort((x, y) => x.a - y.a || x.k - y.k)
+      .map((x) => x.s);
+  const own = ranked(
+    force.memberIds.flatMap((id) => {
+      const s = state.soldiers[soldierIndex.get(id) ?? -1];
+      return s?.status === 'active' ? [s] : [];
+    }),
+  );
+  const i = own.indexOf(shooter);
+  if (i < 0) return null;
+  const order = ranked(targets);
+  const place = new Map(order.map((s, k) => [s.id as string, k]));
+  const wanted = ((i + 0.5) * order.length) / own.length - 0.5;
+  return (target) => Math.abs((place.get(target.id) ?? 0) - wanted);
 }

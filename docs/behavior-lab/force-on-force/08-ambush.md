@@ -40,13 +40,28 @@ ambush order may have one.
 
 ## 2. What the squad does
 
-| Phase                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `moving`                  | Goes to the position like a Move. Contact on the way is handled by the order's actions on contact (Continue by default).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `inAmbush`, deploying     | At the position it shakes out into its extended line (squad: line; fire team: skirmishers), facing the kill zone. The line is closed up to be no wider than the zone, to at least 60 % of its normal intervals, so its ends do not stick out toward the enemy.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `inAmbush`, lying in wait | Prone, facing the kill zone, holding its fire and not halting for what it sees. It is **concealed**: the enemy cannot detect its soldiers beyond `concealmentRangeM` (100 m). Within that range, camouflaged and still, they show only `concealedDetectionFactor` (0.3) of the resolvable detail a prone soldier would.                                                                                                                                                                                                                                                                                                                                                         |
-| sprung → `contact`        | Every ambusher fires at once, with no reaction delay. It knows the enemy soldiers in the kill zone, because it watched them walk in. The enemy squad caught in the zone is **surprised**: its soldiers react `ambushSurpriseSeconds` (4 s) later than usual, still standing and not yet firing back. The ambushers fire **steady**: from prepared prone positions, without the stress of being fired upon, each round of their aimed fire hits `ambushAccuracyFactor` (3) times as often (at most 0.95). This lasts until they are first fired upon, or at most `ambushAccuracySeconds` (15 s). The ambushers' actions on contact become Hold, so they fight from the position. |
-| afterwards                | Contact lost, it holds. The order stays active until the player gives another, so the squad waits there. As in any fight, a squad that is spent (effectiveness, suppression or ammunition) still breaks contact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Phase                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `moving`                  | Goes to the position like a Move. Contact on the way is handled by the order's actions on contact (Continue by default).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `inAmbush`, deploying     | At the position it shakes out into its extended line (squad: line; fire team: skirmishers), facing the kill zone. The line is closed up to be no wider than the zone, to at least 60 % of its normal intervals, so its ends do not stick out toward the enemy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `inAmbush`, lying in wait | Prone, facing the kill zone, holding its fire and not halting for what it sees. It is **concealed**: the enemy cannot detect its soldiers beyond `concealmentRangeM` (100 m). Within that range, camouflaged and still, they show only `concealedDetectionFactor` (0.3) of the resolvable detail a prone soldier would.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| sprung → `contact`        | Every ambusher fires at once, with no reaction delay. It knows the enemy soldiers in the kill zone, because it watched them walk in. The enemy squad caught in the zone is **surprised**: its soldiers react `ambushSurpriseSeconds` (4 s) later than usual, still standing and not yet firing back. The ambushers fire **steady**: from prepared prone positions, without the stress of being fired upon, each round of their aimed fire hits `ambushAccuracyFactor` (3) times as often (at most 0.95). This lasts until they are first fired upon, or at most `ambushAccuracySeconds` (15 s). The ambushers also fire by **sectors**: each takes the enemy at his own place across the kill zone (§2.1), so fire spreads over the enemy instead of every man firing at the nearest. Their actions on contact become Hold, so they fight from the position. |
+| afterwards                | Contact lost, it holds. The order stays active until the player gives another, so the squad waits there. As in any fight, a squad that is spent (effectiveness, suppression or ammunition) still breaks contact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+### 2.1 Sectors of fire
+
+While a squad fights the ambush it sprang (its ambush order still active), each
+ambusher has a sector, as an ambush line is assigned sectors of fire:
+
+- The ambushers are ranked across the kill zone's width, and so are the enemy
+  soldiers they know of and could fire at (in range).
+- The ambusher at rank _i_ of _n_ takes the target at the same share of the
+  _m_ targets, (_i_ + ½)·_m_/_n_ − ½.
+- If he cannot see that target, he takes the next nearest in that order, then
+  by range.
+
+Out of an ambush, every soldier fires at the nearest enemy he can see, as
+before.
 
 ### When it opens fire
 
@@ -123,11 +138,22 @@ time instead of 17 %.
 Without the camouflage factor (1.0), every ambush was compromised before the
 enemy reached the kill zone.
 
-The other results are not decisive (both squads hold, or one breaks contact).
-After the steady fire ends, the fight is the model's ordinary one. Each soldier fires
-at the nearest enemy he can see, so a volley is not distributed across the
-kill zone. That, and lethality in general, belongs to the fire model, not to
-the ambush.
+Without sectors, every ambusher fired at the nearest enemy he could see, so
+the opening volley went at about 2 of the enemy. With sectors (§2.1) it goes
+at about 13, one per ambusher:
+
+| Steady fire, with sectors | Opening volley's targets | Down by 5 / 10 / 30 s (of 130) | Ambush wins  | Casualties B / O |
+| ------------------------- | ------------------------ | ------------------------------ | ------------ | ---------------- |
+| ×3, without sectors       | 2.0                      | 54 / 69 / 93                   | 9 of 10      | 23 / 118         |
+| ×1 (none)                 | 12.7                     | 30 / 41 / 86                   | 8 of 10      | 32 / 111         |
+| ×2                        | 12.8                     | 60 / 74 / 109                  | 10 of 10     | 6 / 130          |
+| **×3 (default)**          | **12.7**                 | **62 / 84 / 118**              | **10 of 10** | **1 / 130**      |
+
+A well-sited ambush with surprise, steady fire and sectors now destroys a
+squad caught in its kill zone, at almost no cost. A compromised ambush gets no
+surprise and no steady fire (sectors still apply), and an enemy that halts
+short of the kill zone does not spring it. Results not counted as wins above
+are not decisive (both squads hold, or one breaks contact).
 
 ## 5. Code and tests
 
@@ -140,7 +166,8 @@ the ambush.
   - lying in wait;
   - surprise in the reaction delays;
   - fire on an ambush springs it, and ends its steady fire.
-- `src/sim/fof/fire.ts`: steady fire (`ambushSteadiness`).
+- `src/sim/fof/fire.ts`: steady fire (`ambushSteadiness`), and sectors of fire in target choice.
+- `src/sim/fof/ambush.ts`: `ambushSectors`.
 - `src/exercise/battle/scenario.ts`: `PlannedKillZone`, `setKillZone`,
   `resizeKillZone`, `defaultKillZone`, `killZoneSpec`, the parsing and the issues.
 - The app:
@@ -154,6 +181,7 @@ the ambush.
       first, and the enemy returns fire only after the surprise;
     - steady fire from the spring until fired upon, and the enemy falling fast in
       the first 5 s;
+    - the opening volley spread over the enemy (sectors);
     - never seen beyond 100 m while concealed, against far sightings of an
       unconcealed squad;
     - it fights from the position and waits;

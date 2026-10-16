@@ -183,6 +183,20 @@ describe('the ambush order', { timeout: 300_000 }, () => {
     expect(early).toBeGreaterThanOrEqual(8);
   });
 
+  it('spreads its fire across the kill zone: each ambusher his own sector, not all at the nearest', () => {
+    for (const seed of SEEDS) {
+      const f = fight(seed, 'ambush', 'wood');
+      const sprung = f.blue.find((e) => e.from === 'inAmbush')?.atSeconds ?? Infinity;
+      const volley = f.events.filter(
+        (e) => e.type === 'fofFire' && e.side === 'BLUEFOR' && e.atSeconds - sprung < 0.05,
+      );
+      const targets = new Set(volley.map((e) => (e.type === 'fofFire' ? e.targetId : '')));
+      // The opening volley: at least as many targets as half its shooters (about one each).
+      expect(volley.length).toBeGreaterThanOrEqual(10);
+      expect(targets.size).toBeGreaterThanOrEqual(volley.length / 2);
+    }
+  });
+
   it('is concealed while it lies in wait: never seen farther than the concealment range', () => {
     let concealedLooks = 0;
     for (const seed of SEEDS) {
