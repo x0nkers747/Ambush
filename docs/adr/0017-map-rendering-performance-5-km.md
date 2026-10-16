@@ -142,3 +142,35 @@ far faster.
 - The camera is snapped to whole device pixels: the map may sit up to half a device pixel from
   where it was before. That cannot be seen, and tactical symbols use the same camera.
 - Simulation, navigation, data and symbols are unchanged.
+
+## Amendment (2026-10-16): contours joined and simplified by zoom; a faster wheel
+
+**The problem.** After a pan or zoom stopped, the settled redraw stalled for one frame of 300–700
+ms on a wooded, hilly battlefield (Coffs Harbour, at 1.5 device pixels per CSS pixel), and about
+600 ms at the whole-map view. Its JavaScript took 14 ms. The time went on rasterizing the contours:
+
+- every traced segment was a separate two-point subpath, hundreds of thousands of them;
+- zoomed out, most were far smaller than a pixel.
+
+**The fix.**
+
+- **Joined.** Each contour level's segments are joined into lines where they share an endpoint
+  (`joinSegments`, `contour-lines.ts`).
+- **Simplified by zoom.** The lines are kept at four levels of detail, simplified with
+  Douglas–Peucker to within 0, 1, 2.5 and 6 m (`CONTOUR_LOD_TOLERANCES_M`).
+- **Drawn at the coarsest level a pixel can show.** Each view draws the coarsest level whose error
+  is under 0.6 of a device pixel (`contourLod`). Lines are cut into the 250 m tiles where they
+  cross into another.
+
+**Measured** (Coffs Harbour, 1.5 device pixels per CSS pixel):
+
+|                       | Contour phase, before | After |
+| --------------------- | --------------------: | ----: |
+| Whole map             |                702 ms | 41 ms |
+| Zoomed in two notches |                304 ms | 29 ms |
+
+Quantico's contour phase now takes 60–75 ms. The worst frame of a pan or zoom with its redraw fell
+from 617–633 ms to 130–150 ms. The maps look the same.
+
+**The wheel.** One notch now zooms by about 42% (`WHEEL_ZOOM_RATE` 0.0035), so two notches double
+the scale. It was 16% a notch, nine notches to double.

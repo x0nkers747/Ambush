@@ -20,8 +20,11 @@ export interface PointerInput {
 
 /** Movement in pixels that turns a press into a drag. */
 export const DRAG_THRESHOLD_PX = 4;
-/** Zoom factor per wheel delta unit (a typical notch, 100, zooms by ~16%). */
-export const WHEEL_ZOOM_RATE = 0.0015;
+/**
+ * Zoom factor per wheel delta unit: a typical notch (100) zooms by ~42%, two
+ * notches double the scale (it was ~16% a notch, nine to double: too slow).
+ */
+export const WHEEL_ZOOM_RATE = 0.0035;
 
 type Mode =
   | { readonly kind: 'idle' }

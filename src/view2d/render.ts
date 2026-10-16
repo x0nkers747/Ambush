@@ -9,6 +9,7 @@ import {
   type WaterArea,
   type WaterwayKind,
 } from '#sim';
+import { joinSegments, simplifyLine } from './contour-lines';
 import { roadStrokes } from './roads';
 import {
   screenToWorld,
@@ -99,6 +100,24 @@ export interface ContourTile {
 const CONTOUR_TILE_M = 250;
 
 /**
+ * The contours' levels of detail: lines simplified to within these many
+ * metres (0: as traced). Each view draws the coarsest whose error is under
+ * `CONTOUR_LOD_PIXELS` of a device pixel, so the whole map draws a fraction
+ * of the points, and close in nothing is lost.
+ */
+export const CONTOUR_LOD_TOLERANCES_M = [0, 1, 2.5, 6] as const;
+const CONTOUR_LOD_PIXELS = 0.6;
+
+/** The contours' level of detail for a view: the coarsest within `CONTOUR_LOD_PIXELS` of a device pixel. */
+export function contourLod(metersPerDevicePixel: number): number {
+  let lod = 0;
+  CONTOUR_LOD_TOLERANCES_M.forEach((t, k) => {
+    if (t <= CONTOUR_LOD_PIXELS * metersPerDevicePixel) lod = k;
+  });
+  return lod;
+}
+
+/**
  * Most line segments stroked as one path. Chrome silently drops a stroke of
  * about a million segments, and every drawing operation after it in the same
  * batch, which is what a whole large battlefield's contours come to.
@@ -114,7 +133,14 @@ export interface TerrainLayer {
   readonly terrain: TerrainDataset;
   readonly bounds: Bounds;
   readonly image: HTMLCanvasElement;
-  readonly contours: readonly ContourTile[];
+  /**
+   * The contours at each level of detail (`CONTOUR_LOD_TOLERANCES_M`), finest
+   * first: lines simplified to within `tolerance` metres, in tiles.
+   */
+  readonly contours: readonly {
+    readonly tolerance: number;
+    readonly tiles: readonly ContourTile[];
+  }[];
   /** Summits, most prominent first (docs/adr/0024). */
   readonly spotHeights: readonly SpotHeight[];
   /**
@@ -187,69 +213,96 @@ export function createTerrainLayer(terrain: TerrainDataset): TerrainLayer {
   pixels.data.set(raster.data);
   ctx.putImageData(pixels, 0, 0);
 
-  // Contour segments are grouped into tiles by their first point.
+  // Each level's segments joined into lines, then each line simplified for
+  // each level of detail and cut into tiles where it crosses into another.
   const intervals = contourIntervals(terrain);
   const bounds = terrainBounds(terrain);
   const tileColumns = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) / CONTOUR_TILE_M));
   const tileRows = Math.max(1, Math.ceil((bounds.maxY - bounds.minY) / CONTOUR_TILE_M));
-  const tiles = new Map<
-    number,
-    {
-      minor: Path2D | null;
-      index: Path2D | null;
-      minorSegments: number;
-      indexSegments: number;
-      box: [number, number, number, number];
-    }
-  >();
+  const tileOf = (x: number, y: number) =>
+    Math.min(tileRows - 1, Math.max(0, Math.floor((y - bounds.minY) / CONTOUR_TILE_M))) *
+      tileColumns +
+    Math.min(tileColumns - 1, Math.max(0, Math.floor((x - bounds.minX) / CONTOUR_TILE_M)));
+  interface TileBuild {
+    minor: Path2D | null;
+    index: Path2D | null;
+    minorSegments: number;
+    indexSegments: number;
+    box: [number, number, number, number];
+  }
+  const lods = CONTOUR_LOD_TOLERANCES_M.map(() => new Map<number, TileBuild>());
   for (const { level, segments } of contourLines(terrain, intervals.minor)) {
     const isIndex = Math.round(level / intervals.minor) % (intervals.index / intervals.minor) === 0;
-    for (let i = 0; i + 3 < segments.length; i += 4) {
-      const x1 = segments[i] ?? 0;
-      const y1 = segments[i + 1] ?? 0;
-      const x2 = segments[i + 2] ?? 0;
-      const y2 = segments[i + 3] ?? 0;
-      const tc = Math.min(
-        tileColumns - 1,
-        Math.max(0, Math.floor((x1 - bounds.minX) / CONTOUR_TILE_M)),
-      );
-      const tr = Math.min(
-        tileRows - 1,
-        Math.max(0, Math.floor((y1 - bounds.minY) / CONTOUR_TILE_M)),
-      );
-      const key = tr * tileColumns + tc;
-      let tile = tiles.get(key);
-      if (!tile) {
-        tile = {
-          minor: null,
-          index: null,
-          minorSegments: 0,
-          indexSegments: 0,
-          box: [x1, y1, x1, y1],
-        };
-        tiles.set(key, tile);
-      }
-      const path = isIndex ? (tile.index ??= new Path2D()) : (tile.minor ??= new Path2D());
-      if (isIndex) tile.indexSegments += 1;
-      else tile.minorSegments += 1;
-      path.moveTo(x1, y1);
-      path.lineTo(x2, y2);
-      const box = tile.box;
-      box[0] = Math.min(box[0], x1, x2);
-      box[1] = Math.min(box[1], y1, y2);
-      box[2] = Math.max(box[2], x1, x2);
-      box[3] = Math.max(box[3], y1, y2);
+    for (const line of joinSegments(segments)) {
+      CONTOUR_LOD_TOLERANCES_M.forEach((tolerance, lod) => {
+        const points = simplifyLine(line, tolerance);
+        const tiles = lods[lod];
+        if (!tiles) return;
+        let tile: TileBuild | null = null;
+        let tileKey = -1;
+        let path: Path2D | null = null;
+        for (let k = 0; k + 1 < points.length; k += 2) {
+          const x = points[k] ?? 0;
+          const y = points[k + 1] ?? 0;
+          const key = tileOf(x, y);
+          if (!tile || !path) {
+            tileKey = key;
+            tile = tiles.get(key) ?? null;
+            if (!tile) {
+              tile = {
+                minor: null,
+                index: null,
+                minorSegments: 0,
+                indexSegments: 0,
+                box: [x, y, x, y],
+              };
+              tiles.set(key, tile);
+            }
+            path = isIndex ? (tile.index ??= new Path2D()) : (tile.minor ??= new Path2D());
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+            if (isIndex) tile.indexSegments += 1;
+            else tile.minorSegments += 1;
+          }
+          const box = tile.box;
+          box[0] = Math.min(box[0], x);
+          box[1] = Math.min(box[1], y);
+          box[2] = Math.max(box[2], x);
+          box[3] = Math.max(box[3], y);
+          // Into another tile: the line goes on there, from this point.
+          if (key !== tileKey) {
+            tileKey = key;
+            tile = tiles.get(key) ?? null;
+            if (!tile) {
+              tile = {
+                minor: null,
+                index: null,
+                minorSegments: 0,
+                indexSegments: 0,
+                box: [x, y, x, y],
+              };
+              tiles.set(key, tile);
+            }
+            path = isIndex ? (tile.index ??= new Path2D()) : (tile.minor ??= new Path2D());
+            path.moveTo(x, y);
+          }
+        }
+      });
     }
   }
-  const contours = [...tiles.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([, { minor, index, minorSegments, indexSegments, box }]) => ({
-      minor,
-      index,
-      minorSegments,
-      indexSegments,
-      bounds: { minX: box[0], minY: box[1], maxX: box[2], maxY: box[3] },
-    }));
+  const contours = lods.map((tiles, lod) => ({
+    tolerance: CONTOUR_LOD_TOLERANCES_M[lod] ?? 0,
+    tiles: [...tiles.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, { minor, index, minorSegments, indexSegments, box }]) => ({
+        minor,
+        index,
+        minorSegments,
+        indexSegments,
+        bounds: { minX: box[0], minY: box[1], maxX: box[2], maxY: box[3] },
+      })),
+  }));
   const {
     roads,
     buildings,
@@ -470,7 +523,7 @@ export function contourBatches(
 /**
  * Contours: the visible tiles joined into one path per weight, so overlapping
  * translucent lines blend as in one stroke (in a few, on the largest views:
- * `contourBatches`).
+ * `contourBatches`), at the level of detail the view's scale needs (`contourLod`).
  */
 function drawContours(
   ctx: CanvasRenderingContext2D,
@@ -480,7 +533,8 @@ function drawContours(
 ): void {
   const mpp = scene.camera.metersPerPixel;
   const dpr = ctx.getTransform().a;
-  const visible = layer.contours.filter((tile) => overlaps(tile.bounds, area, 2 * mpp));
+  const tiles = layer.contours[contourLod(mpp / Math.max(dpr, 1e-9))]?.tiles ?? [];
+  const visible = tiles.filter((tile) => overlaps(tile.bounds, area, 2 * mpp));
   if (visible.length === 0) return;
   ctx.save();
   clipToTerrain(ctx, scene, layer);
