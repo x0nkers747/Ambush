@@ -89,6 +89,9 @@ interface Fought {
   readonly sightings: { readonly event: ContactObservedEvent; readonly concealed: boolean }[];
   /** OPFOR soldiers in the kill zone when the ambush was sprung. */
   readonly insideAtSpring: number;
+  /** BLUEFOR's steady fire after the spring: whether it began, and whether it outlasted the first fire upon it. */
+  readonly steadyAtSpring: boolean;
+  readonly steadyAfterFiredUpon: boolean;
   readonly battle: ReturnType<typeof createBattle>;
 }
 
@@ -102,6 +105,8 @@ function fight(seed: number, order: OrderKind, ground: 'wood' | 'open', seconds 
   const events: SimEvent[] = [];
   const sightings: Fought['sightings'] = [];
   let insideAtSpring = -1;
+  let steadyAtSpring = false;
+  let steadyAfterFiredUpon = false;
   for (let tick = 1; tick <= seconds * 30; tick += 1) {
     const fof = battle.sim.state.fof;
     const concealed = fof?.forces[0]?.concealed === true;
@@ -114,13 +119,25 @@ function fight(seed: number, order: OrderKind, ground: 'wood' | 'open', seconds 
         insideAtSpring = battle.sim.state.soldiers.filter(
           (s) => s.side === 'OPFOR' && s.status === 'active' && inKillZone(ZONE, s.position),
         ).length;
+        steadyAtSpring = fof?.forces[0]?.ambushSteadyUntil != null;
       }
     }
+    const blue = battle.sim.state.fof?.forces[0];
+    if (blue?.lastFiredUponAt != null && blue.ambushSteadyUntil !== null)
+      steadyAfterFiredUpon = true;
   }
   const blue = events.filter(
     (e): e is ForcePhaseChangedEvent => e.type === 'forcePhaseChanged' && e.side === 'BLUEFOR',
   );
-  const fought = { events, blue, sightings, insideAtSpring, battle };
+  const fought = {
+    events,
+    blue,
+    sightings,
+    insideAtSpring,
+    steadyAtSpring,
+    steadyAfterFiredUpon,
+    battle,
+  };
   fights.set(key, fought);
   return fought;
 }
@@ -146,6 +163,24 @@ describe('the ambush order', { timeout: 300_000 }, () => {
       const returned = fire.find((e) => e.side === 'OPFOR');
       if (returned) expect(returned.atSeconds - (sprung?.atSeconds ?? 0)).toBeGreaterThanOrEqual(4);
     }
+  });
+
+  it('fires steady (more accurate) from the spring until it is fired upon: the enemy falls fast', () => {
+    let early = 0;
+    for (const seed of SEEDS) {
+      const f = fight(seed, 'ambush', 'wood');
+      expect(f.steadyAtSpring).toBe(true);
+      expect(f.steadyAfterFiredUpon).toBe(false);
+      const sprung = f.blue.find((e) => e.from === 'inAmbush')?.atSeconds ?? Infinity;
+      early += f.events.filter(
+        (e) =>
+          e.type === 'soldierIncapacitated' &&
+          e.soldierId.startsWith('O1') &&
+          e.atSeconds - sprung <= 5,
+      ).length;
+    }
+    // Some 4 of 13 per ambush in its first 5 s (about 2 without the steady fire).
+    expect(early).toBeGreaterThanOrEqual(8);
   });
 
   it('is concealed while it lies in wait: never seen farther than the concealment range', () => {

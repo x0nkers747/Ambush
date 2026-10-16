@@ -1094,6 +1094,8 @@ export function underFire(context: FofContext, force: number, shooter: Soldier):
   if (!own || !forceActive(own)) return;
   own.lastFiredUponAt = context.t;
   own.hostile = true;
+  // An ambush's steady fire lasts until it is fired upon.
+  own.ambushSteadyUntil = null;
   const detection = context.setup.config.detection;
   const existing = context.fof.tracks.find(
     (tr) => tr.force === force && tr.targetId === shooter.id,

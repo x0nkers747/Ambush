@@ -299,6 +299,11 @@ export interface FofForce {
   killZoneInside: SoldierId[];
   /** Caught in an ambush's kill zone: surprised until then, its soldiers react only after (`null`: not). */
   surprisedUntil: number | null;
+  /**
+   * Sprang its ambush with surprise: its aimed fire is steady (more accurate)
+   * until then, or until it is fired upon (`null`: not).
+   */
+  ambushSteadyUntil: number | null;
   /** When it sprang its ambush (`null`: it has not). */
   ambushSprungAt: number | null;
   /** Lying in wait in its ambush position, deployed: the enemy cannot detect it beyond `concealmentRangeM`. */

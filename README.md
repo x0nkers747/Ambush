@@ -137,7 +137,8 @@ Next says what is missing, and the side panel says the same next to the stage's 
    ambushes, **K**) centres its kill zone, a 50 m square facing the position: drag its corners
    to resize it. The squad goes there, lies in wait in a line facing the kill zone, concealed
    (the enemy cannot see it beyond 100 m), and opens fire on its own when the enemy is in the
-   kill zone (or getting through it, or has found it); it fights until the enemy is down and
+   kill zone (or getting through it, or has found it), steady and accurate until fired upon,
+   the enemy surprised; it fights until the enemy is down and
    waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)).
 4. **Combat** ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)). The
    battle starts paused: **Space** plays and pauses, ½× to 32× sets the speed. Select any squad,

@@ -174,6 +174,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       pressOnUntil: null,
       killZoneInside: [],
       ambushSprungAt: null,
+      ambushSteadyUntil: null,
       surprisedUntil: null,
       concealed: false,
       lastFireAt: null,

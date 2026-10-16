@@ -69,6 +69,22 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
   });
 }
 
+/** A round's hit probability is never raised by an ambush's steady fire beyond this. */
+const AMBUSH_MAX_P_ROUND = 0.95;
+
+/**
+ * An ambush sprung with surprise fires from steady, prepared prone
+ * positions without the stress of being fired upon (docs/behavior-lab/force-on-force/08):
+ * `ambushAccuracyFactor` until it is fired upon (at most `ambushAccuracySeconds`); else 1.
+ */
+function ambushSteadiness(context: FofContext, member: FofSoldier): number {
+  const force = context.fof.forces[member.force];
+  const until = force?.ambushSteadyUntil ?? null;
+  return until !== null && context.t < until - 1e-9
+    ? context.setup.config.force.ambushAccuracyFactor
+    : 1;
+}
+
 /** Avoiding contact, a force returns fire only this long after it was fired upon (s). */
 const HOLD_FIRE_UNLESS_FIRED_UPON_S = 60;
 
@@ -263,11 +279,14 @@ function aimedTarget(
     const { target, range } = chosen;
     const seen = exposure(context, shooter, target);
     if (seen <= 0) continue;
-    const pRound =
+    const base =
       hitProbabilityAt(weapon, range) *
       context.setup.config.fire.postureHitMultipliers[target.posture] *
       seen *
       shooterFactor(context, member);
+    // An ambush's steady fire, in its first moments.
+    const steady = ambushSteadiness(context, member);
+    const pRound = steady > 1 ? Math.min(AMBUSH_MAX_P_ROUND, base * steady) : base;
     return { kind: 'aimed', target, point: target.position, rangeM: range, pRound, victim: target };
   }
   return null;

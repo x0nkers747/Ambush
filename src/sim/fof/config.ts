@@ -280,6 +280,14 @@ export interface ForceBehaviorConfig {
    * otherwise would (s).
    */
   readonly ambushSurpriseSeconds: number;
+  /**
+   * Ambush: an ambush sprung with surprise fires from steady, prepared prone
+   * positions, without the stress of being fired upon: its aimed fire's hit
+   * probability per round is multiplied by this (at most 0.95) until it is
+   * fired upon, for at most `ambushAccuracySeconds`.
+   */
+  readonly ambushAccuracyFactor: number;
+  readonly ambushAccuracySeconds: number;
   /** Attacking: seconds in contact (returning fire, locating the enemy) before it assaults. */
   readonly assaultAfterSeconds: number;
   /**
@@ -743,6 +751,8 @@ export function validateFofConfig(data: unknown): FofConfig {
     'concealedDetectionFactor',
     'ambushTriggerShare',
     'ambushSurpriseSeconds',
+    'ambushAccuracyFactor',
+    'ambushAccuracySeconds',
     'withdrawSuppression',
     'withdrawSuppressedSeconds',
     'withdrawAmmunitionFraction',
@@ -775,6 +785,8 @@ export function validateFofConfig(data: unknown): FofConfig {
     concealedDetectionFactor: [0.01, 1],
     ambushTriggerShare: [0.01, 1],
     ambushSurpriseSeconds: [0, 60],
+    ambushAccuracyFactor: [1, 10],
+    ambushAccuracySeconds: [0, 120],
     withdrawSuppression: [0, 1],
     withdrawSuppressedSeconds: [0],
     withdrawAmmunitionFraction: [0, 1],

@@ -1,4 +1,4 @@
-# Ambush (force-on-force model v2.2)
+# Ambush (force-on-force model v2.3)
 
 An **Ambush** order works differently from the other orders. The squad, fire
 team or element goes to an ambush position and lies in wait there, concealed,
@@ -40,13 +40,13 @@ ambush order may have one.
 
 ## 2. What the squad does
 
-| Phase                     | What it does                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `moving`                  | Goes to the position like a Move. Contact on the way is handled by the order's actions on contact (Continue by default).                                                                                                                                                                                                                                                             |
-| `inAmbush`, deploying     | At the position it shakes out into its extended line (squad: line; fire team: skirmishers), facing the kill zone. The line is closed up to be no wider than the zone, to at least 60 % of its normal intervals, so its ends do not stick out toward the enemy.                                                                                                                       |
-| `inAmbush`, lying in wait | Prone, facing the kill zone, holding its fire and not halting for what it sees. It is **concealed**: the enemy cannot detect its soldiers beyond `concealmentRangeM` (100 m). Within that range, camouflaged and still, they show only `concealedDetectionFactor` (0.3) of the resolvable detail a prone soldier would.                                                              |
-| sprung → `contact`        | Every ambusher fires at once, with no reaction delay. It knows the enemy soldiers in the kill zone, because it watched them walk in. The enemy squad caught in the zone is **surprised**: its soldiers react `ambushSurpriseSeconds` (4 s) later than usual, still standing and not yet firing back. The ambushers' actions on contact become Hold, so they fight from the position. |
-| afterwards                | Contact lost, it holds. The order stays active until the player gives another, so the squad waits there. As in any fight, a squad that is spent (effectiveness, suppression or ammunition) still breaks contact.                                                                                                                                                                     |
+| Phase                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moving`                  | Goes to the position like a Move. Contact on the way is handled by the order's actions on contact (Continue by default).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `inAmbush`, deploying     | At the position it shakes out into its extended line (squad: line; fire team: skirmishers), facing the kill zone. The line is closed up to be no wider than the zone, to at least 60 % of its normal intervals, so its ends do not stick out toward the enemy.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `inAmbush`, lying in wait | Prone, facing the kill zone, holding its fire and not halting for what it sees. It is **concealed**: the enemy cannot detect its soldiers beyond `concealmentRangeM` (100 m). Within that range, camouflaged and still, they show only `concealedDetectionFactor` (0.3) of the resolvable detail a prone soldier would.                                                                                                                                                                                                                                                                                                                                                         |
+| sprung → `contact`        | Every ambusher fires at once, with no reaction delay. It knows the enemy soldiers in the kill zone, because it watched them walk in. The enemy squad caught in the zone is **surprised**: its soldiers react `ambushSurpriseSeconds` (4 s) later than usual, still standing and not yet firing back. The ambushers fire **steady**: from prepared prone positions, without the stress of being fired upon, each round of their aimed fire hits `ambushAccuracyFactor` (3) times as often (at most 0.95). This lasts until they are first fired upon, or at most `ambushAccuracySeconds` (15 s). The ambushers' actions on contact become Hold, so they fight from the position. |
+| afterwards                | Contact lost, it holds. The order stays active until the player gives another, so the squad waits there. As in any fight, a squad that is spent (effectiveness, suppression or ammunition) still breaks contact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### When it opens fire
 
@@ -71,7 +71,7 @@ Review.
 
 ## 3. Configuration
 
-These are in `force` of `src/exercise/forces/fof-v2.json` (version 2.2.0):
+These are in `force` of `src/exercise/forces/fof-v2.json` (version 2.3.0):
 
 | Key                        | Value | Meaning                                                                                  |
 | -------------------------- | ----- | ---------------------------------------------------------------------------------------- |
@@ -79,8 +79,10 @@ These are in `force` of `src/exercise/forces/fof-v2.json` (version 2.2.0):
 | `concealedDetectionFactor` | 0.3   | Within it, his resolvable cycles are multiplied by this (camouflage and stillness).      |
 | `ambushTriggerShare`       | 0.67  | The share of one enemy squad's active soldiers in the kill zone that springs the ambush. |
 | `ambushSurpriseSeconds`    | 4     | How much later a squad caught in the kill zone reacts.                                   |
+| `ambushAccuracyFactor`     | 3     | Steady fire: the multiplier on the ambushers' per-round hit probability (at most 0.95).  |
+| `ambushAccuracySeconds`    | 15    | Steady fire ends after this at the latest; it ends sooner when they are fired upon.      |
 
-## 4. Why the camouflage factor and the surprise
+## 4. Why the camouflage factor, the surprise and the steady fire
 
 With concealment alone (no detection beyond 100 m, normal detection within it),
 an unalerted patrol spotted a prone ambusher 15 m inside a wood in 1–2 s at
@@ -93,18 +95,36 @@ The comparison below uses the test ground: a wood edge 55 m from the route, a
 13-man squad 70 m off the route against a 13-man squad walking down it, over 10
 seeds.
 
-| BLUEFOR                                      | BLUEFOR wins | OPFOR wins | Casualties B / O | Sprung on the kill zone |
-| -------------------------------------------- | ------------ | ---------- | ---------------- | ----------------------- |
-| Halted there on a Move (Hold), not concealed | 1            | 3          | 59 / 20          | —                       |
-| Ambush, no surprise                          | 4            | 5          | 80 / 72          | 10 of 10                |
-| **Ambush, 4 s surprise (default)**           | **6**        | **2**      | **51 / 93**      | 10 of 10                |
-| Ambush, 8 s surprise                         | 7            | 2          | 42 / 101         | 10 of 10                |
+| BLUEFOR                                            | BLUEFOR wins | OPFOR wins | Casualties B / O | Sprung on the kill zone |
+| -------------------------------------------------- | ------------ | ---------- | ---------------- | ----------------------- |
+| Halted there on a Move (Hold), not concealed       | 1            | 3          | 59 / 20          | —                       |
+| Ambush, no surprise                                | 4            | 5          | 80 / 72          | 10 of 10                |
+| **Ambush, 4 s surprise (default)**                 | **6**        | **2**      | **51 / 93**      | 10 of 10                |
+| Ambush, 8 s surprise                               | 7            | 2          | 42 / 101         | 10 of 10                |
+| Ambush, 4 s surprise, steady fire ×2               | 9            | 1          | 18 / 123         | 10 of 10                |
+| **Ambush, 4 s surprise, steady fire ×3 (default)** | **9**        | **1**      | **23 / 118**     | 10 of 10                |
+| Ambush, 4 s surprise, steady fire ×4               | 10           | 0          | 15 / 130         | 10 of 10                |
+
+Steady fire was added because the ordinary hit-probability curves include
+the stress of combat. An ambusher has little: he has chosen his position, lies
+prone with his weapon steady, and nobody is firing at him yet. These are the
+OPFOR soldiers down (of 130, over the 10 ambushes) within 5, 10 and 30 s of the
+spring; OPFOR's first return fire comes 4.6 s after it on average:
+
+| Steady fire      | Down by 5 s | By 10 s | By 30 s |
+| ---------------- | ----------- | ------- | ------- |
+| None (×1)        | 24          | 37      | 68      |
+| **×3 (default)** | **54**      | **69**  | **93**  |
+
+At 70 m a standing target's rifle hit probability per round goes from about
+22 % to about 66 %, so a 2–3-round burst incapacitates him about 45 % of the
+time instead of 17 %.
 
 Without the camouflage factor (1.0), every ambush was compromised before the
 enemy reached the kill zone.
 
 The other results are not decisive (both squads hold, or one breaks contact).
-After the surprise, the fight is the model's ordinary one. Each soldier fires
+After the steady fire ends, the fight is the model's ordinary one. Each soldier fires
 at the nearest enemy he can see, so a volley is not distributed across the
 kill zone. That, and lethality in general, belongs to the fire model, not to
 the ambush.
@@ -119,7 +139,8 @@ the ambush.
   - the `inAmbush` phase and arrival;
   - lying in wait;
   - surprise in the reaction delays;
-  - fire on an ambush springs it.
+  - fire on an ambush springs it, and ends its steady fire.
+- `src/sim/fof/fire.ts`: steady fire (`ambushSteadiness`).
 - `src/exercise/battle/scenario.ts`: `PlannedKillZone`, `setKillZone`,
   `resizeKillZone`, `defaultKillZone`, `killZoneSpec`, the parsing and the issues.
 - The app:
@@ -131,6 +152,8 @@ the ambush.
   - `src/exercise/battle/ambush.test.ts`:
     - it occupies, lies in wait and springs on the enemy in the zone, firing
       first, and the enemy returns fire only after the surprise;
+    - steady fire from the spring until fired upon, and the enemy falling fast in
+      the first 5 s;
     - never seen beyond 100 m while concealed, against far sightings of an
       unconcealed squad;
     - it fights from the position and waits;

@@ -24,6 +24,12 @@ import type { FofForce, FofOrder, KillZone } from './types';
 //   - it is compromised: fired upon, or an enemy squad has seen one of its
 //     soldiers (a confirmed contact) since it occupied the position.
 //
+// Sprung with surprise, the enemy caught in the kill zone reacts
+// `ambushSurpriseSeconds` late, and the ambushers' aimed fire, from steady
+// prone positions and without the stress of being fired upon, hits
+// `ambushAccuracyFactor` times as often until they are fired upon (at most
+// `ambushAccuracySeconds`).
+//
 // Sprung, it knows the enemy in the kill zone (it has watched them in) and
 // fights from where it lies (its actions on contact become `hold`) until the
 // enemy is down or gone, then waits there for new orders: the order never
@@ -187,6 +193,9 @@ export function springAmbush(
   const own = fof.forces.indexOf(force);
   force.ambushSprungAt = t;
   force.concealed = false;
+  // With surprise (not found first), it fires from steady positions until fired upon.
+  const surprised = !reason.includes('compromised') && !reason.includes('fired upon');
+  force.ambushSteadyUntil = surprised ? t + context.setup.config.force.ambushAccuracySeconds : null;
   force.hostile = true;
   force.actionsOn = 'hold';
   force.killZoneInside = [];
@@ -198,7 +207,7 @@ export function springAmbush(
         const s = state.soldiers[soldierIndex.get(id) ?? -1];
         if (s?.status !== 'active' || !inKillZone(zone, s.position)) continue;
         // Caught in the kill zone, its squad is surprised (unless it has already found the ambush).
-        if (!reason.includes('compromised') && !reason.includes('fired upon'))
+        if (surprised)
           enemy.surprisedUntil = Math.max(enemy.surprisedUntil ?? -Infinity, t + surprise);
         const existing = fof.tracks.find((tr) => tr.force === own && tr.targetId === id);
         const from = existing?.level ?? 'unaware';
