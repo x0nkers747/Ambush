@@ -53,10 +53,33 @@ BLUEFOR Planning fights a new one.
 - **In 3D,** the soldiers are characters posed from the battle's motion and
   combat logs (`ViewFigures`).
 - **The selected squad:**
-  - its state: phase, soldiers active, effectiveness;
+  - its state: what it is doing, in a word, and why (below); soldiers
+    active; effectiveness;
   - its active order and what follows;
   - every order it was given, with each one's status and reason.
-- **The roster by force:** each squad's active soldiers and phase.
+- **The roster by force:** each squad's active soldiers and what it is doing
+  (the reason in its tooltip).
+- **What a squad is doing:** a word after its name and count, on the map
+  ("Enemy squad 1 · 8/13 · Regrouping"), in the roster and in the squad
+  panel, with the reason in the panel. It comes from the squad's phase,
+  refined by its order, its actions on contact and its state
+  (`activityOf`, `src/app/battle/status.ts`):
+
+  | Word                   | When                                                                                       |
+  | ---------------------- | ------------------------------------------------------------------------------------------ |
+  | Moving, Advancing      | On a Move (or to an ambush position), on an Attack order                                   |
+  | Pressing on            | On Continue, nothing to engage where it halted: moving on, firing as it goes               |
+  | Observing              | Halted to look at a possible enemy                                                         |
+  | Reacting, Fighting     | In contact, taking cover; exchanging fire                                                  |
+  | Attacking              | Assaulting by fire and movement                                                            |
+  | Withdrawing            | Breaking contact (spent, or avoiding contact), or on a Withdraw order                      |
+  | Regrouping             | Contact lost and recovered: it resumes its order shortly                                   |
+  | Recovering             | Contact lost or broken, still suppressed: it resumes once that wears off                   |
+  | Spent                  | Its losses leave it too weak to go on (lasting effectiveness under 50 %): waits for orders |
+  | Holding                | On Hold, after an ambush, on its objective, or with no more orders                         |
+  | Deploying, Waiting     | Occupying its ambush position; concealed, watching its kill zone                           |
+  | Withdrawn, Ineffective | Out of the fight                                                                           |
+
 - **The event log:**
   - orders started, completed, failed and superseded;
   - phase changes, with their reasons (contact, under fire, assaulting…);

@@ -238,8 +238,16 @@ export interface ForceBehaviorConfig {
   /** In contact with no confirmed contact and no fire for this long, the force holds (s); then resumes after `resumeAfterSeconds`. */
   readonly contactLostSeconds: number;
   readonly resumeAfterSeconds: number;
-  /** Effectiveness to resume the mission after contact is lost. */
-  readonly resumeEffectiveness: number;
+  /**
+   * Recovered from a fight (to resume its mission after contact is lost, or
+   * to start its next order after breaking contact on its own): its mean
+   * suppression has worn off to this, and its lasting effectiveness (what
+   * casualties, ammunition and lost leaders leave it) is still at least
+   * `withdrawEffectiveness`. Suppression is the only part of effectiveness
+   * that recovers, so a threshold on effectiveness itself could never be
+   * reached again by a force its losses had left below it.
+   */
+  readonly resumeSuppression: number;
   /** Withdraw when effectiveness falls below this, ... */
   readonly withdrawEffectiveness: number;
   /** ... or mean suppression stays above `withdrawSuppression` for `withdrawSuppressedSeconds`, ... */
@@ -744,7 +752,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     'reobserveSeconds',
     'contactLostSeconds',
     'resumeAfterSeconds',
-    'resumeEffectiveness',
+    'resumeSuppression',
     'withdrawEffectiveness',
     'pressOnSeconds',
     'concealmentRangeM',
@@ -778,7 +786,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     reobserveSeconds: [0],
     contactLostSeconds: [0],
     resumeAfterSeconds: [0],
-    resumeEffectiveness: [0, 1],
+    resumeSuppression: [0, 1],
     withdrawEffectiveness: [0, 1],
     pressOnSeconds: [1, 3600],
     concealmentRangeM: [0],

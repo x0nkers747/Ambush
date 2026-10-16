@@ -59,8 +59,9 @@ active withdraw ─ arrival ─▶ completed
 active          ─ no route to the destination ─▶ failed
 active, pending ─ the squad combat ineffective ─▶ failed (the whole plan)
 active          ─ the squad spent, breaking contact on its own ─▶ failed;
-                  the next orders wait until effectiveness recovers to
-                  resumeEffectiveness, or until the player gives an order
+                  the next orders wait until it has recovered (its
+                  suppression worn off, and not spent: force-on-force
+                  03 §4), or until the player gives an order
 active, pending ─ replaced by the player ─▶ superseded (canceled if the
                   replacement is empty)
 ```

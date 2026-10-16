@@ -13,6 +13,7 @@ import {
   forceArea,
   issue,
   pictureOf,
+  recovered,
   runningTask,
   standUp,
 } from './force';
@@ -260,14 +261,12 @@ export function failPlan(context: FofContext, force: FofForce, reason: string): 
 
 /**
  * Starts the next pending order, if the squad may: not while it is
- * recovering from breaking contact on its own (until its effectiveness is
- * back to `resumeEffectiveness`). With nothing left to do, it holds where it
+ * recovering from breaking contact on its own (until it has `recovered`). With nothing left to do, it holds where it
  * is (on its last actions on contact, `fallback`).
  */
 function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): void {
-  const behavior = context.setup.config.force;
   if (force.holdUntilRecovered) {
-    if (force.effectiveness < behavior.resumeEffectiveness) return;
+    if (!recovered(force, context.setup.config)) return;
     force.holdUntilRecovered = false;
   }
   const next = force.orders.find((o) => o.status === 'pending');

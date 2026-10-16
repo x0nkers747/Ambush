@@ -41,4 +41,5 @@ export { KILL_ZONE_MAX_M, KILL_ZONE_MIN_M, killZoneProblem, orderSpecProblem } f
 export { inKillZone, killZoneCorners } from './ambush';
 export { hitProbabilityAt, type RangeProbability } from './hit-probability';
 export { armed, roundsLeft } from './weapons';
+export { recovered, spent } from './force';
 export { areaIncapacitation } from './fire';

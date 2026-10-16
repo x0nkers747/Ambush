@@ -49,7 +49,7 @@ any ─ confirmed contact within engageRangeM, or under fire ─▶ contact     
 contact ─ first burst fired ─▶ engaged
 contact / engaged ─ no contact, no fire for contactLostSeconds ─▶ holding
 holding ─ contact within range, or fire ─▶ contact
-holding ─ resumeAfterSeconds, effective enough ─▶ moving (its mission)
+holding ─ resumeAfterSeconds, recovered ─▶ moving (its mission)
 ```
 
 | Parameter                    | Value   | Meaning                                                                           |
@@ -58,9 +58,20 @@ holding ─ resumeAfterSeconds, effective enough ─▶ moving (its mission)
 | `reobserveSeconds`           | 120 s   | After carrying on, how long before a new possible contact halts it again          |
 | `engageRangeM`               | 300 m   | A confirmed contact this close puts the force in contact                          |
 | `contactLostSeconds`         | 40 s    | No confirmed contact and no fire (either way) for this long: holding              |
-| `resumeAfterSeconds`         | 20 s    | Holding this long, the force resumes its mission (if effectiveness ≥ 0.6)         |
+| `resumeAfterSeconds`         | 20 s    | Holding this long, the force resumes its mission (if recovered, below)            |
+| `resumeSuppression`          | 0.25    | Recovered: mean suppression worn off to this, and not spent (below)               |
 | `reactionDelay`              | 0.4–2 s | Each soldier's own delay before taking up his posture and firing (drawn per halt) |
 
+- **Recovered, or spent.** Effectiveness is strength × ammunition × leadership × (1 −
+  0.5 × mean suppression). Only suppression wears off: casualties and lost leaders do
+  not come back, so the first three, the _lasting effectiveness_, never rise again.
+  A force has **recovered** from a fight when its mean suppression is down to
+  `resumeSuppression` (0.25) and its lasting effectiveness is still at least
+  `withdrawEffectiveness` (0.5). Below that it is **spent**: it holds until the player
+  orders it on. (Until v2.4 a force resumed only at effectiveness 0.6. A force its
+  losses had left between 0.5 and 0.6, such as 8 of 13 up with 2 of 4 leaders, 0.54,
+  neither withdrew nor ever resumed: it held for good.) The same test decides when a
+  force that broke contact on its own starts its next order.
 - **Halting** keeps the force's movement order as its _mission_ and cancels its unit
   task (the movement engine's own cancel). **Resuming** re-issues the mission as a unit
   order, so the leader steps off and the others fall in (Behavior Lab "falling in").

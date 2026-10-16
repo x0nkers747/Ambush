@@ -146,7 +146,8 @@ describe('actions on contact', { timeout: 300_000 }, () => {
 
   it('continue: presses on through contact it cannot engage, without halting at once', () => {
     let pressed = 0;
-    for (const seed of SEEDS) {
+    // Six fights: whether one comes to have nothing to engage depends on how it went before.
+    for (const seed of [...SEEDS, 4, 5, 6]) {
       const f = fight(seed, 'continue');
       for (const side of ['BLUEFOR', 'OPFOR'] as const) {
         const phases = f.phases.filter((e) => e.side === side);

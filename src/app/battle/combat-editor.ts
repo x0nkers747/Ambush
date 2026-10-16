@@ -362,7 +362,7 @@ export function createCombatMapEditor(
         if (s.phase === 'engaged' || s.phase === 'contact' || s.phase === 'assaulting')
           ring(ctx, p, 20);
         ctx.textAlign = 'center';
-        const label = `${s.name} · ${String(s.up)}/${String(s.total)}`;
+        const label = `${s.name} · ${String(s.up)}/${String(s.total)} · ${s.activity.word}`;
         ctx.lineWidth = 3;
         ctx.strokeStyle = OUTLINE;
         ctx.strokeText(label, p.x, p.y + 22);

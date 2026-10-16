@@ -8,7 +8,7 @@ import { sightLineTracer } from '../sight-tracer';
 import { isOnTerrain } from '../terrain';
 import { orgUnitId, type Soldier, type SoldierId } from '../state';
 import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
-import { fofWeapon } from './config';
+import { fofWeapon, type FofConfig } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
 import { occupyAmbush, springAmbush, updateAmbush } from './ambush';
 import { activeOrder, updatePlan, withinArrival } from './orders';
@@ -198,7 +198,7 @@ export function updateForces(context: FofContext): void {
           force.actionsOn !== 'hold' &&
           force.actionsOn !== 'withdraw' &&
           t - force.phaseSince >= behavior.resumeAfterSeconds - 1e-9 &&
-          force.effectiveness >= behavior.resumeEffectiveness
+          recovered(force, setup.config)
         ) {
           force.observedUntil = t;
           resume(context, force, 'contact lost: resuming the mission');
@@ -1165,6 +1165,25 @@ export function updateEffectiveness(context: FofContext): void {
     force.effectiveness =
       force.lastingEffectiveness * (1 - e.suppressionWeight * force.meanSuppression);
   });
+}
+
+/**
+ * Recovered from a fight: its suppression has worn off to `resumeSuppression`,
+ * and its lasting effectiveness is still at least `withdrawEffectiveness`
+ * (not spent). Lasting effectiveness never rises again, so it alone decides
+ * whether a force is spent; suppression, which wears off, whether it is
+ * still recovering.
+ */
+export function recovered(
+  force: Pick<FofForce, 'meanSuppression' | 'lastingEffectiveness'>,
+  config: FofConfig,
+): boolean {
+  return force.meanSuppression <= config.force.resumeSuppression + 1e-12 && !spent(force, config);
+}
+
+/** Spent: its losses have left its lasting effectiveness below `withdrawEffectiveness`, for good. */
+export function spent(force: Pick<FofForce, 'lastingEffectiveness'>, config: FofConfig): boolean {
+  return force.lastingEffectiveness < config.force.withdrawEffectiveness - 1e-12;
 }
 
 /** Moves a force to `to`, reporting why. */

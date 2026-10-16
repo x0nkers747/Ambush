@@ -121,7 +121,7 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
       <span class="squad-name">${escapeHtml(s.name)}</span>
     </div>
     <dl class="kv">
-      <dt>State</dt><dd class="phase-${s.phase}">${PHASE_LABELS[s.phase]}</dd>
+      <dt>State</dt><dd><span class="phase-${s.phase}">${escapeHtml(s.activity.word)}</span><span class="muted"> · ${escapeHtml(s.activity.why)}</span></dd>
       <dt>Soldiers</dt><dd>${String(s.up)} of ${String(s.total)} active</dd>
       <dt>Effectiveness</dt><dd>${String(Math.round(s.effectiveness * 100))} %</dd>
       ${ammunitionHtml(s)}
@@ -148,7 +148,7 @@ export function combatRosterHtml(c: { squads(): readonly SquadStatus[] }, ui: Co
             <span class="sq-id">${s.id}</span>
             <span class="sq-name">${escapeHtml(s.name)}</span>
             <span class="sq-org muted">${String(s.up)}/${String(s.total)}</span>
-            <span class="sq-plan phase-${s.phase}">${PHASE_LABELS[s.phase]}</span>
+            <span class="sq-plan phase-${s.phase}" title="${escapeHtml(s.activity.why)}">${escapeHtml(s.activity.word)}</span>
           </button>`,
         )
         .join('');

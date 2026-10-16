@@ -1,13 +1,16 @@
-import type { Battle } from '#exercise/battle';
-import type {
-  DeepReadonly,
-  FofForce,
-  FofOrder,
-  ForcePhase,
-  OrderSpec,
-  Side,
-  SimState,
-  Vec2,
+import { FOF_DEFAULT_CONFIG, type Battle } from '#exercise/battle';
+import {
+  recovered,
+  spent,
+  type DeepReadonly,
+  type FofConfig,
+  type FofForce,
+  type FofOrder,
+  type ForcePhase,
+  type OrderSpec,
+  type Side,
+  type SimState,
+  type Vec2,
 } from '#sim';
 
 // What the pages show of a battle's squads (docs/constructive-simulation/04,
@@ -33,6 +36,8 @@ export interface SquadStatus {
   readonly up: number;
   readonly total: number;
   readonly phase: ForcePhase;
+  /** What it is doing now, in a word, and why (`activityOf`). */
+  readonly activity: SquadActivity;
   readonly effectiveness: number;
   readonly active: DeepReadonly<FofOrder> | null;
   readonly pending: readonly DeepReadonly<FofOrder>[];
@@ -47,6 +52,96 @@ export interface SquadStatus {
   /** Active soldiers reloading now, and out of ammunition for their primary weapon. */
   readonly reloading: number;
   readonly outOfAmmunition: number;
+}
+
+/** What a squad is doing, in a word (shown by its name and count), and why. */
+export interface SquadActivity {
+  readonly word: string;
+  readonly why: string;
+}
+
+const percent = (x: number) => `${String(Math.round(x * 100))} %`;
+
+/**
+ * What a force is doing and why, from its state: its phase, refined by its
+ * order, its actions on contact, and whether it is recovering or spent.
+ */
+export function activityOf(
+  force: DeepReadonly<FofForce>,
+  config: FofConfig = FOF_DEFAULT_CONFIG,
+): SquadActivity {
+  const order = force.orders.find((o) => o.id === force.activeOrderId) ?? null;
+  const tooWeak = () =>
+    `its losses leave it too weak to go on (effectiveness at best ${percent(force.lastingEffectiveness)}, under ${percent(config.force.withdrawEffectiveness)}); it waits for new orders`;
+  const suppressed = () =>
+    `suppressed (${percent(force.meanSuppression)}): it waits for that to wear off to ${percent(config.force.resumeSuppression)}`;
+  switch (force.phase) {
+    case 'moving':
+      if (force.pressOnUntil !== null)
+        return {
+          word: 'Pressing on',
+          why: 'nothing to engage from where it halted: moving on, firing as it goes',
+        };
+      if (order?.kind === 'withdraw') return { word: 'Withdrawing', why: 'on its Withdraw order' };
+      if (order?.kind === 'attack')
+        return { word: 'Advancing', why: 'on its Attack order, to the objective' };
+      if (order?.kind === 'ambush') return { word: 'Moving', why: 'to its ambush position' };
+      return { word: 'Moving', why: order ? 'on its Move order' : 'to where it was sent' };
+    case 'possibleContact':
+      return { word: 'Observing', why: 'halted to look at a possible enemy' };
+    case 'contact':
+      return { word: 'Reacting', why: 'in contact: halted, taking cover, finding the enemy' };
+    case 'engaged':
+      return {
+        word: 'Fighting',
+        why:
+          force.actionsOn === 'attack'
+            ? 'exchanging fire; it attacks once the enemy is located'
+            : force.actionsOn === 'hold' || order?.kind === 'ambush'
+              ? 'exchanging fire from where it is'
+              : 'exchanging fire where it halted; it presses on if it has nothing to engage',
+      };
+    case 'assaulting':
+      return { word: 'Attacking', why: 'assaulting the enemy by fire and movement' };
+    case 'withdrawing':
+      return force.holdUntilRecovered
+        ? { word: 'Withdrawing', why: 'breaking contact: too spent to fight on' }
+        : force.actionsOn === 'withdraw'
+          ? { word: 'Withdrawing', why: 'avoiding contact (actions on contact: Avoid)' }
+          : { word: 'Withdrawing', why: 'breaking contact' };
+    case 'holding':
+      if (spent(force, config)) return { word: 'Spent', why: tooWeak() };
+      if (force.holdUntilRecovered)
+        return recovered(force, config)
+          ? { word: 'Recovering', why: 'broke contact; it starts its next order now' }
+          : { word: 'Recovering', why: `broke contact, ${suppressed()} before its next order` };
+      if (order?.kind === 'ambush')
+        return { word: 'Holding', why: 'the ambush is over; it waits in place for new orders' };
+      if (force.actionsOn === 'hold')
+        return { word: 'Holding', why: 'contact lost; on Hold it waits for new orders' };
+      if (force.actionsOn === 'withdraw')
+        return { word: 'Holding', why: 'fell back from contact; it waits for new orders' };
+      if (!order) return { word: 'Holding', why: 'contact lost; it has no more orders' };
+      return recovered(force, config)
+        ? { word: 'Regrouping', why: 'contact lost; it resumes its order shortly' }
+        : { word: 'Recovering', why: `contact lost, ${suppressed()} before resuming its order` };
+    case 'atObjective':
+      if (spent(force, config)) return { word: 'Spent', why: tooWeak() };
+      return order
+        ? {
+            word: 'Holding',
+            why: `on the objective of its ${order.kind === 'attack' ? 'Attack' : 'order'}`,
+          }
+        : { word: 'Holding', why: 'arrived; it has no more orders' };
+    case 'inAmbush':
+      return force.concealed
+        ? { word: 'Waiting', why: 'in ambush: concealed, watching its kill zone' }
+        : { word: 'Deploying', why: 'occupying its ambush position' };
+    case 'withdrawn':
+      return { word: 'Withdrawn', why: 'broke contact and withdrew: out of the fight' };
+    case 'ineffective':
+      return { word: 'Ineffective', why: 'combat ineffective: too few fit to fight' };
+  }
 }
 
 /** A squad's rounds of one weapon. */
@@ -75,6 +170,7 @@ export function squadStatus(
   state: DeepReadonly<SimState>,
   id: string,
   queued: readonly QueuedOrder[] = [],
+  config: FofConfig = FOF_DEFAULT_CONFIG,
 ): SquadStatus | undefined {
   const squad = battle.squads.find((s) => s.spec.id === id);
   if (!squad) return undefined;
@@ -119,6 +215,7 @@ export function squadStatus(
     up: up.length,
     total: soldiers.length,
     phase: force?.phase ?? 'holding',
+    activity: force ? activityOf(force, config) : { word: 'Holding', why: 'not yet started' },
     effectiveness: force?.effectiveness ?? 0,
     active: orders.find((x) => x.id === force?.activeOrderId) ?? null,
     pending: orders.filter((x) => x.status === 'pending'),
