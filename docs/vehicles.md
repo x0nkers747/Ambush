@@ -1,17 +1,22 @@
-# Vehicles (prototype)
+# Vehicles
 
-A battle can have vehicles: M113 armoured personnel carriers, tracked, of
-either side. A vehicle is placed in Scenario Setup with a route of waypoints.
-It drives the route as a tracked vehicle does, and takes new Move orders in
-combat. It only drives. It has no crew and no weapons, and nothing sees it,
-shoots at it or is blocked by it. Its motion is recorded with the soldiers',
-so the After-Action Review replays it.
+A battle can have vehicles of either side: the M113 armoured personnel
+carrier, the M1A1 Abrams, the BMP-2 and the T-72B. A vehicle is placed in
+Scenario Setup with a route of waypoints. It drives the route as its
+platform does, and takes new Move orders in combat. Since combined arms
+([combined-arms.md](combined-arms.md)) vehicles have crews, weapons and
+armour: they see and are seen, fight soldiers and other vehicles, and are
+damaged and destroyed; that document is the reference for all of it. This
+one covers placing and driving them. Nothing is blocked by a vehicle. Its
+motion, mount angles and damage are recorded with the soldiers', so the
+After-Action Review replays it.
 
 ## 1. Placing a vehicle and giving it a route
 
 **Scenario Setup:**
 
-1. Press **M113 APC** in the BLUEFOR or OPFOR row under **Place vehicles**.
+1. Press **M113**, **Abrams**, **BMP-2** or **T-72** in the BLUEFOR or OPFOR row
+   under **Place vehicles**.
 2. Click the map. The vehicle is placed there, facing north (OPFOR's: south),
    and the Select tool is back: drag the vehicle to move it, its knob to turn it.
 
@@ -115,16 +120,17 @@ same live and in the review:
   runs the two tracks opposite ways. The wheels, sprocket and idler turn with
   their track.
 
-The map draws a vehicle with its APP-6 symbol: an armoured personnel carrier,
-the infantry cross over the oval of tracks. Its route is a dash-dot line. In
+The map draws a vehicle with its APP-6 symbol: a tank the oval of tracks, a
+carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-dot line. In
 3D the symbol stands above the model on a leader line.
 
-## 4. Limits of the prototype
+## 4. Limits
 
-- **Driving only.** No crew to mount or dismount, no weapons. It is not
-  detected, shot at or hit, and it blocks nobody.
-- **Routes.** The routes are soldiers' routes, widened by 3 m at each corner,
-  so a vehicle clears buildings but may brush small obstacles. Fences and
+- **No passengers.** No crew or infantry mount or dismount. It blocks nobody.
+  Its combat: combined-arms.md §16.
+- **Routes.** The routes are soldiers' routes, widened by 3 m at each corner
+  and checked clear for the hull's width (combined-arms.md §10), so a vehicle
+  clears buildings but may brush small obstacles. Fences and
   single trees are not obstacles. Roads are followed only with Prefer roads.
 - **Speed.** Only the ground directly under the vehicle sets its speed.
 

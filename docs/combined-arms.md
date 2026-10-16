@@ -15,19 +15,19 @@ limits (§16).
 
 ## 1. What was there, and what is reused
 
-| Existing system                                                  | Where                                                            | Use for combined arms                                                                                                                                                                               |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fixed-tick simulation, commands, events, snapshots, state hashes | `src/sim/step.ts`, `commands.ts`, `hash.ts`                      | Unchanged. Vehicle combat state is plain data in `SimState.vehicles`, so it is hashed, snapshotted and replayed with the rest.                                                                      |
-| Seeded random numbers                                            | `src/sim/rng.ts`                                                 | Every combat draw for vehicles comes from `SimState.rng`, inside the force-on-force decision, in a fixed order. A battle without vehicles makes no new draws: its results and hashes are unchanged. |
-| Force-on-force decision (10 Hz grid)                             | `src/sim/fof/system.ts`                                          | Vehicles take part in `scan` (detection), the force decisions and `resolveFire` (one volley).                                                                                                       |
-| Detection model (cycles on target, P∞, thresholds, tracks)       | `fof/detection.ts`, `system.ts`                                  | Shared: a vehicle is a large target (its own critical dimension and signature); a vehicle observer has its own sensors (optics, thermal, eye height). Tracks on vehicles are ordinary `FofTrack`s.  |
-| Sight lines (terrain, buildings, vegetation)                     | `sight-tracer.ts`, `fof/detection.ts` (`vegetationTransmission`) | Shared, with vehicle eye and target heights.                                                                                                                                                        |
-| Infantry fire (abstract bursts, hit tables, suppression)         | `fof/fire.ts`, `hit-probability.ts`                              | Unchanged for rifles and machine guns at soldiers. Vehicle machine guns at soldiers use the same model (the weapon's infantry table).                                                               |
-| Infantry weapons, ammunition, reloads                            | `fof/weapons.ts`, `fof-v2.json`                                  | Anti-tank weapons are soldiers' arms like the M203 (loaded, reserve, reload).                                                                                                                       |
-| Squad behaviour (contact, withdrawal, effectiveness)             | `fof/force.ts`, `lifecycle.ts`                                   | Unchanged; vehicles in a squad's picture put it in contact, and their fire suppresses and strikes down its soldiers like any other.                                                                 |
-| Vehicle movement                                                 | `src/sim/vehicles.ts`                                            | Extended: platform mobility (tracked, wheeled), a route feasible for the hull, mobility damage, halting to fire.                                                                                    |
-| Motion log, worker frames                                        | `exercise/motion-log.ts`, `app/battle/frame-log.ts`              | Extended with each vehicle's mount angles and damage, per tick.                                                                                                                                     |
-| 3D M113                                                          | `src/view3d/vehicles.ts`                                         | Generalized: every platform is built from its visual definition, with articulated mounts.                                                                                                           |
+| Existing system                                                  | Where                                                            | Use for combined arms                                                                                                                                                                                               |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fixed-tick simulation, commands, events, snapshots, state hashes | `src/sim/step.ts`, `commands.ts`, `hash.ts`                      | Unchanged. Vehicle combat state is plain data in `SimState.vehicles`, so it is hashed, snapshotted and replayed with the rest.                                                                                      |
+| Seeded random numbers                                            | `src/sim/rng.ts`                                                 | Every combat draw for vehicles comes from `SimState.rng`, inside the force-on-force decision, in a fixed order. A battle without vehicles makes no new draws: its results and hashes are unchanged.                 |
+| Force-on-force decision (10 Hz grid)                             | `src/sim/fof/system.ts`                                          | Vehicles take part in `scan` (detection), the force decisions and `resolveFire` (one volley).                                                                                                                       |
+| Detection model (cycles on target, P∞, thresholds, tracks)       | `fof/detection.ts`, `system.ts`                                  | Shared: a vehicle is a large target (its own critical dimension and signature); a vehicle observer has its own sensors (optics, thermal, eye height). Tracks on vehicles are ordinary `FofTrack`s.                  |
+| Sight lines (terrain, buildings, vegetation)                     | `sight-tracer.ts`, `fof/detection.ts` (`vegetationTransmission`) | Shared, with vehicle eye and target heights.                                                                                                                                                                        |
+| Infantry fire (abstract bursts, hit tables, suppression)         | `fof/fire.ts`, `hit-probability.ts`                              | Unchanged for rifles and machine guns at soldiers. Vehicle machine guns at soldiers use the same model (the weapon's infantry table).                                                                               |
+| Infantry weapons, ammunition, reloads                            | `fof/weapons.ts`, `fof-v2.json`                                  | Unchanged. Anti-tank weapons are combat weapons (`src/sim/combat/catalog.ts`) carried by particular soldiers (`FofForceSetup.antiTank`), their rounds in `SimState.combat.antiTank` (loaded, reserve, reload, aim). |
+| Squad behaviour (contact, withdrawal, effectiveness)             | `fof/force.ts`, `lifecycle.ts`                                   | Unchanged; vehicles in a squad's picture put it in contact, and their fire suppresses and strikes down its soldiers like any other.                                                                                 |
+| Vehicle movement                                                 | `src/sim/vehicles.ts`                                            | Extended: platform mobility (tracked, wheeled), a route feasible for the hull, mobility damage, halting to fire.                                                                                                    |
+| Motion log, worker frames                                        | `exercise/motion-log.ts`, `app/battle/frame-log.ts`              | Extended with each vehicle's mount angles and damage, per tick.                                                                                                                                                     |
+| 3D M113                                                          | `src/view3d/vehicles.ts`                                         | Generalized: every platform is built from its visual definition, with articulated mounts.                                                                                                                           |
 
 ## 2. Platforms
 
@@ -75,17 +75,37 @@ armour, and its effect on soldiers (direct, or an area blast). Rates of fire,
 ready capacity, reloads and ranges are the weapon's; guided weapons have a
 flight speed and whether the launcher must be still.
 
-Soldiers' anti-tank weapons are also arms in the infantry model (`fof-v2.json`:
-capacity, basic load, reload), carried by particular soldiers (§9).
+Soldiers' anti-tank weapons are combat weapons too (`at4`, `rpg7`, `javelin`,
+`9k111`), with the rounds a soldier and his team carry (`carriedRounds`). A
+squad's loadout (`SquadSpec.antiTank`): `none`; `rockets` (each fire team's
+rifleman an AT4 or an RPG-7, by side); `rocketsAndMissile` (and the first
+team's assistant automatic rifleman a Javelin or a 9K111). By default a squad
+carries rockets when the enemy has vehicles.
 
 ## 5. Target classification and detection
 
 Every combatant is a target of a class: a soldier is `infantry`; a vehicle, its
-platform's class. Detection is the force-on-force model's: a squad's soldiers
-look at vehicles as at soldiers (a vehicle is larger, louder and, firing, far
-more conspicuous), and a vehicle's crew look through its sensors at soldiers and
-vehicles. What they find goes into tracks: a squad's picture, or the vehicle's
-own. No one engages what it has not detected.
+platform's class. Detection is the force-on-force model's (`src/sim/combat/system.ts`,
+`scanCombat`, after the soldiers' `scan` in each decision):
+
+- **soldiers look at enemy vehicles** on their own look schedule: a vehicle's
+  critical dimension is √(height × width), three sample heights (85, 55, 20 %
+  of its height) for the sight line, more conspicuous moving (× 1.6, and heard
+  all round within 350 m) and firing (the firing signature). What a soldier
+  finds goes into his **squad's tracks** (`FofTrack`, its target a vehicle's
+  id), so a squad in sight of armour is in contact as with soldiers;
+- **vehicle crews look at enemy soldiers and vehicles** through their sensors:
+  optics multiply the cycles on target and the observation range (up to
+  3 km), thermal sights see through more vegetation; the commander (else the
+  gunner, slower) observes, and damaged sights see less. Concealed ambushers
+  and dug-in soldiers are as hard to see as in the infantry model. What a
+  crew finds goes into its **vehicle's tracks** (`VehicleCombat.tracks`).
+
+A pair's detectability threshold is drawn from `SimState.rng` the first time
+the pair is looked at (`SimState.combat.thresholds`). No one engages what it
+has not detected; a crew keeps following a confirmed target while it stays in
+sight (tracking, `COMBAT_TUNING.trackingSeconds`), and a target that fires on
+it is detected at once (the flash, the impact).
 
 ## 6. Target and weapon selection
 
@@ -104,16 +124,33 @@ A weapon is **ineffective** when its effect is below `minimumEffect`, **suitable
 otherwise, and the **preferred** one is the suitable one of the highest utility
 (effect × (threat + value) / cost). A shooter **commits** to its target: it
 reassesses every few seconds, and switches only to a markedly better one, or
-when the target is gone, out of sight or no longer worth it.
+when the target is gone, out of sight or no longer worth it. It keeps its weapon on
+the same target likewise (the Abrams does not turn to its main gun while its
+coaxial gun reloads). A vehicle seen knocked out (still and silent, unable to
+move or fight) is no longer engaged.
 
 ## 7. Engagement
 
-A mount slews to its target; its weapon fires when laid (within a tolerance),
-loaded, ready, with its operator able, the target in sight and in range, and,
-unstabilized, the vehicle still. A guided missile flies for its range over its
-speed; the launcher (and, for wire-guided missiles, the vehicle) waits. Each shot
-is one event (`vehicleFire`) with its hit chance and outcome, resolved in the
-same volley as soldiers' bursts.
+Each mount (a turret, a cupola; a launcher fixed on a turret is laid with
+it) chooses its engagement among the weapons it lays, slews toward its
+target every tick (`updateVehicles` → `slewMounts`), and fires (in the volley,
+`fireCombat`) when its weapon is laid within a tolerance, loaded (ready
+rounds of the chosen ammunition), ready (its cycle, or a reload from stowage
+done, slower without a loader), aimed long enough (`aimSeconds`), the target
+in sight now and in range, and, for a weapon fired from a halt (a missile),
+the vehicle stopped (it halts to fire, and drives on after). Changing
+ammunition costs a loading cycle. A guided missile flies for its range over
+its speed (`SimState.combat.missiles`); a wire-guided one keeps its vehicle
+halted and needs the gunner alive and the target in sight when it arrives.
+Anti-tank gunners choose among the vehicles their squad has confirmed, aim
+(an AT4 5 s, a Javelin's lock-on 12 s), fire when their squad is fighting
+and they see the target, and reload from what they carry.
+
+Each shot is one event (`vehicleFire`, with its muzzle, aim point, impact and
+hit chance); hits on vehicles are resolved together after the whole volley
+(`vehicleHit`), so fire within a decision is simultaneous. Machine-gun bursts
+and high explosive at soldiers use the infantry model's hit tables, blasts,
+cover and suppression, and their casualties fall with the volley's.
 
 ## 8. Armour and damage
 
@@ -135,54 +172,164 @@ HE). The states are not exclusive, persist, and are never repaired. A vehicle is
 
 ## 9. Crew
 
-Crew members are operational, degraded or incapacitated. The driver drives; the
-gunner lays and fires the turret's weapons; the commander observes (sensors)
-and may take over the gun; the loader loads the main gun (without one, an
-autoloader). A weapon whose operator and alternate are both incapacitated is
-silent; a degraded or alternate operator is slower and less accurate.
+Crew members are operational, degraded or incapacitated. The driver drives
+(degraded: 70 % speed; out: the vehicle stops). The gunner lays and fires
+the turret's weapons; the commander observes and may take over the gun
+(`alternate`: slower, less accurate); the loader serves the main gun (without
+one, `reloadWithoutFactor` slower; the T-72's autoloader needs none). A mount
+whose operator and alternate are both out is still and silent; a crew all
+out is a mission kill.
 
 ## 10. Mobility
 
-Vehicles drive their routes as before (`src/sim/vehicles.ts`), with the
-platform's mobility: tracked vehicles pivot on the spot; wheeled vehicles turn
-with a radius, faster on roads and slower in woods. A route must be feasible for
-the hull: every leg clear of buildings and water by half the vehicle's width;
-otherwise a route is searched on the navigation grid widened by the vehicle's
-size (footbridges too narrow are then closed to it). A mobility kill stops it
-where it is and its orders fail. A vehicle halts to fire a weapon that needs it
-still (an anti-tank missile), and drives on after.
+Vehicles drive their routes as before (`src/sim/vehicles.ts`), with their
+platform's mobility (`vehicleTypeOf`): road, off-road and woods speeds,
+acceleration and braking, turning by speed and lateral grip, climbing losses.
+Tracked vehicles pivot on the spot; wheeled ones cannot, and turn no tighter
+than their radius. A route must be clear for the hull (`hullClear`): every leg,
+and both its sides at half the vehicle's width, clear of buildings and water;
+when the planned route is too narrow somewhere, the roads are tried; when
+neither is, the order fails ("no way there wide enough for the vehicle").
+An immobilized, destroyed or driverless vehicle stops where it is and its
+orders fail (`immobilized`, `destroyed`). Vehicles do not swim or ford.
 
 ## 11. Views
 
-3D: every platform is built procedurally from its visual definition (hull
-profile, running gear, turret shape, gun, fittings), with a node per mount; the
-mount angles and the damage come from the motion log, so the model is posed the
-same live and in the review. Firing, missiles, impacts, smoke, fire and wrecks
-are effects of the events. 2D: the APP-6 symbol of its class (armour, mechanized
-infantry), a hull heading tick, a turret line, the fire, and damage marks.
+**3D** (`src/view3d/vehicle-models.ts`, `vehicles.ts`): every platform is built
+procedurally from its visual definition (hull profile, running gear, turret
+shape, gun, fittings) with a node per mount (turn, then lift) at the mount's
+pivot, the parent's node holding the child's (the Abrams' cupola turns with
+its turret). Geometry is shared by every vehicle of a platform. The mount
+angles, condition, immobilization and fire come from the motion log's
+articulation (per tick, interpolated), so a vehicle is posed the same live and
+in the review. Destroyed, it is charred, and a catastrophic kill of a
+vulnerable tank may throw its turret. Effects (`heavy-effects.ts`): muzzle
+flashes and blast smoke, rounds and tracers in flight, rockets and missiles
+with smoke trails, impacts (dust, flashes, sparks off armour), burning wrecks
+(flames, a column of smoke) and smouldering ones: all a function of the combat
+log, the clock and the articulation, in two pools of points (no objects per
+effect).
+
+**2D** (`src/app/battle/map-editor.ts`, `combat-editor.ts`): the APP-6 symbol
+of its role (armour: the oval of tracks; mechanized infantry: the cross over
+it), its condition (damaged: an orange mark; a mission kill struck through;
+destroyed: crossed out and greyed); zoomed in, its hull to scale turned to its
+heading with its gun's bearing; heavy fire as lines from muzzle to impact,
+missiles in flight, hits as bursts. Both views read the same log: switching
+views changes nothing.
+
+The event log describes guns, rockets and missiles fired, missiles' outcomes,
+hits (face, penetration against protection, perforated or not, the damage)
+and condition changes; the selected vehicle's panel shows its diagnostics
+(`vehicleDiagnosticsHtml`).
 
 ## 12. Determinism and the review
 
-All combat state is in `SimState.vehicles` and `SimState.fof`; all draws come
-from `SimState.rng` in a fixed order; nothing in the views decides anything. The
-review re-simulates the battle from its commands and checks every second's state
-hash; the motion log carries mount angles and damage per tick.
+All combat state is plain data in `SimState` (`vehicles[i].combat`,
+`combat`, the squads' `fof.tracks`), so it is hashed, snapshotted and replayed
+with the rest; all draws come from `SimState.rng` in a fixed order (soldiers'
+scan, `scanCombat`, the soldiers' bursts, then `fireCombat`: missiles
+arriving, vehicles in order, anti-tank gunners in order, the hits); nothing
+in the views decides anything. The review re-simulates the battle from its
+commands and checks every second's state hash. A battle without vehicles or
+anti-tank weapons makes no new draws and has no new state: it runs and hashes
+exactly as before. Recordings of battles with vehicles made before combined
+arms re-simulate under the new rules (the M113 now fights), so their hashes
+differ.
 
 ## 13. Scenarios
 
-A scenario's vehicles have a `kind` (a platform id) and a side; the four are
-placed in Setup like the M113 before. Files from before keep loading (`m113`).
+A scenario's vehicles (`PlannedVehicle.kind`) are any platform of the catalog,
+for either side, placed in Setup (one button per platform and side) and saved
+with the scenario; its squads may set their anti-tank weapons (Setup,
+"Anti-tank"). Both fields are optional and validated when a file loads: files
+from before load unchanged (an M113 stays an M113; a squad without a loadout
+carries the default). An unknown platform is refused with its name.
 
 ## 14. Testing
 
-See `src/sim/combat/*.test.ts`, `src/exercise/battle/combined-arms.test.ts` and
-the browser checks in §17 of the report.
+- `src/sim/combat/combat.test.ts`: the catalog valid and faction-free, invalid
+  platforms refused, a scenario's own platform beside the catalog's;
+  penetration by range, faces by bearing, perforation chances, a hit's damage
+  reproducible from its seed and persistent, mission kills; mounts' rates,
+  limits, crew, parent hierarchy, elevation limits; suitability by effect (a
+  machine gun ineffective against a tank, an RPG-7 against an Abrams' front
+  but not its rear, a Javelin by the roof, the coax preferred at soldiers),
+  commitment to targets.
+- `src/exercise/battle/combined-arms.test.ts`: Abrams against T-72 (main guns,
+  armour-piercing, a kill), Abrams against infantry (machine guns only,
+  soldiers fall), rifles never at vehicles and an M113's .50 never at a T-72,
+  M113 against BMP-2, anti-tank infantry, default loadouts, immobilization,
+  a mixed battle run twice to identical hashes and events, snapshot and
+  resume, and a fifth (wheeled) vehicle fighting from its definition alone.
+- `src/exercise/battle/combined-arms-scenario.test.ts`: the four vehicles for
+  both sides saved and loaded, loadouts saved, unknown values refused; the
+  motion log's articulation equal to the state's; each range scenario fights,
+  never with rifles at vehicles, and runs the same twice.
+- **The range** (`#combined-arms`, `src/app/range/range.ts`): the six
+  scenarios of `src/exercise/battle/range-scenarios.ts` (Abrams vs T-72,
+  Abrams vs infantry, M113 vs BMP-2, anti-tank infantry vs armour, mixed
+  forces, several vehicles) played by the real simulation on open ground, in
+  3D (the game's layers) or on the map (the game's symbols), with each
+  vehicle's targets, weapons, ammunition, readiness, mount bearings, crew and
+  damage, the anti-tank gunners, and the events. Moving back in time runs the
+  battle again from its start and checks each second's hash against the first
+  run.
+
+Performance (this machine, Node, 30 Hz): the range scenarios take 0.01–0.07
+ms of simulation per tick; 208 soldiers and 16 vehicles fighting, 0.5 ms per
+tick, against a 33 ms tick.
 
 ## 15. Adding a vehicle
 
-See §15 of this document's end: a new `PlatformSpec` (and any new weapons and
-ammunition) in the catalog, and nothing else.
+A fifth vehicle needs data only, no change to the combat code:
 
-## 16. Known limitations
+1. Its weapons and ammunition, if new: `CombatWeaponSpec` and `AmmoSpec`
+   entries (penetration by range, energy, lethality, effect on soldiers, hit
+   table, rates, ranges, cost) in `COMBAT_WEAPONS`.
+2. Its `PlatformSpec` in `VEHICLE_PLATFORMS` (`src/sim/combat/catalog.ts`):
+   id, class, dimensions, mobility (tracked or wheeled), armour by face and
+   energy, crew, sensors, mounts (pivots, parents, limits, rates, operators),
+   weapons on them with their loads, catastrophic vulnerability, and its
+   visual definition (`hull` and `turret` may be `box` for a plain model, or a
+   builder added in `vehicle-models.ts`).
+3. Optionally a short name in `exercise/battle/vehicles.ts`
+   (`vehicleShortName`); the Setup tools list every catalog platform.
 
-Recorded at the end of the implementation.
+A scenario may also carry platforms and weapons of its own
+(`Scenario.platforms`, `Scenario.combatWeapons`), validated when it loads;
+`combined-arms.test.ts` fights a wheeled BTR-80 defined only in its test.
+
+## 16. Assumptions and limitations
+
+- **Values** are representative approximations from open sources, rounded:
+  protection is one RHA-equivalent figure per face and energy (turret and
+  hull averaged, angled), penetration nominal by range; hit tables are for a
+  stationary, vehicle-sized target. Explosive reactive armour, depleted
+  uranium, the T-72B's Kontakt-1 and the Abrams' later packages are not
+  modelled.
+- **Ballistics** are abstract: a shot hits or misses by its probability;
+  there is no time of flight for gun rounds, no superelevation or lead, no
+  ricochet; a miss lands just beyond its target for the views.
+- **Faces** are front, side, rear (by the attacker's bearing from the hull,
+  ±45°, scattered ±15°) and top (top attack only); turret and hull are not
+  distinguished, nor hull-down positions beyond what the sight line hides.
+- **Damage** behind the armour is drawn independently (catastrophic,
+  mobility, firepower, sights, each crew member) from the round's lethality
+  and the residual penetration; nothing is repaired; crews never bail out or
+  surrender.
+- **Detection** of vehicles uses the soldiers' model with a vehicle's size
+  and signature; vehicles do not block sight lines or fire, and soldiers do
+  not take cover behind them.
+- **Behaviour**: vehicles keep to their orders and fight on the move; they do
+  not seek cover, reverse, withdraw or pop smoke on their own; they halt only
+  to fire missiles. Infantry rifles and machine guns never engage vehicles
+  (no unarmoured platform is in the catalog: `unarmored` targets would need
+  the infantry model to fire at vehicles). Infantry does not mount or
+  dismount the carriers.
+- **Mobility**: vehicles do not swim or ford, do not collide with each other
+  or with soldiers, and plan routes on the soldiers' navigation grid checked
+  for the hull's width (with the roads as the fallback), not on a grid for
+  each vehicle size.
+- **Views**: models are procedural approximations; the 3D vehicle effects are
+  points, not volumetric smoke; smoke does not block sight lines.
