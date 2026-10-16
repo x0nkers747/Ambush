@@ -148,7 +148,7 @@ Next says what is missing, and the side panel says the same next to the stage's 
    avoids ([docs](docs/behavior-lab/force-on-force/07-actions-on-contact.md)). An **Ambush**
    order's click is the ambush position; "Click again to set killzone" appears, and the next
    click (or **Set kill zone**, under the order's drop-downs) centres its kill zone, a 50 m square facing the position: drag its corners
-   to resize it. The squad goes there, lies in wait in a line facing the kill zone, concealed
+   to resize it, or the circle at its centre to move it. The squad goes there, lies in wait in a line facing the kill zone, concealed
    (the enemy cannot see it beyond 100 m), and opens fire on its own when the enemy is in the
    kill zone (or getting through it, or has found it), steady and accurate until fired upon,
    the enemy surprised; it fights until the enemy is down and
@@ -169,13 +169,16 @@ Next says what is missing, and the side panel says the same next to the stage's 
    ([docs](docs/vehicles.md)).
 4. **Sim**, Combat ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)),
    from **Simulate →** in planning. The header labels the stages Terrain, Setup, Planning, Sim
-   and AAR. Going back to an earlier stage during a battle asks first, then discards it. The
-   battle starts paused: **Play** plays and pauses, ½× to 32× sets the speed. Select any squad,
-   of either side, and give it orders live: pick an order, then click (an ambush: its position,
-   then its kill zone); **Replace plan** or **Append** (Shift-click for the other, for one
-   click); **Hold** holds. **On contact** sets what
-   squads ordered now do on contact (by default, their order's kind's). With an order tool, clicking
-   an enemy squad targets it. Orders given while paused apply when play resumes. The battle never
+   and AAR. Going back to an earlier stage during a battle asks first, then discards it.
+   **Simulate →** starts the battle running (**Pause** stops it), ½× to 32× sets the speed;
+   the units stay where they stand as it starts. Select any squad, of either side: its panel
+   is Planning's, its plan as it stands (the order being carried out marked green), edited the
+   same way: **New orders** adds one after the selected order (an ambush: its position, then its
+   kill zone); its waypoints, kill zone and sector are dragged, right-clicked and changed in
+   the panel as in Planning; **Clear plan** (after asking) stops it where it is. Each edit is
+   given at once, the order being carried out going on unless it is the one changed. With an
+   order tool, clicking an enemy squad targets it. Orders given while paused apply when play
+   resumes. The battle never
    ends by itself: **End combat** ends it. Soldiers carry finite ammunition and fire at their
    weapons' doctrinal rates: riflemen in short aimed bursts, automatic riflemen in 6–9-round
    bursts, reloading when a magazine or belt runs dry; fire team leaders sometimes fire their M203

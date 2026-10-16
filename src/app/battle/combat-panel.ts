@@ -1,5 +1,5 @@
-import { ORDER_LABELS, ACTIONS_ON_HINTS, ACTIONS_ON_LABELS } from '#exercise/battle';
-import { ACTIONS_ON, ORDER_KINDS, type Side } from '#sim';
+import { ORDER_LABELS } from '#exercise/battle';
+import { ORDER_KINDS, type Side } from '#sim';
 import { escapeHtml } from '../shell';
 import {
   COMBAT_SPEEDS,
@@ -11,7 +11,7 @@ import {
   type VehicleStatus,
 } from './combat';
 import { vehicleActivity } from './status';
-import { pendingAmbush, type BattleDisplay, type CombatUi } from './combat-editor';
+import type { BattleDisplay, CombatUi } from './combat-editor';
 import type { TimedEvent } from './session';
 
 // The Combat stage's side panel (docs/constructive-simulation/04): the clock
@@ -41,72 +41,23 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
   return `<div class="combat-clock">
       <span class="clock" data-ui="combat-clock"></span>
       <button class="action" data-cact="play" title="Play or pause">${c.playing ? 'Pause' : 'Play'}</button>
-      <button class="small danger" data-cact="end" title="End the battle: it never ends by itself">End combat</button>
     </div>
     <div class="speed" role="group" aria-label="Simulation speed">${speeds}</div>
-    <h3>Orders, to either side</h3>
-    <div class="tool-grid order-tools" role="group" aria-label="Orders">
+    <h3>New orders</h3>
+    <div class="tool-grid order-tools" role="group" aria-label="New orders">
       ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k])).join('')}
       ${tool(null, 'Select')}
-    </div>
-    ${
-      ui.tool === 'ambush'
-        ? `<div class="tool-row kill-zone-row">
-      <button class="tool kill-zone" data-cact="kill-zone" aria-pressed="${String(pendingAmbush(ui) !== null)}" title="After the ambush position, click the kill zone's centre: a 50 m square facing the position">Set kill zone</button>
-    </div>`
-        : ui.tool === 'defend'
-          ? `<div class="tool-row kill-zone-row">
-      <button class="tool kill-zone" data-cact="kill-zone" aria-pressed="${String(pendingAmbush(ui) !== null)}" title="After the defensive position, click the direction it defends toward: a 90° sector that way">Set direction</button>
-    </div>`
-          : ''
-    }
-    <label class="on-contact">On contact
-      <select data-act="combat-actions" title="What a squad ordered now does on contact">
-        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid, Ambush and Defend: Continue on the way)</option>
-        ${ACTIONS_ON.map((a) => `<option value="${a}"${ui.actionsOn === a ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">${ACTIONS_ON_LABELS[a]}</option>`).join('')}
-      </select>
-    </label>
-    <div class="tool-row mode-row" role="group" aria-label="How a new order is given">
-      <button class="small" data-cmode="replace" aria-pressed="${String(!ui.append)}" title="A new order replaces the squad's orders">Replace plan</button>
-      <button class="small" data-cmode="append" aria-pressed="${String(ui.append)}" title="A new order follows the squad's pending orders">Append</button>
-      <button class="small" data-cact="hold" title="Clear the selected squad's orders: it holds where it is"${ui.selected === null ? ' disabled' : ''}>Hold</button>
     </div>`;
 }
 
-export function combatHint(c: Combat, ui: CombatUi): string {
+/** What the battle is doing, when it needs saying: starting, slower than chosen, or ended. */
+export function combatHint(c: Combat): string {
   if (c.ended) return 'The battle has ended.';
   // The worker first prepares the battlefield (its navigation, sight lines): a moment.
   if (c.playing && c.session.tick === 0) return 'Starting the battle…';
-  const lagging =
-    c.playing && c.achievedSpeed >= 0.5 && c.achievedSpeed < 0.8 * c.speed
-      ? `Running at ${c.achievedSpeed.toFixed(0)}×: the battle is slower to simulate than ${String(c.speed)}× here. `
-      : '';
-  return lagging + hintFor(c, ui);
-}
-
-function hintFor(c: Combat, ui: CombatUi): string {
-  const car = c.vehicle(ui.selected);
-  if (car) {
-    if (ui.tool === null)
-      return `${car.name} selected: pick Move, then click the map to send it there (Hold stops it).`;
-    if (ui.tool !== 'move') return `${car.name} is a vehicle: it only takes Move orders.`;
-    return `Click the map: ${car.name} drives there, ${ui.append ? 'after its route' : 'instead of its route'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
-  }
-  const s = c.squad(ui.selected);
-  if (ui.tool === null)
-    return s
-      ? `${s.name} selected: pick an order, then click the map to order it.`
-      : 'Click a squad of either side to select it.';
-  if (!s) return 'Select a squad first (click it on the map or in the roster).';
-  if (ui.tool === 'ambush')
-    return pendingAmbush(ui)
-      ? `Now click the kill zone's centre: ${s.name} gets the Ambush order, its kill zone a 50 m square facing the ambush position (Esc: start again).`
-      : `Click the ambush position for ${s.name}, then its kill zone.`;
-  if (ui.tool === 'defend')
-    return pendingAmbush(ui)
-      ? `Now click the direction ${s.name} defends toward: it gets the Defend order, a 90° sector that way (Esc: start again).`
-      : `Click the defensive position for ${s.name}, then the direction it defends toward.`;
-  return `Click the map: ${s.name} gets a ${ORDER_LABELS[ui.tool]} order there, ${ui.append ? 'after its pending orders' : 'replacing its orders'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
+  return c.playing && c.achievedSpeed >= 0.5 && c.achievedSpeed < 0.8 * c.speed
+    ? `Running at ${c.achievedSpeed.toFixed(0)}×: the battle is slower to simulate than ${String(c.speed)}× here.`
+    : '';
 }
 
 const statusClass: Readonly<Record<string, string>> = {
@@ -117,6 +68,14 @@ const statusClass: Readonly<Record<string, string>> = {
   active: 'active',
   pending: '',
 };
+
+/** A squad's state in combat, as rows of a `dl.kv`: what it is doing, who is up, its effectiveness and rounds. */
+export function combatStatusRowsHtml(s: SquadStatus): string {
+  return `<dt>State</dt><dd><span class="phase-${s.phase}">${escapeHtml(s.activity.word)}</span><span class="muted"> · ${escapeHtml(s.activity.why)}</span></dd>
+      <dt>Soldiers</dt><dd>${String(s.up)} of ${String(s.total)} active</dd>
+      <dt>Effectiveness</dt><dd>${String(Math.round(s.effectiveness * 100))} %</dd>
+      ${ammunitionHtml(s)}`;
+}
 
 export function combatSquadHtml(s: SquadStatus | undefined): string {
   if (!s) return '<p class="muted">No squad selected. Click one on the map or in the roster.</p>';

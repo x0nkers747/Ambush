@@ -13,6 +13,7 @@ import { createBattle, type BattleSpec } from './battle';
 import {
   addOrder,
   addSquad,
+  moveKillZone,
   newBattleScenario,
   parseBattleScenario,
   resizeKillZone,
@@ -275,6 +276,20 @@ describe('an ambush in a scenario', () => {
     // Never smaller than 5 m.
     d = done(resizeKillZone(terrain, d, 'B1', 0, 2, { x: -25, y: 25 }));
     expect(d.squads[0]?.plan[0]?.killZone?.widthM).toBeCloseTo(5);
+  });
+
+  it('moves by its centre, keeping its size, turned to face the ambush position again', () => {
+    let d = withAmbush();
+    d = done(setKillZone(terrain, d, 'B1', 0, { x: 0, y: 0 }));
+    d = done(resizeKillZone(terrain, d, 'B1', 0, 2, { x: 35, y: -75 }));
+    // From the ambush position (-70, 0), due north of it: facing 0°.
+    d = done(moveKillZone(terrain, d, 'B1', 0, { x: -70, y: 100 }));
+    const zone = d.squads[0]?.plan[0]?.killZone;
+    expect(zone?.centre).toEqual({ east: -70, north: 100 });
+    expect(zone?.facingDeg).toBe(0);
+    expect(zone?.depthM).toBeCloseTo(60);
+    expect(zone?.widthM).toBeCloseTo(100);
+    expect(moveKillZone(terrain, d, 'B1', 0, { x: -70, y: 0 }).ok).toBe(false);
   });
 
   it('is saved and read back; changing the kind drops the kill zone; orders after it are flagged', () => {

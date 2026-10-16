@@ -63,6 +63,8 @@ type Hit =
     }
   /** The handle that widens or narrows the selected defend order's arc. */
   | { readonly kind: 'arc'; readonly squad: ScenarioSquad; readonly index: number }
+  /** The handle at the selected ambush order's kill zone's centre, that moves it. */
+  | { readonly kind: 'zone'; readonly squad: ScenarioSquad; readonly index: number }
   /** The handle that turns the selected defend order's sector round its position. */
   | { readonly kind: 'facing'; readonly squad: ScenarioSquad; readonly index: number }
   | { readonly kind: 'knob'; readonly squad: ScenarioSquad }
@@ -164,6 +166,8 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
           if (p && near(at(p), CORNER_HIT_PX))
             return { kind: 'corner', squad: selected, index, corner };
         }
+        if (near(at(toVec(zone.centre)), CORNER_HIT_PX))
+          return { kind: 'zone', squad: selected, index };
       }
     }
     const ordered = selected ? [selected, ...list.filter((s) => s !== selected)] : list;
@@ -226,6 +230,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
         planner.resizeKillZoneTo(id, drag.index, drag.corner, point, false);
       else if (drag.kind === 'arc') planner.resizeDefendArcTo(id, drag.index, point, false);
       else if (drag.kind === 'facing') planner.turnDefendTo(id, drag.index, point, false);
+      else if (drag.kind === 'zone') planner.moveKillZoneTo(id, drag.index, point, false);
       else planner.moveOrderTo(id, drag.index, point, false);
     },
     drop() {
@@ -239,6 +244,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       const hit = hitAt(screen);
       if (hit?.kind === 'knob' || hit?.kind === 'vehicleKnob' || hit?.kind === 'facing')
         return 'grab';
+      if (hit?.kind === 'zone') return 'move';
       if (hit?.kind === 'vehicle') return planner.canPlace() ? 'move' : 'pointer';
       if (hit?.kind === 'vehicleWaypoint')
         return planner.canRoute(hit.vehicle) ? 'move' : 'pointer';
@@ -829,14 +835,23 @@ export function killZone(
   ctx.strokeStyle = isSelected ? '#fff' : color;
   ctx.stroke();
   ctx.setLineDash([]);
+  // Its label just under its centre (and the handle that moves it).
   ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   const label = `Kill zone ${String(n)}`;
   ctx.lineWidth = 3;
   ctx.strokeStyle = OUTLINE;
-  ctx.strokeText(label, centre.x, centre.y);
+  ctx.strokeText(label, centre.x, centre.y + 9);
   ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
-  ctx.fillText(label, centre.x, centre.y);
+  ctx.fillText(label, centre.x, centre.y + 9);
   if (handles) {
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(centre.x, centre.y, 5.5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
     for (const p of corners) {
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = OUTLINE;

@@ -1,13 +1,18 @@
 import {
   battleSpecOf,
   ORDER_LABELS,
+  orderSpecOf,
   placeDestination,
+  plannedOrderOf,
+  type BattleEdit,
   type BattleScenarioDefinition,
+  type PlannedOrder,
   ACTIONS_ON_LABELS,
   defaultActionsOn,
   defaultKillZone,
   DEFEND_ARC_DEFAULT_DEG,
 } from '#exercise/battle';
+import { orderSpecProblem } from '#sim';
 import type {
   ForcePhase,
   OrderKind,
@@ -83,6 +88,28 @@ export interface Combat {
      */
     killZoneAt?: Vec2 | null,
   ): boolean;
+  /**
+   * A squad's plan as it stands: its active order (first) and pending ones,
+   * with the orders given and not yet applied laid over them, as a plan's
+   * orders (`PlannedOrder`), for the same panel and edits as in planning.
+   */
+  plan(squadId: string): readonly PlannedOrder[];
+  /**
+   * Edits a squad's plan as planning edits a scenario's (`change`, on a
+   * scenario holding only that squad, its plan as `plan` has it). The new
+   * plan is given at once: after its active order when that is unchanged
+   * (`pending`), else in its place (`replace`). Refused edits say why.
+   */
+  editPlan(squadId: string, change: (d: BattleScenarioDefinition) => BattleEdit): boolean;
+  /** The plan `change` would make (while dragging), or `null` if refused; nothing is given. */
+  previewPlan(
+    squadId: string,
+    change: (d: BattleScenarioDefinition) => BattleEdit,
+  ): readonly PlannedOrder[] | null;
+  /** A vehicle's route as it stands (orders given and not yet applied included). */
+  vehicleRoute(vehicleId: string): readonly Vec2[];
+  /** Gives a vehicle this route in place of its own (none: it stops). */
+  setVehicleRoute(vehicleId: string, route: readonly Vec2[]): boolean;
   /** Clears a squad's orders: it holds where it is (a vehicle: it stops). */
   hold(squadId: string): void;
   squads(): readonly SquadStatus[];
@@ -135,7 +162,7 @@ export function createCombat(o: CombatOptions): Combat {
     return status ? { ...status, queued: queued.filter((q) => q.squadId === id) } : undefined;
   };
   /** Gives a command now; it shows queued until its tick has been stepped. */
-  const give = (squadId: string, mode: 'replace' | 'append', orders: OrderSpec[]) => {
+  const give = (squadId: string, mode: 'replace' | 'pending' | 'append', orders: OrderSpec[]) => {
     const squad = byId.get(squadId);
     if (!squad) return;
     const given = driver.submit({
@@ -146,6 +173,63 @@ export function createCombat(o: CombatOptions): Combat {
       orders,
     });
     queued.push({ squadId, mode, orders, tick: session.tick, given });
+  };
+
+  /** Vehicle routes given and not yet applied, by vehicle. */
+  let vehicleQueue: {
+    readonly vehicleId: string;
+    readonly route: Vec2[];
+    readonly given: () => number | null;
+  }[] = [];
+  const planOf = (squadId: string): PlannedOrder[] => {
+    const status = statusOf(squadId);
+    if (!status) return [];
+    const live = [status.active, ...status.pending].flatMap((o) => {
+      const p = o ? plannedOrderOf(o) : null;
+      return p ? [p] : [];
+    });
+    let plan = live;
+    let hasActive = status.active !== null;
+    for (const q of status.queued) {
+      const given = q.orders.flatMap((o) => {
+        const p = plannedOrderOf(o);
+        return p ? [p] : [];
+      });
+      if (q.mode === 'replace') {
+        plan = given;
+        hasActive = false;
+      } else if (q.mode === 'pending') plan = [...(hasActive ? plan.slice(0, 1) : []), ...given];
+      else plan = [...plan, ...given];
+    }
+    return plan;
+  };
+  /** `change` applied to a scenario holding only squad `squadId`, its plan as `planOf` has it. */
+  const applyEdit = (
+    squadId: string,
+    change: (d: BattleScenarioDefinition) => BattleEdit,
+  ): BattleEdit | null => {
+    const squad = byId.get(squadId);
+    const status = statusOf(squadId);
+    if (!squad || !status) return null;
+    return change({
+      ...o.definition,
+      squads: [
+        {
+          id: squadId,
+          name: squad.name,
+          side: squad.side,
+          organization: squad.spec.organization,
+          position: { east: status.centre.x, north: status.centre.y },
+          facingDeg: 0,
+          plan: planOf(squadId),
+        },
+      ],
+    });
+  };
+  /** Whether the first of the plan is the squad's active order, untouched by any queued replace. */
+  const activeKept = (squadId: string): boolean => {
+    const status = statusOf(squadId);
+    return status?.active != null && !status.queued.some((q) => q.mode === 'replace');
   };
 
   const combat: Combat = {
@@ -193,6 +277,11 @@ export function createCombat(o: CombatOptions): Combat {
       } else if (!playing) achieved = speed;
       if (queued.length > 0)
         queued = queued.filter((q) => {
+          const tick = q.given();
+          return tick === null || tick >= session.tick;
+        });
+      if (vehicleQueue.length > 0)
+        vehicleQueue = vehicleQueue.filter((q) => {
           const tick = q.given();
           return tick === null || tick >= session.tick;
         });
@@ -266,6 +355,58 @@ export function createCombat(o: CombatOptions): Combat {
       if (ended || !squad) return;
       give(squadId, 'replace', []);
       o.notify(`${squad.name} will hold where it is.`);
+    },
+    plan: (squadId) => planOf(squadId),
+    previewPlan(squadId, change) {
+      const result = applyEdit(squadId, change);
+      return result?.ok ? (result.definition.squads[0]?.plan ?? []) : null;
+    },
+    editPlan(squadId, change) {
+      if (ended) return false;
+      const before = planOf(squadId);
+      const result = applyEdit(squadId, change);
+      if (!result) return false;
+      if (!result.ok) {
+        o.notify(result.problem);
+        return false;
+      }
+      const after = result.definition.squads[0]?.plan ?? [];
+      // Only orders the battle takes (an ambush needs its kill zone, a defence its direction).
+      const problem = after
+        .map(orderSpecOf)
+        .map(orderSpecProblem)
+        .find((x) => x !== null);
+      if (problem) {
+        o.notify(`Order refused: ${problem}.`);
+        return false;
+      }
+      if (result.note !== undefined) o.notify(result.note);
+      const same = (a: PlannedOrder | undefined, b: PlannedOrder | undefined) =>
+        JSON.stringify(a) === JSON.stringify(b);
+      if (after.length === before.length && after.every((x, k) => same(x, before[k]))) return true;
+      const kept = activeKept(squadId) && before.length > 0 && same(after[0], before[0]);
+      if (kept && after.length > before.length && before.every((x, k) => same(x, after[k])))
+        give(squadId, 'append', after.slice(before.length).map(orderSpecOf));
+      else if (kept) give(squadId, 'pending', after.slice(1).map(orderSpecOf));
+      else give(squadId, 'replace', after.map(orderSpecOf));
+      return true;
+    },
+    vehicleRoute(vehicleId) {
+      const queuedRoute = vehicleQueue.filter((q) => q.vehicleId === vehicleId).at(-1);
+      if (queuedRoute) return queuedRoute.route;
+      return driver.vehicles().find((v) => v.id === vehicleId)?.route ?? [];
+    },
+    setVehicleRoute(vehicleId, route) {
+      if (ended || !spec.vehicles?.some((v) => v.id === vehicleId)) return false;
+      const given = driver.submit({
+        type: 'orderVehicle',
+        tick: session.tick,
+        vehicleId,
+        mode: 'replace',
+        destinations: route,
+      });
+      vehicleQueue.push({ vehicleId, route: [...route], given });
+      return true;
     },
     squads: () => battle.squads.flatMap((s) => statusOf(s.spec.id) ?? []),
     squad: (id) => (id === null ? undefined : statusOf(id)),

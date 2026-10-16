@@ -104,7 +104,8 @@ describe('orders as given', () => {
     };
     expect(command({})).not.toThrow();
     expect(command({ unitId: '' })).toThrow(/unitId/);
-    expect(command({ mode: 'insert' })).toThrow(/replace or append/);
+    expect(command({ mode: 'insert' })).toThrow(/replace, pending or append/);
+    expect(command({ mode: 'pending' })).not.toThrow();
     expect(command({ orders: [{ kind: 'move', destination: null }] })).toThrow(/order 1/);
   });
 });

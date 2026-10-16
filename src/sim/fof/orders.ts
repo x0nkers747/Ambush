@@ -32,7 +32,9 @@ import type { ActionsOn, FofForce, FofOrder, OrderKind, OrderSpec, OrderStatus }
 // Orders enter by the `orderSquad` command, applied at a tick boundary in
 // the order commands were given: `replace` ends the active and pending orders
 // (superseded; canceled when the new plan is empty) and the new ones follow;
-// `append` adds them after the pending ones. A squad's initial plan comes
+// `pending` ends only the pending ones, the active order going on, and the
+// new ones follow it (a plan edited after its active order); `append` adds
+// them after the pending ones. A squad's initial plan comes
 // from its setup.
 //
 // At each decision a planned squad's order is checked and moved on:
@@ -61,7 +63,7 @@ export interface OrderSquadCommand {
   readonly tick: number;
   /** The squad's root unit (a force of the force-on-force setup). */
   readonly unitId: string;
-  readonly mode: 'replace' | 'append';
+  readonly mode: 'replace' | 'pending' | 'append';
   readonly orders: readonly OrderSpec[];
 }
 
@@ -74,8 +76,8 @@ export function validateOrderSquad(command: OrderSquadCommand): void {
     throw new RangeError('orderSquad unitId must be a non-empty string');
   }
   const mode: string = command.mode;
-  if (mode !== 'replace' && mode !== 'append') {
-    throw new RangeError(`orderSquad mode must be replace or append, got ${mode}`);
+  if (mode !== 'replace' && mode !== 'pending' && mode !== 'append') {
+    throw new RangeError(`orderSquad mode must be replace, pending or append, got ${mode}`);
   }
   command.orders.forEach((order, k) => {
     const problem = orderSpecProblem(order);
@@ -152,6 +154,10 @@ export function applyOrderSquad(
       }
     }
     force.activeOrderId = null;
+  } else if (command.mode === 'pending') {
+    for (const order of force.orders) {
+      if (order.status === 'pending') change(order, 'superseded', 'replaced by a new plan');
+    }
   }
   for (const spec of command.orders) {
     const sequence = force.nextOrderSequence;

@@ -1,14 +1,30 @@
 import { emptyMotionSample, type MotionLog } from '#exercise';
-import type { Battle } from '#exercise/battle';
-import type { OrderKind, Vec2, ActionsOn, KillZone } from '#sim';
+import {
+  addOrder,
+  deleteOrder,
+  killZoneSpec,
+  moveKillZone,
+  moveOrder,
+  plannedOrderOf,
+  resizeDefendArc,
+  resizeKillZone,
+  setDefendSector,
+  setKillZone,
+  type Battle,
+  type BattleEdit,
+  type BattleScenarioDefinition,
+  type PlannedOrder,
+} from '#exercise/battle';
+import { killZoneCorners, type OrderKind, type TerrainDataset, type Vec2 } from '#sim';
 import type { MapEditor } from '#view2d';
 import { SECOND_CLICK } from './planner';
 import type { TimedEvent } from './session';
 import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status';
 import {
+  arcHandle,
   defenceSector,
   drawRoute,
-  chevron,
+  facingHandle,
   killZone,
   OUTLINE,
   ring,
@@ -22,14 +38,34 @@ import {
 
 // The Combat stage on the map (docs/constructive-simulation/04): every
 // soldier where the battle has him at the time drawn (smooth between
-// ticks), each squad's symbol at its soldiers' centre with its state, the
-// orders it is carrying out and those given but not yet applied, and the
-// bursts of the last moments. Drawn over the 2D map or the 3D view through
-// either's projection; clicks select squads and give orders, in both views.
+// ticks), each squad's symbol at its soldiers' centre with its state, its
+// plan as it stands, and the bursts of the last moments. Drawn over the 2D
+// map or the 3D view through either's projection.
+//
+// Live, the plans are edited as in planning: click a squad or vehicle to
+// select it, a waypoint to select its order; drag a waypoint to move it,
+// right-click it to delete it; drag the selected order's kill zone (its
+// corners and centre) or sector (its square and circle). With an order
+// picked, a click adds one after the selected order (an ambush or defence:
+// its position, then its kill zone or direction). Each edit is given to the
+// squad at once (`PlanEditing.editPlan`).
+
+/** The plans of a live battle and their edits (`Combat`'s). */
+export interface PlanEditing {
+  readonly terrain: TerrainDataset;
+  plan(squadId: string): readonly PlannedOrder[];
+  editPlan(squadId: string, change: (d: BattleScenarioDefinition) => BattleEdit): boolean;
+  previewPlan(
+    squadId: string,
+    change: (d: BattleScenarioDefinition) => BattleEdit,
+  ): readonly PlannedOrder[] | null;
+  vehicleRoute(vehicleId: string): readonly Vec2[];
+  setVehicleRoute(vehicleId: string, route: readonly Vec2[]): boolean;
+}
 
 /**
  * A battle as the map shows it: live (Combat) or replayed (the After-Action
- * Review). `order` is there only where orders can be given.
+ * Review). `edit` is there only where plans can be edited (live, not ended).
  */
 export interface BattleDisplay {
   readonly motion: MotionLog;
@@ -41,33 +77,28 @@ export interface BattleDisplay {
   squad(id: string | null): SquadStatus | undefined;
   /** The vehicles (docs/vehicles.md). */
   vehicles(): readonly VehicleStatus[];
-  orderVehicle?(vehicleId: string, point: Vec2, mode: 'replace' | 'append'): boolean;
-  order?(
-    squadId: string,
-    kind: OrderKind,
-    point: Vec2,
-    mode: 'replace' | 'append',
-    actionsOn: ActionsOn | null,
-    killZoneAt?: Vec2 | null,
-  ): boolean;
+  readonly edit?: PlanEditing;
 }
 
 export interface CombatUi {
   /** The squad (or vehicle) selected (either side), or `null`. */
   selected: string | null;
+  /** The selected order of its plan (a waypoint of a vehicle's route), or `null`. */
+  selectedOrder: number | null;
   /** The order a map click gives the selected squad, or `null` (select only). */
   tool: OrderKind | null;
-  /** Append orders (else replace the plan); Shift inverts it for one click. */
-  append: boolean;
-  /** Whether Shift is held now. */
-  shift: boolean;
-  /** What a squad ordered now does on contact (`null`: its order kind's). */
-  actionsOn: ActionsOn | null;
   /**
-   * An ambush being given: its position, clicked first, for the selected
-   * squad; the next click sets its kill zone and gives the order. `null`: none.
+   * An ambush or defence being given: its position, clicked first, for the
+   * selected squad; the next click sets its kill zone or direction and gives
+   * it. `null`: none.
    */
   ambush: { readonly squadId: string; readonly at: Vec2 } | null;
+  /** An order of the plan whose kill zone or direction the next click sets again ("Set kill zone"). */
+  second: {
+    readonly squadId: string;
+    readonly index: number;
+    readonly kind: 'killZone' | 'sector';
+  } | null;
 }
 
 /** The ambush or defensive position being given to the selected squad, if any (its second click is next). */
@@ -77,6 +108,15 @@ export function pendingAmbush(ui: CombatUi): Vec2 | null {
     : null;
 }
 
+/** A squad's plan as the map draws it: as edited live, else (the review) its orders at the time. */
+export function shownPlan(c: BattleDisplay, s: SquadStatus): readonly PlannedOrder[] {
+  if (c.edit) return c.edit.plan(s.id);
+  return [s.active, ...s.pending].flatMap((o) => {
+    const p = o ? plannedOrderOf(o) : null;
+    return p ? [p] : [];
+  });
+}
+
 /** How long a burst stays drawn (s of simulation). */
 const BURST_SECONDS = 0.6;
 /** How long a grenade shows on the map (s), and its effect radius drawn (m; the M203's). */
@@ -84,6 +124,24 @@ const GRENADE_SECONDS = 2;
 const GRENADE_EFFECT_M = 10;
 const SQUAD_HIT_PX = 16;
 const SOLDIER_HIT_PX = 6;
+const WAYPOINT_HIT_PX = 11;
+const HANDLE_HIT_PX = 9;
+
+/** What is under the pointer of a live plan. */
+type PlanHit =
+  | { readonly kind: 'waypoint'; readonly squadId: string; readonly index: number }
+  | {
+      readonly kind: 'corner';
+      readonly squadId: string;
+      readonly index: number;
+      readonly corner: number;
+    }
+  | { readonly kind: 'zone'; readonly squadId: string; readonly index: number }
+  | { readonly kind: 'arc'; readonly squadId: string; readonly index: number }
+  | { readonly kind: 'facing'; readonly squadId: string; readonly index: number }
+  | { readonly kind: 'vehicleWaypoint'; readonly vehicleId: string; readonly index: number };
+
+const toVec = (p: { east: number; north: number }): Vec2 => ({ x: p.east, y: p.north });
 
 export function createCombatMapEditor(
   combat: () => BattleDisplay | null,
@@ -95,6 +153,8 @@ export function createCombatMapEditor(
   const sample = emptyMotionSample();
   /** Whether the view drawn last is the 3D view. */
   let perspective = false;
+  /** A drag of a live plan: what was pressed, and where the pointer is now. */
+  let drag: { readonly hit: PlanHit; point: Vec2 | null } | null = null;
 
   /** Where each soldier is at the time drawn, from the motion log (interpolated). */
   const positions = (c: BattleDisplay) => {
@@ -154,63 +214,243 @@ export function createCombatMapEditor(
     return null;
   };
 
+  /** The edit a drag of `hit` to `point` makes. */
+  const changeFor =
+    (edit: PlanEditing, hit: PlanHit, point: Vec2) =>
+    (d: BattleScenarioDefinition): BattleEdit => {
+      switch (hit.kind) {
+        case 'waypoint':
+          return moveOrder(edit.terrain, d, hit.squadId, hit.index, point);
+        case 'corner':
+          return resizeKillZone(edit.terrain, d, hit.squadId, hit.index, hit.corner, point);
+        case 'zone':
+          return moveKillZone(edit.terrain, d, hit.squadId, hit.index, point);
+        case 'arc':
+          return resizeDefendArc(d, hit.squadId, hit.index, point);
+        case 'facing':
+          return setDefendSector(d, hit.squadId, hit.index, point);
+        case 'vehicleWaypoint':
+          return { ok: true, definition: d };
+      }
+    };
+
+  /** A squad's plan as drawn now: while dragging it, as the drag would leave it. */
+  const planNow = (c: BattleDisplay, s: SquadStatus): readonly PlannedOrder[] => {
+    const edit = c.edit;
+    if (edit && drag?.point && drag.hit.kind !== 'vehicleWaypoint' && drag.hit.squadId === s.id)
+      return edit.previewPlan(s.id, changeFor(edit, drag.hit, drag.point)) ?? edit.plan(s.id);
+    return shownPlan(c, s);
+  };
+  /** A vehicle's route as drawn now: while dragging a waypoint of it, there. */
+  const routeNow = (c: BattleDisplay, v: VehicleStatus): readonly Vec2[] => {
+    const route = c.edit ? c.edit.vehicleRoute(v.id) : v.route;
+    if (drag?.point && drag.hit.kind === 'vehicleWaypoint' && drag.hit.vehicleId === v.id) {
+      const { index } = drag.hit;
+      const point = drag.point;
+      return route.map((p, k) => (k === index ? point : p));
+    }
+    return route;
+  };
+
+  /** The live plan's handle or waypoint under `screen`: the selected order's handles first. */
+  const planHitAt = (screen: Vec2): PlanHit | null => {
+    const c = combat();
+    const at = project;
+    if (!c?.edit || !at) return null;
+    const near = (p: Vec2, r: number) => Math.hypot(p.x - screen.x, p.y - screen.y) <= r;
+    const squads = c.squads().filter((s) => s.up > 0);
+    const selected = squads.find((s) => s.id === ui.selected);
+    if (selected && ui.selectedOrder !== null) {
+      const index = ui.selectedOrder;
+      const order = c.edit.plan(selected.id)[index];
+      const id = selected.id;
+      if (order?.killZone) {
+        const corners = killZoneCorners(killZoneSpec(order.killZone));
+        for (let corner = 0; corner < corners.length; corner += 1) {
+          const p = corners[corner];
+          if (p && near(at(p), HANDLE_HIT_PX))
+            return { kind: 'corner', squadId: id, index, corner };
+        }
+        if (near(at(toVec(order.killZone.centre)), HANDLE_HIT_PX))
+          return { kind: 'zone', squadId: id, index };
+      }
+      if (order?.sector) {
+        const from = toVec(order.destination);
+        if (near(at(arcHandle(from, order.sector)), HANDLE_HIT_PX))
+          return { kind: 'arc', squadId: id, index };
+        if (near(at(facingHandle(from, order.sector)), HANDLE_HIT_PX))
+          return { kind: 'facing', squadId: id, index };
+      }
+    }
+    const ordered = selected ? [selected, ...squads.filter((s) => s !== selected)] : squads;
+    for (const s of ordered) {
+      const plan = c.edit.plan(s.id);
+      for (let k = plan.length - 1; k >= 0; k -= 1) {
+        const o = plan[k];
+        if (o && near(at(toVec(o.destination)), WAYPOINT_HIT_PX))
+          return { kind: 'waypoint', squadId: s.id, index: k };
+      }
+    }
+    const vehicles = c.vehicles();
+    const car = vehicles.find((v) => v.id === ui.selected);
+    for (const v of car ? [car, ...vehicles.filter((x) => x !== car)] : vehicles) {
+      const route = c.edit.vehicleRoute(v.id);
+      for (let k = route.length - 1; k >= 0; k -= 1) {
+        const p = route[k];
+        if (p && near(at(p), WAYPOINT_HIT_PX))
+          return { kind: 'vehicleWaypoint', vehicleId: v.id, index: k };
+      }
+    }
+    return null;
+  };
+
+  /** Selects a squad or vehicle, and an order of its plan. */
+  const select = (id: string | null, order: number | null = null) => {
+    if (id !== ui.selected) {
+      ui.ambush = null;
+      ui.second = null;
+    }
+    ui.selected = id;
+    ui.selectedOrder = order;
+  };
+
   return {
     press(_point, screen, button) {
-      const car = vehicleAt(screen);
-      if (car) {
-        if (button === 0) ui.selected = car.id;
+      const c = combat();
+      const hit = planHitAt(screen);
+      if (hit && c?.edit) {
+        if (button === 2) {
+          // Right-click a waypoint: its order deleted.
+          if (hit.kind === 'waypoint') {
+            const { squadId, index } = hit;
+            if (c.edit.editPlan(squadId, (d) => deleteOrder(d, squadId, index)))
+              select(squadId, index > 0 ? index - 1 : null);
+          } else if (hit.kind === 'vehicleWaypoint') {
+            const route = c.edit.vehicleRoute(hit.vehicleId).filter((_, k) => k !== hit.index);
+            if (c.edit.setVehicleRoute(hit.vehicleId, route))
+              select(hit.vehicleId, hit.index > 0 ? hit.index - 1 : null);
+          }
+          return true;
+        }
+        if (button !== 0) return false;
+        if (hit.kind === 'vehicleWaypoint') select(hit.vehicleId, hit.index);
+        else select(hit.squadId, hit.index);
+        drag = { hit, point: null };
         return true;
       }
-      const hit = squadAt(screen);
-      if (!hit) return false;
+      const car = vehicleAt(screen);
+      if (car) {
+        if (button === 0) select(car.id);
+        return true;
+      }
+      const squad = squadAt(screen);
+      if (!squad) return false;
       // With an order to give, a click on the selected squad's enemy is the
       // order's destination (an attack on it), not a new selection.
-      const c = combat();
       const selected = c?.squad(ui.selected);
-      if (button === 0 && ui.tool !== null && selected && hit.side !== selected.side) return false;
-      if (button === 0) ui.selected = hit.id;
+      if (button === 0 && ui.tool !== null && selected && squad.side !== selected.side)
+        return false;
+      if (button === 0) select(squad.id);
       return true;
+    },
+    drag(point) {
+      if (drag) drag.point = point;
+    },
+    drop() {
+      const c = combat();
+      const done = drag;
+      drag = null;
+      if (!c?.edit || !done?.point) return;
+      const { hit, point } = done;
+      if (hit.kind === 'vehicleWaypoint') {
+        const route = c.edit
+          .vehicleRoute(hit.vehicleId)
+          .map((p, k) => (k === hit.index ? point : p));
+        c.edit.setVehicleRoute(hit.vehicleId, route);
+        return;
+      }
+      c.edit.editPlan(hit.squadId, changeFor(c.edit, hit, point));
     },
     click(point) {
       const c = combat();
-      if (!c) return;
-      if (ui.tool === null || !c.order) {
-        ui.selected = null;
+      const edit = c?.edit;
+      if (!c || !edit) {
+        select(null);
+        return;
+      }
+      // "Set kill zone" / "Set direction" of an order of the plan: this click sets it.
+      const second = ui.second?.squadId === ui.selected ? ui.second : null;
+      if (second) {
+        const { squadId, index } = second;
+        const done = edit.editPlan(squadId, (d) =>
+          second.kind === 'killZone'
+            ? setKillZone(edit.terrain, d, squadId, index, point)
+            : setDefendSector(d, squadId, index, point),
+        );
+        if (done) ui.second = null;
+        return;
+      }
+      if (ui.tool === null) {
+        select(null);
         return;
       }
       if (ui.selected === null) {
         notify('Select a squad first (of either side), then click where its order takes it.');
         return;
       }
-      const mode = ui.append !== ui.shift ? 'append' : 'replace';
       const car = c.vehicles().find((v) => v.id === ui.selected);
       if (car) {
         if (ui.tool !== 'move') {
           notify(`${car.name} is a vehicle: it only takes Move orders.`);
           return;
         }
-        c.orderVehicle?.(car.id, point, mode);
+        const route = edit.vehicleRoute(car.id);
+        const at = ui.selectedOrder === null ? route.length : ui.selectedOrder + 1;
+        if (edit.setVehicleRoute(car.id, [...route.slice(0, at), point, ...route.slice(at)]))
+          select(car.id, at);
         return;
       }
-      if (ui.tool === 'ambush' || ui.tool === 'defend') {
+      const squadId = ui.selected;
+      const kind = ui.tool;
+      // After the selected order, or at the end of the plan.
+      const at = ui.selectedOrder === null ? edit.plan(squadId).length : ui.selectedOrder + 1;
+      if (kind === 'ambush' || kind === 'defend') {
         // First its position; then its kill zone (an ambush) or direction (a defence), which gives the order.
-        const at = pendingAmbush(ui);
-        if (!at) {
-          ui.ambush = { squadId: ui.selected, at: point };
-          notify(ui.tool === 'ambush' ? SECOND_CLICK.killZone : SECOND_CLICK.sector);
+        const position = pendingAmbush(ui);
+        if (!position) {
+          ui.ambush = { squadId, at: point };
+          notify(kind === 'ambush' ? SECOND_CLICK.killZone : SECOND_CLICK.sector);
           return;
         }
-        if (c.order(ui.selected, ui.tool, at, mode, ui.actionsOn, point)) ui.ambush = null;
+        const done = edit.editPlan(squadId, (d) => {
+          const added = addOrder(edit.terrain, d, squadId, kind, position, at);
+          if (!added.ok) return added;
+          return kind === 'ambush'
+            ? setKillZone(edit.terrain, added.definition, squadId, at, point)
+            : setDefendSector(added.definition, squadId, at, point);
+        });
+        if (done) {
+          ui.ambush = null;
+          select(squadId, at);
+        }
         return;
       }
-      c.order(ui.selected, ui.tool, point, mode, ui.actionsOn);
+      if (edit.editPlan(squadId, (d) => addOrder(edit.terrain, d, squadId, kind, point, at)))
+        select(squadId, at);
     },
     cursor(_point, screen) {
+      const hit = planHitAt(screen);
+      if (hit) {
+        if (hit.kind === 'corner' || hit.kind === 'arc') return 'nwse-resize';
+        if (hit.kind === 'facing') return 'grab';
+        return 'move';
+      }
       if (vehicleAt(screen)) return 'pointer';
-      const hit = squadAt(screen);
+      const squad = squadAt(screen);
       const selected = combat()?.squad(ui.selected);
-      if (hit && !(ui.tool !== null && selected && hit.side !== selected.side)) return 'pointer';
-      return ui.tool === null ? null : 'crosshair';
+      if (squad && !(ui.tool !== null && selected && squad.side !== selected.side))
+        return 'pointer';
+      return ui.tool === null && ui.second === null ? null : 'crosshair';
     },
     draw(ctx, toScreen, inPerspective = false) {
       project = toScreen;
@@ -225,102 +465,55 @@ export function createCombatMapEditor(
       ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
       ctx.textBaseline = 'middle';
 
-      // Orders: from the squad through the active and pending destinations; queued ones dashed white.
+      // Plans: from the squad through its orders as they stand; the selected
+      // order's kill zone or sector with its handles (live).
       const ordered = [...squads].sort(
         (a, b) => Number(a.id === ui.selected) - Number(b.id === ui.selected),
       );
-      // Sectors of defend orders (active, pending and queued), under the routes.
+      const plans = new Map(ordered.map((s) => [s.id, planNow(c, s)]));
+      const editable = c.edit !== undefined;
       for (const s of ordered) {
         if (s.up === 0) continue;
-        const orders = [s.active, ...s.pending, ...s.queued.flatMap((q) => q.orders)];
-        let n = 0;
-        for (const x of orders) {
-          if (!x?.sector || !x.destination) continue;
-          n += 1;
-          defenceSector(
-            ctx,
-            x.destination,
-            {
-              facingDeg: (x.sector.facing * 180) / Math.PI,
-              arcDeg: (x.sector.arc * 180) / Math.PI,
-            },
-            toScreen,
-            SIDE_COLORS[s.side],
-            n,
-            s.id === ui.selected,
-            false,
-          );
-        }
-      }
-      // Kill zones of ambush orders (active, pending and queued), under the routes.
-      for (const s of ordered) {
-        if (s.up === 0) continue;
-        const zones: { zone: KillZone; from: Vec2 }[] = [];
-        for (const x of [s.active, ...s.pending]) {
-          if (x?.killZone && x.destination) zones.push({ zone: x.killZone, from: x.destination });
-        }
-        for (const q of s.queued) {
-          for (const x of q.orders) {
-            if (x.killZone && x.destination) zones.push({ zone: x.killZone, from: x.destination });
-          }
-        }
-        zones.forEach(({ zone, from }, k) => {
-          killZone(
-            ctx,
-            zone,
-            toScreen(from),
-            toScreen,
-            SIDE_COLORS[s.side],
-            k + 1,
-            s.id === ui.selected,
-            false,
-          );
+        const isSquad = s.id === ui.selected;
+        (plans.get(s.id) ?? []).forEach((x, k) => {
+          const isSelected = isSquad && ui.selectedOrder === k;
+          if (x.sector)
+            defenceSector(
+              ctx,
+              toVec(x.destination),
+              x.sector,
+              toScreen,
+              SIDE_COLORS[s.side],
+              k + 1,
+              isSelected,
+              isSelected && editable,
+            );
+          if (x.killZone)
+            killZone(
+              ctx,
+              killZoneSpec(x.killZone),
+              toScreen(toVec(x.destination)),
+              toScreen,
+              SIDE_COLORS[s.side],
+              k + 1,
+              isSelected,
+              isSelected && editable,
+            );
         });
       }
       for (const s of ordered) {
         if (s.up === 0) continue;
+        const plan = plans.get(s.id) ?? [];
+        if (plan.length === 0) continue;
         const isSelected = s.id === ui.selected;
         const color = SIDE_COLORS[s.side];
-        const live = [s.active, ...s.pending].flatMap((x) => {
-          const d = x?.destination;
-          return x && d ? [{ kind: x.kind, destination: { x: d.x, y: d.y } }] : [];
-        });
-        const replaced = s.queued.some((q) => q.mode === 'replace');
-        const queued = s.queued.flatMap((q) =>
-          q.orders.flatMap((x) => {
-            const d = x.destination;
-            return d ? [{ kind: x.kind, destination: d }] : [];
-          }),
-        );
-        const drawn = replaced ? queued : [...live, ...queued];
-        if (drawn.length === 0) continue;
-        const points = [s.centre, ...drawn.map((x) => x.destination)].map(toScreen);
-        const firstQueued = replaced ? 0 : live.length;
+        const points = [s.centre, ...plan.map((x) => toVec(x.destination))].map(toScreen);
+        drawRoute(ctx, points, color, isSelected, s.side === 'OPFOR' ? [7, 5] : []);
         ctx.globalAlpha = isSelected ? 1 : 0.6;
-        for (let i = 1; i < points.length; i += 1) {
-          const a = points[i - 1];
-          const b = points[i];
-          if (!a || !b) continue;
-          const isQueued = i - 1 >= firstQueued;
-          ctx.setLineDash(isQueued ? [5, 5] : s.side === 'OPFOR' ? [7, 5] : []);
-          for (const [width, stroke] of [
-            [isSelected ? 5 : 4, OUTLINE],
-            [isSelected ? 3 : 2, isQueued ? '#ffffff' : color],
-          ] as const) {
-            ctx.lineWidth = width;
-            ctx.strokeStyle = stroke;
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-          }
-          ctx.setLineDash([]);
-          if (Math.hypot(b.x - a.x, b.y - a.y) > 40)
-            chevron(ctx, (a.x + b.x) / 2, (a.y + b.y) / 2, Math.atan2(b.y - a.y, b.x - a.x), color);
-        }
-        drawn.forEach((x, k) => {
+        plan.forEach((x, k) => {
           const p = points[k + 1];
-          if (p) waypoint(ctx, p, x.kind, k + 1, color, isSelected && k === 0, false);
+          if (p)
+            waypoint(ctx, p, x.kind, k + 1, color, isSelected && ui.selectedOrder === k, false);
         });
         ctx.globalAlpha = 1;
       }
@@ -448,11 +641,13 @@ export function createCombatMapEditor(
         const isSelected = v.id === ui.selected;
         const at = where.get(v.id) ?? v.position;
         const color = SIDE_COLORS[v.side];
-        if (v.route.length > 0) {
-          const points = [at, ...v.route].map(toScreen);
+        const route = routeNow(c, v);
+        if (route.length > 0) {
+          const points = [at, ...route].map(toScreen);
           drawRoute(ctx, points, color, isSelected, [12, 4, 2, 4]);
-          v.route.forEach((d, k) => {
-            waypoint(ctx, toScreen(d), 'move', k + 1, color, isSelected && k === 0, false);
+          route.forEach((d, k) => {
+            const selected = isSelected && ui.selectedOrder === k;
+            waypoint(ctx, toScreen(d), 'move', k + 1, color, selected, false);
           });
         }
       }

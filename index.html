@@ -937,14 +937,22 @@
       }
       .battle .order-row .order-buttons {
         grid-column: 2 / -1;
-        justify-self: end;
         display: flex;
+        justify-content: flex-end;
         gap: 2px;
       }
-      /* An ambush's "Set kill zone", a defence's "Set direction": under its drop-downs. */
+      /* An ambush's "Set kill zone", a defence's "Set direction": first of its buttons. */
       .battle .order-row .kill-zone {
-        grid-column: 2 / -1;
-        justify-self: start;
+        margin-right: auto;
+      }
+      /* The order being carried out (Sim). */
+      .battle .order-row.active .order-pick {
+        border-color: #6fcf6f;
+        color: #9fe39f;
+      }
+      .battle .primary-action .readiness {
+        margin-top: 6px;
+        font-size: 12px;
       }
       .battle .order-row .kill-zone[aria-pressed='true'] {
         background: var(--blue-bg);

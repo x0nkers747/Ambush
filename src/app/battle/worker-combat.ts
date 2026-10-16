@@ -1,5 +1,5 @@
 import type { CombatEvent } from '#exercise';
-import { battleScenario, type BattleCommandOrigin } from '#exercise/battle';
+import { createBattle, type BattleCommandOrigin } from '#exercise/battle';
 import {
   soldierId,
   type SimCommand,
@@ -9,9 +9,9 @@ import {
 } from '#sim';
 import type { HostBatch, HostIn } from './battle-host';
 import type { BattleDriver, DriverFactory } from './driver';
-import { createFrameLog } from './frame-log';
+import { CODES_PER_SOLDIER, createFrameLog, NUMBERS_PER_SOLDIER, writeFrame } from './frame-log';
 import { combatEventOf, type BattleRecording, type BattleRun, type TimedEvent } from './session';
-import type { SquadStatus, VehicleStatus } from './status';
+import { squadStatuses, vehicleStatuses, type SquadStatus, type VehicleStatus } from './status';
 
 // The page's side of the battle worker (docs/constructive-simulation/04): a
 // driver whose battle is simulated in the worker (battle-host.ts), and a
@@ -66,13 +66,24 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
     epochs += 1;
     const epoch = epochs;
     const rate = spec.tickRateHz;
-    // The squads and soldiers, laid out here as the worker lays them out.
-    const { scenario, squads } = battleScenario(spec, terrain);
+    // The battle as it starts, laid out here as the worker lays it out: its
+    // squads, and their soldiers and vehicles where they stand at tick 0, shown
+    // at once (they do not vanish while the worker sets the battle up).
+    const start = createBattle(spec, terrain);
+    const { squads } = start;
+    const state = start.sim.state;
     // Soldiers, then vehicles (`motionMovers`).
     const motion = createFrameLog(rate, [
-      ...scenario.soldiers.map((s) => soldierId(s.id)),
-      ...(scenario.vehicles ?? []).map((v) => soldierId(v.id)),
+      ...state.soldiers.map((s) => s.id),
+      ...(state.vehicles ?? []).map((v) => soldierId(v.id)),
     ]);
+    {
+      const movers = state.soldiers.length + (state.vehicles?.length ?? 0);
+      const numbers = new Float64Array(movers * NUMBERS_PER_SOLDIER);
+      const codes = new Uint8Array(movers * CODES_PER_SOLDIER);
+      writeFrame(state, numbers, codes, 0);
+      motion.add({ firstTick: state.tick, count: 1, numbers, codes });
+    }
     const commands: SimCommand[] = replay ? [...replay.commands] : [];
     const origins: BattleCommandOrigin[] = replay ? [...replay.origins] : [];
     const events: TimedEvent[] = [];
@@ -83,8 +94,8 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
     let fresh: SimEvent[] = [];
     let headTick = 0;
     let cpu = { mean: 0, p95: 0 };
-    let statuses: readonly SquadStatus[] = [];
-    let vehicles: readonly VehicleStatus[] = [];
+    let statuses: readonly SquadStatus[] = squadStatuses(start, state);
+    let vehicles: readonly VehicleStatus[] = vehicleStatuses(state);
     let asked = 0;
     let nextId = 0;
     let waiting: ((recording: BattleRecording) => void)[] = [];

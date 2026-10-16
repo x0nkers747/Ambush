@@ -302,7 +302,7 @@ export function createBattle(
 export function orderSquad(
   battle: Battle,
   squadId: string,
-  mode: 'replace' | 'append',
+  mode: 'replace' | 'pending' | 'append',
   orders: readonly OrderSpec[],
 ): SimCommand {
   const squad = battle.squads.find((s) => s.spec.id === squadId);

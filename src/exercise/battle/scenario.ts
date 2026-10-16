@@ -13,6 +13,7 @@ import {
   type ActionsOn,
   type KillZone,
   type OrderKind,
+  type OrderSpec,
   type PointProblem,
   type Side,
   type TerrainDataset,
@@ -883,6 +884,93 @@ export function setKillZone(
   );
 }
 
+/**
+ * Moves an ambush's kill zone to be centred on `point`, its size kept, turned
+ * to face the ambush position again.
+ */
+export function moveKillZone(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  point: Vec2,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order?.killZone) return refused('There is no such kill zone.');
+  if (!isOnTerrain(terrain, point.x, point.y)) return refused('A kill zone must be on the map.');
+  if (Math.hypot(point.x - order.destination.east, point.y - order.destination.north) < 1)
+    return refused('The kill zone must be away from the ambush position.');
+  const centre = toPoint(point);
+  const killZone: PlannedKillZone = {
+    ...order.killZone,
+    centre,
+    facingDeg: degreesToward(order.destination, centre),
+  };
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, killZone } : o)),
+    })),
+  );
+}
+
+/** An order of a plan as the simulation takes it (`OrderSpec`). */
+export function orderSpecOf(o: PlannedOrder): OrderSpec {
+  return {
+    kind: o.kind,
+    destination: toVec(o.destination),
+    actionsOn: actionsOnOf(o),
+    ...(o.killZone ? { killZone: killZoneSpec(o.killZone) } : {}),
+    ...(o.sector ? { sector: sectorSpec(o.sector) } : {}),
+    ...(o.kind === 'defend' && o.preparedMinutes
+      ? { preparedSeconds: o.preparedMinutes * 60 }
+      : {}),
+  };
+}
+
+/**
+ * An order the simulation holds (a squad's active or pending order in
+ * combat) as a plan's order, for the same edits as in planning; `null`
+ * without a destination.
+ */
+export function plannedOrderOf(o: {
+  readonly kind: OrderKind;
+  readonly destination: Vec2 | null;
+  readonly actionsOn?: ActionsOn;
+  readonly killZone?: KillZone | null;
+  readonly sector?: { readonly facing: number; readonly arc: number } | null;
+  readonly preparedSeconds?: number;
+}): PlannedOrder | null {
+  if (!o.destination) return null;
+  const deg = (rad: number) => ((((rad * 180) / Math.PI) % 360) + 360) % 360;
+  return {
+    kind: o.kind,
+    destination: toPoint(o.destination),
+    actionsOn: o.actionsOn ?? defaultActionsOn(o.kind),
+    ...(o.killZone
+      ? {
+          killZone: {
+            centre: toPoint(o.killZone.centre),
+            widthM: o.killZone.widthM,
+            depthM: o.killZone.depthM,
+            facingDeg: deg(o.killZone.facing),
+          },
+        }
+      : {}),
+    ...(o.sector
+      ? {
+          sector: {
+            facingDeg: deg(o.sector.facing),
+            arcDeg: Math.min(360, (o.sector.arc * 180) / Math.PI),
+          },
+        }
+      : {}),
+    ...(o.kind === 'defend' && o.preparedSeconds
+      ? { preparedMinutes: Math.round(o.preparedSeconds / 60) }
+      : {}),
+  };
+}
+
 /** A new kill zone centred on `centre`: `KILL_ZONE_DEFAULT_M` square, facing the ambush position `from`. */
 export function defaultKillZone(from: Vec2, centre: Vec2): KillZone {
   return {
@@ -1165,16 +1253,7 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
       ...(s.formation !== undefined ? { formation: s.formation } : {}),
       position: toVec(s.position),
       facingDeg: s.facingDeg,
-      plan: s.plan.map((o) => ({
-        kind: o.kind,
-        destination: toVec(o.destination),
-        actionsOn: actionsOnOf(o),
-        ...(o.killZone ? { killZone: killZoneSpec(o.killZone) } : {}),
-        ...(o.sector ? { sector: sectorSpec(o.sector) } : {}),
-        ...(o.kind === 'defend' && o.preparedMinutes
-          ? { preparedSeconds: o.preparedMinutes * 60 }
-          : {}),
-      })),
+      plan: s.plan.map(orderSpecOf),
     })),
     ...(vehiclesOf(d).length > 0 ? { vehicles: vehicleSpecs(d) } : {}),
   };

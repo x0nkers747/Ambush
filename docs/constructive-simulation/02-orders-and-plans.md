@@ -84,7 +84,7 @@ holds from the start.
 ## 4. The `orderSquad` command
 
 ```ts
-{ type: 'orderSquad', tick, unitId, mode: 'replace' | 'append', orders: OrderSpec[] }
+{ type: 'orderSquad', tick, unitId, mode: 'replace' | 'pending' | 'append', orders: OrderSpec[] }
 ```
 
 - The command is applied at a tick boundary. Commands for the same tick are
@@ -93,6 +93,9 @@ holds from the start.
 - `replace` supersedes the active order and every pending order, and the new
   orders follow. `replace` with an empty list cancels them, and the squad
   holds.
+- `pending` supersedes only the pending orders: the active order goes on
+  (it is not restarted), and the new orders follow it. Combat uses it for a
+  plan edited after its active order.
 - `append` adds the new orders after the pending ones. A squad that is
   holding starts on them.
 - A command with a malformed shape is refused with a `RangeError` (from

@@ -20,7 +20,7 @@ import {
 /** A command given but not yet applied (its tick has not been stepped). */
 export interface QueuedOrder {
   readonly squadId: string;
-  readonly mode: 'replace' | 'append';
+  readonly mode: 'replace' | 'pending' | 'append';
   readonly orders: readonly OrderSpec[];
   readonly tick: number;
 }

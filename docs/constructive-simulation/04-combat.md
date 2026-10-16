@@ -8,20 +8,41 @@
 
 ## 1. The stage
 
-Continuing from Planning (once nothing blocks the scenario) starts a
-battle: `createBattle` with the scenario's squads, plans and seed, at 30 Hz.
-The battle starts paused.
+**Simulate →** (once nothing blocks the scenario) starts a battle:
+`createBattle` with the scenario's squads, plans and seed, at 30 Hz. It
+starts running. Its squads, soldiers and vehicles are shown where they stand
+at tick 0 at once, laid out on the page as the battle worker lays them out,
+so nothing vanishes while the worker sets the battle up.
 
-| Control                                 | Effect                                                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Play / Pause                            | Runs or stops the clock                                                                                       |
-| ½× to 32×                               | Speed                                                                                                         |
-| Click a squad (map, 3D or roster)       | Select it, either side                                                                                        |
-| An order button, then click             | Order the selected squad there: Move, Attack, Withdraw, Ambush, Defend                                        |
-| Replace plan / Append, Shift-click      | Whether the order replaces the squad's orders or follows its pending ones; Shift does the other for one click |
-| Click an enemy squad with an order tool | The order's destination is that point (an attack on it), not a new selection                                  |
-| Hold                                    | Clear the squad's orders: it holds where it is                                                                |
-| End combat (button or the primary)      | After asking: the battle ends for good and the review opens                                                   |
+| Control                                      | Effect                                                                                                                                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Play / Pause                                 | Runs or stops the clock                                                                                                                                                               |
+| ½× to 32×                                    | Speed                                                                                                                                                                                 |
+| Click a squad or vehicle (map, 3D or roster) | Select it, either side                                                                                                                                                                |
+| Click a waypoint                             | Select its order                                                                                                                                                                      |
+| A New orders button, then click              | Add an order there, after the selected one (an ambush: its position, then its kill zone)                                                                                              |
+| Drag a waypoint, kill zone or sector handle  | Move the destination, move or resize the kill zone, widen or turn the sector                                                                                                          |
+| Right-click a waypoint                       | Delete its order                                                                                                                                                                      |
+| The squad panel                              | Planning's: each order's kind, actions on contact, preparation, Set kill zone / Set direction, earlier, later, delete; Clear plan (after asking: it stops where it is); Centre on map |
+| Click an enemy squad with an order tool      | The order's destination is that point (an attack on it), not a new selection                                                                                                          |
+| End combat and review (the primary)          | After asking: the battle ends for good and the review opens                                                                                                                           |
+
+**The plan as it stands** is the squad's active order (first, its number
+green) and its pending ones, with the edits given but not yet applied laid
+over them (`Combat.plan`). Each edit is made as in planning, on that plan
+(`Combat.editPlan`), and given at once as one command:
+
+- an order added after the plan: `append`;
+- the active order untouched: `pending`, the pending orders replaced and the
+  active one going on (not restarted: a defence keeps its dig-in);
+- the active order changed, moved or deleted: `replace`, the new plan in its
+  place;
+- **Clear plan**: `replace` with none: it stops and holds.
+
+An order the battle cannot take is refused with a message (an ambush without
+its kill zone): changing an order's kind to Ambush or Defend in the panel gives
+it a kill zone or direction 75 m ahead, along its way, to drag. Vehicles' routes
+are edited the same way (`orderVehicle`, `replace`).
 
 **Orders** are `orderSquad` commands
 ([02](02-orders-and-plans.md#4-the-ordersquad-command)):

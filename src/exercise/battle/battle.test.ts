@@ -240,6 +240,26 @@ describe('orders given during the battle', () => {
     expect(force?.phase).not.toBe('moving');
   }, 60_000);
 
+  it('pending replaces the pending orders only: the active one goes on', () => {
+    const battle = createBattle(spec(2), TERRAIN);
+    runTo(battle, 30, (b) => {
+      if (b.sim.tick === 30 * 10) {
+        // B1 is on the first of its two moves: its second is changed, its first goes on.
+        b.submit(
+          orderSquad(b, 'B1', 'pending', [{ kind: 'move', destination: { x: -400, y: -450 } }]),
+        );
+      }
+    });
+    const b1 = ordersOf(battle, 'B1');
+    expect(b1.map((o) => [o.sequence, o.status])).toEqual([
+      [1, 'active'],
+      [2, 'superseded'],
+      [3, 'pending'],
+    ]);
+    // The active order was not interrupted: it began at the start, not when the plan changed.
+    expect(b1[0]?.activatedAt).toBe(0);
+  }, 60_000);
+
   it('several orders at the same tick apply in the order given', () => {
     const run = (first: 'replace' | 'append') => {
       const battle = createBattle(spec(3), TERRAIN);

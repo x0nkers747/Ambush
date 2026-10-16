@@ -17,7 +17,9 @@ the enemy is down, and waits in place for new orders.
 3. Click the kill zone's centre. The zone is a 50 m × 50 m square turned to face
    the ambush position (one side toward it).
 4. Resize the zone by dragging its corners. The opposite corner stays put and
-   the zone keeps its facing; each side is 5–1000 m.
+   the zone keeps its facing; each side is 5–1000 m. Drag the circle at its
+   centre to move it: its size is kept, and it turns to face the ambush
+   position again. Its label is just under that circle.
 
 Moving the ambush position turns the zone to face it again.
 

@@ -81,7 +81,19 @@ export function createFrameLog(tickRateHz: number, soldierIds: readonly SoldierI
     },
     epoch: 1,
     indexOf: (id) => index.get(id) ?? -1,
-    add(batch) {
+    add(given) {
+      let batch = given;
+      // Frames already held (the battle's start, shown before the worker sends it) are kept.
+      if (batches.length > 0 && batch.firstTick <= lastTick) {
+        const skip = lastTick + 1 - batch.firstTick;
+        if (skip >= batch.count) return;
+        batch = {
+          firstTick: lastTick + 1,
+          count: batch.count - skip,
+          numbers: batch.numbers.subarray(skip * n * NUMBERS_PER_SOLDIER),
+          codes: batch.codes.subarray(skip * n * CODES_PER_SOLDIER),
+        };
+      }
       if (batch.count === 0) return;
       if (batches.length === 0) firstTick = batch.firstTick;
       else if (batch.firstTick !== lastTick + 1)

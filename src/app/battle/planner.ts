@@ -15,6 +15,7 @@ import {
   deleteOrder,
   deleteSquad,
   faceSquadToward,
+  moveKillZone,
   moveOrder,
   moveSquad,
   ORDER_LABELS,
@@ -151,6 +152,8 @@ export interface Planner {
   armKillZone(): boolean;
   /** Widens or narrows a defend order's arc to its handle at `point`. */
   resizeDefendArcTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
+  /** Moves an ambush order's kill zone to be centred on `point` (its size kept, facing the ambush position). */
+  moveKillZoneTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
   /** Turns a defend order's sector round its position to face `point` (its arc kept). */
   turnDefendTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
   /** Moves corner `corner` of an ambush order's kill zone to `point`. */
@@ -637,6 +640,10 @@ export function createPlanner(o: PlannerOptions): Planner {
       changed();
       o.notify(SECOND_CLICK[armed]);
       return true;
+    },
+    moveKillZoneTo(id, index, point, saving) {
+      if (!canPlan(squad(id))) return false;
+      return apply((d) => moveKillZone(terrain, d, id, index, point), saving);
     },
     turnDefendTo(id, index, point, saving) {
       if (!canPlan(squad(id))) return false;

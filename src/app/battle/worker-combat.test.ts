@@ -139,6 +139,33 @@ describe('the battle worker', { timeout: 60_000 }, () => {
     }
   });
 
+  it('shows the squads where they start before the worker has sent anything, then goes on from there', () => {
+    const { channel, flush } = hostChannel();
+    const c = createCombat({
+      terrain,
+      definition: scenario(),
+      notify: () => undefined,
+      driver: createWorkerDriver(channel, terrain),
+    });
+    // Nothing from the worker yet: the squads and their soldiers are there, as they start.
+    const log = c.session.motion;
+    expect(c.squads().map((s) => s.id)).toEqual(['B1', 'B2', 'O1']);
+    expect(log.lastTick).toBe(0);
+    const sample = emptyMotionSample();
+    log.read(log.indexOf('B1-01'), 0, sample);
+    const atStart = { x: sample.x, y: sample.y };
+    expect(Math.hypot(atStart.x, atStart.y + 300)).toBeLessThan(40);
+    // The worker's frames follow on, its tick 0 the same.
+    flush();
+    c.play();
+    c.frame(0.5);
+    flush();
+    c.frame(0.1);
+    expect(log.lastTick).toBeGreaterThan(0);
+    log.read(log.indexOf('B1-01'), 0, sample);
+    expect({ x: sample.x, y: sample.y }).toEqual(atStart);
+  });
+
   it('shows orders queued until the worker has applied them', () => {
     const { channel, flush } = hostChannel();
     const c = createCombat({

@@ -1,6 +1,10 @@
 import { emptyMotionSample } from '#exercise';
 import {
   clearPlan,
+  deleteOrder,
+  reorderOrder,
+  setDefendSector,
+  setKillZone,
   clearVehicleRoute,
   renameVehicle,
   setVehicleFacing,
@@ -24,7 +28,10 @@ import {
   setSquadOrganization,
   SQUAD_ORGANIZATIONS,
   squadPlacementProblem,
+  type BattleEdit,
   type BattleScenarioDefinition,
+  type PlannedOrder,
+  type ScenarioIssue,
   type ScenarioSquad,
   type SquadOrganization,
 } from '#exercise/battle';
@@ -65,6 +72,7 @@ import {
 } from '../shell';
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
 import { createCombat, type Combat, type CombatSpeed } from './combat';
+import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status';
 import {
   createCombatMapEditor,
   pendingAmbush,
@@ -89,10 +97,17 @@ import {
   combatRosterHtml,
   combatSquadHtml,
   combatVehicleHtml,
+  combatStatusRowsHtml,
   combatToolsHtml,
 } from './combat-panel';
 import { createBattleMapEditor } from './map-editor';
-import { createPlanner, type BattleStage, type PlannerTool, type ViewshedPin } from './planner';
+import {
+  createPlanner,
+  SECOND_CLICK,
+  type BattleStage,
+  type PlannerTool,
+  type ViewshedPin,
+} from './planner';
 
 /** A viewshed shown: its pin, its side's colour, where it looks from, and its latest result shown. */
 interface ViewshedLayer {
@@ -218,6 +233,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   <aside class="side" aria-label="Stage tools and status">
     <div class="primary-action">
       <button class="primary-btn" data-ui="primary"></button>
+      <div class="readiness" data-ui="readiness"></div>
     </div>
     <section class="sec" data-sec="tools">
       <h2 data-ui="tools-title"></h2>
@@ -329,11 +345,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   let review: Review | null = null;
   const combatUi: CombatUi = {
     selected: null,
+    selectedOrder: null,
     tool: null,
-    append: false,
-    shift: false,
-    actionsOn: null,
     ambush: null,
+    second: null,
   };
   /** The live battle, in Combat. */
   const inCombat = (): Combat | null => (planner.stage === 'combat' ? combat : null);
@@ -347,9 +362,21 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     squads: () => c.squads(),
     squad: (id) => c.squad(id),
     vehicles: () => c.vehicles(),
-    orderVehicle: (id, point, mode) => c.orderVehicle(id, point, mode),
-    order: (id, kind, point, mode, actionsOn, killZoneAt) =>
-      c.order(id, kind, point, mode, actionsOn, killZoneAt),
+    // Live, the plans are edited as in planning; once the battle has ended, not.
+    ...(c.ended
+      ? {}
+      : {
+          edit: {
+            terrain: o.terrain,
+            plan: (id: string) => c.plan(id),
+            editPlan: (id: string, change: (d: BattleScenarioDefinition) => BattleEdit) =>
+              c.editPlan(id, change),
+            previewPlan: (id: string, change: (d: BattleScenarioDefinition) => BattleEdit) =>
+              c.previewPlan(id, change),
+            vehicleRoute: (id: string) => c.vehicleRoute(id),
+            setVehicleRoute: (id: string, route: readonly Vec2[]) => c.setVehicleRoute(id, route),
+          },
+        }),
   });
   const reviewDisplay = (r: Review): BattleDisplay => ({
     motion: r.replay.motion,
@@ -936,8 +963,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       return;
     }
     const reason = stage === 'aar' ? null : rules.next(stage);
-    if (reason) notify(reason);
-    else enter(NEXT[stage]);
+    if (reason) {
+      notify(reason);
+      return;
+    }
+    enter(NEXT[stage]);
+    // Simulate starts the battle running: no Play to press as well.
+    if (NEXT[stage] === 'combat') combat?.play();
   });
 
   // --- Side panel -----------------------------------------------------------
@@ -971,12 +1003,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
    * An ambush order's "Set kill zone", or a defend order's "Set direction",
    * under its row's drop-downs: the next click on the map sets it.
    */
-  const secondClickButton = (kind: OrderKind, k: number): string => {
+  const secondClickButton = (kind: OrderKind, k: number, armed: boolean): string => {
     if (kind !== 'ambush' && kind !== 'defend') return '';
-    const t = planner.tool;
-    const armed =
-      planner.selection.orderIndex === k &&
-      (kind === 'ambush' ? t.kind === 'killZone' : t.kind === 'sector');
     const title =
       kind === 'ambush'
         ? "Click the map to centre this ambush's kill zone: a 50 m square facing the ambush position"
@@ -1106,42 +1134,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           `<option value="${escapeHtml(f.id)}"${f.id === formation ? ' selected' : ''}>${escapeHtml(f.name)}</option>`,
       )
       .join('');
-    const orders = s.plan
-      .map((order, k) => {
-        const selected = planner.selection.orderIndex === k;
-        const kindSelect = planning
-          ? `<select data-act="order-kind" data-index="${String(k)}" aria-label="Order ${String(k + 1)} kind">${ORDER_KINDS.map(
-              (kind) =>
-                `<option value="${kind}"${kind === order.kind ? ' selected' : ''}>${ORDER_LABELS[kind]}</option>`,
-            ).join('')}</select>`
-          : `<span>${ORDER_LABELS[order.kind]}</span>`;
-        const onContact = actionsOnOf(order);
-        const actionsSelect = planning
-          ? `<select data-act="order-actions" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: on contact" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">${ACTIONS_ON.map(
-              (a) =>
-                `<option value="${a}"${a === onContact ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">On contact: ${ACTIONS_ON_LABELS[a]}</option>`,
-            ).join('')}</select>`
-          : `<span class="muted" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">on contact: ${ACTIONS_ON_LABELS[onContact]}</span>`;
-        const issue = issues.find((i) => i.orderIndex === k);
-        const eye = viewshedButton(s, k);
-        return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
-          <button class="order-pick small" data-act="pick-order" data-index="${String(k)}" title="Select this order">${String(k + 1)}</button>
-          ${kindSelect}
-          ${actionsSelect}
-          ${
-            planning
-              ? `<span class="order-buttons">${eye}
-              <button class="small" data-act="order-up" data-index="${String(k)}" title="Earlier" aria-label="Move order ${String(k + 1)} earlier"${k === 0 ? ' disabled' : ''}>▲</button>
-              <button class="small" data-act="order-down" data-index="${String(k)}" title="Later" aria-label="Move order ${String(k + 1)} later"${k === s.plan.length - 1 ? ' disabled' : ''}>▼</button>
-              <button class="small" data-act="order-delete" data-index="${String(k)}" title="Delete" aria-label="Delete order ${String(k + 1)}">✕</button></span>`
-              : `<span class="order-buttons">${eye}</span>`
-          }
-          ${planning ? secondClickButton(order.kind, k) : ''}
-          ${order.kind === 'defend' ? preparedHtml(order.preparedMinutes ?? 0, k, planning) : ''}
-          ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
-        </li>`;
-      })
-      .join('');
     const squadIssues = issues.filter((i) => i.orderIndex === null);
     return `<div class="squad-head ${sideClass(s.side)}">
         <span class="side-badge">${s.side}</span>
@@ -1171,17 +1163,152 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         <dt>Start</dt><dd class="start-row">${String(Math.round(s.position.east))} E, ${String(Math.round(s.position.north))} N</dd>
       </dl>
       ${squadIssues.map((i) => `<p class="warn">${escapeHtml(i.message)}</p>`).join('')}
-      <h3>Plan${s.plan.length > 0 ? ` (${String(s.plan.length)} order${s.plan.length === 1 ? '' : 's'})` : ''}</h3>
+      ${planSectionHtml({
+        plan: s.plan,
+        editable: planning,
+        selectedIndex: planner.selection.orderIndex,
+        activeIndex: null,
+        armedIndex:
+          planner.tool.kind === 'killZone' || planner.tool.kind === 'sector'
+            ? planner.selection.orderIndex
+            : null,
+        issues,
+        eye: (k) => viewshedButton(s, k),
+        empty: 'No orders: it holds where it starts.',
+        extraButtons: placing
+          ? '<button class="small danger" data-act="delete-squad">Delete squad</button>'
+          : '',
+      })}`;
+  };
+
+  /**
+   * A squad's plan, as Planning and Sim both show it: each order's kind and
+   * actions on contact, its buttons (its viewshed in planning, Set kill zone /
+   * Set direction, earlier, later, delete), a defence's preparation and any
+   * issue; then Clear plan and Centre on map.
+   */
+  const planSectionHtml = (p: {
+    readonly plan: readonly PlannedOrder[];
+    readonly editable: boolean;
+    readonly selectedIndex: number | null;
+    /** The order being carried out (Sim), marked. */
+    readonly activeIndex: number | null;
+    /** The order whose kill zone or direction the next click sets. */
+    readonly armedIndex: number | null;
+    readonly issues: readonly ScenarioIssue[];
+    readonly eye: (k: number) => string;
+    readonly empty: string;
+    readonly extraButtons: string;
+  }): string => {
+    const { plan, editable } = p;
+    const rows = plan
+      .map((order, k) => {
+        const kindSelect = editable
+          ? `<select data-act="order-kind" data-index="${String(k)}" aria-label="Order ${String(k + 1)} kind">${ORDER_KINDS.map(
+              (kind) =>
+                `<option value="${kind}"${kind === order.kind ? ' selected' : ''}>${ORDER_LABELS[kind]}</option>`,
+            ).join('')}</select>`
+          : `<span>${ORDER_LABELS[order.kind]}</span>`;
+        const onContact = actionsOnOf(order);
+        const actionsSelect = editable
+          ? `<select data-act="order-actions" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: on contact" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">${ACTIONS_ON.map(
+              (a) =>
+                `<option value="${a}"${a === onContact ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">On contact: ${ACTIONS_ON_LABELS[a]}</option>`,
+            ).join('')}</select>`
+          : `<span class="muted" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">on contact: ${ACTIONS_ON_LABELS[onContact]}</span>`;
+        const issue = p.issues.find((i) => i.orderIndex === k);
+        const classes = [
+          'order-row',
+          p.selectedIndex === k ? 'selected' : '',
+          p.activeIndex === k ? 'active' : '',
+          issue ? 'has-issue' : '',
+        ].filter((c) => c !== '');
+        return `<li class="${classes.join(' ')}" data-index="${String(k)}">
+          <button class="order-pick small" data-act="pick-order" data-index="${String(k)}" title="${p.activeIndex === k ? 'The order being carried out: select it' : 'Select this order'}">${String(k + 1)}</button>
+          ${kindSelect}
+          ${actionsSelect}
+          ${
+            editable
+              ? `<span class="order-buttons">${secondClickButton(order.kind, k, p.armedIndex === k)}${p.eye(k)}
+              <button class="small" data-act="order-up" data-index="${String(k)}" title="Earlier" aria-label="Move order ${String(k + 1)} earlier"${k === 0 ? ' disabled' : ''}>▲</button>
+              <button class="small" data-act="order-down" data-index="${String(k)}" title="Later" aria-label="Move order ${String(k + 1)} later"${k === plan.length - 1 ? ' disabled' : ''}>▼</button>
+              <button class="small" data-act="order-delete" data-index="${String(k)}" title="Delete" aria-label="Delete order ${String(k + 1)}">✕</button></span>`
+              : `<span class="order-buttons">${p.eye(k)}</span>`
+          }
+          ${order.kind === 'defend' ? preparedHtml(order.preparedMinutes ?? 0, k, editable) : ''}
+          ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
+        </li>`;
+      })
+      .join('');
+    return `<h3>Plan${plan.length > 0 ? ` (${String(plan.length)} order${plan.length === 1 ? '' : 's'})` : ''}</h3>
       ${
-        s.plan.length === 0
-          ? `<p class="muted">No orders: it holds where it starts.${planning ? ' Pick an order and click the map.' : ''}</p>`
-          : `<ol class="plan-list">${orders}</ol>`
+        plan.length === 0
+          ? `<p class="muted">${escapeHtml(p.empty)}${editable ? ' Pick an order and click the map.' : ''}</p>`
+          : `<ol class="plan-list">${rows}</ol>`
       }
       <p class="buttons">
-        ${planning && s.plan.length > 0 ? '<button class="small" data-act="clear-plan">Clear plan</button>' : ''}
-        ${placing ? '<button class="small danger" data-act="delete-squad">Delete squad</button>' : ''}
+        ${editable && plan.length > 0 ? '<button class="small" data-act="clear-plan">Clear plan</button>' : ''}
+        ${p.extraButtons}
         <button class="small" data-act="centre">Centre on map</button>
       </p>`;
+  };
+
+  /** The selected vehicle's panel in Sim: its state, then its route as it stands, edited as in planning. */
+  const combatVehiclePanelHtml = (c: Combat, v: VehicleStatus): string => {
+    const route = c.vehicleRoute(v.id);
+    const editable = !c.ended;
+    const rows = route
+      .map(
+        (
+          _,
+          k,
+        ) => `<li class="order-row${combatUi.selectedOrder === k ? ' selected' : ''}" data-index="${String(k)}">
+          <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
+          <span>Move</span>
+          ${editable ? `<span class="order-buttons"><button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button></span>` : ''}
+        </li>`,
+      )
+      .join('');
+    return `<div class="squad-head ${sideClass(v.side)}">
+        <span class="side-badge">${v.side}</span>
+        <span class="squad-name">${escapeHtml(v.name)}</span>
+      </div>
+      <dl class="kv">
+        <dt>Type</dt><dd>${VEHICLE_LABELS.m113} (tracked; drives only)</dd>
+        <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
+      </dl>
+      <h3>Route${route.length > 0 ? ` (${String(route.length)} waypoint${route.length === 1 ? '' : 's'})` : ''}</h3>
+      ${
+        route.length === 0
+          ? `<p class="muted">No route: it stays where it is.${editable ? ' Pick Move and click the map.' : ''}</p>`
+          : `<ol class="plan-list">${rows}</ol>`
+      }
+      <p class="buttons">
+        ${editable && route.length > 0 ? '<button class="small" data-act="vehicle-clear-route">Clear route</button>' : ''}
+        <button class="small" data-act="centre">Centre on map</button>
+      </p>`;
+  };
+
+  /** The selected squad's panel in Sim: its state, then its plan as it stands, edited as in planning. */
+  const combatSquadPanelHtml = (c: Combat, s: SquadStatus): string => {
+    const replaced = s.queued.some((q) => q.mode === 'replace');
+    const second = combatUi.second;
+    return `<div class="squad-head ${sideClass(s.side)}">
+        <span class="side-badge">${s.side}</span>
+        <span class="squad-name">${escapeHtml(s.name)}</span>
+      </div>
+      <dl class="kv">${combatStatusRowsHtml(s)}</dl>
+      ${planSectionHtml({
+        plan: c.plan(s.id),
+        editable: !c.ended,
+        selectedIndex: combatUi.selectedOrder,
+        activeIndex: s.active !== null && !replaced ? 0 : null,
+        armedIndex: second?.squadId === s.id ? second.index : null,
+        issues: [],
+        eye: () => '',
+        empty: 'No orders: it holds where it is.',
+        extraButtons: '',
+      })}`;
   };
 
   /** The selected vehicle's panel: its name, facing, start and route. */
@@ -1288,10 +1415,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   const scenarioHtml = (): string => {
     const d = planner.definition;
-    const issues = planner.issues();
     const stage = planner.stage;
-    // Order issues belong to Planning; Setup shows the others.
-    const shown = stage === 'scenario' ? issues.filter((i) => i.orderIndex === null) : issues;
     return `<dl class="kv">
         <dt>Name</dt><dd>${escapeHtml(d.name)}</dd>
         <dt>Forces</dt><dd>${escapeHtml(scenarioSummary(d))}</dd>
@@ -1300,50 +1424,51 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input type="number" class="seed-input" data-act="seed" min="0" max="4294967295" step="1" value="${String(d.seed)}" aria-label="Random seed">`
             : String(d.seed)
         }</dd>
-      </dl>
-      ${
-        shown.length === 0
-          ? '<p class="ok">Ready: nothing stops this scenario from being played.</p>'
-          : `<ul class="blockers">${shown
-              .slice(0, 8)
-              .map((i) => `<li>${escapeHtml(i.message)}</li>`)
-              .join(
-                '',
-              )}${shown.length > 8 ? `<li>…and ${String(shown.length - 8)} more</li>` : ''}</ul>`
-      }`;
+      </dl>`;
+  };
+  /** Under the primary button: ready, or what still stops the scenario from being played. */
+  const readinessHtml = (): string => {
+    const issues = planner.issues();
+    // Order issues belong to Planning; Setup shows the others.
+    const shown =
+      planner.stage === 'scenario' ? issues.filter((i) => i.orderIndex === null) : issues;
+    return shown.length === 0
+      ? '<p class="ok">Ready: nothing stops this scenario from being played.</p>'
+      : `<ul class="blockers">${shown
+          .slice(0, 8)
+          .map((i) => `<li>${escapeHtml(i.message)}</li>`)
+          .join(
+            '',
+          )}${shown.length > 8 ? `<li>…and ${String(shown.length - 8)} more</li>` : ''}</ul>`;
   };
 
   /** A click on the Combat stage's panel; `true` when it was one. */
   const combatClick = (target: HTMLElement, clicks: number): boolean => {
     const c = inCombat();
     if (!c) return false;
-    const el = target.closest<HTMLElement>(
-      '[data-ctool], [data-cmode], [data-speed], [data-cact], [data-squad]',
-    );
+    const el = target.closest<HTMLElement>('[data-ctool], [data-speed], [data-cact], [data-squad]');
     if (!el) return false;
-    const { ctool, cmode, speed, cact, squad } = el.dataset;
+    const { ctool, speed, cact, squad } = el.dataset;
     if (ctool !== undefined) {
       const kind = ctool === 'select' ? null : (ctool as OrderKind);
       combatUi.tool = combatUi.tool === kind ? null : kind;
       combatUi.ambush = null;
-    } else if (cmode !== undefined) combatUi.append = cmode === 'append';
-    else if (speed !== undefined) c.setSpeed(Number(speed) as CombatSpeed);
+      combatUi.second = null;
+    } else if (speed !== undefined) c.setSpeed(Number(speed) as CombatSpeed);
     else if (cact === 'play') {
       if (c.playing) c.pause();
       else c.play();
-    } else if (cact === 'end') endCombat();
-    else if (cact === 'kill-zone') {
-      // Before the ambush position it cannot be set; after it, the button starts again.
-      if (pendingAmbush(combatUi)) combatUi.ambush = null;
-      else notify('Click the ambush position on the map first, then the kill zone.');
-    } else if (cact === 'hold') {
-      if (combatUi.selected !== null) c.hold(combatUi.selected);
     } else if (cact === 'centre') {
       const s = c.squad(combatUi.selected);
       const v = c.vehicle(combatUi.selected);
       if (s) centreOn(s.centre);
       else if (v) centreOn(v.position);
     } else if (squad !== undefined && !el.hasAttribute('data-act')) {
+      if (combatUi.selected !== squad) {
+        combatUi.selectedOrder = null;
+        combatUi.ambush = null;
+        combatUi.second = null;
+      }
       combatUi.selected = squad;
       const s = c.squad(squad);
       const v = c.vehicle(squad);
@@ -1426,10 +1551,137 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   // Clicks and changes in the side panel.
   const aside = app.querySelector<HTMLElement>('aside.side');
   if (!aside) throw new Error('Missing side panel');
+  /**
+   * The selected squad's (or vehicle's) plan edited from the panel in Sim,
+   * as in planning, its live plan given at once; `true` when it was such an act.
+   */
+  const combatPlanAct = (act: string, index: number, value: string): boolean => {
+    const c = inCombat();
+    const id = combatUi.selected;
+    if (!c || id === null) return false;
+    if (act === 'centre') {
+      const s = c.squad(id);
+      const v = c.vehicle(id);
+      if (s) centreOn(s.centre);
+      else if (v) centreOn(v.position);
+      return true;
+    }
+    if (c.vehicle(id)) {
+      const route = c.vehicleRoute(id);
+      switch (act) {
+        case 'pick-waypoint':
+          combatUi.selectedOrder = index;
+          return true;
+        case 'waypoint-delete':
+          if (
+            c.setVehicleRoute(
+              id,
+              route.filter((_, k) => k !== index),
+            )
+          )
+            combatUi.selectedOrder = index > 0 ? index - 1 : null;
+          return true;
+        case 'vehicle-clear-route':
+          confirm({
+            message: `Clear the route of ${c.vehicle(id)?.name ?? 'the vehicle'}? It stops where it is until it is given a new one.`,
+            action: 'Clear route',
+            onConfirm: () => {
+              c.setVehicleRoute(id, []);
+              combatUi.selectedOrder = null;
+            },
+          });
+          return true;
+      }
+      return false;
+    }
+    const squad = c.squad(id);
+    if (!squad) return false;
+    switch (act) {
+      case 'pick-order':
+        combatUi.selectedOrder = index;
+        return true;
+      case 'order-up':
+      case 'order-down': {
+        const by = act === 'order-up' ? -1 : 1;
+        if (c.editPlan(id, (d) => reorderOrder(d, id, index, by)))
+          combatUi.selectedOrder = index + by;
+        return true;
+      }
+      case 'order-delete':
+        if (c.editPlan(id, (d) => deleteOrder(d, id, index)))
+          combatUi.selectedOrder = index > 0 ? index - 1 : null;
+        return true;
+      case 'set-kill-zone': {
+        const kind = c.plan(id)[index]?.kind;
+        if (kind !== 'ambush' && kind !== 'defend') return true;
+        const second = kind === 'ambush' ? 'killZone' : 'sector';
+        const armed = combatUi.second?.squadId === id && combatUi.second.index === index;
+        combatUi.second = armed ? null : { squadId: id, index, kind: second };
+        combatUi.selectedOrder = index;
+        if (!armed) notify(SECOND_CLICK[second]);
+        return true;
+      }
+      case 'clear-plan':
+        confirm({
+          message: `Clear the plan of ${squad.name}? It stops where it is until it is given new orders.`,
+          action: 'Clear plan',
+          onConfirm: () => {
+            c.editPlan(id, (d) => clearPlan(d, id));
+            combatUi.selectedOrder = null;
+            combatUi.second = null;
+          },
+        });
+        return true;
+      case 'order-kind': {
+        const kind = value as OrderKind;
+        const plan = c.plan(id);
+        const order = plan[index];
+        if (!order) return true;
+        // A new ambush or defence faces on along its way: a kill zone (or direction) 75 m ahead, to drag.
+        const to = { x: order.destination.east, y: order.destination.north };
+        const before = plan[index - 1];
+        const from = before
+          ? { x: before.destination.east, y: before.destination.north }
+          : squad.centre;
+        const length = Math.hypot(to.x - from.x, to.y - from.y);
+        const ahead =
+          length > 1
+            ? {
+                x: to.x + ((to.x - from.x) / length) * 75,
+                y: to.y + ((to.y - from.y) / length) * 75,
+              }
+            : { x: to.x, y: to.y + 75 };
+        c.editPlan(id, (d) => {
+          const changed = setOrderKind(d, id, index, kind);
+          if (!changed.ok) return changed;
+          if (kind === 'ambush')
+            return setKillZone(o.terrain, changed.definition, id, index, ahead);
+          if (kind === 'defend') return setDefendSector(changed.definition, id, index, ahead);
+          return changed;
+        });
+        return true;
+      }
+      case 'order-actions':
+        c.editPlan(id, (d) => setOrderActionsOn(d, id, index, value as ActionsOn));
+        return true;
+      case 'order-prepared':
+        c.editPlan(id, (d) => setDefendPrepared(d, id, index, Number(value)));
+        return true;
+    }
+    return false;
+  };
+
   aside.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (combatClick(target, event.detail)) return;
     if (reviewClick(target, event.detail)) return;
+    if (inCombat()) {
+      const el = target.closest<HTMLElement>('[data-act]');
+      const act = el?.dataset['act'];
+      if (el && act && !(el instanceof HTMLSelectElement))
+        combatPlanAct(act, Number(el.dataset['index']), '');
+      return;
+    }
     const toolEl = target.closest<HTMLElement>('[data-tool]');
     if (toolEl?.dataset['tool']) {
       const t = JSON.parse(toolEl.dataset['tool']) as PlannerTool;
@@ -1542,6 +1794,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   aside.addEventListener('change', (event) => {
     const el = event.target as HTMLElement;
     const act = el.dataset['act'];
+    if (inCombat()) {
+      if (act && el instanceof HTMLSelectElement)
+        combatPlanAct(act, Number(el.dataset['index']), el.value);
+      // Drawn again at once, from the plan as now given.
+      combatPanelsAt = -Infinity;
+      (el as HTMLSelectElement).blur();
+      return;
+    }
     const s = planner.selectedSquad;
     const car = planner.selectedVehicle;
     const value = el instanceof HTMLInputElement || el instanceof HTMLSelectElement ? el.value : '';
@@ -1582,9 +1842,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           planner.edit((d) =>
             setDefendPrepared(d, s.id, Number(el.dataset['index']), Number(value)),
           );
-        break;
-      case 'combat-actions':
-        combatUi.actionsOn = value === 'order' ? null : (value as ActionsOn);
         break;
       case 'seed':
         planner.edit((d) => setSeed(d, Number(value)));
@@ -1639,13 +1896,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Keys ---------------------------------------------------------------
 
-  // No shortcut keys: Escape cancels (a dialog, a tool, a selection), and
-  // Shift with a click in combat appends orders instead of replacing them.
+  // No shortcut keys: Escape cancels (a dialog, a tool, a selection).
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Shift') {
-      combatUi.shift = true;
-      return;
-    }
     if (event.key !== 'Escape') return;
     if (
       event.target instanceof HTMLInputElement ||
@@ -1658,8 +1910,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       return;
     }
     if (inCombat()) {
-      if (pendingAmbush(combatUi)) combatUi.ambush = null;
+      if (combatUi.second) combatUi.second = null;
+      else if (pendingAmbush(combatUi)) combatUi.ambush = null;
       else if (combatUi.tool !== null) combatUi.tool = null;
+      else if (combatUi.selectedOrder !== null) combatUi.selectedOrder = null;
       else combatUi.selected = null;
       return;
     }
@@ -1670,15 +1924,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (planner.tool.kind !== 'select') planner.setTool({ kind: 'select' });
     else planner.select(null);
   };
-  const onKeyUp = (event: KeyboardEvent) => {
-    if (event.key === 'Shift') combatUi.shift = false;
-  };
-  const onBlur = () => {
-    combatUi.shift = false;
-  };
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', onBlur);
 
   // --- Frame loop -------------------------------------------------------------
 
@@ -1752,6 +1998,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       setHtml(squadEl, car ? vehicleHtml(car) : squadHtml(planner.selectedSquad));
     setHtml(ui('roster'), rosterHtml());
     if (!editingIn(scenarioEl)) setHtml(scenarioEl, scenarioHtml());
+    setHtml(ui('readiness'), readinessHtml());
   };
   /** Whether the user is typing or choosing in a field of `el`. */
   const editingIn = (el: HTMLElement) => {
@@ -1777,19 +2024,27 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     ui('opfor-toggle').hidden = true;
     setText(ui('tools-title'), STAGE_NAMES[planner.stage]);
     setHtml(ui('tools'), toolsHtml());
-    setText(ui('tool-hint'), planner.stage === 'combat' ? combatHint(c, combatUi) : '');
+    setText(ui('tool-hint'), planner.stage === 'combat' ? combatHint(c) : '');
     setText(
       ui('tool-label'),
-      combatUi.tool === null
-        ? ''
-        : `${ORDER_LABELS[combatUi.tool]} orders (${combatUi.append !== combatUi.shift ? 'append' : 'replace'})`,
+      combatUi.tool === null ? '' : `${ORDER_LABELS[combatUi.tool]} orders`,
     );
+    setHtml(ui('readiness'), '');
     const car = c.vehicle(combatUi.selected);
     setText(ui('squad-title'), car ? 'Selected vehicle' : 'Selected squad');
-    setHtml(
-      ui('squad'),
-      car ? combatVehicleHtml(car) : combatSquadHtml(c.squad(combatUi.selected)),
-    );
+    // Not while the user is choosing in it (a drop-down open).
+    const squadEl = ui('squad');
+    if (!editingIn(squadEl)) {
+      const s = c.squad(combatUi.selected);
+      setHtml(
+        squadEl,
+        car
+          ? combatVehiclePanelHtml(c, car)
+          : s
+            ? combatSquadPanelHtml(c, s)
+            : '<p class="muted">No squad selected. Click one on the map or in the roster.</p>',
+      );
+    } else combatPanelsAt = -Infinity;
     setHtml(ui('roster'), combatRosterHtml(c, combatUi));
     setHtml(ui('events'), combatEventsHtml(combatDisplay(c)));
   };
@@ -1900,8 +2155,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     review?.dispose();
     channel?.close();
     channel = null;
-    window.removeEventListener('keyup', onKeyUp);
-    window.removeEventListener('blur', onBlur);
     document.removeEventListener('visibilitychange', onVisibility);
   };
 
@@ -1974,6 +2227,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
                   }
                 : null,
               pending: q.pending.length,
+              pendingTo: q.pending.map((x) => x.destination),
+              plan: (combat?.plan(q.id) ?? []).map((x) => [
+                x.kind,
+                Math.round(x.destination.east),
+                Math.round(x.destination.north),
+              ]),
               orders: q.orders.map((x) => `${x.kind}:${x.status}`),
               queued: q.queued.length,
             })),
