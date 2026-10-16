@@ -47,6 +47,21 @@ const OPFOR_TINT: Record<string, number> = {
   sm002_equipment: 0xb39a74,
 };
 
+/**
+ * Removes the lights and cameras a model file brings with it. The FBX loader
+ * adds an ambient light for the file's ambient colour (the soldier's has one);
+ * cloned into every soldier, and shown only with the soldiers close up, they
+ * lit the whole scene more the closer the camera came. Returns how many it removed.
+ */
+export function stripLightsAndCameras(root: THREE.Object3D): number {
+  const found: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (o !== root && ((o as THREE.Light).isLight || (o as THREE.Camera).isCamera)) found.push(o);
+  });
+  for (const o of found) o.removeFromParent();
+  return found.length;
+}
+
 /** Loads everything from `base` (the folder holding `rocketbox/` and `weapons/`). */
 export async function loadSoldierAssets(base: string): Promise<SoldierAssets> {
   const t0 = performance.now();
@@ -68,6 +83,9 @@ export async function loadSoldierAssets(base: string): Promise<SoldierAssets> {
     gltf.loadAsync(url('weapons/rifle-west.glb')).then((g) => g.scene),
     gltf.loadAsync(url('weapons/ak47.glb')).then((g) => g.scene),
   ]);
+
+  // The scene lights the soldiers: none of the files' own lights or cameras.
+  for (const root of [fbx, rifle, ak]) stripLightsAndCameras(root);
 
   const friendly = new Map<string, THREE.Material>();
   fbx.traverse((o) => {

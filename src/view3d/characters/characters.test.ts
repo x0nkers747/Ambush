@@ -11,7 +11,7 @@ import {
   skeletonFromBaked,
 } from './asset';
 import { AFTERMATH_SECONDS, createAftermath, createCharacterLayer } from './layer';
-import type { SoldierAssets } from './load';
+import { stripLightsAndCameras, type SoldierAssets } from './load';
 import { locomotionBlend, slotSpeed } from './locomotion';
 import { AIM_HOLD_S, POSTURE_SECONDS, SoldierMotion } from './motion';
 import { Puppet } from './puppet';
@@ -383,5 +383,25 @@ describe('the character layer', () => {
     expect(instances('impostors standing')).toBe(1);
     layer.dispose();
     expect(layer.group.children.length).toBe(0);
+  });
+});
+
+describe('loading the models', () => {
+  it('drops the lights and cameras a model file brings, keeping the rest', () => {
+    // As the FBX loader builds the soldier: its meshes, and an ambient light for the file's ambient colour.
+    const root = new THREE.Group();
+    const body = new THREE.Group();
+    body.add(new THREE.Mesh());
+    root.add(body, new THREE.AmbientLight(0x808080, 1), new THREE.PerspectiveCamera());
+    body.add(new THREE.PointLight());
+    expect(stripLightsAndCameras(root)).toBe(3);
+    let lights = 0;
+    let meshes = 0;
+    root.traverse((o) => {
+      if ((o as THREE.Light).isLight || (o as THREE.Camera).isCamera) lights += 1;
+      if (o instanceof THREE.Mesh) meshes += 1;
+    });
+    expect(lights).toBe(0);
+    expect(meshes).toBe(1);
   });
 });
