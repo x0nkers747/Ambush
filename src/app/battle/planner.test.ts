@@ -297,3 +297,38 @@ describe('the 3D view’s figures', () => {
     expect(planner('scenario').p.figures().soldiers).toHaveLength(17);
   });
 });
+
+describe('viewsheds turned on', () => {
+  it('any number, either side; they follow their orders as orders are added, moved and deleted', () => {
+    const { p } = planner('scenario');
+    p.select('O1');
+    p.setTool({ kind: 'order', order: 'move' });
+    for (const y of [300, 200, 100]) p.click({ x: 0, y });
+    const pins = () => p.viewsheds().map((v) => `${v.squadId}:${String(v.orderIndex)}`);
+    expect(p.toggleViewshed('O1', 1)).toBe(true);
+    expect(p.toggleViewshed('B1', null)).toBe(true);
+    expect(p.toggleViewshed('O1', 2)).toBe(true);
+    expect(pins()).toEqual(['O1:1', 'B1:null', 'O1:2']);
+    // Off again.
+    expect(p.toggleViewshed('O1', 2)).toBe(false);
+    expect(p.hasViewshed('O1', 2)).toBe(false);
+    // An order put in before it: it moves down with its order.
+    p.select('O1', 0);
+    p.click({ x: 50, y: 250 });
+    expect(pins()).toEqual(['O1:2', 'B1:null']);
+    // Moved earlier: it goes with it.
+    expect(p.moveOrder('O1', 2, -1)).toBe(true);
+    expect(pins()).toEqual(['O1:1', 'B1:null']);
+    // An earlier order deleted: it moves up; its own deleted: it goes.
+    p.removeOrder('O1', 0);
+    expect(pins()).toEqual(['O1:0', 'B1:null']);
+    p.removeOrder('O1', 0);
+    expect(pins()).toEqual(['B1:null']);
+    // No such order or squad: nothing turned on.
+    expect(p.toggleViewshed('O1', 9)).toBe(false);
+    expect(p.toggleViewshed('X1', null)).toBe(false);
+    // The squad deleted: its viewsheds go with it.
+    p.removeSquad('B1');
+    expect(pins()).toEqual([]);
+  });
+});

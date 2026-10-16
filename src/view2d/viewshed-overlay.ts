@@ -67,3 +67,124 @@ export function drawViewshed(
   ctx.drawImage(imageOf(viewshed), nw.x, nw.y, se.x - nw.x, se.y - nw.y);
   ctx.restore();
 }
+
+/** Which side a viewshed is: BLUEFOR's is drawn light blue, OPFOR's light red. */
+export type ViewshedSide = 'blue' | 'red';
+
+/** Several viewsheds composed on one grid: the pixels to draw, row 0 the northernmost. */
+export interface ViewshedOverlay {
+  readonly grid: Viewshed['grid'];
+  readonly pixels: Uint8ClampedArray;
+}
+
+/** Side colours: inside, and the deeper edge (RGBA). Ground both sides see is purple. */
+const SIDE_COLOURS: Readonly<Record<'blue' | 'red' | 'both', readonly [number[], number[]]>> = {
+  blue: [
+    [120, 190, 255, 120],
+    [35, 120, 235, 210],
+  ],
+  red: [
+    [255, 135, 125, 120],
+    [225, 55, 45, 210],
+  ],
+  both: [
+    [190, 130, 255, 140],
+    [125, 45, 215, 220],
+  ],
+};
+
+/**
+ * The viewsheds of several squads (or waypoints) on `grid` (the finest they
+ * are computed on): where BLUEFOR sees, light blue; OPFOR, light red; both,
+ * purple. Each side's viewsheds are joined (seen by any of them), and each
+ * has a deeper edge. Viewsheds on coarser grids are read at each cell's
+ * centre. Only the rows and columns `bounds` covers are composed.
+ */
+export function composeViewsheds(
+  grid: Viewshed['grid'],
+  layers: readonly { readonly viewshed: Viewshed; readonly side: ViewshedSide }[],
+  bounds: {
+    readonly minX: number;
+    readonly minY: number;
+    readonly maxX: number;
+    readonly maxY: number;
+  },
+): ViewshedOverlay {
+  const { columns, rows, cellSize, originX, originY } = grid;
+  const c0 = Math.max(0, Math.floor((bounds.minX - originX) / cellSize));
+  const c1 = Math.min(columns - 1, Math.ceil((bounds.maxX - originX) / cellSize));
+  const r0 = Math.max(0, Math.floor((bounds.minY - originY) / cellSize));
+  const r1 = Math.min(rows - 1, Math.ceil((bounds.maxY - originY) / cellSize));
+  // Bit 1: BLUEFOR sees the cell; bit 2: OPFOR does.
+  const seen = new Uint8Array(columns * rows);
+  for (const { viewshed, side } of layers) {
+    const bit = side === 'blue' ? 1 : 2;
+    const from = viewshed.grid;
+    const ratio = from.cellSize / cellSize;
+    for (let r = r0; r <= r1; r += 1) {
+      const fr = Math.floor((originY + (r + 0.5) * cellSize - from.originY) / from.cellSize);
+      if (fr < 0 || fr >= from.rows) continue;
+      for (let c = c0; c <= c1; c += 1) {
+        const fc =
+          ratio === 1
+            ? c
+            : Math.floor((originX + (c + 0.5) * cellSize - from.originX) / from.cellSize);
+        if (fc < 0 || fc >= from.columns) continue;
+        const i = r * columns + c;
+        if (viewshed.visible[fr * from.columns + fc] === 1) seen[i] = (seen[i] ?? 0) | bit;
+      }
+    }
+  }
+  const pixels = new Uint8ClampedArray(columns * rows * 4);
+  const at = (c: number, r: number) =>
+    c < 0 || r < 0 || c >= columns || r >= rows ? 0 : (seen[r * columns + c] ?? 0);
+  for (let r = r0; r <= r1; r += 1) {
+    for (let c = c0; c <= c1; c += 1) {
+      const v = at(c, r);
+      if (v === 0) continue;
+      // On the edge of either side's ground: a neighbour lacks one of its sides.
+      const edge =
+        (at(c - 1, r) & v) !== v ||
+        (at(c + 1, r) & v) !== v ||
+        (at(c, r - 1) & v) !== v ||
+        (at(c, r + 1) & v) !== v;
+      const colour = SIDE_COLOURS[v === 3 ? 'both' : v === 1 ? 'blue' : 'red'][edge ? 1 : 0];
+      const i = ((rows - 1 - r) * columns + c) * 4;
+      pixels[i] = colour[0] ?? 0;
+      pixels[i + 1] = colour[1] ?? 0;
+      pixels[i + 2] = colour[2] ?? 0;
+      pixels[i + 3] = colour[3] ?? 0;
+    }
+  }
+  return { grid, pixels };
+}
+
+const overlayImages = new WeakMap<Uint8ClampedArray, HTMLCanvasElement>();
+
+/** Draws composed viewsheds on the 2D map (`toScreen`: map metres to the canvas, north up). */
+export function drawViewshedOverlay(
+  ctx: CanvasRenderingContext2D,
+  overlay: ViewshedOverlay,
+  toScreen: (p: Vec2) => Vec2,
+): void {
+  const { grid, pixels } = overlay;
+  let canvas = overlayImages.get(pixels);
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.width = grid.columns;
+    canvas.height = grid.rows;
+    const c = canvas.getContext('2d');
+    if (c) {
+      const image = c.createImageData(grid.columns, grid.rows);
+      image.data.set(pixels);
+      c.putImageData(image, 0, 0);
+    }
+    overlayImages.set(pixels, canvas);
+  }
+  const nw = toScreen({ x: grid.originX, y: grid.originY + grid.rows * grid.cellSize });
+  const se = toScreen({ x: grid.originX + grid.columns * grid.cellSize, y: grid.originY });
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(canvas, nw.x, nw.y, se.x - nw.x, se.y - nw.y);
+  ctx.restore();
+}

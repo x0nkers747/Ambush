@@ -130,11 +130,12 @@ Next says what is missing, and the side panel says the same next to the stage's 
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
-   **Viewshed:** the selected squad's soldiers' viewshed is shaded purple on the map and on the 3D
-   ground, all round to 1,200 m: from where they start or, with a waypoint selected, from where
-   they will stand there ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). A coarse
-   first look comes in a fraction of a second, full detail in about two; **V** or the
-   **Viewshed** box on the map bar turns it off.
+   **Viewsheds:** the eye beside a squad's start, or beside any of its waypoints, in the squad
+   panel (or **V** for the selected one) shows what its soldiers can see from there, all round to
+   1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple, on the map and on
+   the 3D ground; any number can be on, and a dragged waypoint's follows it
+   ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). The **Viewsheds** box on the map
+   bar shows or hides them all.
 3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,
    or hidden with **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
    change an order's kind, order and deletion in the plan list. Each order's **On contact**

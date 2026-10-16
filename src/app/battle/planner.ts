@@ -9,6 +9,7 @@ import {
   moveOrder,
   moveSquad,
   ORDER_LABELS,
+  reorderOrder,
   resizeKillZone,
   setKillZone,
   scenarioIssues,
@@ -76,6 +77,12 @@ export interface PlannedSoldier {
   readonly position: Vec2;
 }
 
+/** A viewshed turned on: squad `squadId`'s, from where it starts (`orderIndex` null) or from waypoint `orderIndex`. */
+export interface ViewshedPin {
+  readonly squadId: string;
+  readonly orderIndex: number | null;
+}
+
 export interface Planner {
   readonly terrain: TerrainDataset;
   readonly definition: BattleScenarioDefinition;
@@ -120,7 +127,18 @@ export interface Planner {
     saving: boolean,
   ): boolean;
   removeOrder(id: string, index: number): void;
+  /** Moves order `index` one place earlier (`-1`) or later (`+1`), selecting it there. */
+  moveOrder(id: string, index: number, by: -1 | 1): boolean;
   removeSquad(id: string): void;
+  /**
+   * The viewsheds turned on, in the order they were: each a squad's from
+   * where it starts, or from one of its waypoints. They follow their orders
+   * when orders are added, moved or deleted, and go with them.
+   */
+  viewsheds(): readonly ViewshedPin[];
+  hasViewshed(squadId: string, orderIndex: number | null): boolean;
+  /** Turns a squad's (or a waypoint's) viewshed on or off; returns whether it is now on. */
+  toggleViewshed(squadId: string, orderIndex: number | null): boolean;
   /** What still stops the scenario from being played (memoized per scenario). */
   issues(): readonly ScenarioIssue[];
   /** Each squad's soldiers where they start (memoized per scenario). */
@@ -187,6 +205,24 @@ export function createPlanner(o: PlannerOptions): Planner {
   const changed = () => {
     version += 1;
   };
+  /** The viewsheds turned on (`viewsheds`). */
+  let pins: ViewshedPin[] = [];
+  /** Pins of squad `id`'s orders from `from` on, moved by `by` places. */
+  const shiftPins = (id: string, from: number, by: number) => {
+    pins = pins.map((p) =>
+      p.squadId !== id || p.orderIndex === null || p.orderIndex < from
+        ? p
+        : { squadId: id, orderIndex: p.orderIndex + by },
+    );
+  };
+  /** Drops pins whose squad or order no longer exists. */
+  const prunePins = () => {
+    const next = pins.filter((p) => {
+      const s = definition.squads.find((x) => x.id === p.squadId);
+      return s !== undefined && (p.orderIndex === null || p.orderIndex < s.plan.length);
+    });
+    if (next.length !== pins.length) pins = next;
+  };
 
   const memo = <T>(make: (d: BattleScenarioDefinition) => T) => {
     let made: { d: BattleScenarioDefinition; value: T } | null = null;
@@ -244,6 +280,7 @@ export function createPlanner(o: PlannerOptions): Planner {
     }
     if (result.definition !== definition) {
       definition = result.definition;
+      prunePins();
       // The selection follows what still exists.
       const selected = squad(selection.squadId);
       if (!selected) selection = { squadId: null, orderIndex: null };
@@ -356,6 +393,9 @@ export function createPlanner(o: PlannerOptions): Planner {
             ? roadWaypoints(terrain, { x: from.east, y: from.north }, point)
             : null;
         const points = route && route.length > 1 ? route : [point];
+        // Viewsheds of later orders move down with them.
+        const pinsBefore = pins;
+        shiftPins(selected.id, at, points.length);
         const added = apply((d) => {
           let edit: BattleEdit = { ok: true, definition: d };
           for (const [k, p] of points.entries()) {
@@ -364,6 +404,7 @@ export function createPlanner(o: PlannerOptions): Planner {
           }
           return edit;
         }, true);
+        if (!added) pins = pinsBefore;
         if (added && points.length > 1)
           o.notify(
             `Along the road: ${String(points.length)} move orders, to where it joins the road and along it.`,
@@ -427,10 +468,52 @@ export function createPlanner(o: PlannerOptions): Planner {
       const s = squad(id);
       if (!canPlan(s)) return;
       const order = s?.plan[index];
-      if (apply((d) => deleteOrder(d, id, index), true) && order) {
+      // Its viewshed goes with it; later orders' move up a place.
+      const before = pins;
+      pins = pins.filter((p) => p.squadId !== id || p.orderIndex !== index);
+      shiftPins(id, index + 1, -1);
+      if (!apply((d) => deleteOrder(d, id, index), true)) {
+        pins = before;
+        return;
+      }
+      if (order) {
         o.notify(`Removed order ${String(index + 1)} (${ORDER_LABELS[order.kind]}).`);
         planner.select(id, index > 0 ? index - 1 : null);
       }
+    },
+    moveOrder(id, index, by) {
+      const s = squad(id);
+      const to = index + by;
+      if (!s || !canPlan(s) || to < 0 || to >= s.plan.length) return false;
+      const before = pins;
+      // The two orders' viewsheds change places with them.
+      pins = pins.map((p) =>
+        p.squadId !== id || p.orderIndex === null
+          ? p
+          : p.orderIndex === index
+            ? { squadId: id, orderIndex: to }
+            : p.orderIndex === to
+              ? { squadId: id, orderIndex: index }
+              : p,
+      );
+      if (!apply((d) => reorderOrder(d, id, index, by), true)) {
+        pins = before;
+        return false;
+      }
+      planner.select(id, to);
+      return true;
+    },
+    viewsheds: () => pins,
+    hasViewshed: (id, index) => pins.some((p) => p.squadId === id && p.orderIndex === index),
+    toggleViewshed(id, index) {
+      const s = squad(id);
+      if (!s || (index !== null && !s.plan[index])) return false;
+      const on = !planner.hasViewshed(id, index);
+      pins = on
+        ? [...pins, { squadId: id, orderIndex: index }]
+        : pins.filter((p) => p.squadId !== id || p.orderIndex !== index);
+      changed();
+      return on;
     },
     removeSquad(id) {
       const s = squad(id);

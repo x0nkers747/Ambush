@@ -81,3 +81,36 @@ far out in visible ground.
 
 Each result is cached by the soldiers' exact positions. Selecting a squad or waypoint again shows
 its viewshed at once.
+
+## Amendment (2026-10-16): any number of viewsheds, by side, while dragging
+
+**Turned on one by one.** Viewsheds no longer follow the selection. Each squad's start, and each
+of its waypoints, has an eye in the squad panel that turns its viewshed on or off. **V** does the
+same for the selected squad or waypoint. Any number can be on, of either side.
+
+- **Following their orders.** The planner keeps them (`viewsheds`, `toggleViewshed`). They follow
+  their orders when orders are added before them, moved or deleted. They go when their order or
+  squad does.
+- **On the map.** Each viewshed that is on is ringed on the map.
+- **Show or hide all.** The **Viewsheds** box on the map bar shows or hides them all, keeping them
+  on.
+- **OPFOR hidden.** In BLUEFOR Planning, OPFOR's are hidden with OPFOR.
+
+**By side.** `composeViewsheds` puts them all on one 4 m grid:
+
+- BLUEFOR's are light blue and OPFOR's light red. Ground both sides see is purple.
+- Each side's viewsheds are joined, and each side's has a deeper edge.
+- Coarser results are read at each cell's centre. Only the area within range of the observers is
+  composed.
+- The same pixels are drawn over the 2D map and draped on the 3D ground.
+
+**One at a time.** The workers compute one job at a time, and a new request cancels a large job.
+So each frame only one viewshed asks for work:
+
+- the selected one (being dragged) first, then the latest turned on;
+- the others show what the cache already holds (`cachedUnion`, `cachedRefined`).
+
+**While dragging.** Jobs up to 30,000 cells (a 5 km battlefield's 32 m grid) now finish before the
+next request starts. A dragged waypoint's viewshed keeps its last few positions. Until its own is
+in, it shows the latest finished from them. A drag therefore shows a stream of first looks, one
+every 0.1–0.2 s, trailing the pointer slightly. Full detail follows about 2 s after the drop.

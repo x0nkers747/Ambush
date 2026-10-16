@@ -948,6 +948,27 @@
       .battle .order-row .order-buttons button {
         padding: 1px 5px;
       }
+      /* A viewshed's eye: lit in its side's colour when on. */
+      .battle .vs-toggle {
+        display: inline-flex;
+        align-items: center;
+        vertical-align: middle;
+        color: var(--muted, #9aa4ae);
+      }
+      .battle .vs-toggle[aria-pressed='true'].blue {
+        background: #2f6fb8;
+        border-color: #5aaeff;
+        color: #fff;
+      }
+      .battle .vs-toggle[aria-pressed='true'].red {
+        background: #a23a32;
+        border-color: #ff6b5e;
+        color: #fff;
+      }
+      .battle .start-row .vs-toggle {
+        margin-left: 6px;
+        padding: 1px 5px;
+      }
       .battle .order-row .order-issue {
         grid-column: 2 / -1;
         font-size: 11px;

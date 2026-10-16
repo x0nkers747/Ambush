@@ -47,12 +47,12 @@ const PASSES = 2;
 const CACHE_ENTRIES = 32;
 const CACHE_CELLS = 12_500_000;
 /**
- * Jobs up to this many cells (quick previews) finish before the next request
- * starts, so a continuous drag yields a steady stream of updates instead of
- * every update being cancelled by the next pointer move. Larger jobs give way
- * to a new request at once.
+ * Jobs up to this many cells (quick previews: a 5 km battlefield at 32 m is
+ * about 24,000) finish before the next request starts, so a continuous drag
+ * yields a steady stream of updates instead of every update being cancelled
+ * by the next pointer move. Larger jobs give way to a new request at once.
  */
-const FINISH_FIRST_MAX_CELLS = 10_000;
+const FINISH_FIRST_MAX_CELLS = 30_000;
 
 /** What the service needs of a worker: a Web Worker running viewshed.worker.ts. */
 export interface ViewshedWorker {
@@ -136,6 +136,18 @@ export interface ViewshedService {
     sectors: readonly (ViewSector | null)[],
     coarse: Viewshed,
   ): ViewshedRequest;
+  /** The union of `requestUnion` if it is cached, without starting any work. */
+  cachedUnion(
+    observers: readonly Vec2[],
+    cellSize: number,
+    sectors?: readonly (ViewSector | null)[],
+  ): Viewshed | null;
+  /** The refinement of `requestRefined` if it is cached, without starting any work. */
+  cachedRefined(
+    observers: readonly Vec2[],
+    cellSize: number,
+    sectors: readonly (ViewSector | null)[],
+  ): Viewshed | null;
   /** Starts the workers now (each prepares the terrain), so the first viewshed does not wait for them. */
   warmUp(): void;
   /** Drops work in progress, e.g. when no viewshed is shown any more. Cached results stay. */
@@ -583,6 +595,12 @@ export function createViewshedService(
     },
     has(observer, cellSize, sector = null) {
       return cache.has(viewshedKey(observer, cellSize, sector));
+    },
+    cachedUnion(observers, cellSize, sectors = []) {
+      return cache.get(unionKey(observers, cellSize, sectors)) ?? null;
+    },
+    cachedRefined(observers, cellSize, sectors) {
+      return cache.get(`refined:${unionKey(observers, cellSize, sectors)}`) ?? null;
     },
     warmUp() {
       if (workerCount > 0) startWorkers();

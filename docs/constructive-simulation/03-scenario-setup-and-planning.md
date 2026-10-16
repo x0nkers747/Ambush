@@ -193,14 +193,20 @@ and can be moved or deleted like any other. A message says how many were
 added. A Move clicked off the roads, any other order, and BLUEFOR's orders
 go straight to the point clicked.
 
-## The squad's viewshed
+## Viewsheds
 
-With a squad selected, in Scenario Setup and BLUEFOR Planning, what its
-soldiers can see is shaded purple: over the 2D map, and draped on the ground
-in 3D. It is the union of their viewsheds, all round, out to 1,200 m (the
-detection model's longest observation range). It is seen from where they
-start; with one of its waypoints selected, from where the formation will
-put them on arriving there, facing the way they came (at an ambush
-position, its firing line facing the kill zone). A coarse look comes first
-and is refined to 4 m detail in about two seconds (ADR 0055). **V**, or the
-**Viewshed** box on the map bar, shows or hides it.
+Each squad's start, and each of its waypoints, has an eye in the squad panel that turns its
+viewshed on or off. **V** does the same for the selected squad or waypoint. Any number can be on,
+of either side, in Scenario Setup and BLUEFOR Planning.
+
+- **What it shows:** what the squad's soldiers can see, all round, out to 1,200 m (the detection
+  model's longest observation range). It is seen from where they start; for a waypoint, from where
+  the formation will put them on arriving there, facing the way they came. At an ambush position it
+  is the firing line, facing the kill zone.
+- **Colours:** BLUEFOR's are light blue and OPFOR's light red; ground both sides see is purple. They
+  are drawn over the 2D map and on the 3D ground. Each one that is on is ringed on the map.
+- **Speed:** a coarse look comes first and is refined to 4 m detail in about two seconds (ADR 0055).
+  Dragging a waypoint whose viewshed is on updates it as it moves.
+- **Following orders:** they follow their orders when orders are added, moved or deleted.
+- **Show or hide:** the **Viewsheds** box on the map bar shows or hides them all. In BLUEFOR
+  Planning, OPFOR's are hidden with OPFOR.
