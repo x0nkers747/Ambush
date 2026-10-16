@@ -22,6 +22,7 @@ import {
   MATERIAL_BYTES,
   nearestOnRoad,
   PAVED_AREA_SURFACE,
+  SAND_FLAG,
   RoadSurface,
   tileHash,
   type TerrainField,
@@ -627,5 +628,50 @@ describe('mapped paved areas and footways', () => {
     expect(s.roadSurface).toBe(RoadSurface.Paving);
     f.sample(150, 0, s);
     expect(s.roadSurface).toBe(RoadSurface.Dirt);
+  });
+});
+
+describe('beaches', () => {
+  // A beach between open ground (west) and a meadow (east).
+  const own: EnvironmentFeatures = {
+    roads: [],
+    buildings: [],
+    vegetation: [],
+    landUse: [
+      {
+        id: 'beach',
+        kind: 'beach',
+        boundary: [
+          { x: -40, y: -150 },
+          { x: 40, y: -150 },
+          { x: 40, y: 150 },
+          { x: -40, y: 150 },
+        ],
+      },
+    ],
+  };
+  const terrain = createSyntheticTerrain(
+    { originX: -200, originY: -200, cellSize: 10, columns: 41, rows: 41 },
+    () => 50,
+    own,
+  );
+  const f = compileField(
+    { heightfield: terrain.heightfield, features: terrain.features, water: null },
+    { seed: 1, relief: 0 },
+  );
+  const s = emptySample();
+
+  it('are sand all over, flagged in the surface code; nothing else is', () => {
+    f.sample(0, 0, s);
+    expect(s.sand).toBe(1);
+    f.sample(120, 0, s);
+    expect(s.sand).toBe(0);
+    // Tile (3, 3): lattice (9, 9) is (0, 0), on the beach; tile (4, 3)'s is (64, 0), off it.
+    const on = generateTile(f, 1, -200, -200, 0, 3, 3);
+    const off = generateTile(f, 1, -200, -200, 0, 4, 3);
+    const stride = Math.sqrt(on.heights.length);
+    const m = (9 * stride + 9) * MATERIAL_BYTES;
+    expect((on.material[m + 3] ?? 0) & SAND_FLAG).toBe(SAND_FLAG);
+    expect((off.material[m + 3] ?? 0) & SAND_FLAG).toBe(0);
   });
 });

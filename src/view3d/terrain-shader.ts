@@ -1,4 +1,4 @@
-import { PAVED_AREA_SURFACE } from '#sim/terrain-field';
+import { PAVED_AREA_SURFACE, SAND_FLAG } from '#sim/terrain-field';
 import { MATERIAL_TILE_M, MATERIALS } from './ground-textures';
 
 /** Shoulder or pavement widths beside a carriageway, metres: urban, rural asphalt, other surfaces. */
@@ -234,6 +234,8 @@ void labMaterial() {
   int surf = 0;
   float sw[8];
   for (int i = 0; i < 8; i++) sw[i] = 0.0;
+  // Bare sand (beaches, dunes): the samples' flags, blended.
+  float sandS = 0.0;
   {
     vec2 f = fract(vLattice);
     ivec2 c0 = ivec2(floor(vLattice)) + 1;
@@ -245,6 +247,7 @@ void labMaterial() {
         float e = mix(-4.0, 12.0, t.r);
         int c = int(t.a * 255.0 + 0.5);
         int s = c & 7;
+        if ((c & ${String(SAND_FLAG)}) != 0) sandS += wk;
         bool isArea = s == ${String(PAVED_AREA_SURFACE)};
         // A paved area's sample is at least ROAD_KEEP_M (2 m) from any road.
         roadE += wk * (isArea ? 2.0 : e);
@@ -293,6 +296,13 @@ void labMaterial() {
   float slope = 1.0 - n.z;
   w[2] += smoothstep(0.28, 0.42, slope + (n2 - 0.5) * 0.1) * 0.35;
   float rock = smoothstep(${ROCK_FROM.toFixed(2)}, ${(ROCK_FROM + 0.15).toFixed(2)}, slope + (n1 - 0.5) * 0.06);
+  // Beaches and dunes: sand all over (not the cover's grass and soil in
+  // patches), its edge with the land behind ragged over a metre or two.
+  float sand = smoothstep(0.3, 0.7, sandS + (n1 - 0.5) * 0.3 + (n2 - 0.5) * 0.3);
+  if (sand > 0.0) {
+    for (int i = 0; i < ${String(MATERIALS.length)}; i++) w[i] *= 1.0 - sand;
+    w[6] += sand;
+  }
   // Paved ground (docs/adr/0048): mapped paved areas to their outlines;
   // towns' pavements, forecourts and yards, and paved areas' insides near
   // roads, by the samples' paved flags.

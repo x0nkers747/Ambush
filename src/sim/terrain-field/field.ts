@@ -68,6 +68,8 @@ export interface FieldSample {
   wet: number;
   /** 0–1: built-up land. */
   urban: number;
+  /** 0–1: bare sand (beaches and dunes). */
+  sand: number;
   /** 1 where the ground is paved (towns' streets and yards, mapped hard ground), else 0. */
   paved: number;
   /** Signed distance to the nearest mapped paved area's edge (negative in it), metres; 99 when none near. */
@@ -87,6 +89,7 @@ export function emptySample(): FieldSample {
     litter: 0,
     wet: 0,
     urban: 0,
+    sand: 0,
     paved: 0,
     pavedEdge: 99,
   };
@@ -263,7 +266,7 @@ export function compileField(
   for (const b of buckets) entries += b.length / 3;
   lap('index');
 
-  const look = new Float64Array(9);
+  const look = new Float64Array(10);
   const cLo = new Float64Array(MAX_CONSTRAINTS);
   const cHi = new Float64Array(MAX_CONSTRAINTS);
   const cW = new Float64Array(MAX_CONSTRAINTS);
@@ -306,6 +309,7 @@ export function compileField(
     out.soil = look[5] ?? 0;
     out.litter = look[6] ?? 0;
     out.urban = look[7] ?? 0;
+    out.sand = look[9] ?? 0;
     let wet = 0;
     // Whether a graded paved area reaches here (its ground is then dry).
     let planesAt = false;

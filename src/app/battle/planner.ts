@@ -208,6 +208,9 @@ export function createPlanner(o: PlannerOptions): Planner {
     );
   });
   const figures = memo((d): StartFigures => {
+    // No squads yet (a new battlefield): no figures; a battle needs a force.
+    if (d.squads.length === 0)
+      return { log: createMotionRecorder(BATTLE_TICK_RATE_HZ), weapons: {}, soldiers: [] };
     const battle = createBattle(battleSpecOf(d, BATTLE_TICK_RATE_HZ), terrain);
     const log = createMotionRecorder(BATTLE_TICK_RATE_HZ);
     log.record(battle.sim.state);

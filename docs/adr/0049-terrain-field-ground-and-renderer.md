@@ -87,3 +87,17 @@ and hide behind is what the trainee sees.
   Safari are untested.
 - The field's version is part of the terrain model: any change to it that moves the ground
   must bump `TERRAIN_FIELD_VERSION`.
+
+## Amendment (2026-10-16): mapped beaches are sand
+
+Mapped beaches (`natural=beach`, `sand`: land use `beach`, ADR 0040) had lost their sand in the
+terrain field. Their cover's materials were a little grass and soil, and the shader shows bare soil
+only in large noise patches. So a beach was drawn as blotches of dark soil and grass. It showed
+badly on the long beach north of Coffs Harbour.
+
+- **Sand weight.** The cover's look has a `sand` weight (1 on beaches), sampled as `FieldSample.sand`.
+- **Surface flag.** The surface code's spare bit is set where the sand weight is at least ½
+  (`SAND_FLAG`, 32).
+- **Shader.** It blends the flag over the four samples around a point, with noise for a ragged
+  edge a metre or two wide. Sand then replaces the cover's own materials there; roads, paving and
+  the water's edge are still drawn over it.

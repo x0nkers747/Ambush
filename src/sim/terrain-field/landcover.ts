@@ -42,6 +42,8 @@ export interface CoverLook {
    * and pavements, yards), mapped hard ground wholly (docs/adr/0048).
    */
   readonly paved: number;
+  /** Share of the ground that is bare sand (0–1): beaches and dunes (absent: none). */
+  readonly sand?: number;
 }
 
 export const COVER_LOOK: Readonly<Record<Cover, CoverLook>> = {
@@ -76,7 +78,15 @@ export const COVER_LOOK: Readonly<Record<Cover, CoverLook>> = {
   },
   // Towns: mostly paved; gardens and courtyards (field.ts) green.
   [Cover.Urban]: { relief: [0.02, 0.01, 0, 0], grass: 0.85, soil: 0.03, litter: 0, paved: 0.75 },
-  [Cover.Beach]: { relief: [0.06, 0.07, 0.03, 0.01], grass: 0.05, soil: 0.1, litter: 0, paved: 0 },
+  // Sand: its own material over the whole beach (not soil in patches, nor only at the water's edge).
+  [Cover.Beach]: {
+    relief: [0.06, 0.07, 0.03, 0.01],
+    grass: 0.05,
+    soil: 0.1,
+    litter: 0,
+    paved: 0,
+    sand: 1,
+  },
   [Cover.Shingle]: { relief: [0.04, 0.04, 0.03, 0.015], grass: 0, soil: 0.1, litter: 0, paved: 0 },
   [Cover.Rock]: { relief: [0.1, 0.12, 0.1, 0.06], grass: 0.1, soil: 0.3, litter: 0, paved: 0 },
   [Cover.Mud]: { relief: [0.03, 0.03, 0.02, 0.01], grass: 0.1, soil: 0.4, litter: 0, paved: 0 },
@@ -373,15 +383,16 @@ const TAPS = [
 const TAP_WEIGHT = TAPS.reduce((s, [, , w]) => s + w, 0);
 /** Litter at which a point counts as at a wood's edge, fully blended. */
 const EDGE_LITTER = 0.08;
-const tap = new Float64Array(9);
+const tap = new Float64Array(10);
 const blur = new Float64Array(7);
 
 /**
  * The cover's look at (x, y): blended bilinearly between the four nearest
  * cells, so relief and materials change smoothly across a boundary, and at a
  * wood's edge over a wider, wavering band (`EDGE_BLEND_M`). Writes
- * [amp0, amp1, amp2, amp3, grass, soil, litter, urban, paved] into `out`
- * (urban: 1 in towns and on mapped hard ground; urban and paved never blended).
+ * [amp0, amp1, amp2, amp3, grass, soil, litter, urban, paved, sand] into
+ * `out` (urban: 1 in towns and on mapped hard ground; urban, paved and sand
+ * never blended at a wood's edge).
  */
 export function coverLookAt(map: CoverMap, x: number, y: number, out: Float64Array): void {
   sharpLookAt(map, x, y, out);
@@ -425,5 +436,6 @@ function sharpLookAt(map: CoverMap, x: number, y: number, out: Float64Array): vo
     out[6] = (out[6] ?? 0) + w * look.litter;
     out[7] = (out[7] ?? 0) + w * (cov === Cover.Urban || cov === Cover.Paved ? 1 : 0);
     out[8] = (out[8] ?? 0) + w * look.paved;
+    out[9] = (out[9] ?? 0) + w * (look.sand ?? 0);
   }
 }

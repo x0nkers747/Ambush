@@ -97,6 +97,8 @@ const enc = (v: number, lo: number, hi: number) => {
 /** Ranges of the encoded distances (metres). */
 export const ROAD_EDGE_RANGE = [-4, 12] as const;
 export const SHORE_RANGE = [-6, 10] as const;
+/** The surface code's flag for bare sand (beaches and dunes): the shader blends it between samples. */
+export const SAND_FLAG = 32;
 export const BUILDING_RANGE = [0, 8] as const;
 /** The surface code of mapped paved areas (after the road surfaces, 1–5). */
 export const PAVED_AREA_SURFACE = 6;
@@ -106,7 +108,7 @@ export const ROAD_KEEP_M = 2;
 /**
  * Generates one tile: every sample is `field.sample` at its lattice point.
  * Material bytes per sample: road edge distance, shore distance, building
- * distance, surface codes (road surface | shore kind << 3 | urban 64 | paved 128), grass, soil,
+ * distance, surface codes (road surface | shore kind << 3 | sand 32 | urban 64 | paved 128), grass, soil,
  * litter, wetness. More than `ROAD_KEEP_M` from a carriageway, a mapped paved
  * area nearer than the road edge takes the road edge's place, with surface
  * `PAVED_AREA_SURFACE` (its outline exact, as a road's). Nearer, the road's
@@ -156,6 +158,7 @@ export function generateTile(
       material[m + 3] =
         (area ? PAVED_AREA_SURFACE : s.roadSurface) |
         (s.shoreKind << 3) |
+        (s.sand >= 0.5 ? SAND_FLAG : 0) |
         (s.urban > 0.5 || (!area && s.pavedEdge < 0) ? 64 : 0) |
         (s.paved > 0 && !area ? 128 : 0);
       material[m + 4] = enc(s.grass, 0, 1);

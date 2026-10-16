@@ -289,3 +289,11 @@ describe('OPFOR moves along roads', () => {
     expect(plan(blue, 'B1')).toEqual([['move', 300, -50]]);
   });
 });
+
+describe('the 3D view’s figures', () => {
+  it('are none on a new battlefield with no squads (no battle can be built yet)', () => {
+    const { p } = planner('scenario', newBattleScenario(terrain, 'bf'));
+    expect(p.figures().soldiers).toEqual([]);
+    expect(planner('scenario').p.figures().soldiers).toHaveLength(17);
+  });
+});
