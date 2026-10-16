@@ -31,6 +31,9 @@ The battle starts paused.
   "queued" in the squad's list), and apply in turn when play resumes.
 - A destination in water or a building is moved clear, with a message. One
   off the map is refused.
+- A squad made combat ineffective falls back 500 m out of the enemy's reach,
+  holding its fire unless fired upon, then stays down there waiting for
+  orders ([03-model §7](../behavior-lab/force-on-force/03-model.md)).
 - A combat-ineffective squad can still be ordered, while it has soldiers
   left: it carries out the order, and stays counted as ineffective (its
   reason says so). One with nobody left refuses it, and the page says so.

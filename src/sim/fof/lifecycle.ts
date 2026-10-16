@@ -32,10 +32,13 @@ export function updateLifecycle(context: FofContext): void {
     const active = force.memberIds.some(
       (id) => context.state.soldiers[context.soldierIndex.get(id) ?? -1]?.status === 'active',
     );
-    // Combat ineffective: terminal (once: a player may order it on again).
+    // Combat ineffective: terminal (once: a player may order it on again). In
+    // a battle it is judged on lasting effectiveness (losses, ammunition,
+    // leaders), not on suppression, which wears off.
+    const judged = manual ? force.lastingEffectiveness : force.effectiveness;
     if (
       !active ||
-      (!force.combatIneffective && force.effectiveness < behavior.ineffectiveEffectiveness - 1e-12)
+      (!force.combatIneffective && judged < behavior.ineffectiveEffectiveness - 1e-12)
     ) {
       ineffective(
         context,
@@ -63,7 +66,10 @@ export function updateLifecycle(context: FofContext): void {
           if (!task) enter(context, force, 'atObjective', 'reached the withdrawal point');
         } else if (!task || (clear && quiet && !force.brokenWithdrawal)) {
           if (task) cancelTask(context, force);
-          enter(context, force, 'holding', task ? 'broke contact' : 'reached its withdrawal point');
+          const why = task ? 'broke contact' : 'reached its withdrawal point';
+          // Combat ineffective, fallen back: it stays down there until ordered on.
+          if (force.combatIneffective && force.brokenWithdrawal) stayDown(context, force, why);
+          else enter(context, force, 'holding', why);
         }
         return;
       }
@@ -134,10 +140,30 @@ function halt(context: FofContext, force: FofForce): void {
   cancelTask(context, force);
 }
 
-/** The force is spent: it stops, stays down and no longer fires. */
+/**
+ * The force is spent. In an experiment it stops, stays down and no longer
+ * fires. In a battle, with soldiers left, it falls back out of the enemy's
+ * reach first (`brokenWithdrawDistanceM`, holding its fire unless fired
+ * upon), carrying on with a withdrawal it has begun; then it stays down there
+ * (`stayDown`). With nowhere to go, it stays down where it is.
+ */
 function ineffective(context: FofContext, force: FofForce, reason: string): void {
-  halt(context, force);
   if (force.planned) failPlan(context, force, `squad combat ineffective (${reason})`);
+  force.combatIneffective = true;
+  if (context.setup.termination === 'manual' && reason !== 'no soldier left') {
+    if (force.phase === 'withdrawing' && runningTask(context, force)) {
+      force.brokenWithdrawal = true;
+      return;
+    }
+    if (withdraw(context, force, `combat ineffective (${reason}): falling back`, null, true))
+      return;
+  }
+  halt(context, force);
+  stayDown(context, force, reason);
+}
+
+/** A combat-ineffective force where it is: down, holding its fire, until ordered on. */
+function stayDown(context: FofContext, force: FofForce, reason: string): void {
   for (const id of force.memberIds) {
     const member = context.fof.soldiers[context.memberIndex.get(id) ?? -1];
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
@@ -146,7 +172,6 @@ function ineffective(context: FofContext, force: FofForce, reason: string): void
     member.reactAt = null;
     soldier.posture = 'prone';
   }
-  force.combatIneffective = true;
   enter(context, force, 'ineffective', reason);
 }
 

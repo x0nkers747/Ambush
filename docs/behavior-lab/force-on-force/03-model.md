@@ -297,8 +297,22 @@ about 250 m off, where an enemy carrying on with its mission ran into it again a
 finished it off. A force avoiding contact still holds once clear.
 
 **Combat ineffective** (terminal): effectiveness below 0.3, or no soldier left. The
-force stops, its plan fails, its soldiers stay prone, and it fires no more. In a
-battle the player may still order it on, while it has soldiers left. It then carries
+force stops, its plan fails, its soldiers stay prone, and it fires no more.
+
+In a battle (with no experiment to end) two things differ:
+
+- It is judged on lasting effectiveness (losses, ammunition, leaders), not
+  suppression, which wears off. A burst of fire does not write a squad off for
+  good.
+- With soldiers left, it first falls back out of the enemy's reach, as a broken
+  force does (500 m, carrying on with a withdrawal already begun). It holds its
+  fire on the way unless fired upon. Only once there does it stay down, prone
+  and not firing. With nowhere to go, it stays down where it is.
+
+Until then, an ambushed squad could be made ineffective a few seconds into its
+withdrawal and stopped in front of the ambush.
+
+In a battle the player may still order it on, while it has soldiers left. It then carries
 out its orders as before, but it stays combat ineffective (`combatIneffective`:
 counted so, and never made ineffective again for its effectiveness). Spent, it breaks
 contact when it meets the enemy.

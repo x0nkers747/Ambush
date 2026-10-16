@@ -185,7 +185,10 @@ function phaseActivity(force: DeepReadonly<FofForce>, config: FofConfig): SquadA
     case 'withdrawn':
       return { word: 'Withdrawn', why: 'broke contact and withdrew: out of the fight' };
     case 'ineffective':
-      return { word: 'Ineffective', why: 'combat ineffective: too few fit to fight' };
+      return {
+        word: 'Ineffective',
+        why: 'combat ineffective: too few fit to fight; it waits for new orders',
+      };
   }
 }
 

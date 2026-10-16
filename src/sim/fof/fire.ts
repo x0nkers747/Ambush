@@ -182,8 +182,10 @@ export function resolveFire(context: FofContext): void {
       return;
     }
     // Avoiding contact, it holds its fire unless it has been fired upon lately.
+    // So does a combat-ineffective force falling back.
     if (
-      force.actionsOn === 'withdraw' &&
+      (force.actionsOn === 'withdraw' ||
+        (force.phase === 'withdrawing' && force.combatIneffective)) &&
       (force.lastFiredUponAt === null || t - force.lastFiredUponAt > HOLD_FIRE_UNLESS_FIRED_UPON_S)
     ) {
       member.nextFireAt = t + 1;
