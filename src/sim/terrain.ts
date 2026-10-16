@@ -1,6 +1,7 @@
 import { validateFeatures, type DecorFeatures, type EnvironmentFeatures } from './environment';
 import type { TerrainCleaning } from './dem-quality';
 import { refinementIndex, sampleSurface } from './terrain-surface';
+import { isSharedTerrain } from './shared-terrain';
 import type { WaterSurfaces } from './water-grading';
 
 // Runtime terrain format (docs/adr/0006, docs/adr/0008, docs/adr/0011).
@@ -139,6 +140,15 @@ export interface TerrainDataset {
 
 /** Throws a RangeError describing the first invalid field. */
 export function validateTerrain(terrain: TerrainDataset): void {
+  // A shared terrain cannot change: checked once.
+  if (validTerrains.has(terrain)) return;
+  checkTerrain(terrain);
+  if (isSharedTerrain(terrain)) validTerrains.add(terrain);
+}
+
+const validTerrains = new WeakSet<TerrainDataset>();
+
+function checkTerrain(terrain: TerrainDataset): void {
   // Stored data is checked at run time, whatever its static type says.
   const format: number = terrain.formatVersion;
   if (format !== 2 && format !== 3) {

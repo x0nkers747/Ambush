@@ -19,26 +19,25 @@ export function hashSimState(state: SimState | DeepReadonly<SimState>): string {
  * state. Identifies the context a snapshot belongs to (docs/adr/0008).
  */
 export function fingerprintWorld(world: SimWorld): string {
-  // A shared terrain cannot change, so its world's fingerprint is remembered
-  // (per the rest of the world: movement parameters and combat model) rather
-  // than recomputed for every simulation.
-  if (!isSharedTerrain(world.terrain)) return fnv1a64Utf16le(canonicalEncode(world));
+  // The terrain's own fingerprint stands for it: so a shared terrain, which
+  // cannot change, is hashed once, however often the rest of the world (the
+  // movement parameters, the forces of a scenario being edited) changes.
   const { terrain, ...rest } = world;
-  const key = canonicalEncode(rest);
-  let known = worldFingerprints.get(terrain);
-  if (!known) {
-    known = new Map();
-    worldFingerprints.set(terrain, known);
-  }
-  let fingerprint = known.get(key);
+  return fnv1a64Utf16le(canonicalEncode({ ...rest, terrain: terrainFingerprint(terrain) }));
+}
+
+/** A terrain's content fingerprint; remembered for a shared (unchangeable) terrain. */
+export function terrainFingerprint(terrain: TerrainDataset): string {
+  if (!isSharedTerrain(terrain)) return fnv1a64Utf16le(canonicalEncode(terrain));
+  let fingerprint = terrainFingerprints.get(terrain);
   if (fingerprint === undefined) {
-    fingerprint = fnv1a64Utf16le(canonicalEncode(world));
-    known.set(key, fingerprint);
+    fingerprint = fnv1a64Utf16le(canonicalEncode(terrain));
+    terrainFingerprints.set(terrain, fingerprint);
   }
   return fingerprint;
 }
 
-const worldFingerprints = new WeakMap<TerrainDataset, Map<string, string>>();
+const terrainFingerprints = new WeakMap<TerrainDataset, string>();
 
 /**
  * Content fingerprint of any plain data (the same hash as `fingerprintWorld`),

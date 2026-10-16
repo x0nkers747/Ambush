@@ -243,7 +243,32 @@ export function createPlanner(o: PlannerOptions): Planner {
       })),
     );
   });
-  const figures = memo((d): StartFigures => {
+  /**
+   * The start figures, rebuilt only when the soldiers' starts change (the
+   * squads, where they stand and face, their formations, the seed): never for
+   * an edit of a plan, such as a waypoint being dragged.
+   */
+  let figuresKey = '';
+  let figuresMade: StartFigures | null = null;
+  const figures = (): StartFigures => {
+    const key = JSON.stringify([
+      definition.seed,
+      definition.squads.map((s) => [
+        s.id,
+        s.side,
+        s.organization,
+        s.formation,
+        s.position,
+        s.facingDeg,
+      ]),
+    ]);
+    if (figuresMade === null || key !== figuresKey) {
+      figuresKey = key;
+      figuresMade = startFigures(definition);
+    }
+    return figuresMade;
+  };
+  const startFigures = (d: BattleScenarioDefinition): StartFigures => {
     // No squads yet (a new battlefield): no figures; a battle needs a force.
     if (d.squads.length === 0)
       return { log: createMotionRecorder(BATTLE_TICK_RATE_HZ), weapons: {}, soldiers: [] };
@@ -263,7 +288,7 @@ export function createPlanner(o: PlannerOptions): Planner {
         posture: s.posture,
       })),
     };
-  });
+  };
 
   const squad = (id: string | null) =>
     id === null ? undefined : definition.squads.find((s) => s.id === id);

@@ -296,6 +296,18 @@ describe('the 3D view’s figures', () => {
     expect(p.figures().soldiers).toEqual([]);
     expect(planner('scenario').p.figures().soldiers).toHaveLength(17);
   });
+
+  it('are built again only when the soldiers’ starts change, not for a plan’s edits', () => {
+    const { p } = planner('scenario');
+    const first = p.figures();
+    p.select('O1');
+    p.setTool({ kind: 'order', order: 'move' });
+    p.click({ x: 0, y: 200 });
+    p.moveOrderTo('O1', 0, { x: 50, y: 150 }, false);
+    expect(p.figures()).toBe(first);
+    p.moveSquadTo('O1', { x: 20, y: 420 }, false);
+    expect(p.figures()).not.toBe(first);
+  });
 });
 
 describe('viewsheds turned on', () => {

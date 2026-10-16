@@ -255,4 +255,5 @@ describe('snapshot world compatibility', () => {
 
 const PINNED_INITIAL_HASH = 'b404a3ad5a8eca80';
 const PINNED_SCRIPTED_HASH = '3906dc120511b339';
-const PINNED_TEST_WORLD_FINGERPRINT = '703a0d35e7aa6b71';
+// Since 2026-10-16 the terrain enters it as its own fingerprint (hashed once per shared terrain).
+const PINNED_TEST_WORLD_FINGERPRINT = '2babab01545f62d2';
