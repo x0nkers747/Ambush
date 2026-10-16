@@ -365,6 +365,11 @@ describe('a defend order', () => {
       180,
       6,
     );
+    // Its facing handle turns it round the position, keeping the arc.
+    expect(p.turnDefendTo('B1', 0, { x: -100, y: -300 }, true)).toBe(true);
+    const turned = p.definition.squads.find((s) => s.id === 'B1')?.plan[0]?.sector;
+    expect(turned?.facingDeg).toBeCloseTo(270, 6);
+    expect(turned?.arcDeg).toBeCloseTo(180, 6);
   });
 });
 

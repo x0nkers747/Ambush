@@ -149,6 +149,8 @@ export interface Planner {
   armKillZone(): boolean;
   /** Widens or narrows a defend order's arc to its handle at `point`. */
   resizeDefendArcTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
+  /** Turns a defend order's sector round its position to face `point` (its arc kept). */
+  turnDefendTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
   /** Moves corner `corner` of an ambush order's kill zone to `point`. */
   resizeKillZoneTo(
     id: string,
@@ -635,6 +637,10 @@ export function createPlanner(o: PlannerOptions): Planner {
       tool = { kind: s.plan[index]?.kind === 'defend' ? 'sector' : 'killZone' };
       changed();
       return true;
+    },
+    turnDefendTo(id, index, point, saving) {
+      if (!canPlan(squad(id))) return false;
+      return apply((d) => setDefendSector(d, id, index, point), saving);
     },
     resizeDefendArcTo(id, index, point, saving) {
       if (!canPlan(squad(id))) return false;

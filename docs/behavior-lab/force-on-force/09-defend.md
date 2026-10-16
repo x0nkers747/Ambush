@@ -14,9 +14,13 @@ it waits for new orders.
 
 1. Select the squad and press **Defend** (**D**).
 2. Click the defensive position. This adds the order and arms the direction tool.
-3. Click in the direction it defends toward. The sector is a 90° wedge that way.
+3. Click in the direction it defends toward. The sector is a 90° wedge that way,
+   drawn 45 m out from the position. Its label ("Defend 1 · 90°") is just under
+   the middle of its arc.
 4. Drag the small square on the wedge's edge to widen or narrow it, from 20° up
    to all round. Within 10° of all round it becomes all round.
+5. Drag the small circle at the middle of the arc to turn the wedge round the
+   position. Its width stays the same.
 
 **Set direction** (**K**) sets the direction again. It is shown with the Defend
 tool, or with a defend order selected.
@@ -142,8 +146,8 @@ is within the noise.
   - `PlannedSector`, `setDefendSector`, `resizeDefendArc`, `setDefendPrepared`, `sectorSpec`;
   - the parsing and the issues.
 - The app:
-  - `planner.ts`: the direction tool and the arc handle;
-  - `map-editor.ts`: the wedge (`defenceSector`);
+  - `planner.ts`: the direction tool, the arc handle and turning the sector (`turnDefendTo`);
+  - `map-editor.ts`: the wedge (`defenceSector`), its arc and facing handles;
   - `combat.ts` and `combat-editor.ts`: two clicks in combat;
   - `status.ts`: "Defending 45%" and the earthworks;
   - `page.ts`: the tools, keys, panel and preparation.

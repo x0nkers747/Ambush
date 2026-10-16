@@ -63,6 +63,8 @@ type Hit =
     }
   /** The handle that widens or narrows the selected defend order's arc. */
   | { readonly kind: 'arc'; readonly squad: ScenarioSquad; readonly index: number }
+  /** The handle that turns the selected defend order's sector round its position. */
+  | { readonly kind: 'facing'; readonly squad: ScenarioSquad; readonly index: number }
   | { readonly kind: 'knob'; readonly squad: ScenarioSquad }
   | { readonly kind: 'squad'; readonly squad: ScenarioSquad }
   | { readonly kind: 'vehicle'; readonly vehicle: PlannedVehicle }
@@ -150,6 +152,8 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       if (defence?.sector && index !== null && planner.canPlan(selected)) {
         const handle = arcHandle(toVec(defence.destination), defence.sector);
         if (near(at(handle), CORNER_HIT_PX)) return { kind: 'arc', squad: selected, index };
+        const facing = facingHandle(toVec(defence.destination), defence.sector);
+        if (near(at(facing), CORNER_HIT_PX)) return { kind: 'facing', squad: selected, index };
       }
       // The selected ambush order's kill zone corners.
       const zone = index === null ? undefined : selected.plan[index]?.killZone;
@@ -221,6 +225,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       else if (drag.kind === 'corner')
         planner.resizeKillZoneTo(id, drag.index, drag.corner, point, false);
       else if (drag.kind === 'arc') planner.resizeDefendArcTo(id, drag.index, point, false);
+      else if (drag.kind === 'facing') planner.turnDefendTo(id, drag.index, point, false);
       else planner.moveOrderTo(id, drag.index, point, false);
     },
     drop() {
@@ -232,7 +237,8 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     },
     cursor(_point, screen) {
       const hit = hitAt(screen);
-      if (hit?.kind === 'knob' || hit?.kind === 'vehicleKnob') return 'grab';
+      if (hit?.kind === 'knob' || hit?.kind === 'vehicleKnob' || hit?.kind === 'facing')
+        return 'grab';
       if (hit?.kind === 'vehicle') return planner.canPlace() ? 'move' : 'pointer';
       if (hit?.kind === 'vehicleWaypoint')
         return planner.canRoute(hit.vehicle) ? 'move' : 'pointer';
@@ -681,7 +687,13 @@ export function waypoint(
 }
 
 /** How far a defence's sector is drawn from its position (map metres). */
-export const SECTOR_DRAW_M = 90;
+export const SECTOR_DRAW_M = 45;
+
+/** Where a defence's facing handle is: the middle of its arc, the way it faces (its label just under it). */
+export function facingHandle(at: Vec2, sector: PlannedSector): Vec2 {
+  const rad = (sector.facingDeg * Math.PI) / 180;
+  return { x: at.x + SECTOR_DRAW_M * Math.sin(rad), y: at.y + SECTOR_DRAW_M * Math.cos(rad) };
+}
 
 /** Where a defence's arc handle is: on its arc's right-hand edge (all round, behind it). */
 export function arcHandle(at: Vec2, sector: PlannedSector): Vec2 {
@@ -737,8 +749,8 @@ export function defenceSector(
   ctx.stroke();
   ctx.setLineDash([]);
   // Its facing: a line from the position to the arc's middle.
-  const mid = edge[Math.floor(steps / 2)];
-  if (mid && arc < 360) {
+  const mid = at(facingHandle(centre, sector));
+  if (arc < 360) {
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = color;
     ctx.beginPath();
@@ -746,15 +758,24 @@ export function defenceSector(
     ctx.lineTo(mid.x, mid.y);
     ctx.stroke();
   }
-  const labelAt = mid ?? c;
+  // Its label just under the arc's middle (and the facing handle there).
   ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   const label = `Defend ${String(n)} · ${String(Math.round(arc))}°`;
   ctx.lineWidth = 3;
   ctx.strokeStyle = OUTLINE;
-  ctx.strokeText(label, labelAt.x, labelAt.y);
+  ctx.strokeText(label, mid.x, mid.y + 9);
   ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
-  ctx.fillText(label, labelAt.x, labelAt.y);
+  ctx.fillText(label, mid.x, mid.y + 9);
   if (handle) {
+    // The facing handle (a circle: drag to turn the sector round the position).
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, 5.5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
     const h = at(arcHandle(centre, sector));
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = OUTLINE;
