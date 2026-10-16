@@ -1,6 +1,6 @@
 import { emptyMotionSample, type MotionLog } from '#exercise';
 import type { Battle } from '#exercise/battle';
-import type { OrderKind, Vec2 } from '#sim';
+import type { OrderKind, Vec2, ActionsOn } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { TimedEvent } from './session';
 import type { SquadStatus } from './status';
@@ -25,7 +25,13 @@ export interface BattleDisplay {
   readonly battle: Pick<Battle, 'squads'>;
   squads(): readonly SquadStatus[];
   squad(id: string | null): SquadStatus | undefined;
-  order?(squadId: string, kind: OrderKind, point: Vec2, mode: 'replace' | 'append'): boolean;
+  order?(
+    squadId: string,
+    kind: OrderKind,
+    point: Vec2,
+    mode: 'replace' | 'append',
+    actionsOn: ActionsOn | null,
+  ): boolean;
 }
 
 export interface CombatUi {
@@ -37,6 +43,8 @@ export interface CombatUi {
   append: boolean;
   /** Whether Shift is held now. */
   shift: boolean;
+  /** What a squad ordered now does on contact (`null`: its order kind's). */
+  actionsOn: ActionsOn | null;
 }
 
 /** How long a burst stays drawn (s of simulation). */
@@ -116,7 +124,13 @@ export function createCombatMapEditor(
         notify('Select a squad first (of either side), then click where its order takes it.');
         return;
       }
-      c.order(ui.selected, ui.tool, point, ui.append !== ui.shift ? 'append' : 'replace');
+      c.order(
+        ui.selected,
+        ui.tool,
+        point,
+        ui.append !== ui.shift ? 'append' : 'replace',
+        ui.actionsOn,
+      );
     },
     cursor(_point, screen) {
       const hit = squadAt(screen);

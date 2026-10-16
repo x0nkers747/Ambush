@@ -30,15 +30,27 @@ import type { FofForce, ForcePhase, ObservationLevel } from './types';
 //   contact / engaged ─ no contact and no fire for contactLostSeconds ─▶ holding
 //   holding ─ contact again ─▶ contact;  ─ resumeAfterSeconds ─▶ moving (mission)
 //
-// What "contact" leads to is the force's actions on contact (`ActionsOn`):
+// What "contact" leads to is the force's actions on contact (`ActionsOn`,
+// docs/behavior-lab/force-on-force/07):
 //
-//   continue: as above, it fights where it halts and resumes its mission;
+//   continue: as above, it fights where it halts and resumes its mission; with
+//             no soldier able to fire at an enemy he sees for pressOnSeconds,
+//             it presses on (moving, firing on the move, not halting for
+//             contact for as long);
 //   attack:   contact ─ assaultAfterSeconds, enemy located ─▶ assaulting (on
-//             the enemy's believed position, by fire and movement: one
-//             element bounds while the others fire, in turn);
+//             the enemy's believed position, by fire and movement, in its
+//             assault formation, an extended line: one element bounds while
+//             the others fire, in turn);
 //             assaulting ─ closed with the enemy ─▶ contact;
 //                        ─ on the objective, no contact ─▶ holding ─▶ mission;
-//   withdraw: contact ─▶ withdrawing (back to where it started) at once.
+//   hold:     it fights where it halts, and holds there until ordered on;
+//   withdraw: avoiding contact: any confirmed contact ─▶ withdrawing at once
+//             (in the lab, back to where it started; in a battle, back from
+//             where it is), holding its fire unless fired upon; then it holds.
+//
+// Halted in contact, each soldier takes the lowest posture from which he
+// sees an enemy his force knows of (prone, else kneeling), chosen again
+// every few seconds.
 //
 // Withdrawal of a spent force and combat ineffectiveness (terminal) are
 // added by the engagement lifecycle (`lifecycle.ts`).
@@ -51,6 +63,11 @@ const WITHDRAW_OFFSETS_DEG: readonly number[] = [0, 30, -30, 60, -60, 90, -90];
 export const WITHDRAW_RETRY_S = 10;
 /** A start closer than this to the force (m) is no place to go back to: it withdraws away from the threat. */
 const HOME_MIN_DISTANCE_M = 25;
+/** How often a halted soldier's posture is chosen again (s), and how many known contacts he looks for. */
+const POSTURE_CHECK_S = 3;
+const POSTURE_CONTACTS = 3;
+/** Where a soldier is aimed at, above the ground at his last known position (m). */
+const CONTACT_HEIGHT_M = 0.6;
 
 /** Phases in which the force is halted in place (no unit task). */
 export function halted(phase: ForcePhase): boolean {
@@ -62,6 +79,13 @@ export function halted(phase: ForcePhase): boolean {
 /** Phases in which the force moves under fire, its soldiers firing on the move. */
 export function firingOnTheMove(phase: ForcePhase): boolean {
   return phase === 'withdrawing';
+}
+
+/** Whether the force is pressing on through contact now (actions on contact `continue`). */
+export function pressingOn(context: FofContext, force: FofForce): boolean {
+  return (
+    force.phase === 'moving' && force.pressOnUntil !== null && context.t < force.pressOnUntil - 1e-9
+  );
 }
 
 /** Phases in which the force's movement is its own (contact behaviour), not its mission. */
@@ -76,16 +100,24 @@ export function updateForces(context: FofContext): void {
   context.fof.forces.forEach((force, i) => {
     if (!forceActive(force)) return;
     const picture = pictureOf(context, i);
-    if (picture.confirmed) force.lastContactAt = t;
+    // Contact lasts while the enemy is actually seen (a sighting), not while a remembered track lasts.
+    if (picture.lastSeenAt !== null)
+      force.lastContactAt = Math.max(force.lastContactAt ?? -Infinity, picture.lastSeenAt);
     if (picture.identified) force.hostile = true;
     force.threat = picture.threat;
     // Its orders first (a planned squad): the active one checked, the next started.
     updatePlan(context, force, setup.forces[i]?.actionsOn ?? 'continue');
     if (!forceActive(force)) return;
-    const close = picture.nearestConfirmed <= behavior.engageRangeM;
+    // Avoiding contact, any confirmed contact is close enough to fall back from.
+    const close =
+      force.actionsOn === 'withdraw'
+        ? picture.confirmed
+        : picture.nearestConfirmed <= behavior.engageRangeM;
     switch (force.phase) {
       case 'moving':
       case 'atObjective':
+        if (pressingOn(context, force)) break;
+        if (force.phase === 'moving') force.pressOnUntil = null;
         if (close) onContact(context, force, 'contact within engagement range');
         else if (
           picture.newSince(force.observedUntil) &&
@@ -121,10 +153,21 @@ export function updateForces(context: FofContext): void {
           enter(context, force, 'holding', 'contact lost');
         } else if (force.actionsOn === 'attack') {
           beginAssault(context, force, picture.enemy);
+        } else if (force.actionsOn === 'continue' && nothingToEngage(context, force)) {
+          // Nothing it can engage from here: it presses on, firing on the move.
+          force.pressOnUntil = t + behavior.pressOnSeconds;
+          force.observedUntil = t;
+          resume(context, force, 'nothing to engage: pressing on');
+          if ((force.phase as ForcePhase) !== 'moving') force.pressOnUntil = null;
         } else if (
           force.actionsOn === 'withdraw' &&
           (force.withdrawRetryAt === null || t >= force.withdrawRetryAt - 1e-9) &&
-          !withdraw(context, force, 'actions on contact: withdraw', force.start)
+          !withdraw(
+            context,
+            force,
+            'actions on contact: withdraw',
+            force.planned ? null : force.start,
+          )
         ) {
           force.withdrawRetryAt = t + WITHDRAW_RETRY_S;
         }
@@ -137,6 +180,9 @@ export function updateForces(context: FofContext): void {
         if (close) {
           onContact(context, force, 'contact regained');
         } else if (
+          // Holding (or having fallen back from contact) it stays until ordered on.
+          force.actionsOn !== 'hold' &&
+          force.actionsOn !== 'withdraw' &&
           t - force.phaseSince >= behavior.resumeAfterSeconds - 1e-9 &&
           force.effectiveness >= behavior.resumeEffectiveness
         ) {
@@ -166,6 +212,7 @@ export function pictureOf(context: FofContext, force: number) {
   const centre = own ? centreOf(context, own) : null;
   let confirmed = false;
   let identified = false;
+  let lastSeenAt: number | null = null;
   let nearestConfirmed = Infinity;
   let sx = 0;
   let sy = 0;
@@ -179,6 +226,7 @@ export function pictureOf(context: FofContext, force: number) {
     const current = track.level !== 'lost';
     if (track.level === 'detected' || track.level === 'identified') {
       confirmed = true;
+      lastSeenAt = Math.max(lastSeenAt ?? -Infinity, track.lastSeenAt);
       ex += track.lastKnown.x;
       ey += track.lastKnown.y;
       en += 1;
@@ -209,6 +257,8 @@ export function pictureOf(context: FofContext, force: number) {
   return {
     confirmed,
     identified,
+    /** When a confirmed contact was last actually seen (`null`: none confirmed). */
+    lastSeenAt,
     nearestConfirmed,
     threat: n > 0 ? { x: sx / n, y: sy / n } : null,
     /** Where it believes the enemy is: the centre of its current confirmed contacts. */
@@ -270,7 +320,11 @@ export function halt(
     force.phase !== 'contact' &&
     force.phase !== 'engaged' &&
     force.phase !== 'assaulting';
-  if (entering) force.contactCycles += 1;
+  if (entering) {
+    force.contactCycles += 1;
+    force.contactAt = t;
+  }
+  force.pressOnUntil = null;
   enter(context, force, phase, reason);
   // Reaction delays, drawn in soldier order.
   const delay = context.setup.config.force.reactionDelay;
@@ -308,7 +362,9 @@ export function cancelTask(context: FofContext, force: FofForce): void {
 function onContact(context: FofContext, force: FofForce, reason: string): void {
   const { t } = context;
   if (force.actionsOn === 'withdraw') {
-    if (withdraw(context, force, `actions on contact: withdraw (${reason})`, force.start)) {
+    // The lab's forces go back to where they started; a battle's squads fall back from where they are.
+    const home = force.planned ? null : force.start;
+    if (withdraw(context, force, `actions on contact: withdraw (${reason})`, home)) {
       force.contactCycles += 1;
       return;
     }
@@ -407,9 +463,12 @@ interface Element {
  * has two or more; else its soldiers in two halves, in formation order (the
  * leader with the first).
  */
-export function elementsOf(context: FofContext, force: FofForce): Element[] {
+export function elementsOf(context: FofContext, force: FofForce, assault = false): Element[] {
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
-  const formation = force.mission?.formation ?? forceSetup?.formation;
+  const formation =
+    (assault ? forceSetup?.assaultFormation : undefined) ??
+    force.mission?.formation ??
+    forceSetup?.formation;
   if (!formation) return [];
   const root = formation.root;
   const soldiersOf = (n: FormationNode): SoldierId[] => [
@@ -452,7 +511,8 @@ export function elementsOf(context: FofContext, force: FofForce): Element[] {
 function bound(context: FofContext, force: FofForce, target: Vec2): boolean {
   const { t } = context;
   const behavior = context.setup.config.force;
-  const elements = elementsOf(context, force);
+  // Assaulting, in its assault formation (an extended line).
+  const elements = elementsOf(context, force, true);
   for (const index of boundOrder(context, force, elements, target)) {
     const element = elements[index];
     if (!element) continue;
@@ -833,7 +893,7 @@ function carryOut(
       // Assaulting or breaking contact, he fires on the move at what he can see
       // (after a moment to start off); breaking contact, he keeps his last rounds.
       if (
-        firingOnTheMove(force.phase) &&
+        (firingOnTheMove(force.phase) || pressingOn(context, force)) &&
         member.nextFireAt === null &&
         member.weapon !== null &&
         roundsLeft(member) > 0 &&
@@ -857,12 +917,13 @@ function carryOut(
       }
     }
     if (!member.reacted) continue;
-    soldier.posture =
-      member.level === 'pinned'
-        ? 'prone'
-        : force.phase === 'possibleContact' || member.leader
-          ? 'kneeling'
-          : 'prone';
+    if (member.level === 'pinned') soldier.posture = 'prone';
+    else if (force.phase === 'possibleContact') soldier.posture = 'kneeling';
+    else if (t >= member.postureAt - 1e-9) {
+      // In contact: the lowest posture he sees the enemy from (leaders kneel to see and command).
+      member.postureAt = t + POSTURE_CHECK_S;
+      soldier.posture = postureToSee(context, soldier, known, member.leader ? 'kneeling' : 'prone');
+    }
     // Contact phases that began before he reacted: fire once reacted.
     if (
       (force.phase === 'contact' || force.phase === 'engaged' || assaulting) &&
@@ -882,6 +943,54 @@ function carryOut(
   }
 }
 
+/**
+ * The lowest posture, from `lowest` up to kneeling, from which a soldier
+ * sees one of the nearest contacts his force knows of; with none in sight
+ * from any, `lowest` (in cover).
+ */
+export function postureToSee(
+  context: FofContext,
+  soldier: Soldier,
+  known: KnownContacts,
+  lowest: 'prone' | 'kneeling',
+): 'prone' | 'kneeling' {
+  if (known.count === 0) return lowest;
+  const terrain = context.world.terrain;
+  const tracer = sightLineTracer(terrain);
+  const eyes = context.setup.config.detection.eyeHeightM;
+  // The nearest few contacts (the first of equals), by squared distance.
+  const fx = soldier.position.x;
+  const fy = soldier.position.y;
+  const order = Array.from({ length: known.count }, (_, k) => k)
+    .map((k) => ({ k, d: ((known.x[k] ?? 0) - fx) ** 2 + ((known.y[k] ?? 0) - fy) ** 2 }))
+    .sort((a, b) => a.d - b.d || a.k - b.k)
+    .slice(0, POSTURE_CONTACTS);
+  const sees = (posture: 'prone' | 'kneeling') => {
+    const eye = { x: fx, y: fy, z: soldier.position.z + eyes[posture] };
+    return order.some(({ k }) => {
+      const x = known.x[k] ?? 0;
+      const y = known.y[k] ?? 0;
+      if (!isOnTerrain(terrain, x, y) || (x === fx && y === fy)) return false;
+      return !tracer.blocked(eye, { x, y, z: surfaceHeightAt(terrain, x, y) + CONTACT_HEIGHT_M });
+    });
+  };
+  if (lowest === 'prone' && sees('prone')) return 'prone';
+  if (sees('kneeling')) return 'kneeling';
+  return lowest;
+}
+
+/**
+ * Whether a force halted in contact has nothing it can engage: none of its
+ * soldiers has fired at an enemy he could see for `pressOnSeconds` since it
+ * halted, and it is not pinned down.
+ */
+function nothingToEngage(context: FofContext, force: FofForce): boolean {
+  const { t, setup } = context;
+  const since = Math.max(force.contactAt ?? -Infinity, force.lastAimedFireAt ?? -Infinity);
+  if (t - since < setup.config.force.pressOnSeconds - 1e-9) return false;
+  return force.meanSuppression < setup.config.suppression.suppressedAt;
+}
+
 /** Holds (or releases) a soldier steered by a unit task in place. */
 function hold(context: FofContext, soldier: Soldier, on: boolean): void {
   holdAgent(
@@ -897,7 +1006,7 @@ function holdAgent(agent: AgentState | undefined, on: boolean): void {
 }
 
 /** A force's current contacts (not lost), in track order: their last known positions. */
-interface KnownContacts {
+export interface KnownContacts {
   readonly count: number;
   readonly x: Float64Array;
   readonly y: Float64Array;
@@ -970,6 +1079,7 @@ export function underFire(context: FofContext, force: number, shooter: Soldier):
     );
     setLevel(context, track, from, null, null);
   }
+  if (pressingOn(context, own)) return;
   if (
     own.phase === 'moving' ||
     own.phase === 'atObjective' ||

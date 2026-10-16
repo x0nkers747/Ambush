@@ -17,8 +17,13 @@ export {
   type SquadSpec,
 } from './battle';
 export {
+  ACTIONS_ON_HINTS,
+  ACTIONS_ON_LABELS,
+  actionsOnOf,
   addOrder,
   addSquad,
+  defaultActionsOn,
+  setOrderActionsOn,
   BATTLE_SCHEMA_VERSION,
   BattleScenarioError,
   describePathProblem,

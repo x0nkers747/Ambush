@@ -288,7 +288,7 @@ const SQUAD_KEYS = [
   'facingDeg',
   'plan',
 ];
-const ORDER_KEYS = ['kind', 'destination'];
+const ORDER_KEYS = ['kind', 'destination', 'actionsOn'];
 const POINT_KEYS = ['east', 'north'];
 const SCENARIO_KEYS = [
   'schema',

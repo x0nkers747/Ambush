@@ -1,4 +1,5 @@
 import {
+  ACTIONS_ON,
   azimuthOf,
   isOnTerrain,
   nearestClearPoint,
@@ -6,6 +7,7 @@ import {
   planPath,
   pointProblem,
   terrainModelId,
+  type ActionsOn,
   type OrderKind,
   type PointProblem,
   type Side,
@@ -92,7 +94,18 @@ export function describePathProblem(
 export interface PlannedOrder {
   readonly kind: OrderKind;
   readonly destination: MapPoint;
+  /** What the squad does on contact while carrying it out; absent: its kind's (`defaultActionsOn`). */
+  readonly actionsOn?: ActionsOn;
 }
+
+/** The actions on contact of an order kind, by default: a move continues, an attack attacks, a withdrawal avoids contact. */
+export function defaultActionsOn(kind: OrderKind): ActionsOn {
+  return kind === 'attack' ? 'attack' : kind === 'withdraw' ? 'withdraw' : 'continue';
+}
+
+/** An order's actions on contact (its own, else its kind's). */
+export const actionsOnOf = (order: PlannedOrder): ActionsOn =>
+  order.actionsOn ?? defaultActionsOn(order.kind);
 
 export interface ScenarioSquad {
   /** Stable id: letters and digits (`B1`, `O2`…); its soldiers are `<id>-01`…. */
@@ -145,6 +158,22 @@ export const ORDER_LABELS: Readonly<Record<OrderKind, string>> = {
   move: 'Move',
   attack: 'Attack',
   withdraw: 'Withdraw',
+};
+
+/** What each actions on contact is called (docs/behavior-lab/force-on-force/07). */
+export const ACTIONS_ON_LABELS: Readonly<Record<ActionsOn, string>> = {
+  continue: 'Continue',
+  attack: 'Attack',
+  hold: 'Hold',
+  withdraw: 'Avoid',
+};
+
+/** What each actions on contact does, in a line. */
+export const ACTIONS_ON_HINTS: Readonly<Record<ActionsOn, string>> = {
+  continue: 'On contact: fight from where it halts, and press on when it has nothing to engage',
+  attack: 'On contact: assault the enemy in an extended line, then carry on',
+  hold: 'On contact: halt, fight from there and wait for new orders',
+  withdraw: 'On contact: fall back at once and hold, firing only if fired upon',
 };
 
 /** The id of a battlefield's battle scenario (one per battlefield; the ambush's is `<id>/1`). */
@@ -335,9 +364,16 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
       const kind = o['kind'];
       if (typeof kind !== 'string' || !(ORDER_KINDS as readonly string[]).includes(kind))
         return fail(`${what}, order ${String(k + 1)}: the kind is unknown`);
+      const actionsOn = o['actionsOn'];
+      if (
+        actionsOn !== undefined &&
+        (typeof actionsOn !== 'string' || !(ACTIONS_ON as readonly string[]).includes(actionsOn))
+      )
+        fail(`${what}, order ${String(k + 1)}: the actions on contact are unknown`);
       return {
         kind: kind as OrderKind,
         destination: point(o['destination'], `${what}, order ${String(k + 1)}'s destination`),
+        ...(typeof actionsOn === 'string' ? { actionsOn: actionsOn as ActionsOn } : {}),
       };
     });
     return {
@@ -658,7 +694,11 @@ export function addOrder(
   if ('problem' in placed) return refused(placed.problem);
   const at =
     index === undefined ? squad.plan.length : Math.max(0, Math.min(index, squad.plan.length));
-  const order: PlannedOrder = { kind, destination: toPoint(placed.point) };
+  const order: PlannedOrder = {
+    kind,
+    destination: toPoint(placed.point),
+    actionsOn: defaultActionsOn(kind),
+  };
   return {
     ok: true,
     definition: withSquad(d, id, (s) => ({
@@ -703,7 +743,36 @@ export function setOrderKind(
   return ok(
     withSquad(d, id, (s) => ({
       ...s,
-      plan: s.plan.map((o, k) => (k === index ? { ...o, kind } : o)),
+      plan: s.plan.map((o, k) =>
+        k !== index
+          ? o
+          : {
+              ...o,
+              kind,
+              // Its actions on contact follow the kind, unless they were chosen apart from it.
+              actionsOn:
+                actionsOnOf(o) === defaultActionsOn(o.kind)
+                  ? defaultActionsOn(kind)
+                  : actionsOnOf(o),
+            },
+      ),
+    })),
+  );
+}
+
+/** Sets what a squad does on contact while carrying out order `index`. */
+export function setOrderActionsOn(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  actionsOn: ActionsOn,
+): BattleEdit {
+  if (!orderAt(d, id, index)) return refused('There is no such order.');
+  if (!ACTIONS_ON.includes(actionsOn)) return refused('Unknown actions on contact.');
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, actionsOn } : o)),
     })),
   );
 }
@@ -764,7 +833,11 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
       ...(s.formation !== undefined ? { formation: s.formation } : {}),
       position: toVec(s.position),
       facingDeg: s.facingDeg,
-      plan: s.plan.map((o) => ({ kind: o.kind, destination: toVec(o.destination) })),
+      plan: s.plan.map((o) => ({
+        kind: o.kind,
+        destination: toVec(o.destination),
+        actionsOn: actionsOnOf(o),
+      })),
     })),
   };
 }

@@ -8,6 +8,7 @@ import { fofWeapon } from './config';
 import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, ttpf } from './detection';
 import { resolveFire, updateSuppression } from './fire';
 import { armed, updateReloads } from './weapons';
+import { actionsOnFor } from './orders';
 import { updateEffectiveness, updateForces } from './force';
 import { adjudicate, updateLifecycle } from './lifecycle';
 import { forceMembers } from './setup';
@@ -127,6 +128,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       unitId: f.unitId,
       sequence: k + 1,
       kind: spec.kind,
+      actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
       source: 'scenario',
       issuedTick: 0,
@@ -166,6 +168,9 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       mission: null,
       threat: null,
       lastContactAt: null,
+      contactAt: null,
+      lastAimedFireAt: null,
+      pressOnUntil: null,
       lastFireAt: null,
       lastFiredUponAt: null,
       suppressedSince: null,
@@ -210,6 +215,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       arms,
       reloading: -1,
       reloadUntil: null,
+      postureAt: 0,
       nextFireAt: null,
       reactAt: null,
       reacted: false,

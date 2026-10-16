@@ -44,9 +44,10 @@ import type { ActionsOn, FofForce, FofOrder, OrderKind, OrderSpec, OrderStatus }
 //   active          ─ the squad spent, breaking contact on its own ─▶ failed
 //                     (the next orders wait until it recovers, or a player orders it)
 //
-// The order's kind sets the squad's actions on contact: a move halts to
-// fight and carries on (`continue`), an attack assaults (`attack`), a
-// withdrawal does not halt to fight (it is the `withdrawing` phase).
+// Each order carries the squad's actions on contact while it is active
+// (`ActionsOn`, docs/behavior-lab/force-on-force/07); by default its kind's:
+// a move continues (fights, and presses on), an attack assaults, a
+// withdrawal avoids contact.
 
 /** Gives a squad orders (or, `replace` with none, clears its plan: it holds where it is). */
 export interface OrderSquadCommand {
@@ -135,6 +136,7 @@ export function applyOrderSquad(
       unitId: force.unitId,
       sequence,
       kind: spec.kind,
+      actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
       source: 'player',
       issuedTick: state.tick,
@@ -158,8 +160,8 @@ export function activeOrder(force: FofForce): FofOrder | null {
   return force.orders.find((o) => o.id === force.activeOrderId) ?? null;
 }
 
-/** The actions on contact of an order kind. */
-function actionsOnFor(kind: OrderKind): ActionsOn {
+/** The actions on contact of an order kind, by default. */
+export function actionsOnFor(kind: OrderKind): ActionsOn {
   return kind === 'attack' ? 'attack' : kind === 'withdraw' ? 'withdraw' : 'continue';
 }
 
@@ -276,7 +278,8 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   next.activatedAt = context.t;
   force.activeOrderId = next.id;
   force.objectiveQuietSince = null;
-  force.actionsOn = actionsOnFor(next.kind);
+  force.actionsOn = next.actionsOn;
+  force.pressOnUntil = null;
   context.events.push(orderEvent(context.tick, context.t, force, next, 'pending', 'started'));
   if (!next.destination) return;
   const mission = missionTo(context, force, next.destination);

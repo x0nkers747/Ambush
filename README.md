@@ -127,11 +127,17 @@ Next says what is missing, and the side panel says the same next to the stage's 
    ambush scenario is converted on opening.
 3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,
    or hidden with **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
-   change an order's kind, order and deletion in the plan list.
+   change an order's kind, order and deletion in the plan list. Each order's **On contact**
+   drop-down says what the squad does when it meets the enemy on the way: **Continue** (halt,
+   fight, and press on when there is nothing to engage), **Attack** (assault in an extended
+   line), **Hold** (halt, fight from there and wait for new orders) or **Avoid** (fall back,
+   firing only if fired upon); by default a Move continues, an Attack attacks and a Withdraw
+   avoids ([docs](docs/behavior-lab/force-on-force/07-actions-on-contact.md)).
 4. **Combat** ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)). The
    battle starts paused: **Space** plays and pauses, ½× to 32× sets the speed. Select any squad,
    of either side, and give it orders live: **M**, **A** or **W**, then click; **Replace plan**
-   or **Append** (Shift for the other, for one click); **H** holds. With an order tool, clicking
+   or **Append** (Shift for the other, for one click); **H** holds. **On contact** sets what
+   squads ordered now do on contact (by default, their order's kind's). With an order tool, clicking
    an enemy squad targets it. Orders given while paused apply when play resumes. The battle never
    ends by itself: **End combat** ends it. Soldiers carry finite ammunition and fire at their
    weapons' doctrinal rates: riflemen in short aimed bursts, automatic riflemen in 6–9-round

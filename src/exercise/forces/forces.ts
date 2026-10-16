@@ -53,6 +53,17 @@ export function formationsForOrganization(
   return formationsFor(echelon, template.slots.length);
 }
 
+/**
+ * The formation an organization assaults in: its extended line (a squad's
+ * line, a fire team's skirmishers), or `null` when it has none.
+ */
+export function assaultFormationId(organization: SquadOrganization): string | null {
+  return (
+    formationsForOrganization(organization).find((f) => /\.line$|skirmishers/.test(f.id))?.id ??
+    null
+  );
+}
+
 /** The simulation weapon category of a slot (from its primary weapon), or `null`. */
 export function weaponCategory(template: OrganizationTemplate, slot: TemplateSlot): string | null {
   const role = template.roles.find((r) => r.id === slot.roleId);
@@ -79,6 +90,8 @@ export interface SquadForce {
   readonly organization: TraineeOrganization;
   readonly formation: FormationSpec;
   readonly soldierIds: readonly string[];
+  /** The formation it assaults in (an extended line), when its organization has one. */
+  readonly assaultFormation: FormationSpec | null;
   /** Weapon category (simulation) and model (display) of each soldier. */
   readonly weapons: Readonly<Record<string, string | null>>;
   /** The second weapon (simulation) each soldier carries, if any (a grenade launcher). */
@@ -147,7 +160,15 @@ export function instantiateForce(o: ForceInstance): {
       interval: spec.interval,
       elementSpacing: spec.elementSpacing,
     });
-    return { unitIdPrefix, members, organization, formation };
+    const line = assaultFormationId(spec.organization);
+    const assault =
+      line === null
+        ? null
+        : buildFormationSpec(organization, root, line, {
+            interval: spec.interval,
+            elementSpacing: spec.elementSpacing,
+          });
+    return { unitIdPrefix, members, organization, formation, assault };
   });
   const first = copies[0];
   if (!first) throw new Error('force-on-force force needs an organization');
@@ -235,6 +256,7 @@ export function instantiateForce(o: ForceInstance): {
     unitId,
     organization: first.organization,
     formation,
+    assaultFormation: grouped ? null : first.assault,
     soldierIds: copies.flatMap((c) => c.members.map((m) => m.soldierId)),
     weapons,
     secondaryWeapons,

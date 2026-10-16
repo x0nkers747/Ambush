@@ -1,5 +1,5 @@
-import { ORDER_LABELS } from '#exercise/battle';
-import { ORDER_KINDS, type Side } from '#sim';
+import { ORDER_LABELS, ACTIONS_ON_HINTS, ACTIONS_ON_LABELS } from '#exercise/battle';
+import { ACTIONS_ON, ORDER_KINDS, type Side } from '#sim';
 import { escapeHtml } from '../shell';
 import {
   COMBAT_SPEEDS,
@@ -47,6 +47,12 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
       ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k], k[0]?.toUpperCase() ?? '')).join('')}
       ${tool(null, 'Select', 'S')}
     </div>
+    <label class="on-contact">On contact
+      <select data-act="combat-actions" title="What a squad ordered now does on contact">
+        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid)</option>
+        ${ACTIONS_ON.map((a) => `<option value="${a}"${ui.actionsOn === a ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">${ACTIONS_ON_LABELS[a]}</option>`).join('')}
+      </select>
+    </label>
     <div class="tool-row mode-row" role="group" aria-label="How a new order is given">
       <button class="small" data-cmode="replace" aria-pressed="${String(!ui.append)}" title="A new order replaces the squad's orders">Replace plan</button>
       <button class="small" data-cmode="append" aria-pressed="${String(ui.append)}" title="A new order follows the squad's pending orders">Append</button>

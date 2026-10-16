@@ -11,6 +11,8 @@ feature: the game never runs it.
 - [03 The model: contact, fire, suppression, outcomes](03-model.md)
 - [04 Experiments, sweeps, determinism and performance](04-experiments.md)
 - [05 The lab page](05-lab.md)
+- [06 Weapons, ammunition and grenade launchers](06-weapons-and-ammunition.md)
+- [07 Actions on contact](07-actions-on-contact.md)
 - [Implementation journal](journal.md)
 
 Open it: `npm run dev`, then http://localhost:5173/#force-on-force, and press **Run the default demonstration**.

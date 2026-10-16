@@ -165,7 +165,7 @@ export function startForceOnForceLab(root: HTMLElement): () => void {
         .map(([k, v]) => `<option value="${k}">${escape(v)}</option>`)
         .join('')}</select><span></span></label>
       <label class="row">Formation <select data-i="${side}-formation"></select><span></span></label>
-      <label class="row" title="What the force does when it comes into contact">Actions on contact <select data-i="${side}-actions"><option value="attack">Attack</option><option value="withdraw">Withdraw</option><option value="continue">Continue</option></select><span></span></label>
+      <label class="row" title="What the force does when it comes into contact">Actions on contact <select data-i="${side}-actions"><option value="continue">Continue</option><option value="attack">Attack</option><option value="hold">Hold</option><option value="withdraw">Withdraw (avoid)</option></select><span></span></label>
       <label class="row">Posture <select data-i="${side}-posture"><option value="standing">Standing</option><option value="kneeling">Kneeling</option><option value="prone">Prone</option></select><span></span></label>
       <div class="buttons">
         <button data-a="${side}-start" title="Then click the ground">Set start</button>

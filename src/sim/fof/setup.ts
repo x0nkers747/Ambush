@@ -4,7 +4,7 @@ import { fofWeapon, validateFofConfig, VISIBILITY_CLASSES } from './config';
 import { ORDER_KINDS, type ActionsOn, type FofSetup, type OrderSpec } from './types';
 
 /** The actions on contact a force can be given. */
-export const ACTIONS_ON: readonly ActionsOn[] = ['attack', 'withdraw', 'continue'];
+export const ACTIONS_ON: readonly ActionsOn[] = ['continue', 'attack', 'hold', 'withdraw'];
 
 /** Throws an Error naming the first problem of a force-on-force setup for these units and soldiers. */
 export function validateFofSetup(
@@ -82,6 +82,9 @@ export function orderSpecProblem(order: OrderSpec): string | null {
   const d = order.destination;
   if (d === null) return `a ${order.kind} order needs a destination`;
   if (!Number.isFinite(d.x) || !Number.isFinite(d.y)) return 'the destination must be finite';
+  const actionsOn: string | undefined = order.actionsOn;
+  if (actionsOn !== undefined && !(ACTIONS_ON as readonly string[]).includes(actionsOn))
+    return `unknown actions on contact "${actionsOn}"`;
   return null;
 }
 

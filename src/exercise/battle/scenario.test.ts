@@ -398,7 +398,10 @@ describe('the battle a scenario makes', () => {
     const spec = battleSpecOf(d, 30);
     expect(spec.seed).toBe(7);
     expect(spec.squads.map((s) => s.id)).toEqual(['O1', 'B1', 'B2']);
-    expect(spec.squads[0]?.plan).toEqual([{ kind: 'move', destination: { x: 0, y: 200 } }]);
+    // Each order with its actions on contact (a move's, by default: continue).
+    expect(spec.squads[0]?.plan).toEqual([
+      { kind: 'move', destination: { x: 0, y: 200 }, actionsOn: 'continue' },
+    ]);
     const starts = soldierStarts(terrain, d);
     expect(starts.get('O1')).toHaveLength(4);
     expect(starts.get('B1')).toHaveLength(13);

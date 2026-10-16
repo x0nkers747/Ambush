@@ -75,6 +75,16 @@ export function updateLifecycle(context: FofContext): void {
     ) {
       return;
     }
+    // Holding clear of the enemy (it has broken contact): nothing to break off from.
+    if (
+      force.phase === 'holding' &&
+      (force.lastContactAt === null ||
+        t - force.lastContactAt >= behavior.withdrawnClearSeconds - 1e-9) &&
+      (force.lastFiredUponAt === null ||
+        t - force.lastFiredUponAt >= behavior.withdrawnClearSeconds - 1e-9)
+    ) {
+      return;
+    }
     const ammunition = ammunitionShare(context, force);
     const reason =
       force.effectiveness < behavior.withdrawEffectiveness

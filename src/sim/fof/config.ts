@@ -253,6 +253,13 @@ export interface ForceBehaviorConfig {
   readonly withdrawnClearSeconds: number;
   /** Below this effectiveness the force is combat ineffective (terminal). */
   readonly ineffectiveEffectiveness: number;
+  /**
+   * Actions on contact `continue`: halted in contact with no soldier able to
+   * fire at an enemy he can see for this long (and not pinned), it presses on
+   * toward its destination, firing on the move, and does not halt for
+   * contact again for as long (s).
+   */
+  readonly pressOnSeconds: number;
   /** Attacking: seconds in contact (returning fire, locating the enemy) before it assaults. */
   readonly assaultAfterSeconds: number;
   /**
@@ -711,6 +718,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     'resumeAfterSeconds',
     'resumeEffectiveness',
     'withdrawEffectiveness',
+    'pressOnSeconds',
     'withdrawSuppression',
     'withdrawSuppressedSeconds',
     'withdrawAmmunitionFraction',
@@ -738,6 +746,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     resumeAfterSeconds: [0],
     resumeEffectiveness: [0, 1],
     withdrawEffectiveness: [0, 1],
+    pressOnSeconds: [1, 3600],
     withdrawSuppression: [0, 1],
     withdrawSuppressedSeconds: [0],
     withdrawAmmunitionFraction: [0, 1],

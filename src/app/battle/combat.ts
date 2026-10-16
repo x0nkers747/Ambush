@@ -3,8 +3,18 @@ import {
   ORDER_LABELS,
   placeDestination,
   type BattleScenarioDefinition,
+  ACTIONS_ON_LABELS,
+  defaultActionsOn,
 } from '#exercise/battle';
-import type { ForcePhase, OrderKind, OrderSpec, SimEvent, TerrainDataset, Vec2 } from '#sim';
+import type {
+  ForcePhase,
+  OrderKind,
+  OrderSpec,
+  SimEvent,
+  TerrainDataset,
+  Vec2,
+  ActionsOn,
+} from '#sim';
 import { BATTLE_TICK_RATE_HZ } from './planner';
 import { createLocalDriver, type DriverFactory } from './driver';
 import type { BattleRecording, BattleRun } from './session';
@@ -51,7 +61,14 @@ export interface Combat {
    */
   readonly achievedSpeed: number;
   /** Orders a squad to `point` (snapped clear of water and buildings). `true` when given. */
-  order(squadId: string, kind: OrderKind, point: Vec2, mode: 'replace' | 'append'): boolean;
+  /** Orders a squad; `actionsOn`: what it does on contact (`null`: its order kind's). */
+  order(
+    squadId: string,
+    kind: OrderKind,
+    point: Vec2,
+    mode: 'replace' | 'append',
+    actionsOn?: ActionsOn | null,
+  ): boolean;
   /** Clears a squad's orders: it holds where it is. */
   hold(squadId: string): void;
   squads(): readonly SquadStatus[];
@@ -174,7 +191,7 @@ export function createCombat(o: CombatOptions): Combat {
       }
       return events;
     },
-    order(squadId, kind, point, mode) {
+    order(squadId, kind, point, mode, actionsOn = null) {
       const squad = byId.get(squadId);
       if (ended || !squad) return false;
       const placed = placeDestination(o.terrain, point);
@@ -183,7 +200,9 @@ export function createCombat(o: CombatOptions): Combat {
         return false;
       }
       if (placed.note !== undefined) o.notify(placed.note);
-      give(squadId, mode, [{ kind, destination: placed.point }]);
+      give(squadId, mode, [
+        { kind, destination: placed.point, actionsOn: actionsOn ?? defaultActionsOn(kind) },
+      ]);
       return true;
     },
     hold(squadId) {
@@ -212,11 +231,17 @@ export function createCombat(o: CombatOptions): Combat {
 export function describeOrder(order: {
   readonly kind: OrderKind;
   readonly destination: Vec2 | null;
+  readonly actionsOn?: ActionsOn;
 }): string {
   const d = order.destination;
-  return d
+  const what = d
     ? `${ORDER_LABELS[order.kind]} to ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N`
     : ORDER_LABELS[order.kind];
+  // Its actions on contact, when not its kind's.
+  const on = order.actionsOn;
+  return on && on !== defaultActionsOn(order.kind)
+    ? `${what} (on contact: ${ACTIONS_ON_LABELS[on]})`
+    : what;
 }
 
 export const PHASE_LABELS: Readonly<Record<ForcePhase, string>> = {

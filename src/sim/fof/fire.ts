@@ -5,7 +5,7 @@ import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
 import type { AreaEffect, FofWeapon } from './config';
-import { enter, firingOnTheMove, underFire } from './force';
+import { enter, firingOnTheMove, pressingOn, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
 import { hostile, soldierOf } from './system';
@@ -69,6 +69,9 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
   });
 }
 
+/** Avoiding contact, a force returns fire only this long after it was fired upon (s). */
+const HOLD_FIRE_UNLESS_FIRED_UPON_S = 60;
+
 /** Phases in which a force's soldiers fire. */
 function firing(phase: string): boolean {
   return (
@@ -76,7 +79,9 @@ function firing(phase: string): boolean {
     phase === 'engaged' ||
     phase === 'holding' ||
     phase === 'withdrawing' ||
-    phase === 'assaulting'
+    phase === 'assaulting' ||
+    // Pressing on through contact (it fires on the move).
+    phase === 'moving'
   );
 }
 
@@ -119,7 +124,8 @@ export function resolveFire(context: FofContext): void {
       shooter.status !== 'active' ||
       !force ||
       !firing(force.phase) ||
-      (!member.reacted && !firingOnTheMove(force.phase))
+      (force.phase === 'moving' && !pressingOn(context, force)) ||
+      (!member.reacted && !firingOnTheMove(force.phase) && !pressingOn(context, force))
     ) {
       member.nextFireAt = null;
       return;
@@ -148,6 +154,14 @@ export function resolveFire(context: FofContext): void {
       left < weapon.basicLoadRounds * context.setup.config.force.withdrawAmmunitionFraction
     ) {
       member.nextFireAt = null;
+      return;
+    }
+    // Avoiding contact, it holds its fire unless it has been fired upon lately.
+    if (
+      force.actionsOn === 'withdraw' &&
+      (force.lastFiredUponAt === null || t - force.lastFiredUponAt > HOLD_FIRE_UNLESS_FIRED_UPON_S)
+    ) {
+      member.nextFireAt = t + 1;
       return;
     }
     // Pinned: no fire; look again shortly.
@@ -391,6 +405,7 @@ function burst(
   if (hit) member.stats.hits += 1;
   fired(context, member, rounds, hit);
   const force = fof.forces[member.force];
+  if (force && aim.kind === 'aimed') force.lastAimedFireAt = t;
   const dx = aim.point.x - shooter.position.x;
   const dy = aim.point.y - shooter.position.y;
   if (dx !== 0 || dy !== 0) shooter.azimuth = azimuthOf(dx, dy);

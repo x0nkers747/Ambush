@@ -231,6 +231,7 @@ export function battleScenario(
     weapons: b.squad.weapons,
     secondaryWeapons: b.squad.secondaryWeapons,
     formation: b.squad.formation,
+    ...(b.squad.assaultFormation ? { assaultFormation: b.squad.assaultFormation } : {}),
     pace: b.pace,
     // Its home (where it falls back to on its own): its centre, or the clear ground nearest it.
     start:

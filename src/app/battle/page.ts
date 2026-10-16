@@ -8,6 +8,10 @@ import {
   reorderOrder,
   scenarioSummary,
   setOrderKind,
+  setOrderActionsOn,
+  ACTIONS_ON_HINTS,
+  ACTIONS_ON_LABELS,
+  actionsOnOf,
   setSeed,
   setSquadFacing,
   setSquadFormation,
@@ -19,8 +23,10 @@ import {
   type SquadOrganization,
 } from '#exercise/battle';
 import {
+  ACTIONS_ON,
   ORDER_KINDS,
   soldierId,
+  type ActionsOn,
   type OrderKind,
   type Side,
   type TerrainDataset,
@@ -255,7 +261,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   let combat: Combat | null = null;
   /** The After-Action Review of the battle fought: its replay from tick 0. */
   let review: Review | null = null;
-  const combatUi: CombatUi = { selected: null, tool: null, append: false, shift: false };
+  const combatUi: CombatUi = {
+    selected: null,
+    tool: null,
+    append: false,
+    shift: false,
+    actionsOn: null,
+  };
   /** The live battle, in Combat. */
   const inCombat = (): Combat | null => (planner.stage === 'combat' ? combat : null);
   /** The replayed battle, in the review. */
@@ -267,7 +279,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     battle: c.session.battle,
     squads: () => c.squads(),
     squad: (id) => c.squad(id),
-    order: (id, kind, point, mode) => c.order(id, kind, point, mode),
+    order: (id, kind, point, mode, actionsOn) => c.order(id, kind, point, mode, actionsOn),
   });
   const reviewDisplay = (r: Review): BattleDisplay => ({
     motion: r.replay.motion,
@@ -734,10 +746,18 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
                 `<option value="${kind}"${kind === order.kind ? ' selected' : ''}>${ORDER_LABELS[kind]}</option>`,
             ).join('')}</select>`
           : `<span>${ORDER_LABELS[order.kind]}</span>`;
+        const onContact = actionsOnOf(order);
+        const actionsSelect = planning
+          ? `<select data-act="order-actions" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: on contact" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">${ACTIONS_ON.map(
+              (a) =>
+                `<option value="${a}"${a === onContact ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">On contact: ${ACTIONS_ON_LABELS[a]}</option>`,
+            ).join('')}</select>`
+          : `<span class="muted" title="${escapeHtml(ACTIONS_ON_HINTS[onContact])}">on contact: ${ACTIONS_ON_LABELS[onContact]}</span>`;
         const issue = issues.find((i) => i.orderIndex === k);
         return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-order" data-index="${String(k)}" title="Select this order">${String(k + 1)}</button>
           ${kindSelect}
+          ${actionsSelect}
           <span class="muted coords">${String(Math.round(order.destination.east))} E, ${String(Math.round(order.destination.north))} N</span>
           ${
             planning
@@ -1056,6 +1076,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           planner.edit((d) =>
             setOrderKind(d, s.id, Number(el.dataset['index']), value as OrderKind),
           );
+        break;
+      case 'order-actions':
+        if (s)
+          planner.edit((d) =>
+            setOrderActionsOn(d, s.id, Number(el.dataset['index']), value as ActionsOn),
+          );
+        break;
+      case 'combat-actions':
+        combatUi.actionsOn = value === 'order' ? null : (value as ActionsOn);
         break;
       case 'seed':
         planner.edit((d) => setSeed(d, Number(value)));

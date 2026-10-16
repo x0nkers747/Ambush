@@ -22,7 +22,15 @@ import type { FofConfig, VisibilityClass } from './config';
  * - `continue`: halts to fight where it is, and resumes its movement order
  *   once contact is lost.
  */
-export type ActionsOn = 'attack' | 'withdraw' | 'continue';
+/**
+ * What a squad does on contact (docs/behavior-lab/force-on-force/07):
+ * `continue` fights where it halts and presses on when it has nothing to
+ * engage; `attack` assaults the enemy in an extended line; `hold` fights
+ * where it halts and stays there until ordered on; `withdraw` avoids
+ * contact: it falls back as soon as it sees the enemy and holds its fire
+ * unless fired upon.
+ */
+export type ActionsOn = 'continue' | 'attack' | 'hold' | 'withdraw';
 
 /**
  * A squad's tactical order (docs/constructive-simulation/02): the
@@ -51,6 +59,8 @@ export interface OrderSpec {
   readonly kind: OrderKind;
   /** Where to go (a map point). Every order kind has one now; future kinds may not. */
   readonly destination: Vec2 | null;
+  /** What the squad does on contact while carrying it out (default: by the order's kind, `actionsOnFor`). */
+  readonly actionsOn?: ActionsOn;
 }
 
 /** Who gave an order: the scenario's initial plan, or a player during the run. */
@@ -64,6 +74,8 @@ export interface FofOrder {
   /** The squad's orders in the order they were issued (from 1). */
   readonly sequence: number;
   readonly kind: OrderKind;
+  /** What the squad does on contact while carrying it out. */
+  readonly actionsOn: ActionsOn;
   readonly destination: Vec2 | null;
   readonly source: OrderSource;
   /** When it was issued (tick and seconds), started, and ended. */
@@ -87,6 +99,8 @@ export interface FofForceSetup {
   readonly secondaryWeapons?: Readonly<Record<string, string | null>>;
   /** The formation it withdraws in when it has no movement order to take one from. */
   readonly formation?: FormationSpec;
+  /** The formation it assaults in (an extended line); default: its formation. */
+  readonly assaultFormation?: FormationSpec;
   /** Pace of a withdrawal (m/s); default: the world's movement speed. */
   readonly pace?: number;
   /** What it does on contact; default `continue`. */
@@ -252,6 +266,12 @@ export interface FofForce {
   threat: Vec2 | null;
   /** Last time it had a confirmed, current contact; its own last burst; last fire at it. */
   lastContactAt: number | null;
+  /** When it last halted in contact (`null`: never). */
+  contactAt: number | null;
+  /** When one of its soldiers last fired at an enemy he could see (an aimed burst). */
+  lastAimedFireAt: number | null;
+  /** Pressing on through contact (actions on contact `continue`) until then: it does not halt for contact. */
+  pressOnUntil: number | null;
   lastFireAt: number | null;
   lastFiredUponAt: number | null;
   /** Since when its mean suppression has stayed above `withdrawSuppression`. */
@@ -319,6 +339,8 @@ export interface FofSoldier {
   /** The arm he is reloading (index), or -1; and when he is done (`null`: not reloading). */
   reloading: number;
   reloadUntil: number | null;
+  /** When his posture in contact (the lowest he can see the enemy from) is next chosen. */
+  postureAt: number;
   /** His next burst, or `null` when he does not fire. */
   nextFireAt: number | null;
   /** When he takes up his contact posture (after his reaction delay), or `null`. */
