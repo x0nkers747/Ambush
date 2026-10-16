@@ -16,6 +16,8 @@ export interface ViewEarthwork {
   readonly y: number;
   readonly azimuth: number;
   readonly level: number;
+  /** On hard ground (a paved road, paving): nothing is dug, nothing drawn, and he lies prone. */
+  readonly hard?: boolean;
 }
 
 /** From this dig-in on, a soldier stands in his position, sunk into the ground. */
@@ -122,7 +124,7 @@ export function createEarthworksLayer(): EarthworksLayer {
       if (next === key) return;
       key = next;
       clear();
-      const shown = works.filter((w) => w.level > 0.005);
+      const shown = works.filter((w) => w.level > 0.005 && !w.hard);
       if (shown.length === 0) return;
       holes = new THREE.InstancedMesh(holeGeometry, holeMaterial, shown.length);
       mounds = new THREE.InstancedMesh(moundGeometry, moundMaterial, shown.length * 2);

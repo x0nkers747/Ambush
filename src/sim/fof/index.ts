@@ -44,4 +44,4 @@ export { armed, roundsLeft } from './weapons';
 export { recovered, spent } from './force';
 export { areaIncapacitation } from './fire';
 export { DEFENCE_ARC_MIN_RAD } from './setup';
-export { defenceAzimuth, defenceFormation, RING_FROM_RAD } from './defence';
+export { defenceAzimuth, defenceFormation, hardGround, RING_FROM_RAD } from './defence';

@@ -2,7 +2,9 @@ import { nearestInArea } from '../behavior/slots';
 import type { FormationNode, FormationSpec, FormationSlot } from '../behavior/types';
 import { azimuthOf, type Vec2 } from '../geometry';
 import type { Soldier } from '../state';
-import { isOnTerrain } from '../terrain';
+import { pointInPolygon } from '../polygon';
+import { roadNetwork, roadPointAt } from '../road-network';
+import { isOnTerrain, type TerrainDataset } from '../terrain';
 import { centreOf, enter, forceArea, issue, runningTask } from './force';
 import { activeOrder } from './orders';
 import type { FofContext } from './system';
@@ -162,26 +164,63 @@ export function updateDefence(context: FofContext, force: FofForce): void {
   for (const id of force.memberIds) {
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
     if (soldier?.status !== 'active') continue;
-    recordEarthwork(force, soldier);
+    recordEarthwork(context, force, soldier);
   }
 }
 
-function recordEarthwork(force: FofForce, soldier: Soldier): void {
+function recordEarthwork(context: FofContext, force: FofForce, soldier: Soldier): void {
+  const { x, y } = soldier.position;
   const work = force.earthworks.find((w) => w.soldierId === soldier.id);
   if (work) {
-    work.x = soldier.position.x;
-    work.y = soldier.position.y;
+    // Where it is hard ground is looked up again only when he has moved.
+    if (Math.hypot(work.x - x, work.y - y) > 0.5)
+      work.hard = hardGround(context.world.terrain, x, y);
+    work.x = x;
+    work.y = y;
     work.azimuth = soldier.azimuth;
     work.level = force.dugIn;
   } else {
     force.earthworks.push({
       soldierId: soldier.id,
-      x: soldier.position.x,
-      y: soldier.position.y,
+      x,
+      y,
       azimuth: soldier.azimuth,
       level: force.dugIn,
+      hard: hardGround(context.world.terrain, x, y),
     });
   }
+}
+
+/** Footways and the like: paved paths (the ground's own rule, docs/adr/0048). */
+const PAVED_PATHS: ReadonlySet<string> = new Set(['footway', 'pedestrian', 'cycleway', 'steps']);
+
+/**
+ * Whether nothing can be dug at (x, y): on the carriageway of a paved or major
+ * road (or a paved path), on mapped paved ground (a car park, a square), or
+ * inside a building.
+ */
+export function hardGround(terrain: TerrainDataset, x: number, y: number): boolean {
+  const p = { x, y };
+  const on = roadPointAt(terrain, p);
+  if (on) {
+    const net = roadNetwork(terrain);
+    const edge = net.edges[on.edge];
+    const road = edge ? net.roads[edge.road] : undefined;
+    if (
+      edge &&
+      road &&
+      on.distance <= edge.halfWidth &&
+      (road.roadClass === 'major' ||
+        road.roadClass === 'paved' ||
+        (road.highway !== undefined && PAVED_PATHS.has(road.highway)))
+    )
+      return true;
+  }
+  const { landUse = [], buildings } = terrain.features;
+  for (const area of landUse) {
+    if (area.kind === 'paved' && pointInPolygon(p, area.boundary)) return true;
+  }
+  return buildings.some((b) => pointInPolygon(p, b.footprint));
 }
 
 /**

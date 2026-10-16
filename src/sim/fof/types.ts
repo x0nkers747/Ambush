@@ -63,13 +63,19 @@ export interface DefenceSector {
   readonly arc: number;
 }
 
-/** A soldier's fighting position: where he dug, the way he faces, and how far (0–1: a scrape to a trench). */
+/**
+ * A soldier's fighting position: where he dug, the way he faces, and how far
+ * (0–1: a scrape to a trench). On hard ground (a paved road, paving, a
+ * building's floor) nothing can be dug: `hard`, he lies prone there, with the
+ * same protection, and no hole is drawn.
+ */
 export interface Earthwork {
   readonly soldierId: SoldierId;
   x: number;
   y: number;
   azimuth: number;
   level: number;
+  hard: boolean;
 }
 
 /**

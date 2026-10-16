@@ -42,7 +42,7 @@ const IN_POSITION_M = 1.2;
 /** How far a soldier at (x, y) is sunk into his fighting position (m): 0 when he is not standing in one. */
 function trenchDepth(frame: CharacterFrame, id: string, x: number, y: number): number {
   const work = frame.earthworks?.get(id);
-  if (!work || Math.hypot(x - work.x, y - work.y) > IN_POSITION_M) return 0;
+  if (!work || work.hard === true || Math.hypot(x - work.x, y - work.y) > IN_POSITION_M) return 0;
   return sinkDepth(work.level);
 }
 
@@ -401,7 +401,8 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
           // Near: every frame; middle: every other frame (spread), and at once when he comes in.
           const due = lod === 'near' || wasFar || e.frame < 0 || (frameCount + e.slot) % 2 === 0;
           if (visible && due) {
-            const work = frame.earthworks?.get(u.id);
+            const dug = frame.earthworks?.get(u.id);
+            const work = dug?.hard === true ? undefined : dug;
             const surfaceAt = frame.surfaceAt;
             // In his fighting position, dug in deep enough: standing in it, sunk, his feet on its floor.
             const inTrench = work

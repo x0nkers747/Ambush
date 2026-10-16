@@ -49,6 +49,8 @@ export interface SquadStatus {
     readonly y: number;
     readonly azimuth: number;
     readonly level: number;
+    /** On hard ground (paved): nothing dug, he lies prone there. */
+    readonly hard: boolean;
   }[];
   readonly effectiveness: number;
   readonly active: DeepReadonly<FofOrder> | null;

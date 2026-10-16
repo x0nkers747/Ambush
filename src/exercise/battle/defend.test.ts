@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { azimuthDelta, type ForcePhaseChangedEvent, type SimEvent } from '#sim';
+import {
+  azimuthDelta,
+  hardGround,
+  NO_FEATURES,
+  type ForcePhaseChangedEvent,
+  type SimEvent,
+} from '#sim';
 import { labTerrain } from '../behavior-lab/run';
 import { FOF_DEFAULT_CONFIG } from '../forces/forces';
 import { createBattle, type BattleSpec, type SquadSpec } from './battle';
@@ -185,6 +191,70 @@ describe('the defend order', { timeout: 300_000 }, () => {
     // Its fighting positions stay where they were dug.
     expect(force?.earthworks.length).toBe(13);
     expect(force?.earthworks.every((w) => w.level === 1)).toBe(true);
+  });
+});
+
+describe('hard ground', () => {
+  it('nothing is dug on a paved road or paving (the positions are hard), but a dirt track can be', () => {
+    const road = (id: string, roadClass: 'paved' | 'track', x: number) => ({
+      id,
+      roadClass,
+      widthMeters: 8,
+      centerline: [
+        { x, y: -500 },
+        { x, y: 500 },
+      ],
+    });
+    const ground = labTerrain({
+      ...NO_FEATURES,
+      roads: [road('asphalt', 'paved', 0), road('dirt', 'track', 200)],
+      landUse: [
+        {
+          id: 'car-park',
+          kind: 'paved',
+          boundary: [
+            { x: -300, y: -50 },
+            { x: -250, y: -50 },
+            { x: -250, y: 50 },
+            { x: -300, y: 50 },
+          ],
+        },
+      ],
+    });
+    expect(hardGround(ground, 1, 0)).toBe(true);
+    expect(hardGround(ground, 3.9, 100)).toBe(true);
+    expect(hardGround(ground, 6, 0)).toBe(false);
+    expect(hardGround(ground, 200, 0)).toBe(false);
+    expect(hardGround(ground, -275, 0)).toBe(true);
+    // A squad defending along the asphalt (a narrow arc: a line across it) lies on it, undug.
+    const battle = createBattle(
+      {
+        ...spec(1, { prepared: 1800, arc: Math.PI / 4 }),
+        squads: spec(1, { prepared: 1800, arc: Math.PI / 4 }).squads.map((s) =>
+          s.id === 'B1'
+            ? {
+                ...s,
+                plan: [
+                  {
+                    kind: 'defend' as const,
+                    destination: { x: 0, y: 0 },
+                    sector: { facing: Math.PI / 2, arc: Math.PI / 4 },
+                    preparedSeconds: 1800,
+                  },
+                ],
+              }
+            : s,
+        ),
+      },
+      ground,
+    );
+    for (let t = 0; t < 140 * 30; t += 1) battle.step();
+    const works = battle.sim.state.fof?.forces[0]?.earthworks ?? [];
+    expect(works.length).toBe(13);
+    // Its line runs north–south, along the road: all of it on the asphalt.
+    expect(works.every((w) => w.hard)).toBe(true);
+    // The protection is the same: it is fully dug in.
+    expect(battle.sim.state.fof?.forces[0]?.dugIn).toBe(1);
   });
 });
 

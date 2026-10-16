@@ -86,6 +86,12 @@ the squad's dig-in (`FofForce.earthworks`). The 3D view draws it on the ground
 | 50–99% | A fighting pit, a parapet of spoil in front                                       | Standing in it, sunk 0.55 m and deeper               |
 | 100%   | A stretch of trench about 3 m long, a parapet in front and a lower parados behind | Standing in it, sunk 1.15 m: head and shoulders show |
 
+**Hard ground.** Nothing can be dug on the carriageway of a paved or major road
+(or a paved path), on mapped paved ground (a car park, a square), or inside a
+building (`hardGround`, decided where each soldier lies). A soldier there lies
+prone with the same protection as his squad's dig-in, and no position is drawn
+under him. Dirt tracks, unpaved roads and trails can be dug.
+
 The ground itself is not cut. The hole is a dark patch on it, soil-coloured in a
 scrape and darker the deeper it is. A soldier standing in his position is drawn
 lower, so the ground hides his legs. The positions stay after the squad leaves.
