@@ -2,7 +2,7 @@
   "schema": "ambush.fof-config",
   "schemaVersion": 2,
   "id": "fof-v2",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "name": "Force-on-force experimental model v2 (weapons and ammunition)",
   "notes": [
     "Experimental parameters for a constructive simulation prototype. They are not validated military detection or lethality data.",
@@ -328,6 +328,7 @@
     "withdrawSuppressedSeconds": 45,
     "withdrawAmmunitionFraction": 0.15,
     "withdrawDistanceM": 250,
+    "brokenWithdrawDistanceM": 500,
     "withdrawnClearSeconds": 30,
     "ineffectiveEffectiveness": 0.3,
     "assaultAfterSeconds": 8,

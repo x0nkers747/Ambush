@@ -191,7 +191,8 @@ export interface FofTrack {
  * - `atObjective`: arrived, observing (reacts to contact as before);
  * - `inAmbush`: on an ambush order, at its position: deploying, then lying
  *   in wait, concealed, holding its fire until the enemy is in its kill zone;
- * - `withdrawn`, `ineffective`: terminal.
+ * - `withdrawn`, `ineffective`: terminal (in a battle, a player's order
+ *   takes an ineffective force on again, `combatIneffective`).
  */
 export type ForcePhase =
   | 'moving'
@@ -259,6 +260,17 @@ export interface FofForce {
   objectiveQuietSince: number | null;
   /** Broke contact on its own, spent: its next order waits until it has recovered. */
   holdUntilRecovered: boolean;
+  /**
+   * Broken by the fight (spent, suppressed too long, short of ammunition): its
+   * withdrawal goes all the way to its point, `brokenWithdrawDistanceM` away,
+   * rather than ending once clear of the enemy.
+   */
+  brokenWithdrawal: boolean;
+  /**
+   * Has been made combat ineffective. It stays so (counted, and never made
+   * ineffective again), though in a battle the player may still order it on.
+   */
+  combatIneffective: boolean;
   /** Its centre at the start (where a `withdraw` force goes back to). */
   readonly start: Vec2;
   /** Attacking: when it assaults (after returning fire and locating the enemy), or `null`. */

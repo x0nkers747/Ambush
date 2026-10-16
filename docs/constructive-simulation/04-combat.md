@@ -31,8 +31,9 @@ The battle starts paused.
   "queued" in the squad's list), and apply in turn when play resumes.
 - A destination in water or a building is moved clear, with a message. One
   off the map is refused.
-- An order to a combat-ineffective squad is refused by the simulation, and
-  the page says so.
+- A combat-ineffective squad can still be ordered, while it has soldiers
+  left: it carries out the order, and stays counted as ineffective (its
+  reason says so). One with nobody left refuses it, and the page says so.
 
 **No automatic end.** The battle runs until the user ends it. While it
 runs, the header will not leave the stage (leaving would discard it). After
@@ -70,7 +71,7 @@ BLUEFOR Planning fights a new one.
   | Moving, Advancing      | On a Move (or to an ambush position), on an Attack order                                   |
   | Pressing on            | On Continue, nothing to engage where it halted: moving on, firing as it goes               |
   | Observing              | Halted to look at a possible enemy                                                         |
-  | Reacting, Fighting     | In contact, taking cover; exchanging fire                                                  |
+  | Reacting, Engaging     | In contact, taking cover; exchanging fire                                                  |
   | Attacking              | Assaulting by fire and movement                                                            |
   | Withdrawing            | Breaking contact (spent, or avoiding contact), or on a Withdraw order                      |
   | Regrouping             | Contact lost and recovered: it resumes its order shortly                                   |

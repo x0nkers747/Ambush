@@ -277,8 +277,10 @@ these hold:
 - mean suppression has stayed at 0.55 or above for 45 s;
 - ammunition is below 15 % of the basic load.
 
-It is ordered `withdrawDistanceM` (250 m) away from the threat it knows of (a force
-whose actions on contact are `withdraw`: back to its start), through the movement
+Broken by the fight like this, it is ordered `brokenWithdrawDistanceM` (500 m) away
+from the threat it knows of, out of the reach of the enemy that broke it. (Avoiding
+contact, actions on contact `withdraw`, it goes `withdrawDistanceM`, 250 m, or back to
+its start in the lab.) It moves through the movement
 engine, in its formation. It takes the first heading of 0°, ±30°, ±60°, ±90° from
 straight away that has reachable ground. While withdrawing, its soldiers fire on the move at what they can see (× 0.3 accuracy
 on the move). They keep their last rounds: no fire below the withdrawal share of their
@@ -289,8 +291,17 @@ It has **withdrawn** (terminal) when either:
 - it arrives;
 - for 30 s it has had no confirmed contact and has not been fired on.
 
+In a battle (no experiment to end) it holds instead. A broken force holds only once it
+arrives, 500 m back. Until v2.5 it held once clear of the enemy for 30 s, often only
+about 250 m off, where an enemy carrying on with its mission ran into it again and
+finished it off. A force avoiding contact still holds once clear.
+
 **Combat ineffective** (terminal): effectiveness below 0.3, or no soldier left. The
-force stops, its soldiers stay prone, and it fires no more.
+force stops, its plan fails, its soldiers stay prone, and it fires no more. In a
+battle the player may still order it on, while it has soldiers left. It then carries
+out its orders as before, but it stays combat ineffective (`combatIneffective`:
+counted so, and never made ineffective again for its effectiveness). Spent, it breaks
+contact when it meets the enemy.
 
 **Adjudication**, checked after every decision in this order (the first that holds
 ends the experiment):

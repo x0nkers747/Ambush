@@ -184,7 +184,7 @@ export function createCombat(o: CombatOptions): Combat {
         if (event.type === 'commandRejected') {
           const reason =
             {
-              unitIneffective: 'the squad is combat ineffective',
+              unitIneffective: 'the squad has nobody left',
               destinationOffTerrain: 'the destination is off the map',
               unknownUnit: 'there is no such squad',
               noForceModel: 'the battle has no force model',

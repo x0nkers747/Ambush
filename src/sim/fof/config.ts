@@ -255,11 +255,17 @@ export interface ForceBehaviorConfig {
   readonly withdrawSuppressedSeconds: number;
   /** ... or ammunition falls below this share of the basic load. */
   readonly withdrawAmmunitionFraction: number;
-  /** How far a withdrawal goes, away from the known threat (m). */
+  /** How far a withdrawal avoiding contact goes, away from the known threat (m). */
   readonly withdrawDistanceM: number;
+  /**
+   * How far a force broken by the fight (spent, suppressed too long, short of
+   * ammunition) falls back from the enemy that broke it (m). It goes all the
+   * way, out of the enemy's reach, before it holds.
+   */
+  readonly brokenWithdrawDistanceM: number;
   /** A withdrawing force has withdrawn once it has no confirmed contact for this long (s), or arrives. */
   readonly withdrawnClearSeconds: number;
-  /** Below this effectiveness the force is combat ineffective (terminal). */
+  /** Below this effectiveness the force is combat ineffective (terminal, but a player may order it on). */
   readonly ineffectiveEffectiveness: number;
   /**
    * Actions on contact `continue`: halted in contact with no soldier able to
@@ -765,6 +771,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     'withdrawSuppressedSeconds',
     'withdrawAmmunitionFraction',
     'withdrawDistanceM',
+    'brokenWithdrawDistanceM',
     'withdrawnClearSeconds',
     'ineffectiveEffectiveness',
     'assaultAfterSeconds',
@@ -799,6 +806,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     withdrawSuppressedSeconds: [0],
     withdrawAmmunitionFraction: [0, 1],
     withdrawDistanceM: [0],
+    brokenWithdrawDistanceM: [0],
     withdrawnClearSeconds: [0],
     ineffectiveEffectiveness: [0, 1],
     assaultAfterSeconds: [0],

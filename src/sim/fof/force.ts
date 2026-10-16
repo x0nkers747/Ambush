@@ -765,8 +765,8 @@ export function forceArea(context: FofContext, force: FofForce, from?: Vec2): nu
 
 /**
  * Breaks contact: orders the force back to `home` (where it started) if
- * given and not where it stands, else `withdrawDistanceM` away from the
- * threat it knows of (the first heading of `WITHDRAW_OFFSETS_DEG` with
+ * given and not where it stands, else `withdrawDistanceM` (`broken`: by the
+ * fight, `brokenWithdrawDistanceM`) away from the threat it knows of (the first heading of `WITHDRAW_OFFSETS_DEG` with
  * ground it can reach), in its formation, through the movement engine. With
  * nowhere to go it stays where it is (returns `false`).
  */
@@ -775,6 +775,7 @@ export function withdraw(
   force: FofForce,
   reason: string,
   home: Vec2 | null = null,
+  broken = false,
 ): boolean {
   const { setup } = context;
   const centre = centreOf(context, force);
@@ -790,6 +791,7 @@ export function withdraw(
     force.boundUnit = null;
     enter(context, force, 'withdrawing', reason);
     force.withdrawRetryAt = null;
+    force.brokenWithdrawal = broken;
     return true;
   };
   if (
@@ -806,7 +808,9 @@ export function withdraw(
     threat && (threat.x !== centre.x || threat.y !== centre.y)
       ? azimuthOf(centre.x - threat.x, centre.y - threat.y)
       : normalizeAzimuth((facing?.azimuth ?? 0) + Math.PI);
-  const distance = setup.config.force.withdrawDistanceM;
+  const distance = broken
+    ? setup.config.force.brokenWithdrawDistanceM
+    : setup.config.force.withdrawDistanceM;
   for (const offset of WITHDRAW_OFFSETS_DEG) {
     const heading = away + (offset * Math.PI) / 180;
     const to = {

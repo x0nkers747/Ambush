@@ -32,8 +32,11 @@ export function updateLifecycle(context: FofContext): void {
     const active = force.memberIds.some(
       (id) => context.state.soldiers[context.soldierIndex.get(id) ?? -1]?.status === 'active',
     );
-    // Combat ineffective: terminal.
-    if (!active || force.effectiveness < behavior.ineffectiveEffectiveness - 1e-12) {
+    // Combat ineffective: terminal (once: a player may order it on again).
+    if (
+      !active ||
+      (!force.combatIneffective && force.effectiveness < behavior.ineffectiveEffectiveness - 1e-12)
+    ) {
       ineffective(
         context,
         force,
@@ -54,10 +57,11 @@ export function updateLifecycle(context: FofContext): void {
         t - force.lastFiredUponAt >= behavior.withdrawnClearSeconds - 1e-9;
       if (manual) {
         // No experiment to end: an ordered withdrawal goes to its point (its
-        // order then ends); one of its own, spent, ends once clear, holding.
+        // order then ends), and so does a broken force's; one avoiding
+        // contact ends once clear, holding.
         if (activeOrder(force)?.kind === 'withdraw') {
           if (!task) enter(context, force, 'atObjective', 'reached the withdrawal point');
-        } else if (!task || (clear && quiet)) {
+        } else if (!task || (clear && quiet && !force.brokenWithdrawal)) {
           if (task) cancelTask(context, force);
           enter(context, force, 'holding', task ? 'broke contact' : 'reached its withdrawal point');
         }
@@ -99,7 +103,7 @@ export function updateLifecycle(context: FofContext): void {
       // Nowhere to go now: it fights on where it is and tries again later.
       const home = force.actionsOn === 'withdraw' && !force.planned ? force.start : null;
       const order = force.planned ? activeOrder(force) : null;
-      if (withdraw(context, force, reason, home)) {
+      if (withdraw(context, force, reason, home, true)) {
         // Spent, breaking contact on its own: its order has failed; the next waits until it recovers.
         if (order) endOrder(context, force, order, 'failed', `broke contact: ${reason}`);
         if (force.planned) force.holdUntilRecovered = true;
@@ -142,6 +146,7 @@ function ineffective(context: FofContext, force: FofForce, reason: string): void
     member.reactAt = null;
     soldier.posture = 'prone';
   }
+  force.combatIneffective = true;
   enter(context, force, 'ineffective', reason);
 }
 

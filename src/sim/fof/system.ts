@@ -152,6 +152,8 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       nextOrderSequence: orders.length + 1,
       objectiveQuietSince: null,
       holdUntilRecovered: false,
+      brokenWithdrawal: false,
+      combatIneffective: false,
       start,
       assaultAt: null,
       objective: null,

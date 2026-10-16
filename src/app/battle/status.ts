@@ -36,6 +36,8 @@ export interface SquadStatus {
   readonly up: number;
   readonly total: number;
   readonly phase: ForcePhase;
+  /** Made combat ineffective (it may since have been ordered on: it stays so). */
+  readonly ineffective: boolean;
   /** What it is doing now, in a word, and why (`activityOf`). */
   readonly activity: SquadActivity;
   readonly effectiveness: number;
@@ -70,6 +72,14 @@ export function activityOf(
   force: DeepReadonly<FofForce>,
   config: FofConfig = FOF_DEFAULT_CONFIG,
 ): SquadActivity {
+  const activity = phaseActivity(force, config);
+  // Ordered on after it was made combat ineffective: it stays ineffective.
+  return force.combatIneffective && force.phase !== 'ineffective'
+    ? { word: activity.word, why: `${activity.why} (combat ineffective)` }
+    : activity;
+}
+
+function phaseActivity(force: DeepReadonly<FofForce>, config: FofConfig): SquadActivity {
   const order = force.orders.find((o) => o.id === force.activeOrderId) ?? null;
   const tooWeak = () =>
     `its losses leave it too weak to go on (effectiveness at best ${percent(force.lastingEffectiveness)}, under ${percent(config.force.withdrawEffectiveness)}); it waits for new orders`;
@@ -93,7 +103,7 @@ export function activityOf(
       return { word: 'Reacting', why: 'in contact: halted, taking cover, finding the enemy' };
     case 'engaged':
       return {
-        word: 'Fighting',
+        word: 'Engaging',
         why:
           force.actionsOn === 'attack'
             ? 'exchanging fire; it attacks once the enemy is located'
@@ -104,8 +114,8 @@ export function activityOf(
     case 'assaulting':
       return { word: 'Attacking', why: 'assaulting the enemy by fire and movement' };
     case 'withdrawing':
-      return force.holdUntilRecovered
-        ? { word: 'Withdrawing', why: 'breaking contact: too spent to fight on' }
+      return force.brokenWithdrawal
+        ? { word: 'Withdrawing', why: 'broken by the fight: falling back out of the enemy’s reach' }
         : force.actionsOn === 'withdraw'
           ? { word: 'Withdrawing', why: 'avoiding contact (actions on contact: Avoid)' }
           : { word: 'Withdrawing', why: 'breaking contact' };
@@ -215,6 +225,7 @@ export function squadStatus(
     up: up.length,
     total: soldiers.length,
     phase: force?.phase ?? 'holding',
+    ineffective: force ? force.combatIneffective || force.phase === 'ineffective' : false,
     activity: force ? activityOf(force, config) : { word: 'Holding', why: 'not yet started' },
     effectiveness: force?.effectiveness ?? 0,
     active: orders.find((x) => x.id === force?.activeOrderId) ?? null,
@@ -246,7 +257,7 @@ export function summarize(squads: readonly SquadStatus[], seconds: number): Batt
       soldiers,
       casualties: soldiers - list.reduce((n, s) => n + s.up, 0),
       squads: list.length,
-      ineffective: list.filter((s) => s.phase === 'ineffective').length,
+      ineffective: list.filter((s) => s.ineffective).length,
     };
   });
   const all = squads.flatMap((s) => s.orders);

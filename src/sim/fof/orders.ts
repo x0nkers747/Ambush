@@ -105,8 +105,27 @@ export function applyOrderSquad(
     return;
   }
   if (force.phase === 'ineffective') {
-    reject('unitIneffective');
-    return;
+    // Combat ineffective, it is ordered on (it stays ineffective: spent, it
+    // breaks contact when it meets the enemy); with nobody left, nobody goes.
+    const left = force.memberIds.some(
+      (id) => state.soldiers.find((s) => s.id === id)?.status === 'active',
+    );
+    if (!left) {
+      reject('unitIneffective');
+      return;
+    }
+    force.phase = 'atObjective';
+    force.phaseSince = startSeconds;
+    events.push({
+      type: 'forcePhaseChanged',
+      tick: state.tick,
+      atSeconds: startSeconds,
+      unitId: force.unitId,
+      side: force.side,
+      from: 'ineffective',
+      to: 'atObjective',
+      reason: 'combat ineffective, ordered on',
+    });
   }
   for (const order of command.orders) {
     const d = order.destination;

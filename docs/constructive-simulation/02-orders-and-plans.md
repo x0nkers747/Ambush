@@ -95,7 +95,10 @@ holds from the start.
 - These commands are rejected, with a `commandRejected` event:
   - `noForceModel`: the world has no force-on-force setup;
   - `unknownUnit`: the unit is not a squad of the battle;
-  - `unitIneffective`: the squad is combat ineffective;
+  - `unitIneffective`: the squad is combat ineffective with nobody left. A
+    combat-ineffective squad with soldiers left takes the order: it is
+    taken on again (`ineffective` ─▶ `atObjective`, "combat ineffective,
+    ordered on") and stays counted as ineffective;
   - `destinationOffTerrain`: a destination is off the terrain.
 
 ## 5. The battle builder

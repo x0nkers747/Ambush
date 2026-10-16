@@ -61,11 +61,15 @@ describe('the activity word', () => {
   it('says what it is doing and why', () => {
     expect(as({ pressOnUntil: 100 }).word).toBe('Pressing on');
     expect(as({ phase: 'possibleContact' }).word).toBe('Observing');
-    expect(as({ phase: 'engaged' }).word).toBe('Fighting');
+    expect(as({ phase: 'engaged' }).word).toBe('Engaging');
     expect(as({ phase: 'assaulting' }).word).toBe('Attacking');
     expect(as({ phase: 'withdrawing' }).word).toBe('Withdrawing');
     expect(as({ phase: 'inAmbush', concealed: true }).word).toBe('Waiting');
     expect(as({ phase: 'ineffective' }).word).toBe('Ineffective');
+    expect(as({ phase: 'withdrawing', brokenWithdrawal: true }).why).toMatch(/broken/);
+    const ordered = as({ phase: 'moving', combatIneffective: true });
+    expect(ordered.word).toBe('Moving');
+    expect(ordered.why).toMatch(/\(combat ineffective\)$/);
   });
 
   it('holding: regrouping, recovering, or spent', () => {

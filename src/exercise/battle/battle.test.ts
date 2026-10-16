@@ -192,6 +192,47 @@ describe('a battle of several squads a side, each on its own plan', () => {
   });
 });
 
+describe('a combat-ineffective squad', { timeout: 120_000 }, () => {
+  it('can still be ordered: it moves on, and stays combat ineffective', () => {
+    const battle = createBattle(spec(), TERRAIN);
+    const state = () => battle.sim.state;
+    const forceOf = (id: string) => state().fof?.forces.find((f) => f.unitId.startsWith(`${id}-`));
+    const upOf = (id: string) =>
+      state().soldiers.filter((s) => s.unitId.startsWith(`${id}-`) && s.status === 'active');
+    const centreOf = (id: string) => {
+      const up = upOf(id);
+      return {
+        x: up.reduce((a, s) => a + s.position.x, 0) / up.length,
+        y: up.reduce((a, s) => a + s.position.y, 0) / up.length,
+      };
+    };
+    // Fought until a squad is made ineffective with soldiers left.
+    const ids = SQUADS.map((s) => s.id);
+    let id: string | undefined;
+    while (!id && battle.sim.timeSeconds < 1500) {
+      battle.step();
+      id = ids.find((x) => forceOf(x)?.phase === 'ineffective' && upOf(x).length > 0);
+    }
+    if (!id) throw new Error('no squad made ineffective with soldiers left');
+    const from = centreOf(id);
+    const to = { x: from.x, y: from.y + (forceOf(id)?.side === 'BLUEFOR' ? -150 : 150) };
+    battle.submit(orderSquad(battle, id, 'replace', [{ kind: 'move', destination: to }]));
+    const events = runTo(battle, battle.sim.timeSeconds + 60);
+    expect(events.filter((e) => e.type === 'commandRejected')).toEqual([]);
+    expect(forceOf(id)?.combatIneffective).toBe(true);
+    const phases = events
+      .filter((e) => e.type === 'forcePhaseChanged' && e.unitId.startsWith(`${id}-`))
+      .map((e) => (e.type === 'forcePhaseChanged' ? `${e.from}>${e.to}: ${e.reason}` : ''));
+    // Taken on again, it starts its move; spent, it is never made ineffective again
+    // for its effectiveness (only once nobody is left).
+    expect(phases[0]).toBe('ineffective>atObjective: combat ineffective, ordered on');
+    expect(phases[1]).toBe('atObjective>moving: ordered to move');
+    expect(
+      phases.filter((p) => p.endsWith('effectiveness below the ineffective threshold')),
+    ).toEqual([]);
+  });
+});
+
 describe('orders given during the battle', () => {
   it('replace supersedes the active and pending orders; append adds after them; an empty replace clears', () => {
     const battle = createBattle(spec(2), TERRAIN);
