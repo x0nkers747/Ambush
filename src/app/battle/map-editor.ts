@@ -1,4 +1,9 @@
-import { killZoneSpec, ORDER_LABELS, type ScenarioSquad } from '#exercise/battle';
+import {
+  killZoneSpec,
+  ORDER_LABELS,
+  type PlannedSector,
+  type ScenarioSquad,
+} from '#exercise/battle';
 import { killZoneCorners, type KillZone, type OrderKind, type Side, type Vec2 } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { Planner } from './planner';
@@ -15,6 +20,7 @@ import type { Planner } from './planner';
 //   click a waypoint     select its order   drag it    move the destination
 //   drag the knob        turn the selected squad (its facing at the start)
 //   drag a corner        resize the selected ambush order's kill zone
+//   drag the arc handle  widen or narrow the selected defend order's sector
 //   right-click a waypoint  delete the order
 
 /** Friendly blue and hostile red (APP-6 affiliation colours, as the map has always drawn them). */
@@ -38,6 +44,7 @@ export const ORDER_INITIALS: Readonly<Record<OrderKind, string>> = {
   attack: 'A',
   withdraw: 'W',
   ambush: 'B',
+  defend: 'D',
 };
 
 type Hit =
@@ -48,6 +55,8 @@ type Hit =
       readonly index: number;
       readonly corner: number;
     }
+  /** The handle that widens or narrows the selected defend order's arc. */
+  | { readonly kind: 'arc'; readonly squad: ScenarioSquad; readonly index: number }
   | { readonly kind: 'knob'; readonly squad: ScenarioSquad }
   | { readonly kind: 'squad'; readonly squad: ScenarioSquad };
 
@@ -95,8 +104,14 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     if (selected && visible(selected)) {
       const knob = knobOf(selected, at);
       if (knob && near(knob, KNOB_HIT_PX)) return { kind: 'knob', squad: selected };
-      // The selected ambush order's kill zone corners.
+      // The selected defend order's arc handle.
       const index = planner.selection.orderIndex;
+      const defence = index === null ? undefined : selected.plan[index];
+      if (defence?.sector && index !== null && planner.canPlan(selected)) {
+        const handle = arcHandle(toVec(defence.destination), defence.sector);
+        if (near(at(handle), CORNER_HIT_PX)) return { kind: 'arc', squad: selected, index };
+      }
+      // The selected ambush order's kill zone corners.
       const zone = index === null ? undefined : selected.plan[index]?.killZone;
       if (zone && index !== null && planner.canPlan(selected)) {
         const corners = killZoneCorners(killZoneSpec(zone));
@@ -149,6 +164,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       else if (drag.kind === 'knob') planner.turnSquadToward(id, point, false);
       else if (drag.kind === 'corner')
         planner.resizeKillZoneTo(id, drag.index, drag.corner, point, false);
+      else if (drag.kind === 'arc') planner.resizeDefendArcTo(id, drag.index, point, false);
       else planner.moveOrderTo(id, drag.index, point, false);
     },
     drop() {
@@ -161,7 +177,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     cursor(_point, screen) {
       const hit = hitAt(screen);
       if (hit?.kind === 'knob') return 'grab';
-      if (hit?.kind === 'corner') return 'nwse-resize';
+      if (hit?.kind === 'corner' || hit?.kind === 'arc') return 'nwse-resize';
       if (hit?.kind === 'squad') return planner.canPlace() ? 'move' : 'pointer';
       if (hit?.kind === 'waypoint') return planner.canPlan(hit.squad) ? 'move' : 'pointer';
       return planner.tool.kind === 'select' ? null : 'crosshair';
@@ -194,7 +210,23 @@ function drawBattle(
   const order = [...squads].sort(
     (a, b) => Number(a.id === selected.squadId) - Number(b.id === selected.squadId),
   );
-  // Kill zones of ambush orders, under the routes.
+  // Sectors of defend orders, and kill zones of ambush orders, under the routes.
+  for (const s of order) {
+    s.plan.forEach((o, k) => {
+      if (!o.sector) return;
+      const isSelected = s.id === selected.squadId && selected.orderIndex === k;
+      defenceSector(
+        ctx,
+        toVec(o.destination),
+        o.sector,
+        at,
+        SIDE_COLORS[s.side],
+        k + 1,
+        isSelected,
+        isSelected && planner.canPlan(s),
+      );
+    });
+  }
   for (const s of order) {
     s.plan.forEach((o, k) => {
       if (!o.killZone) return;
@@ -361,6 +393,93 @@ export function waypoint(
   ctx.strokeText(label, p.x + r + 5, p.y);
   ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
   ctx.fillText(label, p.x + r + 5, p.y);
+}
+
+/** How far a defence's sector is drawn from its position (map metres). */
+export const SECTOR_DRAW_M = 90;
+
+/** Where a defence's arc handle is: on its arc's right-hand edge (all round, behind it). */
+export function arcHandle(at: Vec2, sector: PlannedSector): Vec2 {
+  const half = Math.min(180, sector.arcDeg / 2);
+  const rad = ((sector.facingDeg + half) * Math.PI) / 180;
+  return { x: at.x + SECTOR_DRAW_M * Math.sin(rad), y: at.y + SECTOR_DRAW_M * Math.cos(rad) };
+}
+
+/**
+ * A defence's sector: a shaded wedge from its position toward the direction
+ * it defends (a disc, all round), its label, and (when it can be changed)
+ * the handle that widens or narrows it.
+ */
+export function defenceSector(
+  ctx: CanvasRenderingContext2D,
+  centre: Vec2,
+  sector: PlannedSector,
+  at: (p: Vec2) => Vec2,
+  color: string,
+  n: number,
+  isSelected: boolean,
+  handle: boolean,
+): void {
+  const arc = Math.min(360, sector.arcDeg);
+  const steps = Math.max(8, Math.ceil(arc / 6));
+  const edge: Vec2[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const deg = sector.facingDeg - arc / 2 + (arc * i) / steps;
+    const rad = (deg * Math.PI) / 180;
+    edge.push(
+      at({
+        x: centre.x + SECTOR_DRAW_M * Math.sin(rad),
+        y: centre.y + SECTOR_DRAW_M * Math.cos(rad),
+      }),
+    );
+  }
+  const c = at(centre);
+  ctx.save();
+  ctx.beginPath();
+  if (arc < 360) ctx.moveTo(c.x, c.y);
+  edge.forEach((p, i) => {
+    if (i === 0 && arc >= 360) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = isSelected ? 0.26 : 0.15;
+  ctx.fill();
+  ctx.globalAlpha = isSelected ? 1 : 0.8;
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = isSelected ? 2.5 : 1.5;
+  ctx.strokeStyle = isSelected ? '#fff' : color;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Its facing: a line from the position to the arc's middle.
+  const mid = edge[Math.floor(steps / 2)];
+  if (mid && arc < 360) {
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(mid.x, mid.y);
+    ctx.stroke();
+  }
+  const labelAt = mid ?? c;
+  ctx.textAlign = 'center';
+  const label = `Defend ${String(n)} · ${String(Math.round(arc))}°`;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = OUTLINE;
+  ctx.strokeText(label, labelAt.x, labelAt.y);
+  ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
+  ctx.fillText(label, labelAt.x, labelAt.y);
+  if (handle) {
+    const h = at(arcHandle(centre, sector));
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(h.x - 5, h.y - 5, 10, 10);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**

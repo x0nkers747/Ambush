@@ -11,6 +11,7 @@ import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../beh
 import { fofWeapon, type FofConfig } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
 import { occupyAmbush, springAmbush, updateAmbush } from './ambush';
+import { defenceAzimuth, occupyDefence, resumeDefence, updateDefence } from './defence';
 import { activeOrder, updatePlan, withinArrival } from './orders';
 import { roundsLeft } from './weapons';
 import type { FofContext } from './system';
@@ -141,11 +142,24 @@ export function updateForces(context: FofContext): void {
             withinArrival(context, force, order.destination)
           ) {
             occupyAmbush(context, force, order);
+          } else if (
+            order?.kind === 'defend' &&
+            order.destination &&
+            withinArrival(context, force, order.destination)
+          ) {
+            occupyDefence(context, force, order);
           } else enter(context, force, 'atObjective', 'arrived');
         }
         break;
       case 'inAmbush':
         updateAmbush(context, force);
+        break;
+      case 'defending':
+        // Defending: a contact close enough is fought from the position (its
+        // actions on contact are hold); else it digs in (possible contacts
+        // are watched from where it lies).
+        if (close) onContact(context, force, 'contact within engagement range');
+        else updateDefence(context, force);
         break;
       case 'possibleContact':
         if (close) {
@@ -193,6 +207,8 @@ export function updateForces(context: FofContext): void {
       case 'holding':
         if (close) {
           onContact(context, force, 'contact regained');
+        } else if (activeOrder(force)?.kind === 'defend') {
+          resumeDefence(context, force);
         } else if (
           // Holding (or having fallen back from contact) it stays until ordered on.
           force.actionsOn !== 'hold' &&
@@ -920,6 +936,24 @@ function carryOut(
           if (dx !== 0 || dy !== 0) soldier.azimuth = azimuthOf(dx, dy);
         }
       } else soldier.posture = 'standing';
+      continue;
+    }
+    if (force.phase === 'defending') {
+      // In the defence (no contact): prone in his position, facing his share of the sector.
+      holdAgent(agents.get(id), false);
+      member.nextFireAt = null;
+      member.reactAt = null;
+      member.reacted = false;
+      const order = activeOrder(force);
+      if (!runningTask(context, force) && order?.sector && order.destination) {
+        soldier.posture = 'prone';
+        soldier.azimuth = defenceAzimuth(
+          order.sector,
+          order.destination,
+          soldier.position,
+          force.memberIds.length,
+        );
+      }
       continue;
     }
     // Assaulting, the bounding element moves; the rest are down, firing (the base of fire).

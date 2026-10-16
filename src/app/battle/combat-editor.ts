@@ -4,7 +4,16 @@ import type { OrderKind, Vec2, ActionsOn, KillZone } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { TimedEvent } from './session';
 import type { SquadStatus } from './status';
-import { chevron, killZone, OUTLINE, ring, SIDE_COLORS, unitSymbol, waypoint } from './map-editor';
+import {
+  chevron,
+  defenceSector,
+  killZone,
+  OUTLINE,
+  ring,
+  SIDE_COLORS,
+  unitSymbol,
+  waypoint,
+} from './map-editor';
 
 // The Combat stage on the map (docs/constructive-simulation/04): every
 // soldier where the battle has him at the time drawn (smooth between
@@ -53,9 +62,11 @@ export interface CombatUi {
   ambush: { readonly squadId: string; readonly at: Vec2 } | null;
 }
 
-/** The ambush position being given to the selected squad, if any. */
+/** The ambush or defensive position being given to the selected squad, if any (its second click is next). */
 export function pendingAmbush(ui: CombatUi): Vec2 | null {
-  return ui.tool === 'ambush' && ui.ambush?.squadId === ui.selected ? ui.ambush.at : null;
+  return (ui.tool === 'ambush' || ui.tool === 'defend') && ui.ambush?.squadId === ui.selected
+    ? ui.ambush.at
+    : null;
 }
 
 /** How long a burst stays drawn (s of simulation). */
@@ -136,14 +147,14 @@ export function createCombatMapEditor(
         return;
       }
       const mode = ui.append !== ui.shift ? 'append' : 'replace';
-      if (ui.tool === 'ambush') {
-        // First its position; then its kill zone, which gives the order.
+      if (ui.tool === 'ambush' || ui.tool === 'defend') {
+        // First its position; then its kill zone (an ambush) or direction (a defence), which gives the order.
         const at = pendingAmbush(ui);
         if (!at) {
           ui.ambush = { squadId: ui.selected, at: point };
           return;
         }
-        if (c.order(ui.selected, 'ambush', at, mode, ui.actionsOn, point)) ui.ambush = null;
+        if (c.order(ui.selected, ui.tool, at, mode, ui.actionsOn, point)) ui.ambush = null;
         return;
       }
       c.order(ui.selected, ui.tool, point, mode, ui.actionsOn);
@@ -170,6 +181,29 @@ export function createCombatMapEditor(
       const ordered = [...squads].sort(
         (a, b) => Number(a.id === ui.selected) - Number(b.id === ui.selected),
       );
+      // Sectors of defend orders (active, pending and queued), under the routes.
+      for (const s of ordered) {
+        if (s.up === 0) continue;
+        const orders = [s.active, ...s.pending, ...s.queued.flatMap((q) => q.orders)];
+        let n = 0;
+        for (const x of orders) {
+          if (!x?.sector || !x.destination) continue;
+          n += 1;
+          defenceSector(
+            ctx,
+            x.destination,
+            {
+              facingDeg: (x.sector.facing * 180) / Math.PI,
+              arcDeg: (x.sector.arc * 180) / Math.PI,
+            },
+            toScreen,
+            SIDE_COLORS[s.side],
+            n,
+            s.id === ui.selected,
+            false,
+          );
+        }
+      }
       // Kill zones of ambush orders (active, pending and queued), under the routes.
       for (const s of ordered) {
         if (s.up === 0) continue;
@@ -257,7 +291,15 @@ export function createCombatMapEditor(
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
         ctx.setLineDash([]);
-        waypoint(ctx, p, 'ambush', 1, SIDE_COLORS[pendingSquad.side], true, false);
+        waypoint(
+          ctx,
+          p,
+          ui.tool === 'defend' ? 'defend' : 'ambush',
+          1,
+          SIDE_COLORS[pendingSquad.side],
+          true,
+          false,
+        );
       }
 
       // Bursts of the last moments: shooter to aim point (2D only: the 3D view

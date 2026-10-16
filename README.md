@@ -150,7 +150,13 @@ Next says what is missing, and the side panel says the same next to the stage's 
    (the enemy cannot see it beyond 100 m), and opens fire on its own when the enemy is in the
    kill zone (or getting through it, or has found it), steady and accurate until fired upon,
    the enemy surprised; it fights until the enemy is down and
-   waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)).
+   waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)). A
+   **Defend** order (**D**) is clicked at the defensive position, then in the direction it
+   defends toward: a 90° wedge, widened or narrowed by dragging the square on its edge, up to all
+   round. The squad deploys across it, lies prone and digs in over 30 minutes (from shell scrapes
+   to a trench, drawn in 3D), harder to hit, see and suppress the deeper it is; its row's
+   **prepared** choice starts it partly or fully dug in. It fights from there and waits for new
+   orders ([docs](docs/behavior-lab/force-on-force/09-defend.md)).
 4. **Sim**, Combat ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)),
    from **Simulate →** in planning. The header labels the stages Terrain, Setup, Planning, Sim
    and AAR. Going back to an earlier stage during a battle asks first, then discards it. The

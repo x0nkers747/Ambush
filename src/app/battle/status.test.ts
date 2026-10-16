@@ -66,6 +66,11 @@ describe('the activity word', () => {
     expect(as({ phase: 'withdrawing' }).word).toBe('Withdrawing');
     expect(as({ phase: 'inAmbush', concealed: true }).word).toBe('Waiting');
     expect(as({ phase: 'ineffective' }).word).toBe('Ineffective');
+    // Defending: how far dug in, in the word; what it looks like, in the reason.
+    const defending = as({ phase: 'defending', dugIn: 0.45 });
+    expect(defending.word).toBe('Defending 45%');
+    expect(defending.why).toMatch(/shell scrapes/);
+    expect(as({ phase: 'defending', dugIn: 1 }).why).toMatch(/fully dug in/);
     expect(as({ phase: 'withdrawing', brokenWithdrawal: true }).why).toMatch(/broken/);
     const ordered = as({ phase: 'moving', combatIneffective: true });
     expect(ordered.word).toBe('Moving');

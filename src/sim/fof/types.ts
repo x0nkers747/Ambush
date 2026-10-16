@@ -45,10 +45,32 @@ export type ActionsOn = 'continue' | 'attack' | 'hold' | 'withdraw';
  * - `ambush`: to the destination (the ambush position), where it lies in
  *   wait, concealed and holding its fire, facing its kill zone; it opens fire
  *   when the enemy is in the kill zone (docs/behavior-lab/force-on-force/08),
- *   fights until the enemy is down and waits there for new orders.
+ *   fights until the enemy is down and waits there for new orders;
+ * - `defend`: to the destination (the defensive position), where it deploys
+ *   across its sector (an arc toward which it defends, up to all round),
+ *   lies prone and digs in over time (docs/behavior-lab/force-on-force/09);
+ *   it fights from there and never moves on: it waits for new orders.
  */
-export type OrderKind = 'move' | 'attack' | 'withdraw' | 'ambush';
-export const ORDER_KINDS: readonly OrderKind[] = ['move', 'attack', 'withdraw', 'ambush'];
+export type OrderKind = 'move' | 'attack' | 'withdraw' | 'ambush' | 'defend';
+export const ORDER_KINDS: readonly OrderKind[] = ['move', 'attack', 'withdraw', 'ambush', 'defend'];
+
+/**
+ * A defence's sector: the direction it defends toward (`facing`, an azimuth,
+ * radians) and the arc's width (`arc`, radians, up to 2π: all round).
+ */
+export interface DefenceSector {
+  readonly facing: number;
+  readonly arc: number;
+}
+
+/** A soldier's fighting position: where he dug, the way he faces, and how far (0–1: a scrape to a trench). */
+export interface Earthwork {
+  readonly soldierId: SoldierId;
+  x: number;
+  y: number;
+  azimuth: number;
+  level: number;
+}
 
 /**
  * An ambush's kill zone: a rectangle on the map, `widthM` across and
@@ -79,6 +101,10 @@ export interface OrderSpec {
   readonly actionsOn?: ActionsOn;
   /** An ambush's kill zone (required for an ambush, refused for any other kind). */
   readonly killZone?: KillZone;
+  /** A defence's sector (required for a defence, refused for any other kind). */
+  readonly sector?: DefenceSector;
+  /** A defence: how long its position was prepared before (s, 0–`digInSeconds`): it starts that far dug in. */
+  readonly preparedSeconds?: number;
 }
 
 /** Who gave an order: the scenario's initial plan, or a player during the run. */
@@ -97,6 +123,10 @@ export interface FofOrder {
   readonly destination: Vec2 | null;
   /** An ambush's kill zone; `null` for every other kind. */
   readonly killZone: KillZone | null;
+  /** A defence's sector; `null` for every other kind. */
+  readonly sector: DefenceSector | null;
+  /** A defence's preparation before it was given (s); 0 for every other kind. */
+  readonly preparedSeconds: number;
   readonly source: OrderSource;
   /** When it was issued (tick and seconds), started, and ended. */
   readonly issuedTick: number;
@@ -204,6 +234,7 @@ export type ForcePhase =
   | 'withdrawing'
   | 'atObjective'
   | 'inAmbush'
+  | 'defending'
   | 'withdrawn'
   | 'ineffective';
 
@@ -308,6 +339,15 @@ export interface FofForce {
   /** Pressing on through contact (actions on contact `continue`) until then: it does not halt for contact. */
   pressOnUntil: number | null;
   /** In ambush: the enemy soldiers in its kill zone at the last decision, in soldier order. */
+  /**
+   * A defence (`defending`): how far dug in (0–1; full after `digInSeconds`
+   * in the position, undisturbed), and since when it has been digging
+   * (`null`: it is not). Lost when it is given another order.
+   */
+  dugIn: number;
+  diggingSince: number | null;
+  /** Its soldiers' fighting positions, as last dug (they stay when it leaves). */
+  earthworks: Earthwork[];
   killZoneInside: SoldierId[];
   /** Caught in an ambush's kill zone: surprised until then, its soldiers react only after (`null`: not). */
   surprisedUntil: number | null;

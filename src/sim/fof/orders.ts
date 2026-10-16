@@ -6,6 +6,7 @@ import type { SimState } from '../state';
 import { isOnTerrain } from '../terrain';
 import type { SimWorld } from '../world';
 import { occupyAmbush } from './ambush';
+import { occupyDefence } from './defence';
 import {
   cancelTask,
   centreOf,
@@ -163,6 +164,8 @@ export function applyOrderSquad(
       actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
       killZone: spec.killZone ?? null,
+      sector: spec.sector ?? null,
+      preparedSeconds: spec.preparedSeconds ?? 0,
       source: 'player',
       issuedTick: state.tick,
       issuedAt: startSeconds,
@@ -249,6 +252,11 @@ function checkActive(context: FofContext, force: FofForce, order: FofOrder): voi
       if (stopped && force.ambushSprungAt === null)
         endOrder(context, force, order, 'failed', 'could not reach the ambush position');
       return;
+    case 'defend':
+      // At its position it defends (`defending`); stopped anywhere else, it could not get there.
+      if (stopped)
+        endOrder(context, force, order, 'failed', 'could not reach the defensive position');
+      return;
   }
 }
 
@@ -310,13 +318,16 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   force.pressOnUntil = null;
   force.ambushSprungAt = null;
   force.killZoneInside = [];
+  // A new order: its dig-in is lost (its fighting positions stay where they were dug).
+  force.dugIn = 0;
+  force.diggingSince = null;
   context.events.push(orderEvent(context.tick, context.t, force, next, 'pending', 'started'));
   if (!next.destination) return;
   const zone = next.killZone;
-  // An ambush faces its kill zone at its position.
+  // An ambush faces its kill zone at its position; a defence, its sector.
   const facing = zone
     ? azimuthOf(zone.centre.x - next.destination.x, zone.centre.y - next.destination.y)
-    : undefined;
+    : (next.sector?.facing ?? undefined);
   const mission = missionTo(context, force, next.destination, facing);
   if (!mission) {
     endOrder(context, force, next, 'failed', 'no way to the destination');
@@ -344,14 +355,20 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
     case 'moving':
     case 'atObjective':
     case 'inAmbush':
+    case 'defending':
     case 'withdrawing':
       // On its way (or breaking contact on an order now ended): to the new destination.
       standUp(context, force);
       force.concealed = false;
-      // An ambush already at its position occupies it.
+      // An ambush or a defence already at its position occupies it.
       if (next.kind === 'ambush' && withinArrival(context, force, next.destination)) {
         cancelTask(context, force);
         occupyAmbush(context, force, next);
+        return;
+      }
+      if (next.kind === 'defend' && withinArrival(context, force, next.destination)) {
+        cancelTask(context, force);
+        occupyDefence(context, force, next);
         return;
       }
       if (issue(context, force, mission))

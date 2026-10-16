@@ -8,6 +8,7 @@ import { fofWeapon } from './config';
 import { chanceIn, confidenceAt, cyclesOnTarget, draw, levelAt, ttpf } from './detection';
 import { resolveFire, updateSuppression } from './fire';
 import { armed, updateReloads } from './weapons';
+import { dugInFactor, effectiveDugIn } from './defence';
 import { actionsOnFor } from './orders';
 import { updateEffectiveness, updateForces } from './force';
 import { adjudicate, updateLifecycle } from './lifecycle';
@@ -131,6 +132,8 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
       killZone: spec.killZone ?? null,
+      sector: spec.sector ?? null,
+      preparedSeconds: spec.preparedSeconds ?? 0,
       source: 'scenario',
       issuedTick: 0,
       issuedAt: 0,
@@ -175,6 +178,9 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       lastAimedFireAt: null,
       pressOnUntil: null,
       killZoneInside: [],
+      dugIn: 0,
+      diggingSince: null,
+      earthworks: [],
       ambushSprungAt: null,
       ambushSteadyUntil: null,
       surprisedUntil: null,
@@ -376,6 +382,10 @@ function scan(context: FofContext): void {
   const concealedFrom = setup.config.force.concealmentRangeM;
   const concealed = fof.forces.map((f) => f.concealed);
   const camouflage = setup.config.force.concealedDetectionFactor;
+  // Dug in (a defence): less of each soldier to make out (docs/behavior-lab/force-on-force/09).
+  const dugIn = fof.forces.map((f) =>
+    dugInFactor(effectiveDugIn(f), setup.config.force.dugInDetectionFactor),
+  );
   const regard = detection.regardHalfAngleDeg;
   const central = detection.centralHalfAngleDeg;
   const n50 = detection.detectionCycles50;
@@ -420,7 +430,8 @@ function scan(context: FofContext): void {
       }
       if (rangeM < 1e-6) continue;
       // Within it, camouflaged and still: harder to make out.
-      const cue = (cues[j] ?? 1) * (hidden ? camouflage : 1);
+      const cue =
+        (cues[j] ?? 1) * (hidden ? camouflage : 1) * (dugIn[fof.soldiers[j]?.force ?? -1] ?? 1);
       const dimension = detection.criticalDimensionM[target.posture];
       // Cheaper first: haze only lowers the cycles, so short of what the pair
       // needs even without it, he is not detectable now (as below, exactly).

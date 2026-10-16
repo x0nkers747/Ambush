@@ -16,3 +16,4 @@ export type { GroundProjection, MapPoint, ScreenPoint } from './ground-projectio
 export type { QualityLevel } from './quality';
 export { terrainGround, type GroundAt } from './camera-math';
 export type { GroundOverlay } from './terrain-renderer';
+export type { ViewEarthwork } from './earthworks';

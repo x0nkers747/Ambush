@@ -7,6 +7,7 @@ import {
   renameSquad,
   scenarioSummary,
   setOrderKind,
+  setDefendPrepared,
   setOrderActionsOn,
   ACTIONS_ON_HINTS,
   ACTIONS_ON_LABELS,
@@ -161,6 +162,7 @@ const ORDER_KEYS: Readonly<Record<string, OrderKind>> = {
   a: 'attack',
   w: 'withdraw',
   b: 'ambush',
+  d: 'defend',
 };
 
 /** An eye, in `currentColor`, for the viewshed toggles. */
@@ -169,8 +171,8 @@ const EYE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="t
 const HELP_HTML = `<dl class="kv help">
   <dt>S, Esc</dt><dd>Select tool; Esc again clears the selection</dd>
   <dt>P</dt><dd>Place squads (Scenario Setup): pick the side and organization, then click the map</dd>
-  <dt>M, A, W, B</dt><dd>Give the selected squad Move, Attack, Withdraw or Ambush orders: each click adds one, after the selected order</dd>
-  <dt>K</dt><dd>Set the kill zone of the selected ambush order: click its centre; drag its corners to resize it</dd>
+  <dt>M, A, W, B, D</dt><dd>Give the selected squad Move, Attack, Withdraw, Ambush or Defend orders: each click adds one, after the selected order</dd>
+  <dt>K</dt><dd>Set the kill zone of the selected ambush order (click its centre; drag its corners to resize it), or the direction of the selected defend order (click that way; drag the square on its edge to widen it)</dd>
   <dt>Drag</dt><dd>A squad to move it (Setup), a waypoint to move its destination, the white knob to turn the selected squad</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
   <dt>Delete</dt><dd>The selected order, or else the selected squad (Setup)</dd>
@@ -180,7 +182,8 @@ const HELP_HTML = `<dl class="kv help">
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
 <b>Attack</b> takes and clears the objective, assaulting with fire and movement; <b>Withdraw</b> falls back
 without halting to fight; <b>Ambush</b> goes to the ambush position and lies in wait, concealed, facing its
-kill zone: it opens fire when the enemy is in the kill zone, then holds there until ordered on. Contact interrupts an order: the squad reacts on its own, then resumes it.
+kill zone: it opens fire when the enemy is in the kill zone, then holds there until ordered on; <b>Defend</b> goes to the
+defensive position, deploys across its sector and digs in (full after 30 minutes), fighting from there until ordered on. Contact interrupts an order: the squad reacts on its own, then resumes it.
 A squad with no orders left holds where it is.</p>`;
 
 const sideClass = (side: Side) => (side === 'BLUEFOR' ? 'blue' : 'red');
@@ -503,10 +506,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           };
         }),
       );
+      // Fighting positions dug by defences, as the battle reports them.
+      const squads = inCombat()?.squads() ?? inReview()?.squads() ?? [];
       return {
         units,
         clock: { log: c.log, combatLog: c.combatLog, seconds: c.seconds, ended: c.ended },
         weapons: combatWeapons.weapons,
+        earthworks: squads.flatMap((s) => s.earthworks),
       };
     }
     const f = planner.figures();
@@ -939,15 +945,30 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     </div>
     ${killZoneButton()}`;
 
-  /** "Set kill zone": only with the Ambush tool, or an ambush order selected (of a squad being planned). */
+  /**
+   * "Set kill zone" (an ambush) or "Set direction" (a defence): only with the
+   * Ambush or Defend tool, or such an order selected (of a squad being planned).
+   */
   const killZoneButton = (): string => {
     const t = planner.tool;
     const s = planner.selectedSquad;
     const index = planner.selection.orderIndex;
-    const ambushSelected = index !== null && s?.plan[index]?.kind === 'ambush';
-    const shown =
-      (t.kind === 'order' && t.order === 'ambush') || t.kind === 'killZone' || ambushSelected;
-    if (!shown || !planner.canPlan(s)) return '';
+    const selectedKind = index === null ? undefined : s?.plan[index]?.kind;
+    const defence =
+      (t.kind === 'order' && t.order === 'defend') ||
+      t.kind === 'sector' ||
+      (selectedKind === 'defend' && !(t.kind === 'order' && t.order === 'ambush'));
+    const ambush =
+      (t.kind === 'order' && t.order === 'ambush') ||
+      t.kind === 'killZone' ||
+      selectedKind === 'ambush';
+    if ((!defence && !ambush) || !planner.canPlan(s)) return '';
+    if (defence) {
+      const has = s?.plan.some((o) => o.kind === 'defend') === true;
+      return `<div class="tool-row kill-zone-row">
+      <button class="tool kill-zone" data-act="set-kill-zone" aria-pressed="${String(t.kind === 'sector')}"${has ? '' : ' disabled'} title="Click the map in the direction the selected defend order defends toward; then drag the square on its arc to widen or narrow it, up to all round (K)">Set direction</button>
+    </div>`;
+    }
     const hasAmbush = s?.plan.some((o) => o.kind === 'ambush') === true;
     return `<div class="tool-row kill-zone-row">
       <button class="tool kill-zone" data-act="set-kill-zone" aria-pressed="${String(t.kind === 'killZone')}"${hasAmbush ? '' : ' disabled'} title="Click the map to centre the selected ambush order's kill zone: a 50 m square facing the ambush position (K)">Set kill zone</button>
@@ -994,6 +1015,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const selected = planner.selectedSquad;
     if (t.kind === 'place')
       return `Click the map to place a ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}; Esc to stop.`;
+    if (t.kind === 'sector') {
+      const index = planner.selection.orderIndex;
+      return selected && index !== null
+        ? `Click the map in the direction order ${String(index + 1)} defends toward: a 90° arc that way. Then drag the square on its arc to widen or narrow it, up to all round.`
+        : 'Select a defend order first.';
+    }
     if (t.kind === 'killZone') {
       const index = planner.selection.orderIndex;
       return selected && index !== null
@@ -1006,15 +1033,27 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         return planner.stage === 'bluefor'
           ? `${selected.name} is OPFOR: its plan is set in Scenario Setup.`
           : `${selected.name} is BLUEFOR: its plan is made in BLUEFOR Planning.`;
-      return `Click the map: ${selected.name} gets a${t.order === 'ambush' || t.order === 'attack' ? 'n' : ''} ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.${t.order === 'ambush' ? ' That is the ambush position; the next click sets its kill zone.' : ''}`;
+      return `Click the map: ${selected.name} gets a${t.order === 'ambush' || t.order === 'attack' ? 'n' : ''} ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.${t.order === 'ambush' ? ' That is the ambush position; the next click sets its kill zone.' : t.order === 'defend' ? ' That is the defensive position; the next click sets the direction it defends toward.' : ''}`;
     }
     if (planner.stage === 'scenario')
-      return 'Place both sides’ squads, then give OPFOR its plans (select an OPFOR squad, then M, A, W or B).';
+      return 'Place both sides’ squads, then give OPFOR its plans (select an OPFOR squad, then M, A, W, B or D).';
     if (planner.stage === 'bluefor')
-      return 'Select a BLUEFOR squad, then M, A, W or B and click the map for each order.';
+      return 'Select a BLUEFOR squad, then M, A, W, B or D and click the map for each order.';
     return '';
   };
 
+  /** A defence's preparation before the battle: chosen while planning it, else shown. */
+  const preparedHtml = (minutes: number, k: number, planning: boolean): string => {
+    const label = (m: number) => (m === 0 ? 'not prepared' : `prepared ${String(m)} min`);
+    if (!planning) return `<span class="muted prepared">${label(minutes)}</span>`;
+    const options = [0, 5, 10, 15, 20, 25, 30]
+      .map(
+        (m) =>
+          `<option value="${String(m)}"${m === minutes ? ' selected' : ''}>${label(m)}${m === 30 ? ' (dug in)' : ''}</option>`,
+      )
+      .join('');
+    return `<select class="prepared" data-act="order-prepared" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: how long its position was prepared before the battle" title="How long the position was prepared before the battle: it starts that far dug in (30 minutes: fully)">${options}</select>`;
+  };
   /** The eye that turns a squad's viewshed from its start (`index` null), or from a waypoint, on or off. */
   const viewshedButton = (s: ScenarioSquad, index: number | null): string => {
     const on = planner.hasViewshed(s.id, index);
@@ -1067,7 +1106,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               ? order.killZone
                 ? ` · kill zone ${String(Math.round(order.killZone.widthM))} × ${String(Math.round(order.killZone.depthM))} m`
                 : ' · <span class="warn">no kill zone</span>'
-              : ''
+              : order.kind === 'defend'
+                ? order.sector
+                  ? ` · facing ${String(Math.round(((order.sector.facingDeg % 360) + 360) % 360)).padStart(3, '0')}°, ${order.sector.arcDeg >= 360 ? 'all round' : `${String(Math.round(order.sector.arcDeg))}° arc`}`
+                  : ' · <span class="warn">no direction</span>'
+                : ''
           }</span>
           ${
             planning
@@ -1077,6 +1120,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               <button class="small" data-act="order-delete" data-index="${String(k)}" title="Delete" aria-label="Delete order ${String(k + 1)}">✕</button></span>`
               : `<span class="order-buttons">${eye}</span>`
           }
+          ${order.kind === 'defend' ? preparedHtml(order.preparedMinutes ?? 0, k, planning) : ''}
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
         </li>`;
       })
@@ -1402,6 +1446,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         if (s)
           planner.edit((d) =>
             setOrderActionsOn(d, s.id, Number(el.dataset['index']), value as ActionsOn),
+          );
+        break;
+      case 'order-prepared':
+        if (s)
+          planner.edit((d) =>
+            setDefendPrepared(d, s.id, Number(el.dataset['index']), Number(value)),
           );
         break;
       case 'combat-actions':

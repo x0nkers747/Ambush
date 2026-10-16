@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { sinkDepth, type ViewEarthwork } from '../earthworks';
+import type { PoseInput } from './motion';
 import type { CombatEvent, MotionLog } from '#exercise';
 import type { UnitMarker } from '../unit-markers';
 import { emptyMotionSample } from '#exercise';
@@ -34,6 +36,16 @@ export interface AnimationClock {
   readonly ended?: boolean;
 }
 
+/** A soldier this close to his fighting position (m) is in it. */
+const IN_POSITION_M = 1.2;
+
+/** How far a soldier at (x, y) is sunk into his fighting position (m): 0 when he is not standing in one. */
+function trenchDepth(frame: CharacterFrame, id: string, x: number, y: number): number {
+  const work = frame.earthworks?.get(id);
+  if (!work || Math.hypot(x - work.x, y - work.y) > IN_POSITION_M) return 0;
+  return sinkDepth(work.level);
+}
+
 /** How long the animation runs on after the timeline has ended (s). */
 export const AFTERMATH_SECONDS = 3;
 
@@ -64,6 +76,11 @@ export interface CharacterFrame {
   readonly surfaceAt: (x: number, y: number) => number;
   readonly camera: THREE.PerspectiveCamera;
   readonly viewportHeightPx: number;
+  /**
+   * Fighting positions by soldier id (a defence's, docs/behavior-lab/force-on-force/09):
+   * a soldier at his, dug in deep enough, is drawn standing in it, sunk into the ground.
+   */
+  readonly earthworks?: ReadonlyMap<string, ViewEarthwork>;
 }
 
 export interface CharacterStats {
@@ -347,9 +364,11 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
             if (e.puppet.view.weapon) e.puppet.view.weapon.object.visible = false;
           }
           const s = sampleAt(log, index, frame.clock.seconds);
-          const shape: ImpostorShape = s.status !== 'active' ? 'down' : s.posture;
+          const sunk = s.status === 'active' ? trenchDepth(frame, u.id, s.x, s.y) : 0;
+          const shape: ImpostorShape =
+            s.status !== 'active' ? 'down' : sunk > 0 ? 'standing' : s.posture;
           const x = s.x;
-          const y = s.z;
+          const y = s.z - sunk;
           const z = -s.y;
           const lying = shape === 'prone' || shape === 'down';
           if (visible) {
@@ -382,7 +401,28 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
           // Near: every frame; middle: every other frame (spread), and at once when he comes in.
           const due = lod === 'near' || wasFar || e.frame < 0 || (frameCount + e.slot) % 2 === 0;
           if (visible && due) {
-            puppet.pose(log, frame.clock.combatLog, frame.clock.seconds, frame.surfaceAt);
+            const work = frame.earthworks?.get(u.id);
+            const surfaceAt = frame.surfaceAt;
+            // In his fighting position, dug in deep enough: standing in it, sunk, his feet on its floor.
+            const inTrench = work
+              ? (input: PoseInput): PoseInput => {
+                  const depth = trenchDepth(frame, u.id, input.x, input.y);
+                  if (depth <= 0 || input.speed > 0.4) return input;
+                  return {
+                    ...input,
+                    z: input.z - depth,
+                    posture: 'standing',
+                    postureFrom: 'standing',
+                    postureT: 1,
+                  };
+                }
+              : undefined;
+            const floor = work
+              ? (x: number, y: number) =>
+                  surfaceAt(x, y) -
+                  (Math.hypot(x - work.x, y - work.y) < 1.5 ? sinkDepth(work.level) : 0)
+              : surfaceAt;
+            puppet.pose(log, frame.clock.combatLog, frame.clock.seconds, floor, inTrench);
             e.frame = frameCount;
             posed += 1;
           }

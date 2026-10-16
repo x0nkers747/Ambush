@@ -85,12 +85,28 @@ export function orderSpecProblem(order: OrderSpec): string | null {
   const actionsOn: string | undefined = order.actionsOn;
   if (actionsOn !== undefined && !(ACTIONS_ON as readonly string[]).includes(actionsOn))
     return `unknown actions on contact "${actionsOn}"`;
+  const sector = order.sector;
+  if (order.kind !== 'defend' && sector !== undefined) return `a ${order.kind} order has no sector`;
+  if (order.kind !== 'defend' && order.preparedSeconds !== undefined)
+    return `a ${order.kind} order has no preparation`;
+  if (order.kind === 'defend') {
+    if (sector === undefined) return 'a defend order needs a sector';
+    if (!Number.isFinite(sector.facing)) return 'the sector must face a finite direction';
+    if (!(sector.arc >= DEFENCE_ARC_MIN_RAD - 1e-9 && sector.arc <= 2 * Math.PI + 1e-9))
+      return 'the sector must be 20° to 360° wide';
+    const prepared = order.preparedSeconds;
+    if (prepared !== undefined && !(prepared >= 0 && Number.isFinite(prepared)))
+      return 'the preparation must be a finite, non-negative time';
+  }
   const zone = order.killZone;
   if (order.kind !== 'ambush')
     return zone === undefined ? null : `a ${order.kind} order has no kill zone`;
   if (zone === undefined) return 'an ambush order needs a kill zone';
   return killZoneProblem(zone);
 }
+
+/** A defence's sector is at least this wide (radians, 20°). */
+export const DEFENCE_ARC_MIN_RAD = Math.PI / 9;
 
 /** Kill zones are this many metres across and deep, at least and at most. */
 export const KILL_ZONE_MIN_M = 5;

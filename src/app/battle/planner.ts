@@ -10,7 +10,9 @@ import {
   moveSquad,
   ORDER_LABELS,
   reorderOrder,
+  resizeDefendArc,
   resizeKillZone,
+  setDefendSector,
   setKillZone,
   scenarioIssues,
   soldierStarts,
@@ -51,7 +53,9 @@ export type PlannerTool =
   /** Give the selected squad orders of a kind, one per click. */
   | { readonly kind: 'order'; readonly order: OrderKind }
   /** Set the kill zone of the selected ambush order: a click centres it. */
-  | { readonly kind: 'killZone' };
+  | { readonly kind: 'killZone' }
+  /** The next click sets the selected defend order's direction (its sector's facing). */
+  | { readonly kind: 'sector' };
 
 export interface PlannerSelection {
   readonly squadId: string | null;
@@ -114,10 +118,13 @@ export interface Planner {
   turnSquadToward(id: string, point: Vec2, saving: boolean): boolean;
   moveOrderTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
   /**
-   * Arms the kill zone tool for the selected squad's ambush order (the
-   * selected order, else its last ambush). Returns whether there is one.
+   * Arms the second click of the selected squad's ambush or defend order (the
+   * selected order, else its last of them): an ambush's kill zone, a
+   * defence's direction. Returns whether there is one.
    */
   armKillZone(): boolean;
+  /** Widens or narrows a defend order's arc to its handle at `point`. */
+  resizeDefendArcTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
   /** Moves corner `corner` of an ambush order's kill zone to `point`. */
   resizeKillZoneTo(
     id: string,
@@ -436,11 +443,25 @@ export function createPlanner(o: PlannerOptions): Planner {
           );
         if (added) {
           planner.select(selected.id, at + points.length - 1);
-          // An ambush needs its kill zone: the next click sets it.
-          if (kind === 'ambush') {
-            tool = { kind: 'killZone' };
+          // An ambush needs its kill zone, a defence its direction: the next click sets it.
+          if (kind === 'ambush' || kind === 'defend') {
+            tool = { kind: kind === 'ambush' ? 'killZone' : 'sector' };
             changed();
           }
+        }
+        return;
+      }
+      if (tool.kind === 'sector') {
+        const selected = planner.selectedSquad;
+        const index = selection.orderIndex;
+        if (!selected || index === null || selected.plan[index]?.kind !== 'defend') {
+          o.notify('Select a defend order first, then click the direction it defends toward.');
+          return;
+        }
+        if (!canPlan(selected)) return;
+        if (apply((d) => setDefendSector(d, selected.id, index, point), true)) {
+          tool = { kind: 'select' };
+          changed();
         }
         return;
       }
@@ -476,14 +497,21 @@ export function createPlanner(o: PlannerOptions): Planner {
     armKillZone() {
       const s = planner.selectedSquad;
       if (!s || !canPlan(s)) return false;
+      // The selected order if it is an ambush or a defence, else the squad's last of them.
       const chosen = selection.orderIndex;
-      let index = chosen !== null && s.plan[chosen]?.kind === 'ambush' ? chosen : -1;
-      if (index < 0) index = s.plan.map((x) => x.kind).lastIndexOf('ambush');
+      const second = (k: number) => s.plan[k]?.kind === 'ambush' || s.plan[k]?.kind === 'defend';
+      let index = chosen !== null && second(chosen) ? chosen : -1;
+      if (index < 0)
+        for (let k = s.plan.length - 1; k >= 0 && index < 0; k -= 1) if (second(k)) index = k;
       if (index < 0) return false;
       selection = { squadId: s.id, orderIndex: index };
-      tool = { kind: 'killZone' };
+      tool = { kind: s.plan[index]?.kind === 'defend' ? 'sector' : 'killZone' };
       changed();
       return true;
+    },
+    resizeDefendArcTo(id, index, point, saving) {
+      if (!canPlan(squad(id))) return false;
+      return apply((d) => resizeDefendArc(d, id, index, point), saving);
     },
     resizeKillZoneTo(id, index, corner, point, saving) {
       if (!canPlan(squad(id))) return false;

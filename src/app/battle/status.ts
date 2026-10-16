@@ -40,6 +40,16 @@ export interface SquadStatus {
   readonly ineffective: boolean;
   /** What it is doing now, in a word, and why (`activityOf`). */
   readonly activity: SquadActivity;
+  /** How far dug in it is (0–1) while it holds a defence; else 0. */
+  readonly dugIn: number;
+  /** Its soldiers' fighting positions (they stay where they were dug). */
+  readonly earthworks: readonly {
+    readonly soldierId: string;
+    readonly x: number;
+    readonly y: number;
+    readonly azimuth: number;
+    readonly level: number;
+  }[];
   readonly effectiveness: number;
   readonly active: DeepReadonly<FofOrder> | null;
   readonly pending: readonly DeepReadonly<FofOrder>[];
@@ -64,6 +74,14 @@ export interface SquadActivity {
 
 const percent = (x: number) => `${String(Math.round(x * 100))} %`;
 
+/** What a defence's dig-in looks like on the ground. */
+export function digStage(dugIn: number): string {
+  if (dugIn < 0.05) return 'lying in the open';
+  if (dugIn < 0.5) return 'in shell scrapes';
+  if (dugIn < 1) return 'in fighting pits';
+  return 'in its trench';
+}
+
 /**
  * What a force is doing and why, from its state: its phase, refined by its
  * order, its actions on contact, and whether it is recovering or spent.
@@ -72,7 +90,13 @@ export function activityOf(
   force: DeepReadonly<FofForce>,
   config: FofConfig = FOF_DEFAULT_CONFIG,
 ): SquadActivity {
-  const activity = phaseActivity(force, config);
+  const base = phaseActivity(force, config);
+  // Fighting from its defence: how far dug in it is.
+  const defending = force.orders.find((o) => o.id === force.activeOrderId)?.kind === 'defend';
+  const activity =
+    defending && force.phase !== 'defending' && force.phase !== 'moving' && force.dugIn > 0
+      ? { word: base.word, why: `${base.why} (dug in ${percent(force.dugIn)})` }
+      : base;
   // Ordered on after it was made combat ineffective: it stays ineffective.
   return force.combatIneffective && force.phase !== 'ineffective'
     ? { word: activity.word, why: `${activity.why} (combat ineffective)` }
@@ -96,6 +120,7 @@ function phaseActivity(force: DeepReadonly<FofForce>, config: FofConfig): SquadA
       if (order?.kind === 'attack')
         return { word: 'Advancing', why: 'on its Attack order, to the objective' };
       if (order?.kind === 'ambush') return { word: 'Moving', why: 'to its ambush position' };
+      if (order?.kind === 'defend') return { word: 'Moving', why: 'to its defensive position' };
       return { word: 'Moving', why: order ? 'on its Move order' : 'to where it was sent' };
     case 'possibleContact':
       return { word: 'Observing', why: 'halted to look at a possible enemy' };
@@ -143,6 +168,14 @@ function phaseActivity(force: DeepReadonly<FofForce>, config: FofConfig): SquadA
             why: `on the objective of its ${order.kind === 'attack' ? 'Attack' : 'order'}`,
           }
         : { word: 'Holding', why: 'arrived; it has no more orders' };
+    case 'defending':
+      return {
+        word: `Defending ${percent(force.dugIn).replace(' ', '')}`,
+        why:
+          force.dugIn >= 1
+            ? 'in its defensive position: fully dug in, standing in its trench'
+            : `in its defensive position, digging in: ${percent(force.dugIn)} (${digStage(force.dugIn)})`,
+      };
     case 'inAmbush':
       return force.concealed
         ? { word: 'Waiting', why: 'in ambush: concealed, watching its kill zone' }
@@ -227,6 +260,11 @@ export function squadStatus(
     phase: force?.phase ?? 'holding',
     ineffective: force ? force.combatIneffective || force.phase === 'ineffective' : false,
     activity: force ? activityOf(force, config) : { word: 'Holding', why: 'not yet started' },
+    dugIn:
+      force && force.orders.find((o) => o.id === force.activeOrderId)?.kind === 'defend'
+        ? force.dugIn
+        : 0,
+    earthworks: force?.earthworks ?? [],
     effectiveness: force?.effectiveness ?? 0,
     active: orders.find((x) => x.id === force?.activeOrderId) ?? null,
     pending: orders.filter((x) => x.status === 'pending'),

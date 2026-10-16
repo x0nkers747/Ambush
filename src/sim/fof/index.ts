@@ -43,3 +43,5 @@ export { hitProbabilityAt, type RangeProbability } from './hit-probability';
 export { armed, roundsLeft } from './weapons';
 export { recovered, spent } from './force';
 export { areaIncapacitation } from './fire';
+export { DEFENCE_ARC_MIN_RAD } from './setup';
+export { defenceAzimuth, defenceFormation, RING_FROM_RAD } from './defence';

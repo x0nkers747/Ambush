@@ -288,7 +288,8 @@ const SQUAD_KEYS = [
   'facingDeg',
   'plan',
 ];
-const ORDER_KEYS = ['kind', 'destination', 'actionsOn', 'killZone'];
+const ORDER_KEYS = ['kind', 'destination', 'actionsOn', 'killZone', 'sector', 'preparedMinutes'];
+const SECTOR_KEYS = ['facingDeg', 'arcDeg'];
 const KILL_ZONE_KEYS = ['centre', 'widthM', 'depthM', 'facingDeg'];
 const POINT_KEYS = ['east', 'north'];
 const SCENARIO_KEYS = [
@@ -331,6 +332,9 @@ function readScenario(raw: unknown, fail: Fail): BattleScenarioDefinition {
               `${where}, order ${String(k + 1)}'s destination`,
               fail,
             );
+          const sector = o['sector'];
+          if (isObject(sector))
+            onlyKnown(sector, SECTOR_KEYS, `${where}, order ${String(k + 1)}'s sector`, fail);
           const zone = o['killZone'];
           if (isObject(zone)) {
             onlyKnown(zone, KILL_ZONE_KEYS, `${where}, order ${String(k + 1)}'s kill zone`, fail);

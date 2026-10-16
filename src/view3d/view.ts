@@ -48,6 +48,7 @@ import { createMotionRecorder, emptyMotionSample } from '#exercise';
 import { benchCrowd, type BenchCrowd } from './characters/bench';
 import { type AnimationClock, createAftermath, createCharacterLayer } from './characters/layer';
 import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
+import { createEarthworksLayer, type ViewEarthwork } from './earthworks';
 import { createImpactLayer } from './impacts';
 import { createTracerLayer } from './tracers';
 import { createMarkerLayer } from './markers';
@@ -111,6 +112,8 @@ export interface ViewFigures {
   readonly clock: AnimationClock;
   /** The weapon each soldier carries (display model), by soldier id. */
   readonly weapons: Readonly<Record<string, string | null>>;
+  /** Fighting positions dug by defences (docs/behavior-lab/force-on-force/09), drawn on the ground. */
+  readonly earthworks?: readonly ViewEarthwork[];
 }
 
 /**
@@ -332,6 +335,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     : null;
   if (characters) scene.add(characters.group);
   const impacts = createImpactLayer();
+  const earthworks = createEarthworksLayer();
+  scene.add(earthworks.group);
   scene.add(impacts.group);
   const tracers = createTracerLayer();
   scene.add(tracers.group);
@@ -795,6 +800,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       const units = figures?.units ?? [];
       const surfaceAt = (x: number, y: number) =>
         isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN;
+      const works = figures?.earthworks ?? [];
+      earthworks.update(works, surfaceAt);
+      const worksBySoldier = new Map(works.map((w) => [w.soldierId, w]));
       if (characters?.ready && bench) {
         const { crowd, startMs } = bench;
         const seconds = ((performance.now() - startMs) / 1000) % crowd.seconds;
@@ -821,6 +829,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
           surfaceAt,
           camera: eye,
           viewportHeightPx: height,
+          earthworks: worksBySoldier,
         });
         markers.update([], eye, height);
       } else markers.update(units, eye, height);
@@ -916,6 +925,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       sun.shadow.dispose();
       markers.dispose();
       impacts.dispose();
+      earthworks.dispose();
       tracers.dispose();
       characters?.dispose();
       sky.geometry.dispose();

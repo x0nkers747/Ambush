@@ -82,6 +82,7 @@ export const PHASE_TEXT: Readonly<Record<FofForce['phase'], string>> = {
   withdrawing: 'WITHDRAWING: breaking contact',
   atObjective: 'at objective',
   inAmbush: 'IN AMBUSH: lying in wait',
+  defending: 'DEFENDING: in position, digging in',
   withdrawn: 'WITHDRAWN',
   ineffective: 'COMBAT INEFFECTIVE',
 };

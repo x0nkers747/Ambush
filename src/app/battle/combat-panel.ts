@@ -52,11 +52,15 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
         ? `<div class="tool-row kill-zone-row">
       <button class="tool kill-zone" data-cact="kill-zone" aria-pressed="${String(pendingAmbush(ui) !== null)}" title="After the ambush position, click the kill zone's centre: a 50 m square facing the position">Set kill zone</button>
     </div>`
-        : ''
+        : ui.tool === 'defend'
+          ? `<div class="tool-row kill-zone-row">
+      <button class="tool kill-zone" data-cact="kill-zone" aria-pressed="${String(pendingAmbush(ui) !== null)}" title="After the defensive position, click the direction it defends toward: a 90° sector that way">Set direction</button>
+    </div>`
+          : ''
     }
     <label class="on-contact">On contact
       <select data-act="combat-actions" title="What a squad ordered now does on contact">
-        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid, Ambush: Continue)</option>
+        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid, Ambush and Defend: Continue on the way)</option>
         ${ACTIONS_ON.map((a) => `<option value="${a}"${ui.actionsOn === a ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">${ACTIONS_ON_LABELS[a]}</option>`).join('')}
       </select>
     </label>
@@ -82,13 +86,17 @@ function hintFor(c: Combat, ui: CombatUi): string {
   const s = c.squad(ui.selected);
   if (ui.tool === null)
     return s
-      ? `${s.name} selected: press M, A, W or B, then click the map to order it.`
+      ? `${s.name} selected: press M, A, W, B or D, then click the map to order it.`
       : 'Click a squad of either side to select it. Space plays or pauses.';
   if (!s) return 'Select a squad first (click it on the map or in the roster).';
   if (ui.tool === 'ambush')
     return pendingAmbush(ui)
       ? `Now click the kill zone's centre: ${s.name} gets the Ambush order, its kill zone a 50 m square facing the ambush position (Esc: start again).`
       : `Click the ambush position for ${s.name}, then its kill zone.`;
+  if (ui.tool === 'defend')
+    return pendingAmbush(ui)
+      ? `Now click the direction ${s.name} defends toward: it gets the Defend order, a 90° sector that way (Esc: start again).`
+      : `Click the defensive position for ${s.name}, then the direction it defends toward.`;
   return `Click the map: ${s.name} gets a ${ORDER_LABELS[ui.tool]} order there, ${ui.append ? 'after its pending orders' : 'replacing its orders'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
 }
 

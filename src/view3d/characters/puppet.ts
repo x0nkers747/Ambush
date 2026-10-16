@@ -93,6 +93,8 @@ export class Puppet {
     combatLog: readonly CombatEvent[],
     seconds: number,
     surfaceAt: (x: number, y: number) => number,
+    /** Changes the pose's input before it is posed (a soldier standing in his trench); not when he is down. */
+    adjust?: (input: PoseInput) => PoseInput,
   ): PoseInput {
     if (log !== this.log || log.epoch !== this.epoch) {
       // A new exercise, or its log started again: forget memoised facts.
@@ -110,6 +112,7 @@ export class Puppet {
       if (this.ragdoll?.downAt !== downAt) this.ragdoll = this.fall(downAt, surfaceAt);
       input = this.motion.at(seconds);
     }
+    if (adjust && input.sinceDown < 0) input = adjust(input);
     this.posed(input, surfaceAt);
     // Down: the body is the ragdoll's (the weapon falls as the hold lets go).
     if (input.sinceDown >= 0) this.ragdoll?.pose(this.view, input.sinceDown);

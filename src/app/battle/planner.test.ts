@@ -344,3 +344,26 @@ describe('viewsheds turned on', () => {
     expect(pins()).toEqual([]);
   });
 });
+
+describe('a defend order', () => {
+  it('its position, then a second click for its direction; K arms that click again', () => {
+    const { p } = planner('bluefor');
+    p.select('B1');
+    p.setTool({ kind: 'order', order: 'defend' });
+    p.click({ x: 0, y: -300 });
+    expect(p.tool).toEqual({ kind: 'sector' });
+    p.click({ x: 0, y: -200 });
+    const order = p.definition.squads.find((s) => s.id === 'B1')?.plan[0];
+    expect(order?.kind).toBe('defend');
+    expect(order?.sector?.facingDeg).toBeCloseTo(0, 6);
+    expect(p.tool).toEqual({ kind: 'select' });
+    expect(p.armKillZone()).toBe(true);
+    expect(p.tool).toEqual({ kind: 'sector' });
+    // Its handle widens the arc.
+    p.resizeDefendArcTo('B1', 0, { x: 100, y: -300 }, true);
+    expect(p.definition.squads.find((s) => s.id === 'B1')?.plan[0]?.sector?.arcDeg).toBeCloseTo(
+      180,
+      6,
+    );
+  });
+});

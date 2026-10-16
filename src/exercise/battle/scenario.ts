@@ -99,6 +99,21 @@ export function describePathProblem(
  * across and `depthM` deep around `centre`, its depth axis at `facingDeg`
  * (compass degrees, from the ambush position toward the zone).
  */
+/**
+ * A defence's sector, as the scenario holds it: the direction it defends
+ * toward (`facingDeg`, compass degrees) and the arc's width (`arcDeg`,
+ * `DEFEND_ARC_MIN_DEG`–360: all round).
+ */
+export interface PlannedSector {
+  readonly facingDeg: number;
+  readonly arcDeg: number;
+}
+
+/** A new defence's arc (degrees), the narrowest, and the longest it can have been prepared for (minutes). */
+export const DEFEND_ARC_DEFAULT_DEG = 90;
+export const DEFEND_ARC_MIN_DEG = 20;
+export const DEFEND_PREPARED_MAX_MIN = 30;
+
 export interface PlannedKillZone {
   readonly centre: MapPoint;
   readonly widthM: number;
@@ -115,6 +130,10 @@ export interface PlannedOrder {
   readonly destination: MapPoint;
   /** An ambush's kill zone (absent until set; only an ambush has one). */
   readonly killZone?: PlannedKillZone;
+  /** A defence's sector (absent until its direction is set; only a defence has one). */
+  readonly sector?: PlannedSector;
+  /** A defence: how long its position was prepared before the battle (minutes): it starts that far dug in. */
+  readonly preparedMinutes?: number;
   /** What the squad does on contact while carrying it out; absent: its kind's (`defaultActionsOn`). */
   readonly actionsOn?: ActionsOn;
 }
@@ -180,6 +199,7 @@ export const ORDER_LABELS: Readonly<Record<OrderKind, string>> = {
   attack: 'Attack',
   withdraw: 'Withdraw',
   ambush: 'Ambush',
+  defend: 'Defend',
 };
 
 /** What each actions on contact is called (docs/behavior-lab/force-on-force/07). */
@@ -415,11 +435,36 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
           facingDeg: facingDeg as number,
         };
       }
+      const rawSector = o['sector'];
+      let sector: PlannedSector | undefined;
+      if (rawSector !== undefined) {
+        const sectorWhat = `${what}, order ${String(k + 1)}'s sector`;
+        if (kind !== 'defend') fail(`${what}, order ${String(k + 1)}: only a defence has a sector`);
+        const r = (rawSector ?? {}) as Record<string, unknown>;
+        const facingDeg = r['facingDeg'];
+        const arcDeg = r['arcDeg'];
+        if (typeof facingDeg !== 'number' || !Number.isFinite(facingDeg))
+          fail(`${sectorWhat}: the facing is not a number`);
+        if (typeof arcDeg !== 'number' || !(arcDeg >= DEFEND_ARC_MIN_DEG && arcDeg <= 360))
+          fail(`${sectorWhat}: the arc is not ${String(DEFEND_ARC_MIN_DEG)}–360°`);
+        sector = { facingDeg: facingDeg as number, arcDeg: arcDeg as number };
+      }
+      const prepared = o['preparedMinutes'];
+      if (prepared !== undefined) {
+        if (kind !== 'defend')
+          fail(`${what}, order ${String(k + 1)}: only a defence can be prepared`);
+        if (typeof prepared !== 'number' || !(prepared >= 0 && prepared <= DEFEND_PREPARED_MAX_MIN))
+          fail(
+            `${what}, order ${String(k + 1)}: the preparation is not 0–${String(DEFEND_PREPARED_MAX_MIN)} minutes`,
+          );
+      }
       return {
         kind: kind as OrderKind,
         destination: point(o['destination'], `${what}, order ${String(k + 1)}'s destination`),
         ...(typeof actionsOn === 'string' ? { actionsOn: actionsOn as ActionsOn } : {}),
         ...(killZone ? { killZone } : {}),
+        ...(sector ? { sector } : {}),
+        ...(typeof prepared === 'number' && prepared > 0 ? { preparedMinutes: prepared } : {}),
       };
     });
     return {
@@ -922,13 +967,107 @@ export function setOrderKind(
   );
 }
 
-/** An order without its kill zone, unless it stays an ambush. */
+/** An order without its kill zone, unless it stays an ambush, and without its sector and preparation, unless it stays a defence. */
 function withoutKillZone(order: PlannedOrder, kind: OrderKind): PlannedOrder {
-  if (kind === 'ambush' || !order.killZone) return order;
+  const keepZone = kind === 'ambush';
+  const keepSector = kind === 'defend';
   return {
     kind: order.kind,
     destination: order.destination,
     ...(order.actionsOn ? { actionsOn: order.actionsOn } : {}),
+    ...(keepZone && order.killZone ? { killZone: order.killZone } : {}),
+    ...(keepSector && order.sector ? { sector: order.sector } : {}),
+    ...(keepSector && order.preparedMinutes !== undefined
+      ? { preparedMinutes: order.preparedMinutes }
+      : {}),
+  };
+}
+
+/**
+ * Sets a defence's direction: toward `point` from its position, keeping its
+ * arc (a new one's is `DEFEND_ARC_DEFAULT_DEG`).
+ */
+export function setDefendSector(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  point: Vec2,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order) return refused('There is no such order.');
+  if (order.kind !== 'defend') return refused('Only a defence has a sector.');
+  const from = toVec(order.destination);
+  if (Math.hypot(point.x - from.x, point.y - from.y) < 1)
+    return refused('Click away from the defensive position, in the direction it defends toward.');
+  const sector: PlannedSector = {
+    facingDeg: degreesToward(toPoint(from), toPoint(point)),
+    arcDeg: order.sector?.arcDeg ?? DEFEND_ARC_DEFAULT_DEG,
+  };
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, sector } : o)),
+    })),
+  );
+}
+
+/**
+ * Widens or narrows a defence's arc to reach `point`, its handle's new place:
+ * twice the angle between the sector's facing and the way to `point` from the
+ * position, at least `DEFEND_ARC_MIN_DEG`; within 10° of all round, all round.
+ */
+export function resizeDefendArc(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  point: Vec2,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order?.sector) return refused('There is no such sector.');
+  const from = toVec(order.destination);
+  if (Math.hypot(point.x - from.x, point.y - from.y) < 1) return ok(d);
+  const toward = degreesToward(toPoint(from), toPoint(point));
+  const off = Math.abs(((((toward - order.sector.facingDeg) % 360) + 540) % 360) - 180);
+  const arc = 2 * off >= 350 ? 360 : Math.max(DEFEND_ARC_MIN_DEG, 2 * off);
+  const sector: PlannedSector = { ...order.sector, arcDeg: arc };
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, sector } : o)),
+    })),
+  );
+}
+
+/** Sets how long a defence's position was prepared before the battle (minutes, 0–`DEFEND_PREPARED_MAX_MIN`). */
+export function setDefendPrepared(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  minutes: number,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order) return refused('There is no such order.');
+  if (order.kind !== 'defend') return refused('Only a defence can be prepared.');
+  if (!(minutes >= 0 && minutes <= DEFEND_PREPARED_MAX_MIN))
+    return refused(`A defence is prepared for 0–${String(DEFEND_PREPARED_MAX_MIN)} minutes.`);
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => {
+        if (k !== index) return o;
+        const rest: PlannedOrder = { ...o };
+        delete (rest as { preparedMinutes?: number }).preparedMinutes;
+        return minutes > 0 ? { ...rest, preparedMinutes: minutes } : rest;
+      }),
+    })),
+  );
+}
+
+/** A defence's sector in the simulation's terms (radians). */
+export function sectorSpec(sector: PlannedSector): { facing: number; arc: number } {
+  return {
+    facing: (sector.facingDeg * Math.PI) / 180,
+    arc: (Math.min(360, sector.arcDeg) * Math.PI) / 180,
   };
 }
 
@@ -1018,6 +1157,10 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
         destination: toVec(o.destination),
         actionsOn: actionsOnOf(o),
         ...(o.killZone ? { killZone: killZoneSpec(o.killZone) } : {}),
+        ...(o.sector ? { sector: sectorSpec(o.sector) } : {}),
+        ...(o.kind === 'defend' && o.preparedMinutes
+          ? { preparedSeconds: o.preparedMinutes * 60 }
+          : {}),
       })),
     })),
   };
@@ -1087,6 +1230,18 @@ export function scenarioIssues(
       const label = `${squad.name}, order ${String(k + 1)} (${ORDER_LABELS[order.kind]})`;
       if (order.kind === 'ambush' && !order.killZone)
         issues.push({ squadId: squad.id, orderIndex: k, message: `${label}: set its kill zone.` });
+      if (order.kind === 'defend' && !order.sector)
+        issues.push({
+          squadId: squad.id,
+          orderIndex: k,
+          message: `${label}: set the direction it defends toward.`,
+        });
+      if (k > 0 && squad.plan[k - 1]?.kind === 'defend')
+        issues.push({
+          squadId: squad.id,
+          orderIndex: k,
+          message: `${label}: a defence waits for new orders, so no order after it is carried out. Delete it, or give it in combat.`,
+        });
       if (k > 0 && squad.plan[k - 1]?.kind === 'ambush')
         issues.push({
           squadId: squad.id,

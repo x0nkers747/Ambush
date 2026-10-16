@@ -302,6 +302,21 @@ export interface ForceBehaviorConfig {
    */
   readonly ambushAccuracyFactor: number;
   readonly ambushAccuracySeconds: number;
+  /**
+   * Defence (docs/behavior-lab/force-on-force/09): a squad in its defensive
+   * position, undisturbed, is fully dug in after this long (s), from lying
+   * in the open, through shell scrapes, to fighting pits and trench.
+   */
+  readonly digInSeconds: number;
+  /**
+   * Fully dug in, a soldier's chance of being hit (aimed fire, and by area
+   * fire) is multiplied by `dugInHitFactor`, the detail an observer sees of
+   * him by `dugInDetectionFactor`, and the suppression fire puts on him by
+   * `dugInSuppressionFactor`; part dug in, by as much less (linearly).
+   */
+  readonly dugInHitFactor: number;
+  readonly dugInDetectionFactor: number;
+  readonly dugInSuppressionFactor: number;
   /** Attacking: seconds in contact (returning fire, locating the enemy) before it assaults. */
   readonly assaultAfterSeconds: number;
   /**
@@ -767,6 +782,10 @@ export function validateFofConfig(data: unknown): FofConfig {
     'ambushSurpriseSeconds',
     'ambushAccuracyFactor',
     'ambushAccuracySeconds',
+    'digInSeconds',
+    'dugInHitFactor',
+    'dugInDetectionFactor',
+    'dugInSuppressionFactor',
     'withdrawSuppression',
     'withdrawSuppressedSeconds',
     'withdrawAmmunitionFraction',
@@ -802,6 +821,10 @@ export function validateFofConfig(data: unknown): FofConfig {
     ambushSurpriseSeconds: [0, 60],
     ambushAccuracyFactor: [1, 10],
     ambushAccuracySeconds: [0, 120],
+    digInSeconds: [1, 86_400],
+    dugInHitFactor: [0.01, 1],
+    dugInDetectionFactor: [0.01, 1],
+    dugInSuppressionFactor: [0, 1],
     withdrawSuppression: [0, 1],
     withdrawSuppressedSeconds: [0],
     withdrawAmmunitionFraction: [0, 1],

@@ -6,6 +6,7 @@ import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
 import type { AreaEffect, FofWeapon } from './config';
 import { ambushSectors } from './ambush';
+import { dugInFactor, effectiveDugIn } from './defence';
 import { enter, firingOnTheMove, pressingOn, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
@@ -68,6 +69,13 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
     y: p.y,
     z: surfaceHeightAt(terrain, p.x, p.y) + 0.5,
   });
+}
+
+/** A soldier's chance of being hit, dug in (docs/behavior-lab/force-on-force/09): 1 in the open. */
+function dugInHit(context: FofContext, target: Soldier): number {
+  const member = context.fof.soldiers[context.memberIndex.get(target.id) ?? -1];
+  const force = member ? context.fof.forces[member.force] : undefined;
+  return dugInFactor(effectiveDugIn(force ?? null), context.setup.config.force.dugInHitFactor);
 }
 
 /** A round's hit probability is never raised by an ambush's steady fire beyond this. */
@@ -300,6 +308,7 @@ function aimedTarget(
     const base =
       hitProbabilityAt(weapon, range) *
       context.setup.config.fire.postureHitMultipliers[target.posture] *
+      dugInHit(context, target) *
       seen *
       shooterFactor(context, member);
     // An ambush's steady fire, in its first moments.
@@ -351,6 +360,7 @@ function areaTarget(
     near && seen > 0
       ? hitProbabilityAt(weapon, best.range) *
         setup.config.fire.postureHitMultipliers[near.posture] *
+        dugInHit(context, near) *
         setup.config.fire.areaFireHitFactor *
         seen *
         shooterFactor(context, member)
@@ -409,7 +419,15 @@ function suppressAround(
     const share = s.id === aimedAt ? 1 : d < radiusM ? 1 - d / radiusM : 0;
     if (share <= 0) continue;
     const prone = s.posture === 'prone' ? setup.config.suppression.proneSuppressionFactor : 1;
-    volley.suppression.set(enemy, (volley.suppression.get(enemy) ?? 0) + perBurst * share * prone);
+    // Dug in, less suppressed.
+    const dug = dugInFactor(
+      effectiveDugIn(fof.forces[enemy.force] ?? null),
+      setup.config.force.dugInSuppressionFactor,
+    );
+    volley.suppression.set(
+      enemy,
+      (volley.suppression.get(enemy) ?? 0) + perBurst * share * prone * dug,
+    );
   }
 }
 
@@ -603,7 +621,10 @@ function grenade(
       );
     if (covered) continue;
     exposed += 1;
-    const p = areaIncapacitation(area, d) * (s.posture === 'prone' ? area.proneFactor : 1);
+    const p =
+      areaIncapacitation(area, d) *
+      (s.posture === 'prone' ? area.proneFactor : 1) *
+      dugInHit(context, s);
     if (nextFloat(state.rng) < p && !volley.down.has(s.id)) {
       casualties.push(s.id);
       other.stats.timesHit += 1;
