@@ -46,6 +46,8 @@ export type TerrainJobResult =
       readonly bands: readonly GroundBand[];
       readonly decks: readonly TerrainDeck[];
     }
+  /** One more band of a `bands` job sampled (before its result). */
+  | { readonly kind: 'progress' }
   | { readonly kind: 'error'; readonly error: string };
 
 interface WorkerScope {
@@ -63,7 +65,11 @@ scope.onmessage = ({ data }) => {
       return;
     }
     const field = compileField(data.input, DEFAULT_FIELD_SPEC);
-    const bands = data.bands.map(([r0, r1]) => groundBand(field, data.input.heightfield, r0, r1));
+    const bands = data.bands.map(([r0, r1]) => {
+      const band = groundBand(field, data.input.heightfield, r0, r1);
+      scope.postMessage({ kind: 'progress' });
+      return band;
+    });
     scope.postMessage(
       { kind: 'bands', bands, decks: data.decks ? groundDecks(field) : [] },
       bands.flatMap((b) => [b.nodes.buffer, b.cells.buffer, b.samples.buffer]),

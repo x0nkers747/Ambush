@@ -1,4 +1,4 @@
-import { isCancelled, type BattlefieldStore } from '#acquire';
+import { generationFraction, isCancelled, type BattlefieldStore } from '#acquire';
 import {
   battleScenarioId,
   parseBattleScenario,
@@ -261,7 +261,7 @@ export function createScenarioManager(o: ScenarioManagerOptions): ScenarioManage
       try {
         const found = await resolveTerrain(doc.terrain, o.terrain, {
           onProgress: (p) => {
-            progress.update(`Generating ${where(doc)} again: ${p.message}`);
+            progress.update(`Generating ${where(doc)} again: ${p.message}`, generationFraction(p));
           },
           signal: progress.signal,
         });

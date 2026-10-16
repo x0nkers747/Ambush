@@ -1,3 +1,4 @@
+import { busy, painted, type BusyTask } from '../busy';
 import { emptyMotionSample } from '#exercise';
 import {
   clearPlan,
@@ -498,6 +499,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   let view3d: BattlefieldView3d | null = null;
   let loading3d = false;
   let stopped = false;
+  /** The loading overlay while a battle starts, or `null`. */
+  let startingTask: BusyTask | null = null;
   /** Terrain selection's 3D camera, for the 3D view when it opens. */
   let handedPose: CameraPose | null = null;
   const FOV_HALF_TAN = Math.tan((22.5 * Math.PI) / 180);
@@ -652,10 +655,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (loading3d) return;
     loading3d = true;
     notify('Loading the 3D view…');
+    // Building the view holds the page: the progress overlay is up until its first frame.
+    const task = busy('Loading the 3D view…', null, { immediate: true });
     import('#view3d')
-      .then(({ createBattlefieldView3d }) => {
+      .then(async ({ createBattlefieldView3d }) => {
+        await painted();
         loading3d = false;
-        if (stopped) return;
+        if (stopped) {
+          task.done();
+          return;
+        }
         view3d = createBattlefieldView3d({ terrain: o.terrain, figures });
         ui('attribution').before(view3d.canvas, view3d.overlay);
         connect3d(view3d);
@@ -665,6 +674,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         const pose = handedPose;
         handedPose = null;
         requestAnimationFrame(() => {
+          task.done();
           if (view3d !== opened || viewMode !== '3d') return;
           // From terrain selection's 3D camera, exactly; else where the 2D map looked.
           if (pose) opened.setCameraPose(pose);
@@ -673,6 +683,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         notify('');
       })
       .catch((error: unknown) => {
+        task.done();
         loading3d = false;
         notify(
           `The 3D view could not be opened: ${error instanceof Error ? error.message : String(error)}`,
@@ -951,14 +962,20 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         c.end();
         combatUi.tool = null;
         notify('Ending the battle…');
-        void c.recording().then((recording) => {
-          if (combat !== c || stopped) return;
-          c.dispose();
-          // The review replays the battle from its recording, from tick 0.
-          review = createReview({ terrain: o.terrain, recording, driver: battleDriver() });
-          notify('');
-          enter('aar');
-        });
+        const task = busy('Ending the battle and preparing the review…');
+        void c
+          .recording()
+          .finally(() => {
+            task.done();
+          })
+          .then((recording) => {
+            if (combat !== c || stopped) return;
+            c.dispose();
+            // The review replays the battle from its recording, from tick 0.
+            review = createReview({ terrain: o.terrain, recording, driver: battleDriver() });
+            notify('');
+            enter('aar');
+          });
       },
     });
     if (wasPlaying) notify('Paused. End the battle, or Cancel to go on.');
@@ -2208,6 +2225,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     // The battle steps for at most part of a frame, so the view keeps drawing
     // smoothly (less in 3D, whose drawing takes longer).
     inCombat()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
+    // A battle starting: its worker prepares the battlefield before the first tick.
+    const c = inCombat();
+    const starting = c !== null && !c.ended && c.playing && c.session.tick === 0;
+    if (starting && !startingTask)
+      startingTask = busy('Starting the battle: preparing the battlefield…');
+    else if (!starting && startingTask) {
+      startingTask.done();
+      startingTask = null;
+    }
     inReview()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     lastFrameMs = nowMs;
     updateViewshed();
@@ -2218,6 +2244,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   const stop = () => {
     stopped = true;
+    startingTask?.done();
+    startingTask = null;
     viewshed.service?.dispose();
     viewshed.service = null;
     view3d?.dispose();

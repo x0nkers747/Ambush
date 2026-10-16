@@ -16,6 +16,7 @@ export {
 } from './canopy';
 export {
   generateBattlefield,
+  generationFraction,
   OsmUnavailableError,
   type GenerateOptions,
   type GenerationProgress,

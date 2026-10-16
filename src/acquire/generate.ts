@@ -39,6 +39,29 @@ export interface GenerationProgress {
   readonly total?: number;
 }
 
+/** Each step's share of a generation's time (roughly), in order. */
+const STEP_SHARES: readonly (readonly [GenerationStep, number])[] = [
+  ['elevation', 0.3],
+  ['buildings', 0.15],
+  ['osm', 0.2],
+  ['trees', 0.15],
+  ['processing', 0.15],
+  ['saving', 0.05],
+];
+
+/** How far a generation has got (0–1), from its progress: the steps before, and this step's parts. */
+export function generationFraction(p: GenerationProgress): number {
+  let before = 0;
+  for (const [step, share] of STEP_SHARES) {
+    if (step === p.step) {
+      const part = p.total !== undefined && p.total > 0 ? (p.done ?? 0) / p.total : 0;
+      return Math.min(1, before + share * Math.min(1, part));
+    }
+    before += share;
+  }
+  return before;
+}
+
 export interface GenerateOptions {
   readonly config: ServiceConfig;
   readonly store: BattlefieldStore;

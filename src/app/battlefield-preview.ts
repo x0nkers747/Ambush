@@ -1,4 +1,5 @@
 import type { TerrainDataset } from '#sim';
+import { busy, painted } from './busy';
 import { createTacticalMap, type MapEditor, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d, CameraPose } from '#view3d';
 import { saveScreenshot, screenshotName } from './screenshot';
@@ -201,22 +202,30 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     loading3d = true;
     const loading = 'Loading the 3D view…';
     status(loading);
+    // Building the view holds the page: the progress overlay is up until its first frame.
+    const task = busy(loading, null, { immediate: true });
     import('#view3d')
-      .then(({ createBattlefieldView3d }) => {
+      .then(async ({ createBattlefieldView3d }) => {
+        await painted();
         loading3d = false;
         if (el('preview-status').textContent === loading) status(null);
         // Whatever is shown now (the battlefield may have changed while loading), if still wanted.
-        if (!terrain || viewMode !== '3d' || view3d) return;
+        if (!terrain || viewMode !== '3d' || view3d) {
+          task.done();
+          return;
+        }
         view3d = createBattlefieldView3d({ terrain });
         place3d(view3d);
         showViewMode();
         // The first frame lays out the camera; then look where the 2D map did.
         const opened = view3d;
         requestAnimationFrame(() => {
+          task.done();
           if (view3d === opened && viewMode === '3d') carryFocus('3d');
         });
       })
       .catch((error: unknown) => {
+        task.done();
         loading3d = false;
         if (el('preview-status').textContent === loading) status(null);
         viewMode = '2d';

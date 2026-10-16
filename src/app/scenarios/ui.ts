@@ -1,3 +1,4 @@
+import { progressBarHtml } from '../busy';
 import { escapeHtml, TRASH_ICON } from '../shell';
 import { nameProblem, SCENARIO_FILE_EXTENSION } from './document';
 import type { LibraryEntry } from './library';
@@ -37,7 +38,8 @@ export interface ScenarioDialogs {
 export interface ProgressDialog {
   /** Aborted when the user cancels. */
   readonly signal: AbortSignal;
-  update(message: string): void;
+  /** A new message, and how far it has got (0–1; `null` or absent: unknown). */
+  update(message: string, progress?: number | null): void;
   /** Shows a failure; resolves `true` to try again (offered when `retry`), `false` to give up. */
   failed(message: string, retry: boolean): Promise<boolean>;
   close(): void;
@@ -165,8 +167,9 @@ export function progress(o: { readonly title: string; readonly message: string }
     if (failure) failure(false);
     else controller.abort();
   });
-  const render = (message: string) => {
+  const render = (message: string, fraction: number | null = null) => {
     m.body.innerHTML = `<p class="modal-progress" role="status">${escapeHtml(message)}</p>
+      ${progressBarHtml(fraction)}
       <div class="modal-buttons">${button('Cancel', 'cancel')}</div>`;
   };
   render(o.message);
@@ -180,9 +183,11 @@ export function progress(o: { readonly title: string; readonly message: string }
   });
   return {
     signal: controller.signal,
-    update(message) {
+    update(message, fraction = null) {
       const p = m.body.querySelector('.modal-progress');
       if (p) p.textContent = message;
+      const bar = m.body.querySelector('.busy-track');
+      if (bar) bar.outerHTML = progressBarHtml(fraction);
     },
     failed(message, retry) {
       m.body.innerHTML = `<p class="warn" role="alert">${escapeHtml(message)}</p>

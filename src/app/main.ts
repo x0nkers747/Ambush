@@ -1,4 +1,5 @@
 import { authoritativeTerrain } from './terrain-grading';
+import { busy, whileBusy, type BusyTask } from './busy';
 import { localSeedMemory, seedBundledBattlefields } from './bundled-battlefields';
 import {
   createMemoryStore,
@@ -136,7 +137,11 @@ async function loadBattle(
  * so its navigation grid and other per-terrain data are built once. The
  * stored package keeps the source terrain.
  */
-async function openBattlefield(store: BattlefieldStore, id: string): Promise<OpenedBattlefield> {
+async function openBattlefield(
+  store: BattlefieldStore,
+  id: string,
+  task?: BusyTask,
+): Promise<OpenedBattlefield> {
   const start = performance.now();
   const pkg = await store.get(id);
   const { terrain, quality } = await authoritativeTerrain(
@@ -147,6 +152,9 @@ async function openBattlefield(store: BattlefieldStore, id: string): Promise<Ope
       get: (model) => store.getPrepared(id, model),
       put: (model, prepared) => store.putPrepared(id, model, prepared),
     },
+    // Prepared now (not read back): the first opening on this browser.
+    (fraction) =>
+      task?.update(fraction, `Preparing the terrain of ${pkg.name} (first opening only)…`),
   );
   const opened = { ...pkg, terrain: shareTerrain(terrain), quality };
   // For the browser's performance tools: how long opening it took (prepared, or read back).
@@ -305,8 +313,10 @@ async function main(root: HTMLElement): Promise<void> {
       loadPreview: async (id) => {
         lastBattlefield.set(id);
         const mine = (previewLoads += 1);
-        const pkg = await openBattlefield(store, id);
-        const { definition } = await loadBattle(store, pkg);
+        const { pkg, definition } = await whileBusy('Opening the battlefield…', async (task) => {
+          const opened = await openBattlefield(store, id, task);
+          return { pkg: opened, definition: (await loadBattle(store, opened)).definition };
+        });
         if (mine === previewLoads) loaded = { pkg, battle: definition };
         return previewData(pkg, definition);
       },
@@ -339,11 +349,13 @@ async function main(root: HTMLElement): Promise<void> {
   ): Promise<void> => {
     let map = handed;
     let shown = view;
+    // Input is held until the battlefield's page is up (or it failed).
+    const task = busy('Opening the battlefield…');
     try {
       let pkg: OpenedBattlefield;
       if (loaded?.pkg.id === id) pkg = loaded.pkg;
       else {
-        pkg = await openBattlefield(store, id);
+        pkg = await openBattlefield(store, id, task);
         // A map (or 3D view) of another load of this battlefield shows another terrain object.
         map?.dispose();
         map = null;
@@ -454,7 +466,9 @@ async function main(root: HTMLElement): Promise<void> {
         },
         scenarios: menu,
       });
+      task.done();
     } catch (error) {
+      task.done();
       previous?.dispose();
       map?.dispose();
       shown?.view3d?.dispose();
@@ -479,6 +493,7 @@ async function main(root: HTMLElement): Promise<void> {
     // Without a lasting store nothing survives a reload: seeded on every visit.
     persistent ? localSeedMemory(storageOrNull()) : { has: () => false, add: () => undefined },
     (file) => window.fetch(new URL(file, document.baseURI)),
+    (label) => busy(label, 0),
   );
   const stage = parseStage(window.location.hash);
   switch (stage.kind) {
