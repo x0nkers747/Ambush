@@ -6,7 +6,15 @@ import {
   type PlannedVehicle,
   type ScenarioSquad,
 } from '#exercise/battle';
-import { killZoneCorners, type KillZone, type OrderKind, type Side, type Vec2 } from '#sim';
+import {
+  killZoneCorners,
+  planPath,
+  type KillZone,
+  type OrderKind,
+  type Side,
+  type TerrainDataset,
+  type Vec2,
+} from '#sim';
 import type { MapEditor } from '#view2d';
 import type { Planner } from './planner';
 
@@ -307,6 +315,46 @@ function drawKnob(ctx: CanvasRenderingContext2D, c: Vec2, knob: Vec2): void {
   ctx.stroke();
 }
 
+/** Road routes drawn lately, by their start (to the nearest `ROUTE_START_M`) and destination. */
+const roadLines = new Map<string, readonly Vec2[]>();
+const ROUTE_START_M = 20;
+
+/**
+ * A plan's line on the map (map metres): from `start` through each stop;
+ * straight to a stop, but along the roads to one preferring them (the way
+ * `planPath` plans it: to the road, along it, off it). A moving start is taken
+ * to the nearest `ROUTE_START_M`, so a road route is planned again only as
+ * the squad moves on.
+ */
+export function routeLine(
+  terrain: TerrainDataset,
+  start: Vec2,
+  stops: readonly { readonly point: Vec2; readonly followRoads: boolean }[],
+): Vec2[] {
+  const line: Vec2[] = [start];
+  let from = start;
+  for (const stop of stops) {
+    if (stop.followRoads) {
+      const q = {
+        x: Math.round(from.x / ROUTE_START_M) * ROUTE_START_M,
+        y: Math.round(from.y / ROUTE_START_M) * ROUTE_START_M,
+      };
+      const key = `${String(q.x)},${String(q.y)}>${String(stop.point.x)},${String(stop.point.y)}`;
+      let turns = roadLines.get(key);
+      if (!turns) {
+        const path = planPath(terrain, from, stop.point, { followRoads: true });
+        turns = path.ok ? path.turns.map((p) => ({ x: p.x, y: p.y })) : [];
+        if (roadLines.size > 500) roadLines.clear();
+        roadLines.set(key, turns);
+      }
+      line.push(...turns);
+    }
+    line.push(stop.point);
+    from = stop.point;
+  }
+  return line;
+}
+
 /** A route on the map: a line from `points[0]` through the rest, a chevron along each leg. */
 export function drawRoute(
   ctx: CanvasRenderingContext2D,
@@ -363,7 +411,12 @@ function drawVehicles(
     const color = SIDE_COLORS[v.side];
     if (v.route.length > 0) {
       const points = [toVec(v.position), ...v.route.map(toVec)].map(at);
-      drawRoute(ctx, points, color, isSelected, [12, 4, 2, 4]);
+      const line = routeLine(
+        planner.terrain,
+        toVec(v.position),
+        v.route.map((p) => ({ point: toVec(p), followRoads: p.followRoads === true })),
+      );
+      drawRoute(ctx, line.map(at), color, isSelected, [12, 4, 2, 4]);
       v.route.forEach((_, k) => {
         const q = points[k + 1];
         if (!q) return;
@@ -559,32 +612,14 @@ function drawBattle(
     if (s.plan.length === 0) continue;
     const isSelected = s.id === selected.squadId;
     const color = SIDE_COLORS[s.side];
+    const line = routeLine(
+      planner.terrain,
+      toVec(s.position),
+      s.plan.map((o) => ({ point: toVec(o.destination), followRoads: o.followRoads === true })),
+    );
+    drawRoute(ctx, line.map(at), color, isSelected, s.side === 'OPFOR' ? [7, 5] : []);
     const points = [toVec(s.position), ...s.plan.map((o) => toVec(o.destination))].map(at);
     ctx.globalAlpha = isSelected ? 1 : 0.75;
-    ctx.setLineDash(s.side === 'OPFOR' ? [7, 5] : []);
-    for (const [width, stroke] of [
-      [isSelected ? 5 : 4, OUTLINE],
-      [isSelected ? 3 : 2, color],
-    ] as const) {
-      ctx.lineWidth = width;
-      ctx.strokeStyle = stroke;
-      ctx.beginPath();
-      points.forEach((p, i) => {
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      });
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    // A chevron half-way along each leg, pointing the way.
-    for (let i = 1; i < points.length; i += 1) {
-      const a = points[i - 1];
-      const b = points[i];
-      if (!a || !b) continue;
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      if (len < 40) continue;
-      chevron(ctx, (a.x + b.x) / 2, (a.y + b.y) / 2, Math.atan2(b.y - a.y, b.x - a.x), color);
-    }
     s.plan.forEach((o, k) => {
       const p = points[k + 1];
       if (!p) return;

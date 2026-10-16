@@ -135,7 +135,17 @@ export function updateForces(context: FofContext): void {
         } else if (force.phase === 'moving' && !runningTask(context, force)) {
           // On an ambush order, at its position: it occupies it and lies in wait.
           const order = activeOrder(force);
-          if (
+          const road = force.roadMove;
+          const leg = road?.legs[0];
+          if (road && leg) {
+            // A move by the roads: on to its next leg.
+            road.legs = road.legs.slice(1);
+            road.onRoad = leg.onRoad;
+            force.mission = leg.order;
+            // Its last leg, off the road: a plain move from here on.
+            if (road.legs.length === 0 && !leg.onRoad) delete force.roadMove;
+            if (!issue(context, force, leg.order)) delete force.roadMove;
+          } else if (
             order?.kind === 'ambush' &&
             order.destination &&
             force.ambushSprungAt === null &&
@@ -498,7 +508,7 @@ export function elementsOf(context: FofContext, force: FofForce, assault = false
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
   const formation =
     (assault ? forceSetup?.assaultFormation : undefined) ??
-    force.mission?.formation ??
+    (force.roadMove?.onRoad ? undefined : force.mission?.formation) ??
     forceSetup?.formation;
   if (!formation) return [];
   const root = formation.root;
@@ -751,7 +761,10 @@ function moveTo(
   const { world } = context;
   const area = forceArea(context, force, from);
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
-  const shape = formation ?? force.mission?.formation ?? forceSetup?.formation;
+  const shape =
+    formation ??
+    (force.roadMove?.onRoad ? undefined : force.mission?.formation) ??
+    forceSetup?.formation;
   if (area === 0 || !shape || !isOnTerrain(world.terrain, to.x, to.y)) return false;
   const point = nearestInArea(world.terrain, to, area);
   if (!point) return false;

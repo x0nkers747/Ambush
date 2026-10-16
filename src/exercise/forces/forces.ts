@@ -64,6 +64,20 @@ export function assaultFormationId(organization: SquadOrganization): string | nu
   );
 }
 
+/**
+ * The formation an organization follows a road in: its column (a squad's
+ * teams one behind another; a fire team's), else its file; `null` when it has
+ * neither.
+ */
+export function roadFormationId(organization: SquadOrganization): string | null {
+  const formations = formationsForOrganization(organization);
+  return (
+    formations.find((f) => f.id.endsWith('.column'))?.id ??
+    formations.find((f) => f.id.endsWith('.file'))?.id ??
+    null
+  );
+}
+
 /** The simulation weapon category of a slot (from its primary weapon), or `null`. */
 export function weaponCategory(template: OrganizationTemplate, slot: TemplateSlot): string | null {
   const role = template.roles.find((r) => r.id === slot.roleId);
@@ -92,6 +106,8 @@ export interface SquadForce {
   readonly soldierIds: readonly string[];
   /** The formation it assaults in (an extended line), when its organization has one. */
   readonly assaultFormation: FormationSpec | null;
+  /** The formation it follows a road in (`roadFormationId`), or `null`. */
+  readonly roadFormation: FormationSpec | null;
   /** Weapon category (simulation) and model (display) of each soldier. */
   readonly weapons: Readonly<Record<string, string | null>>;
   /** The second weapon (simulation) each soldier carries, if any (a grenade launcher). */
@@ -168,7 +184,15 @@ export function instantiateForce(o: ForceInstance): {
             interval: spec.interval,
             elementSpacing: spec.elementSpacing,
           });
-    return { unitIdPrefix, members, organization, formation, assault };
+    const column = roadFormationId(spec.organization);
+    const road =
+      column === null
+        ? null
+        : buildFormationSpec(organization, root, column, {
+            interval: spec.interval,
+            elementSpacing: spec.elementSpacing,
+          });
+    return { unitIdPrefix, members, organization, formation, assault, road };
   });
   const first = copies[0];
   if (!first) throw new Error('force-on-force force needs an organization');
@@ -257,6 +281,7 @@ export function instantiateForce(o: ForceInstance): {
     organization: first.organization,
     formation,
     assaultFormation: grouped ? null : first.assault,
+    roadFormation: grouped ? null : first.road,
     soldierIds: copies.flatMap((c) => c.members.map((m) => m.soldierId)),
     weapons,
     secondaryWeapons,

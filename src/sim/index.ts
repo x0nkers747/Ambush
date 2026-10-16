@@ -263,7 +263,9 @@ export {
   roadNetwork,
   roadPointAt,
   roadWaypoints,
+  roadsRoute,
   type RoadNetwork,
+  type RoadsRoute,
 } from './road-network';
 export {
   cellCentre,
@@ -286,6 +288,7 @@ export {
   groundSpeed,
   type OrderVehicleCommand,
   type ScenarioVehicle,
+  type VehicleDestination,
   type VehicleKind,
   type VehicleOrder,
   type VehicleState,

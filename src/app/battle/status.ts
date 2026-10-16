@@ -11,6 +11,7 @@ import {
   type Side,
   type SimState,
   type Vec2,
+  type VehicleDestination,
 } from '#sim';
 
 // What the pages show of a battle's squads (docs/constructive-simulation/04,
@@ -325,8 +326,8 @@ export interface VehicleStatus {
   readonly heading: number;
   /** m/s. */
   readonly speed: number;
-  /** Where it still drives: its active order's destination, then the pending ones. */
-  readonly route: readonly Vec2[];
+  /** Where it still drives: its active order's destination, then the pending ones (each preferring roads or not). */
+  readonly route: readonly VehicleDestination[];
 }
 
 /** The vehicles of a battle state. */
@@ -340,7 +341,11 @@ export function vehicleStatuses(state: DeepReadonly<SimState>): VehicleStatus[] 
     speed: v.speed,
     route: v.orders
       .filter((o) => o.status === 'active' || o.status === 'pending')
-      .map((o) => ({ x: o.destination.x, y: o.destination.y })),
+      .map((o) => ({
+        x: o.destination.x,
+        y: o.destination.y,
+        ...(o.followRoads ? { followRoads: true } : {}),
+      })),
   }));
 }
 

@@ -377,7 +377,7 @@ export function roadPointAt(terrain: TerrainDataset, p: Vec2): EdgePoint | null 
   return best;
 }
 
-/** The nearest points of the nearest `count` edges of component `part`, nearest first (ties: lowest edge). */
+/** The nearest points of the nearest `count` edges of component `part` (−1: any), nearest first (ties: lowest edge). */
 function nearestEdges(b: Built, p: Vec2, part: number, count: number): EdgePoint[] {
   const net = b.network;
   const gx = Math.floor(p.x / BUCKET_M);
@@ -391,7 +391,7 @@ function nearestEdges(b: Built, p: Vec2, part: number, count: number): EdgePoint
         for (const i of b.buckets.get(bucketKey(x, y)) ?? []) {
           if (found.has(i)) continue;
           const e = net.edges[i];
-          if (!e || net.component[e.a] !== part) continue;
+          if (!e || (part >= 0 && net.component[e.a] !== part)) continue;
           const q = onEdge(net, i, p);
           if (q) found.set(i, q);
         }
@@ -592,13 +592,84 @@ function roadRoute(
   return options[0] ?? null;
 }
 
+/** A way to a destination by the roads (`roadsRoute`). */
+export interface RoadsRoute {
+  /** Every turn of the way, from the start to the destination (as `planPath`'s). */
+  readonly turns: readonly PathPoint[];
+  /** The off-road walk to the road: its turns, and where it joins the road. */
+  readonly joinTurns: readonly PathPoint[];
+  readonly entry: PathPoint;
+  /** Along the roads: their points from where it joins to where it leaves (both included). */
+  readonly road: readonly PathPoint[];
+  /** Where it leaves the road, and the off-road walk from there to the destination. */
+  readonly exit: PathPoint;
+  readonly leaveTurns: readonly PathPoint[];
+}
+
 /**
- * `planPath` with `followRoads` (docs/adr/0043) to a standable `to`: along the
- * roads when `to` is on one the soldier can join, else off road.
+ * The way from `from` to `to` that prefers the roads (a Move order's Prefer
+ * roads): off road to the nearest road it can walk to, along the roads to the
+ * point of them nearest `to` that `to` can be walked to from, and off road to
+ * `to` (which need not be on a road). Of the nearest few roads at each end,
+ * the shortest walks, then the shortest road. `null` when no road helps: none
+ * can be joined, or the walks to and from the roads come to at least the
+ * way straight there (it goes straight there instead).
+ */
+export function roadsRoute(terrain: TerrainDataset, from: Vec2, to: Vec2): RoadsRoute | null {
+  const b = built(terrain);
+  const net = b.network;
+  if (net.edges.length === 0) return null;
+  const direct = planOffRoad(terrain, from, to);
+  const straight = direct.ok ? pathLength(from, direct.turns, to) : Infinity;
+  let best: (RoadsRoute & { walk: number; length: number }) | null = null;
+  for (const goal of nearestEdges(b, to, -1, ENTRY_CHECKS)) {
+    const leave = planOffRoad(terrain, goal.point, to);
+    if (!leave.ok) continue;
+    const leaveWalk = pathLength(goal.point, leave.turns, to);
+    if (leaveWalk >= straight) continue;
+    const goalEdge = net.edges[goal.edge];
+    const part = goalEdge ? (net.component[goalEdge.a] ?? -1) : -1;
+    const toGoal = distancesTo(b, goal);
+    const here = roadPointAt(terrain, from);
+    const hereEdge = here && net.edges[here.edge];
+    const entries =
+      here && hereEdge && net.component[hereEdge.a] === part
+        ? [here]
+        : nearestEdges(b, from, part, ENTRY_CHECKS);
+    for (const entry of entries) {
+      const join = planOffRoad(terrain, from, entry.point);
+      if (!join.ok) continue;
+      const walk = pathLength(from, join.turns, entry.point) + leaveWalk;
+      // Roads help only if the walks to and from them are shorter than the way straight there.
+      if (walk >= straight) continue;
+      const route = roadRoute(b, entry, goal, toGoal);
+      if (!route) continue;
+      if (best && (walk > best.walk || (walk === best.walk && route.length >= best.length)))
+        continue;
+      best = {
+        turns: dedupe([...join.turns, ...route.points, ...leave.turns], from, to),
+        joinTurns: join.turns,
+        entry: entry.point,
+        road: route.points,
+        exit: goal.point,
+        leaveTurns: leave.turns,
+        walk,
+        length: route.length,
+      };
+    }
+  }
+  if (!best) return null;
+  const { turns, joinTurns, entry, road, exit, leaveTurns } = best;
+  return { turns, joinTurns, entry, road, exit, leaveTurns };
+}
+
+/**
+ * `planPath` with `followRoads` (docs/adr/0043) to a standable `to`: by the
+ * roads when they help (`roadsRoute`), else off road.
  */
 export function planRoadPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult {
-  const best = bestRoadRoute(terrain, from, to);
-  // Off the roads, or no road the soldier can join: off road, if anything.
+  const best = roadsRoute(terrain, from, to);
+  // No road helps, or none the soldier can join: off road, if anything.
   return best ? { ok: true, turns: best.turns } : planOffRoad(terrain, from, to);
 }
 

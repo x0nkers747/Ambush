@@ -144,6 +144,8 @@ export interface PlannedOrder {
   readonly preparedMinutes?: number;
   /** What the squad does on contact while carrying it out; absent: its kind's (`defaultActionsOn`). */
   readonly actionsOn?: ActionsOn;
+  /** A move order: Prefer roads (by the roads when they help, in column); absent: it does not. */
+  readonly followRoads?: true;
 }
 
 /** The actions on contact of an order kind, by default: a move continues, an attack attacks, a withdrawal avoids contact. */
@@ -459,6 +461,11 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
           fail(`${sectorWhat}: the arc is not ${String(DEFEND_ARC_MIN_DEG)}–360°`);
         sector = { facingDeg: facingDeg as number, arcDeg: arcDeg as number };
       }
+      const roads = o['followRoads'];
+      if (roads !== undefined && roads !== true && roads !== false)
+        fail(`${what}, order ${String(k + 1)}: followRoads is not true or false`);
+      if (roads === true && kind !== 'move')
+        fail(`${what}, order ${String(k + 1)}: only a move order can prefer roads`);
       const prepared = o['preparedMinutes'];
       if (prepared !== undefined) {
         if (kind !== 'defend')
@@ -475,6 +482,7 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
         ...(killZone ? { killZone } : {}),
         ...(sector ? { sector } : {}),
         ...(typeof prepared === 'number' && prepared > 0 ? { preparedMinutes: prepared } : {}),
+        ...(roads === true ? { followRoads: true as const } : {}),
       };
     });
     return {
@@ -925,6 +933,7 @@ export function orderSpecOf(o: PlannedOrder): OrderSpec {
     ...(o.kind === 'defend' && o.preparedMinutes
       ? { preparedSeconds: o.preparedMinutes * 60 }
       : {}),
+    ...(o.kind === 'move' && o.followRoads ? { followRoads: true } : {}),
   };
 }
 
@@ -940,6 +949,7 @@ export function plannedOrderOf(o: {
   readonly killZone?: KillZone | null;
   readonly sector?: { readonly facing: number; readonly arc: number } | null;
   readonly preparedSeconds?: number;
+  readonly followRoads?: boolean;
 }): PlannedOrder | null {
   if (!o.destination) return null;
   const deg = (rad: number) => ((((rad * 180) / Math.PI) % 360) + 360) % 360;
@@ -968,6 +978,7 @@ export function plannedOrderOf(o: {
     ...(o.kind === 'defend' && o.preparedSeconds
       ? { preparedMinutes: Math.round(o.preparedSeconds / 60) }
       : {}),
+    ...(o.kind === 'move' && o.followRoads ? { followRoads: true as const } : {}),
   };
 }
 
@@ -1079,7 +1090,31 @@ function withoutKillZone(order: PlannedOrder, kind: OrderKind): PlannedOrder {
     ...(keepSector && order.preparedMinutes !== undefined
       ? { preparedMinutes: order.preparedMinutes }
       : {}),
+    ...(kind === 'move' && order.followRoads ? { followRoads: true as const } : {}),
   };
+}
+
+/** Turns a move order's Prefer roads on or off. */
+export function setOrderFollowRoads(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  on: boolean,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order) return refused('There is no such order.');
+  if (order.kind !== 'move') return refused('Only a move order can prefer roads.');
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => {
+        if (k !== index) return o;
+        const rest = { ...o };
+        delete rest.followRoads;
+        return on ? { ...rest, followRoads: true as const } : rest;
+      }),
+    })),
+  );
 }
 
 /**
@@ -1344,10 +1379,11 @@ export function scenarioIssues(
       const spot = destinationProblem(terrain, to);
       if (spot) issues.push({ squadId: squad.id, orderIndex: k, message: `${label}: ${spot}` });
       else {
-        const key = `${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
+        const roads = order.followRoads === true;
+        const key = `${roads ? 'R' : ''}${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
         let reach = paths.get(key);
         if (reach === undefined) {
-          const path = planPath(terrain, from, to);
+          const path = planPath(terrain, from, to, { followRoads: roads });
           reach = path.ok ? null : describePathProblem(path.problem);
           paths.set(key, reach);
         }

@@ -85,6 +85,9 @@ export function orderSpecProblem(order: OrderSpec): string | null {
   const actionsOn: string | undefined = order.actionsOn;
   if (actionsOn !== undefined && !(ACTIONS_ON as readonly string[]).includes(actionsOn))
     return `unknown actions on contact "${actionsOn}"`;
+  const roads: unknown = order.followRoads;
+  if (roads !== undefined && typeof roads !== 'boolean') return 'followRoads must be true or false';
+  if (order.kind !== 'move' && roads === true) return `a ${order.kind} order does not prefer roads`;
   const sector = order.sector;
   if (order.kind !== 'defend' && sector !== undefined) return `a ${order.kind} order has no sector`;
   if (order.kind !== 'defend' && order.preparedSeconds !== undefined)

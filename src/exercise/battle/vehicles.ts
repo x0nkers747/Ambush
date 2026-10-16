@@ -36,9 +36,12 @@ export interface PlannedVehicle {
   readonly position: MapPoint;
   /** The way it faces at the start, degrees clockwise from north. */
   readonly facingDeg: number;
-  /** Where it drives, in turn. */
-  readonly route: readonly MapPoint[];
+  /** Where it drives, in turn (each waypoint: Prefer roads on the way there, or not). */
+  readonly route: readonly RouteWaypoint[];
 }
+
+/** A waypoint of a vehicle's route: where, and whether it prefers the roads on the way there. */
+export type RouteWaypoint = MapPoint & { readonly followRoads?: true };
 
 export const VEHICLE_LABELS: Readonly<Record<VehicleKind, string>> = { m113: 'M113 APC' };
 
@@ -218,7 +221,11 @@ export function moveVehicleWaypoint(
     ok: true,
     definition: withVehicle(d, id, (x) => ({
       ...x,
-      route: x.route.map((p, k) => (k === index ? toPoint(placed.point) : p)),
+      route: x.route.map((p, k) =>
+        k === index
+          ? { ...toPoint(placed.point), ...(p.followRoads ? { followRoads: true as const } : {}) }
+          : p,
+      ),
     })),
     ...(placed.note !== undefined ? { note: placed.note } : {}),
   };
@@ -232,6 +239,29 @@ export function deleteVehicleWaypoint(
   const v = vehicleOf(d, id);
   if (!v?.route[index]) return refused('There is no such waypoint.');
   return ok(withVehicle(d, id, (x) => ({ ...x, route: x.route.filter((_, k) => k !== index) })));
+}
+
+/** Turns Prefer roads on or off for the way to waypoint `index`. */
+export function setVehicleWaypointRoads(
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  on: boolean,
+): BattleEdit {
+  const v = vehicleOf(d, id);
+  if (!v?.route[index]) return refused('There is no such waypoint.');
+  return ok(
+    withVehicle(d, id, (x) => ({
+      ...x,
+      route: x.route.map((p, k) =>
+        k !== index
+          ? p
+          : on
+            ? { east: p.east, north: p.north, followRoads: true as const }
+            : { east: p.east, north: p.north },
+      ),
+    })),
+  );
 }
 
 export function clearVehicleRoute(d: BattleScenarioDefinition, id: string): BattleEdit {
@@ -248,7 +278,10 @@ export function vehicleSpecs(d: BattleScenarioDefinition): ScenarioVehicle[] {
     kind: v.kind,
     position: toVec(v.position),
     headingDeg: v.facingDeg,
-    destinations: v.route.map(toVec),
+    destinations: v.route.map((p) => ({
+      ...toVec(p),
+      ...(p.followRoads ? { followRoads: true } : {}),
+    })),
   }));
 }
 
@@ -276,10 +309,11 @@ export function vehicleIssues(
     let from = at;
     v.route.forEach((p, k) => {
       const to = toVec(p);
-      const key = `${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
+      const roads = p.followRoads === true;
+      const key = `${roads ? 'R' : ''}${String(from.x)},${String(from.y)}>${String(to.x)},${String(to.y)}`;
       let reach = paths.get(key);
       if (reach === undefined) {
-        const path = planPath(terrain, from, to);
+        const path = planPath(terrain, from, to, { followRoads: roads });
         reach = path.ok ? null : describePathProblem(path.problem);
         paths.set(key, reach);
       }
@@ -333,7 +367,13 @@ export function parseVehicles(
       kind,
       position: point(v['position'], `${what}'s position`),
       facingDeg: facing,
-      route: (route as unknown[]).map((p, k) => point(p, `${what}, waypoint ${String(k + 1)}`)),
+      route: (route as unknown[]).map((p, k): RouteWaypoint => {
+        const at = point(p, `${what}, waypoint ${String(k + 1)}`);
+        const roads = (p as { followRoads?: unknown } | null)?.followRoads;
+        if (roads !== undefined && roads !== true && roads !== false)
+          fail(`${what}, waypoint ${String(k + 1)}: followRoads is not true or false`);
+        return roads === true ? { ...at, followRoads: true } : at;
+      }),
     };
   });
 }

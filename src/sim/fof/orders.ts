@@ -1,8 +1,9 @@
 import { nearestInArea } from '../behavior/slots';
-import type { UnitOrder } from '../behavior/types';
+import type { FormationSpec, UnitOrder } from '../behavior/types';
 import type { SimEvent } from '../events';
 import { azimuthOf, type Vec2 } from '../geometry';
 import type { SimState } from '../state';
+import { roadsRoute } from '../road-network';
 import { isOnTerrain } from '../terrain';
 import type { SimWorld } from '../world';
 import { occupyAmbush } from './ambush';
@@ -21,7 +22,15 @@ import {
 import { orderSpecProblem } from './setup';
 import type { FofContext } from './system';
 import { fofStateOf } from './system';
-import type { ActionsOn, FofForce, FofOrder, OrderKind, OrderSpec, OrderStatus } from './types';
+import type {
+  ActionsOn,
+  FofForce,
+  FofOrder,
+  OrderKind,
+  OrderSpec,
+  OrderStatus,
+  RoadLeg,
+} from './types';
 
 // Squads' orders and plans (docs/constructive-simulation/02). An order is the
 // commander's intent (move, attack, withdraw, to a destination); the squad's
@@ -172,6 +181,7 @@ export function applyOrderSquad(
       killZone: spec.killZone ?? null,
       sector: spec.sector ?? null,
       preparedSeconds: spec.preparedSeconds ?? 0,
+      ...(spec.followRoads === true ? { followRoads: true as const } : {}),
       source: 'player',
       issuedTick: state.tick,
       issuedAt: startSeconds,
@@ -309,9 +319,11 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
     if (force.phase === 'moving' && runningTask(context, force)) {
       cancelTask(context, force);
       force.mission = null;
+      delete force.roadMove;
       enter(context, force, 'atObjective', 'no more orders: holding');
     } else if (force.phase === 'moving') {
       force.mission = null;
+      delete force.roadMove;
       enter(context, force, 'atObjective', 'no more orders: holding');
     }
     return;
@@ -334,12 +346,17 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   const facing = zone
     ? azimuthOf(zone.centre.x - next.destination.x, zone.centre.y - next.destination.y)
     : (next.sector?.facing ?? undefined);
-  const mission = missionTo(context, force, next.destination, facing);
-  if (!mission) {
+  const legs = missionTo(context, force, next.destination, facing, next.followRoads === true);
+  const first = legs?.[0];
+  if (!legs || !first) {
     endOrder(context, force, next, 'failed', 'no way to the destination');
     return;
   }
+  const mission = first.order;
   force.mission = mission;
+  // By the roads: the legs after the first.
+  if (legs.length > 1) force.roadMove = { legs: legs.slice(1), onRoad: first.onRoad };
+  else delete force.roadMove;
   if (next.kind === 'withdraw') {
     // Breaking contact at once, whatever it was doing.
     standUp(context, force);
@@ -403,29 +420,77 @@ export function withinArrival(context: FofContext, force: FofForce, point: Vec2)
   );
 }
 
-/** The movement order to `destination` in the force's formation (facing `finalFacing` there), or `null` when it cannot get there. */
+/**
+ * The movement to `destination` in the force's formation (facing
+ * `finalFacing` there), as legs: one; by the roads (`roads`, when they help),
+ * to the road in its formation, along the road in column (`roadFormation`),
+ * and off it to the destination in its formation. `null` when it cannot get
+ * there.
+ */
 function missionTo(
   context: FofContext,
   force: FofForce,
   destination: Vec2,
   finalFacing?: number,
-): UnitOrder | null {
+  roads = false,
+): RoadLeg[] | null {
   const { world } = context;
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
-  const formation = force.mission?.formation ?? forceSetup?.formation;
+  const formation = ownFormation(context, force);
   const area = forceArea(context, force);
   if (!formation || area === 0 || !isOnTerrain(world.terrain, destination.x, destination.y)) {
     return null;
   }
   const point = nearestInArea(world.terrain, destination, area);
   if (!point) return null;
-  return {
+  const pace = forceSetup?.pace !== undefined ? { pace: forceSetup.pace } : {};
+  const last: UnitOrder = {
     kind: 'moveInFormation',
     destination: point,
     formation,
     ...(finalFacing !== undefined ? { finalFacing } : {}),
-    ...(forceSetup?.pace !== undefined ? { pace: forceSetup.pace } : {}),
+    ...pace,
   };
+  const centre = roads ? centreOf(context, force) : null;
+  const route = centre ? roadsRoute(world.terrain, centre, point) : null;
+  if (!centre || !route) return [{ order: last, onRoad: false }];
+  const legs: RoadLeg[] = [];
+  // To the road (unless on it already).
+  if (Math.hypot(route.entry.x - centre.x, route.entry.y - centre.y) > ROAD_LEG_MIN_M)
+    legs.push({
+      order: {
+        kind: 'moveInFormation',
+        destination: { x: route.entry.x, y: route.entry.y },
+        formation,
+        ...pace,
+      },
+      onRoad: false,
+    });
+  // Along it, in column.
+  const along = route.road.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
+  legs.push({
+    order: {
+      kind: 'moveInFormation',
+      ...(along.length > 0 ? { via: along } : {}),
+      destination: { x: route.exit.x, y: route.exit.y },
+      formation: forceSetup?.roadFormation ?? formation,
+      ...pace,
+    },
+    onRoad: true,
+  });
+  // Off it, to the destination.
+  if (Math.hypot(route.exit.x - point.x, route.exit.y - point.y) > ROAD_LEG_MIN_M)
+    legs.push({ order: last, onRoad: false });
+  return legs;
+}
+
+/** A leg of a move by the roads shorter than this (m) is left out. */
+const ROAD_LEG_MIN_M = 10;
+
+/** The force's own formation: its mission's, but not the column it follows a road in. */
+export function ownFormation(context: FofContext, force: FofForce): FormationSpec | undefined {
+  const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
+  return (force.roadMove?.onRoad ? undefined : force.mission?.formation) ?? forceSetup?.formation;
 }
 
 function orderEvent(

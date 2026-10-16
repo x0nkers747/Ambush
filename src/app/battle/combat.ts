@@ -21,6 +21,7 @@ import type {
   TerrainDataset,
   Vec2,
   ActionsOn,
+  VehicleDestination,
 } from '#sim';
 import { BATTLE_TICK_RATE_HZ } from './planner';
 import { createLocalDriver, type DriverFactory } from './driver';
@@ -107,9 +108,9 @@ export interface Combat {
     change: (d: BattleScenarioDefinition) => BattleEdit,
   ): readonly PlannedOrder[] | null;
   /** A vehicle's route as it stands (orders given and not yet applied included). */
-  vehicleRoute(vehicleId: string): readonly Vec2[];
+  vehicleRoute(vehicleId: string): readonly VehicleDestination[];
   /** Gives a vehicle this route in place of its own (none: it stops). */
-  setVehicleRoute(vehicleId: string, route: readonly Vec2[]): boolean;
+  setVehicleRoute(vehicleId: string, route: readonly VehicleDestination[]): boolean;
   /** Clears a squad's orders: it holds where it is (a vehicle: it stops). */
   hold(squadId: string): void;
   squads(): readonly SquadStatus[];
@@ -178,7 +179,7 @@ export function createCombat(o: CombatOptions): Combat {
   /** Vehicle routes given and not yet applied, by vehicle. */
   let vehicleQueue: {
     readonly vehicleId: string;
-    readonly route: Vec2[];
+    readonly route: VehicleDestination[];
     readonly given: () => number | null;
   }[] = [];
   const planOf = (squadId: string): PlannedOrder[] => {

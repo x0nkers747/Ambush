@@ -54,10 +54,20 @@ export const VEHICLE_TYPES: Readonly<Record<VehicleKind, VehicleType>> = {
   },
 };
 
+/** Where a vehicle is sent: a point, and whether it prefers the roads on the way. */
+export interface VehicleDestination {
+  readonly x: number;
+  readonly y: number;
+  /** Prefer roads: by the roads when they help (`roadsRoute`). */
+  readonly followRoads?: boolean;
+}
+
 /** A vehicle's move order (plain data in the state). */
 export interface VehicleOrder {
   readonly id: string;
   readonly destination: Vec2;
+  /** Prefer roads (absent: it does not). */
+  readonly followRoads?: true;
   status: 'pending' | 'active' | 'completed' | 'failed' | 'superseded' | 'canceled';
   reason: string | null;
 }
@@ -89,7 +99,7 @@ export interface ScenarioVehicle {
   readonly position: Vec2;
   readonly headingDeg: number;
   /** Its move orders, in turn. */
-  readonly destinations: readonly Vec2[];
+  readonly destinations: readonly VehicleDestination[];
 }
 
 /** Gives vehicles move orders: `replace` drops the pending and active ones (it stops, then goes on). */
@@ -98,7 +108,7 @@ export interface OrderVehicleCommand {
   readonly tick: number;
   readonly vehicleId: string;
   readonly mode: 'replace' | 'append';
-  readonly destinations: readonly Vec2[];
+  readonly destinations: readonly VehicleDestination[];
 }
 
 /** Within this of its destination (m), slow enough, a vehicle has arrived. */
@@ -133,6 +143,7 @@ export function initialVehicles(
     orders: v.destinations.map((d, k) => ({
       id: `${v.id}#${String(k + 1)}`,
       destination: { x: d.x, y: d.y },
+      ...(d.followRoads === true ? { followRoads: true as const } : {}),
       status: 'pending',
       reason: null,
     })),
@@ -177,6 +188,7 @@ export function applyOrderVehicle(
     vehicle.orders.push({
       id: `${vehicle.id}#${String(vehicle.nextOrder)}`,
       destination: { x: d.x, y: d.y },
+      ...(d.followRoads === true ? { followRoads: true as const } : {}),
       status: 'pending',
       reason: null,
     });
@@ -203,7 +215,9 @@ function startNext(v: VehicleState, terrain: TerrainDataset): void {
     const next = v.orders.find((o) => o.status === 'pending');
     if (!next) return;
     const from = { x: v.position.x, y: v.position.y };
-    const path = planPath(terrain, from, next.destination);
+    const path = planPath(terrain, from, next.destination, {
+      followRoads: next.followRoads === true,
+    });
     if (!path.ok) {
       next.status = 'failed';
       next.reason = 'no way there';

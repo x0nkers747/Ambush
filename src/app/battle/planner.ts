@@ -34,7 +34,6 @@ import {
 } from '#exercise/battle';
 import { createMotionRecorder } from '#exercise';
 import {
-  roadWaypoints,
   type Azimuth,
   type OrderKind,
   type Side,
@@ -545,33 +544,13 @@ export function createPlanner(o: PlannerOptions): Planner {
         const kind = tool.order;
         // After the selected order, or at the end of the plan.
         const at = selection.orderIndex === null ? selected.plan.length : selection.orderIndex + 1;
-        // OPFOR moving to a point on a road goes along the roads: a move to
-        // where it joins the nearest road, then one to each turn of the road.
-        const before = at > 0 ? selected.plan[at - 1]?.destination : undefined;
-        const from = before ?? selected.position;
-        const route =
-          kind === 'move' && selected.side === 'OPFOR'
-            ? roadWaypoints(terrain, { x: from.east, y: from.north }, point)
-            : null;
-        const points = route && route.length > 1 ? route : [point];
-        // Viewsheds of later orders move down with them.
+        // Viewsheds of later orders move down with it.
         const pinsBefore = pins;
-        shiftPins(selected.id, at, points.length);
-        const added = apply((d) => {
-          let edit: BattleEdit = { ok: true, definition: d };
-          for (const [k, p] of points.entries()) {
-            if (!edit.ok) return edit;
-            edit = addOrder(terrain, edit.definition, selected.id, kind, p, at + k);
-          }
-          return edit;
-        }, true);
+        shiftPins(selected.id, at, 1);
+        const added = apply((d) => addOrder(terrain, d, selected.id, kind, point, at), true);
         if (!added) pins = pinsBefore;
-        if (added && points.length > 1)
-          o.notify(
-            `Along the road: ${String(points.length)} move orders, to where it joins the road and along it.`,
-          );
         if (added) {
-          planner.select(selected.id, at + points.length - 1);
+          planner.select(selected.id, at);
           // An ambush needs its kill zone, a defence its direction: the next click sets it.
           if (kind === 'ambush' || kind === 'defend') {
             tool = { kind: kind === 'ambush' ? 'killZone' : 'sector' };

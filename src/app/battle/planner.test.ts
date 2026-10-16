@@ -5,6 +5,10 @@ import {
   addOrder,
   addSquad,
   newBattleScenario,
+  orderSpecOf,
+  parseBattleScenario,
+  setOrderFollowRoads,
+  setOrderKind,
   type BattleEdit,
   type BattleScenarioDefinition,
 } from '#exercise/battle';
@@ -217,7 +221,7 @@ describe('what the views show', () => {
   });
 });
 
-describe('OPFOR moves along roads', () => {
+describe('moves and Prefer roads', () => {
   // A road west to east at y = 250, turning south at x = 300.
   const roads = labTerrain({
     ...NO_FEATURES,
@@ -253,43 +257,35 @@ describe('OPFOR moves along roads', () => {
       .find((s) => s.id === id)
       ?.plan.map((o) => [o.kind, Math.round(o.destination.east), Math.round(o.destination.north)]);
 
-  it('a move clicked on a road: to the road, along it, to the point', () => {
+  it('a move is one order, to the point clicked, whatever the side or the road', () => {
     const { p, notices } = make('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     p.click({ x: 300, y: -50 });
-    // Joins the road nearest it (straight south of it), then the corner, then the point.
-    expect(plan(p, 'O1')).toEqual([
-      ['move', 0, 250],
-      ['move', 300, 250],
-      ['move', 300, -50],
-    ]);
-    expect(notices.at(-1)).toMatch(/Along the road: 3 move orders/);
-    expect(p.selection.orderIndex).toBe(2);
-    // Next from there, on the road already: no move to where it stands.
-    p.click({ x: -300, y: 250 });
-    expect(plan(p, 'O1')?.slice(3)).toEqual([
-      ['move', 300, 250],
-      ['move', -300, 250],
-    ]);
+    expect(plan(p, 'O1')).toEqual([['move', 300, -50]]);
+    expect(notices).toEqual([]);
+    expect(p.selection.orderIndex).toBe(0);
   });
 
-  it('off the road it goes straight there; an attack, or BLUEFOR, is not routed', () => {
+  it('Prefer roads: switched on for a move order (and its vehicle waypoints), saved, given to the battle', () => {
     const { p } = make('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
-    p.click({ x: 100, y: 100 });
-    p.setTool({ kind: 'order', order: 'attack' });
-    p.click({ x: 300, y: 0 });
-    expect(plan(p, 'O1')).toEqual([
-      ['move', 100, 100],
-      ['attack', 300, 0],
-    ]);
-    const blue = make('bluefor').p;
-    blue.select('B1');
-    blue.setTool({ kind: 'order', order: 'move' });
-    blue.click({ x: 300, y: -50 });
-    expect(plan(blue, 'B1')).toEqual([['move', 300, -50]]);
+    p.click({ x: 300, y: -50 });
+    expect(p.edit((d) => setOrderFollowRoads(d, 'O1', 0, true))).toBe(true);
+    const order = p.squad('O1')?.plan[0];
+    expect(order?.followRoads).toBe(true);
+    expect(
+      orderSpecOf(order ?? { kind: 'move', destination: { east: 0, north: 0 } }),
+    ).toMatchObject({ kind: 'move', followRoads: true });
+    // Only a move order prefers roads; another kind drops it.
+    expect(p.edit((d) => setOrderKind(d, 'O1', 0, 'attack'))).toBe(true);
+    expect(p.squad('O1')?.plan[0]?.followRoads).toBeUndefined();
+    expect(p.edit((d) => setOrderFollowRoads(d, 'O1', 0, true))).toBe(false);
+    // Read back from the file as it was saved.
+    p.edit((d) => setOrderKind(d, 'O1', 0, 'move'));
+    p.edit((d) => setOrderFollowRoads(d, 'O1', 0, true));
+    expect(parseBattleScenario(JSON.parse(JSON.stringify(p.definition)))).toEqual(p.definition);
   });
 });
 

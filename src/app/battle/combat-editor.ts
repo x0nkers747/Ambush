@@ -15,7 +15,13 @@ import {
   type BattleScenarioDefinition,
   type PlannedOrder,
 } from '#exercise/battle';
-import { killZoneCorners, type OrderKind, type TerrainDataset, type Vec2 } from '#sim';
+import {
+  killZoneCorners,
+  type OrderKind,
+  type TerrainDataset,
+  type Vec2,
+  type VehicleDestination,
+} from '#sim';
 import type { MapEditor } from '#view2d';
 import { SECOND_CLICK } from './planner';
 import type { TimedEvent } from './session';
@@ -31,6 +37,7 @@ import {
   SIDE_COLORS,
   unitSymbol,
   pxPerMetre,
+  routeLine,
   vehicleMarker,
   vehicleSymbolAt,
   waypoint,
@@ -59,8 +66,8 @@ export interface PlanEditing {
     squadId: string,
     change: (d: BattleScenarioDefinition) => BattleEdit,
   ): readonly PlannedOrder[] | null;
-  vehicleRoute(vehicleId: string): readonly Vec2[];
-  setVehicleRoute(vehicleId: string, route: readonly Vec2[]): boolean;
+  vehicleRoute(vehicleId: string): readonly VehicleDestination[];
+  setVehicleRoute(vehicleId: string, route: readonly VehicleDestination[]): boolean;
 }
 
 /**
@@ -78,6 +85,8 @@ export interface BattleDisplay {
   /** The vehicles (docs/vehicles.md). */
   vehicles(): readonly VehicleStatus[];
   readonly edit?: PlanEditing;
+  /** The battlefield (routes preferring roads are drawn along them). */
+  readonly terrain?: TerrainDataset;
 }
 
 export interface CombatUi {
@@ -242,12 +251,12 @@ export function createCombatMapEditor(
     return shownPlan(c, s);
   };
   /** A vehicle's route as drawn now: while dragging a waypoint of it, there. */
-  const routeNow = (c: BattleDisplay, v: VehicleStatus): readonly Vec2[] => {
+  const routeNow = (c: BattleDisplay, v: VehicleStatus): readonly VehicleDestination[] => {
     const route = c.edit ? c.edit.vehicleRoute(v.id) : v.route;
     if (drag?.point && drag.hit.kind === 'vehicleWaypoint' && drag.hit.vehicleId === v.id) {
       const { index } = drag.hit;
       const point = drag.point;
-      return route.map((p, k) => (k === index ? point : p));
+      return route.map((p, k) => (k === index ? { ...p, x: point.x, y: point.y } : p));
     }
     return route;
   };
@@ -508,7 +517,14 @@ export function createCombatMapEditor(
         const isSelected = s.id === ui.selected;
         const color = SIDE_COLORS[s.side];
         const points = [s.centre, ...plan.map((x) => toVec(x.destination))].map(toScreen);
-        drawRoute(ctx, points, color, isSelected, s.side === 'OPFOR' ? [7, 5] : []);
+        const stops = plan.map((x) => ({
+          point: toVec(x.destination),
+          followRoads: x.followRoads === true,
+        }));
+        const line = c.terrain
+          ? routeLine(c.terrain, s.centre, stops)
+          : [s.centre, ...stops.map((x) => x.point)];
+        drawRoute(ctx, line.map(toScreen), color, isSelected, s.side === 'OPFOR' ? [7, 5] : []);
         ctx.globalAlpha = isSelected ? 1 : 0.6;
         plan.forEach((x, k) => {
           const p = points[k + 1];
@@ -643,8 +659,14 @@ export function createCombatMapEditor(
         const color = SIDE_COLORS[v.side];
         const route = routeNow(c, v);
         if (route.length > 0) {
-          const points = [at, ...route].map(toScreen);
-          drawRoute(ctx, points, color, isSelected, [12, 4, 2, 4]);
+          const stops = route.map((p) => ({
+            point: { x: p.x, y: p.y },
+            followRoads: p.followRoads === true,
+          }));
+          const line = c.terrain
+            ? routeLine(c.terrain, at, stops)
+            : [at, ...stops.map((x) => x.point)];
+          drawRoute(ctx, line.map(toScreen), color, isSelected, [12, 4, 2, 4]);
           route.forEach((d, k) => {
             const selected = isSelected && ui.selectedOrder === k;
             waypoint(ctx, toScreen(d), 'move', k + 1, color, selected, false);

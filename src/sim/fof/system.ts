@@ -134,6 +134,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       killZone: spec.killZone ?? null,
       sector: spec.sector ?? null,
       preparedSeconds: spec.preparedSeconds ?? 0,
+      ...(spec.followRoads === true ? { followRoads: true as const } : {}),
       source: 'scenario',
       issuedTick: 0,
       issuedAt: 0,

@@ -1,6 +1,8 @@
 import { emptyMotionSample } from '#exercise';
 import {
   clearPlan,
+  setOrderFollowRoads,
+  setVehicleWaypointRoads,
   deleteOrder,
   reorderOrder,
   setDefendSector,
@@ -45,6 +47,7 @@ import {
   type Side,
   type TerrainDataset,
   type Vec2,
+  type VehicleDestination,
   type Viewshed,
   viewshedGrid,
 } from '#sim';
@@ -180,6 +183,13 @@ export interface PageScenario {
 }
 
 const PLACE_ORGANIZATIONS: readonly SquadOrganization[] = ['squad', 'fireTeam', 'element3'];
+
+/** A road, in `currentColor`, for the Prefer roads toggles. */
+const ROAD_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 21M16 3l4 18"/><path d="M12 4v3M12 10.5v3M12 17v3"/></svg>`;
+
+/** A move order's (or a vehicle waypoint's) Prefer roads toggle. */
+const roadsButton = (act: string, k: number, on: boolean, editable: boolean): string =>
+  `<button class="small roads-toggle" data-act="${act}" data-index="${String(k)}" aria-pressed="${String(on)}"${editable ? '' : ' disabled'} title="Prefer roads: ${on ? 'on' : 'off'}. On, it goes to the nearest road, along the roads (a squad in column), and off them to the waypoint, when the roads help" aria-label="Prefer roads">${ROAD_ICON}</button>`;
 
 /** An eye, in `currentColor`, for the viewshed toggles. */
 const EYE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
@@ -357,6 +367,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const combatDisplay = (c: Combat): BattleDisplay => ({
     motion: c.session.motion,
     events: c.session.events,
+    terrain: o.terrain,
     renderSeconds: c.renderSeconds,
     battle: c.session.battle,
     squads: () => c.squads(),
@@ -374,13 +385,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             previewPlan: (id: string, change: (d: BattleScenarioDefinition) => BattleEdit) =>
               c.previewPlan(id, change),
             vehicleRoute: (id: string) => c.vehicleRoute(id),
-            setVehicleRoute: (id: string, route: readonly Vec2[]) => c.setVehicleRoute(id, route),
+            setVehicleRoute: (id: string, route: readonly VehicleDestination[]) =>
+              c.setVehicleRoute(id, route),
           },
         }),
   });
   const reviewDisplay = (r: Review): BattleDisplay => ({
     motion: r.replay.motion,
     events: r.replay.events,
+    terrain: o.terrain,
     renderSeconds: r.seconds,
     battle: r.replay.battle,
     squads: () => r.squads(),
@@ -1229,11 +1242,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           ${actionsSelect}
           ${
             editable
-              ? `<span class="order-buttons">${secondClickButton(order.kind, k, p.armedIndex === k)}${p.eye(k)}
+              ? `<span class="order-buttons">${secondClickButton(order.kind, k, p.armedIndex === k)}${order.kind === 'move' ? roadsButton('order-roads', k, order.followRoads === true, true) : ''}${p.eye(k)}
               <button class="small" data-act="order-up" data-index="${String(k)}" title="Earlier" aria-label="Move order ${String(k + 1)} earlier"${k === 0 ? ' disabled' : ''}>▲</button>
               <button class="small" data-act="order-down" data-index="${String(k)}" title="Later" aria-label="Move order ${String(k + 1)} later"${k === plan.length - 1 ? ' disabled' : ''}>▼</button>
               <button class="small" data-act="order-delete" data-index="${String(k)}" title="Delete" aria-label="Delete order ${String(k + 1)}">✕</button></span>`
-              : `<span class="order-buttons">${p.eye(k)}</span>`
+              : `<span class="order-buttons">${order.kind === 'move' && order.followRoads ? roadsButton('order-roads', k, true, false) : ''}${p.eye(k)}</span>`
           }
           ${order.kind === 'defend' ? preparedHtml(order.preparedMinutes ?? 0, k, editable) : ''}
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
@@ -1265,7 +1278,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         ) => `<li class="order-row${combatUi.selectedOrder === k ? ' selected' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
           <span>Move</span>
-          ${editable ? `<span class="order-buttons"><button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button></span>` : ''}
+          <span class="order-buttons">${roadsButton('waypoint-roads', k, route[k]?.followRoads === true, editable)}${editable ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
         </li>`,
       )
       .join('');
@@ -1323,7 +1336,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
           <span>Move</span>
-          ${routing ? `<span class="order-buttons"><button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button></span>` : ''}
+          <span class="order-buttons">${roadsButton('waypoint-roads', k, v.route[k]?.followRoads === true, routing)}${routing ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
         </li>`;
       })
@@ -1581,6 +1594,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           )
             combatUi.selectedOrder = index > 0 ? index - 1 : null;
           return true;
+        case 'waypoint-roads':
+          c.setVehicleRoute(
+            id,
+            route.map((p, k) =>
+              k !== index ? p : p.followRoads ? { x: p.x, y: p.y } : { ...p, followRoads: true },
+            ),
+          );
+          return true;
         case 'vehicle-clear-route':
           confirm({
             message: `Clear the route of ${c.vehicle(id)?.name ?? 'the vehicle'}? It stops where it is until it is given a new one.`,
@@ -1664,6 +1685,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'order-actions':
         c.editPlan(id, (d) => setOrderActionsOn(d, id, index, value as ActionsOn));
         return true;
+      case 'order-roads': {
+        const on = c.plan(id)[index]?.followRoads !== true;
+        c.editPlan(id, (d) => setOrderFollowRoads(d, id, index, on));
+        return true;
+      }
       case 'order-prepared':
         c.editPlan(id, (d) => setDefendPrepared(d, id, index, Number(value)));
         return true;
@@ -1723,6 +1749,18 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       }
       case 'pick-order':
         if (s) planner.select(s.id, index);
+        return;
+      case 'order-roads':
+        if (s && planner.canPlan(s)) {
+          const on = s.plan[index]?.followRoads !== true;
+          planner.edit((d) => setOrderFollowRoads(d, s.id, index, on));
+        }
+        return;
+      case 'waypoint-roads':
+        if (car && planner.canRoute(car)) {
+          const on = car.route[index]?.followRoads !== true;
+          planner.edit((d) => setVehicleWaypointRoads(d, car.id, index, on));
+        }
         return;
       case 'set-kill-zone': {
         // This order's second click: armed (or, armed already, put down).

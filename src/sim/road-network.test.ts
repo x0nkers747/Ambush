@@ -4,15 +4,15 @@ import { NO_FEATURES, type EnvironmentFeatures, type Road, type WaterArea } from
 import type { Vec2 } from './geometry';
 import { gradeTerrain } from './ground';
 import { pathLength, planOffRoad, planPath } from './navigation';
-import { roadNetwork, roadPointAt } from './road-network';
+import { roadNetwork, roadPointAt, roadsRoute } from './road-network';
 import type { Scenario } from './scenario';
 import { createSimulation } from './simulation';
 import { soldierId, waypointId } from './state';
 import { createSyntheticTerrain, flatElevation } from './synthetic-terrain';
 import type { TerrainDataset } from './terrain';
 
-// OPFOR road following (docs/adr/0043): to a destination on a road, along the
-// roads; elsewhere, off road as before.
+// Road following (docs/adr/0043, and a Move order's Prefer roads): by the roads
+// when they help, to a destination on a road or off it; else off road.
 
 const GRID = { originX: -400, originY: -400, cellSize: 10, columns: 81, rows: 81 };
 const road = (id: string, pts: [number, number][], extra: Partial<Road> = {}): Road => ({
@@ -201,13 +201,22 @@ describe('road following', () => {
     expect(visited.at(-1)).toMatchObject(to);
   });
 
-  it('plans a destination off the roads as before', () => {
+  it('goes to a destination off the roads by the roads when they help, else straight there', () => {
     const t = flat({ roads: [WINDING] });
     const from = { x: -300, y: 0 };
     const to = { x: 200, y: -300 };
     expect(roadPointAt(t, to)).toBeNull();
-    expect(planPath(t, from, to, { followRoads: true })).toEqual(planPath(t, from, to));
-    expect(planPath(t, from, to, { followRoads: true })).toEqual({ ok: true, turns: [] });
+    // The walks to and from the road are shorter than the way straight there: by the road.
+    const route = roadsRoute(t, from, to);
+    expect(route).not.toBeNull();
+    const byRoad = planPath(t, from, to, { followRoads: true });
+    expect(byRoad.ok && byRoad.turns.length).toBeGreaterThan(2);
+    expect(route?.road.every((p) => distanceTo(p, WINDING.centerline) < 0.5)).toBe(true);
+    // A destination a few metres off: no road helps, straight there.
+    const off = { x: -300, y: -60 };
+    const near = { x: -250, y: -70 };
+    expect(roadsRoute(t, off, near)).toBeNull();
+    expect(planPath(t, off, near, { followRoads: true })).toEqual(planPath(t, off, near));
   });
 
   it('does not join roads that are not joined, nor cross water with no bridge', () => {

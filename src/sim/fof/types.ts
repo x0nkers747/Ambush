@@ -111,6 +111,12 @@ export interface OrderSpec {
   readonly sector?: DefenceSector;
   /** A defence: how long its position was prepared before (s, 0–`digInSeconds`): it starts that far dug in. */
   readonly preparedSeconds?: number;
+  /**
+   * A move order: Prefer roads. It goes by the roads when they help
+   * (`roadsRoute`): to the nearest road, along the roads in column, and off
+   * them to the destination.
+   */
+  readonly followRoads?: boolean;
 }
 
 /** Who gave an order: the scenario's initial plan, or a player during the run. */
@@ -133,6 +139,8 @@ export interface FofOrder {
   readonly sector: DefenceSector | null;
   /** A defence's preparation before it was given (s); 0 for every other kind. */
   readonly preparedSeconds: number;
+  /** A move order preferring the roads (absent: it does not). */
+  readonly followRoads?: true;
   readonly source: OrderSource;
   /** When it was issued (tick and seconds), started, and ended. */
   readonly issuedTick: number;
@@ -142,6 +150,12 @@ export interface FofOrder {
   status: OrderStatus;
   /** Why it ended (or failed), in words; `null` while pending or active. */
   reason: string | null;
+}
+
+/** A leg of a move by the roads: its movement, and whether it is the one along the road. */
+export interface RoadLeg {
+  readonly order: UnitOrder;
+  readonly onRoad: boolean;
 }
 
 /** One side's organization in the experiment. */
@@ -157,6 +171,8 @@ export interface FofForceSetup {
   readonly formation?: FormationSpec;
   /** The formation it assaults in (an extended line); default: its formation. */
   readonly assaultFormation?: FormationSpec;
+  /** The formation it follows a road in (a column); default: its formation. */
+  readonly roadFormation?: FormationSpec;
   /** Pace of a withdrawal (m/s); default: the world's movement speed. */
   readonly pace?: number;
   /** What it does on contact; default `continue`. */
@@ -334,6 +350,12 @@ export interface FofForce {
   lastingEffectiveness: number;
   /** The movement order it was on when contact interrupted it (resumed after contact). */
   mission: UnitOrder | null;
+  /**
+   * A move by the roads (Prefer roads), in legs: to the road in its formation,
+   * along it in column, off it to the destination. `legs`: those after
+   * `mission`; `onRoad`: `mission` is the leg along the road. Absent otherwise.
+   */
+  roadMove?: { legs: RoadLeg[]; onRoad: boolean };
   /** Where it believes the threat is (centroid of its current tracks), or `null`. */
   threat: Vec2 | null;
   /** Last time it had a confirmed, current contact; its own last burst; last fire at it. */

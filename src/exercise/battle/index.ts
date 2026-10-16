@@ -69,6 +69,7 @@ export {
   scenarioIssues,
   scenarioSummary,
   setOrderKind,
+  setOrderFollowRoads,
   setSeed,
   setSquadFacing,
   setSquadFormation,
@@ -99,7 +100,9 @@ export {
   moveVehicleWaypoint,
   renameVehicle,
   setVehicleFacing,
+  setVehicleWaypointRoads,
   VEHICLE_LABELS,
   vehiclesOf,
   type PlannedVehicle,
+  type RouteWaypoint,
 } from './vehicles';

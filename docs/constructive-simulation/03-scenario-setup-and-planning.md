@@ -86,16 +86,16 @@ The 3D view hands its pointer to the 2D map's surface, which calls the same
 editor (docs/adr/0039), and draws the same overlay through its own
 projection. So everything below works the same in 2D and 3D.
 
-| Input                      | Effect                                                                                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A Place button (Setup)     | Place squads (or vehicles) of the chosen side and organization: one per click.                                                                                                              |
-| An order button (Planning) | Orders of that kind for the selected squad: each click adds one after the selected order, or at the end of the plan. An OPFOR Move clicked on a road becomes Moves along the roads (below). |
-| Esc                        | The Select tool. Esc again clears the selection.                                                                                                                                            |
-| Click a squad or waypoint  | Select it.                                                                                                                                                                                  |
-| Drag a squad               | Move it (Setup only).                                                                                                                                                                       |
-| Drag a waypoint            | Move its destination.                                                                                                                                                                       |
-| Drag the white knob        | Turn the selected squad: its facing at the start.                                                                                                                                           |
-| Right-click a waypoint     | Delete its order.                                                                                                                                                                           |
+| Input                      | Effect                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A Place button (Setup)     | Place squads (or vehicles) of the chosen side and organization: one per click.                                                                                        |
+| An order button (Planning) | Orders of that kind for the selected squad: each click adds one after the selected order, or at the end of the plan. A Move's Prefer roads is set in its row (below). |
+| Esc                        | The Select tool. Esc again clears the selection.                                                                                                                      |
+| Click a squad or waypoint  | Select it.                                                                                                                                                            |
+| Drag a squad               | Move it (Setup only).                                                                                                                                                 |
+| Drag a waypoint            | Move its destination.                                                                                                                                                 |
+| Drag the white knob        | Turn the selected squad: its facing at the start.                                                                                                                     |
+| Right-click a waypoint     | Delete its order.                                                                                                                                                     |
 
 **Who may change what:**
 
@@ -180,23 +180,36 @@ way, and an unreachable destination. They are listed as problems and saved.
 
 Work in progress is never lost.
 
-## OPFOR moves along roads
+## Prefer roads
 
-A Move order for an OPFOR squad clicked on a road (within the road's
-half-width plus 2 m) is laid along the roads (`roadWaypoints`,
-`src/sim/road-network.ts`; the road network of [ADR 0043](../adr/0043-bridge-and-road-navigation.md)).
-From the squad's start, or the order before the new one:
+A Move order (a squad's, or a vehicle's waypoint) has a **Prefer roads**
+toggle, the road button in its row of the panel, in Planning and in Sim. It is
+off by default. The order stays one waypoint, where it was clicked; what
+changes is the way there (`roadsRoute`, `src/sim/road-network.ts`, on the road
+network of [ADR 0043](../adr/0043-bridge-and-road-navigation.md)):
 
-- a Move to where it joins the nearest road leading there that it can walk
-  to (left out when it is already on the road);
-- a Move to each turn of the road route, simplified to within 3 m of the
-  road and no closer than 25 m to one another;
-- a Move to the point clicked.
+1. Off road to the nearest road it can walk to (of the nearest few, the
+   shortest walk), on the part of the network that also reaches the
+   destination.
+2. Along the roads, the shortest way, to the point of them nearest the
+   destination that the destination can be walked to from.
+3. Off road from there to the destination, which need not be on a road.
 
-They are ordinary Move orders, inserted where the one Move would have been,
-and can be moved or deleted like any other. A message says how many were
-added. A Move clicked off the roads, any other order, and BLUEFOR's orders
-go straight to the point clicked.
+**Roads only when they help.** If the walks to and from the roads come to at
+least the way straight there, it goes straight there.
+
+**A squad marches along the road in column** (its organization's Column, else
+its File: `roadFormation`), and in its own formation to the road and from it.
+The move is three legs (`FofForce.roadMove`); after contact it resumes the leg
+it was on. A vehicle drives the same route, at road speed where the road is
+paved.
+
+On the map, such an order's line follows the roads it will take. The scenario
+file stores it as `followRoads: true` on the order (a vehicle's waypoint);
+only a move order may have it.
+
+Until this toggle, an OPFOR Move clicked on a road was laid out as many Move
+orders along the road; that is gone: every Move is one waypoint.
 
 ## Viewsheds
 

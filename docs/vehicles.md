@@ -16,7 +16,9 @@ so the After-Action Review replays it.
    and the Select tool is back: drag the vehicle to move it, its knob to turn it.
 
 **Planning:** select the vehicle, pick **Move**, and click the map. Each click
-adds a waypoint to its route, after the selected one, or at the end.
+adds a waypoint to its route, after the selected one, or at the end. Each
+waypoint's road button (**Prefer roads**) takes the vehicle there by the roads
+when they help.
 
 With a vehicle selected:
 
@@ -55,7 +57,7 @@ are unchanged.
 ## 2. How it drives
 
 Each order's route is planned like a soldier's. It goes round buildings and
-water, and through woods. It does not follow roads. The vehicle steers along
+water, and through woods. With Prefer roads, by the roads when they help. The vehicle steers along
 the route (`src/sim/vehicles.ts`):
 
 - **Pivoting.** Nearly stopped and facing more than 50° away from where it must
@@ -123,7 +125,7 @@ the infantry cross over the oval of tracks. Its route is a dash-dot line. In
   detected, shot at or hit, and it blocks nobody.
 - **Routes.** The routes are soldiers' routes, widened by 3 m at each corner,
   so a vehicle clears buildings but may brush small obstacles. Fences and
-  single trees are not obstacles. Roads are not followed.
+  single trees are not obstacles. Roads are followed only with Prefer roads.
 - **Speed.** Only the ground directly under the vehicle sets its speed.
 
 ## 5. Code and tests

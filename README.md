@@ -136,9 +136,11 @@ Next says what is missing, and the side panel says the same next to the stage's 
    bar shows or hides them all.
 3. **Planning.** Give both sides' squads, and the vehicles, their orders: select one, pick an
    order (**Move**, **Attack**, **Withdraw**, **Ambush**, **Defend**) and click the map once per
-   order. A Move clicked on a road for OPFOR goes along the roads: it becomes a Move to where the
-   squad joins the nearest road, one to each turn of the road, and one to the point clicked
-   ([ADR 0043](docs/adr/0043-bridge-and-road-navigation.md)). OPFOR can be hidden with
+   order. A Move order's **Prefer roads** toggle (the road button in its row, for squads and
+   vehicles, in Planning and Sim) keeps it one waypoint but takes it there by the roads when they
+   help: to the nearest road, along the roads (a squad in column), and off them to the waypoint;
+   its line on the map follows the roads
+   ([docs](docs/constructive-simulation/03-scenario-setup-and-planning.md#prefer-roads)). OPFOR can be hidden with
    **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
    change an order's kind, order and deletion in the plan list. Each order's **On contact**
    drop-down says what the squad does when it meets the enemy on the way: **Continue** (halt,
