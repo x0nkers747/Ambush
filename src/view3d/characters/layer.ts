@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { sinkDepth, type ViewEarthwork } from '../earthworks';
+import { hardGroundPosture, sinkDepth, type ViewEarthwork } from '../earthworks';
 import type { PoseInput } from './motion';
 import type { CombatEvent, MotionLog } from '#exercise';
 import type { UnitMarker } from '../unit-markers';
@@ -44,6 +44,19 @@ function trenchDepth(frame: CharacterFrame, id: string, x: number, y: number): n
   const work = frame.earthworks?.get(id);
   if (!work || work.hard === true || Math.hypot(x - work.x, y - work.y) > IN_POSITION_M) return 0;
   return sinkDepth(work.level);
+}
+
+/** How a soldier at (x, y) is drawn behind his sandbags on hard ground (kneeling, standing), or `null`. */
+function sandbagPosture(
+  frame: CharacterFrame,
+  id: string,
+  x: number,
+  y: number,
+): 'kneeling' | 'standing' | null {
+  const work = frame.earthworks?.get(id);
+  if (work?.hard !== true || Math.hypot(x - work.x, y - work.y) > IN_POSITION_M) return null;
+  const posture = hardGroundPosture(work.level);
+  return posture === 'prone' ? null : posture;
 }
 
 /** How long the animation runs on after the timeline has ended (s). */
@@ -365,8 +378,9 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
           }
           const s = sampleAt(log, index, frame.clock.seconds);
           const sunk = s.status === 'active' ? trenchDepth(frame, u.id, s.x, s.y) : 0;
+          const behind = s.status === 'active' ? sandbagPosture(frame, u.id, s.x, s.y) : null;
           const shape: ImpostorShape =
-            s.status !== 'active' ? 'down' : sunk > 0 ? 'standing' : s.posture;
+            s.status !== 'active' ? 'down' : sunk > 0 ? 'standing' : (behind ?? s.posture);
           const x = s.x;
           const y = s.z - sunk;
           const z = -s.y;
@@ -401,12 +415,15 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
           // Near: every frame; middle: every other frame (spread), and at once when he comes in.
           const due = lod === 'near' || wasFar || e.frame < 0 || (frameCount + e.slot) % 2 === 0;
           if (visible && due) {
-            const dug = frame.earthworks?.get(u.id);
-            const work = dug?.hard === true ? undefined : dug;
+            const work = frame.earthworks?.get(u.id);
             const surfaceAt = frame.surfaceAt;
             // In his fighting position, dug in deep enough: standing in it, sunk, his feet on its floor.
             const inTrench = work
               ? (input: PoseInput): PoseInput => {
+                  // Behind sandbags on hard ground: kneeling, then standing, as the wall grows.
+                  const behind = sandbagPosture(frame, u.id, input.x, input.y);
+                  if (behind && input.speed <= 0.4)
+                    return { ...input, posture: behind, postureFrom: behind, postureT: 1 };
                   const depth = trenchDepth(frame, u.id, input.x, input.y);
                   if (depth <= 0 || input.speed > 0.4) return input;
                   return {
@@ -418,11 +435,12 @@ export function createCharacterLayer(source: string | Promise<SoldierAssets>): C
                   };
                 }
               : undefined;
-            const floor = work
-              ? (x: number, y: number) =>
-                  surfaceAt(x, y) -
-                  (Math.hypot(x - work.x, y - work.y) < 1.5 ? sinkDepth(work.level) : 0)
-              : surfaceAt;
+            const floor =
+              work && work.hard !== true
+                ? (x: number, y: number) =>
+                    surfaceAt(x, y) -
+                    (Math.hypot(x - work.x, y - work.y) < 1.5 ? sinkDepth(work.level) : 0)
+                : surfaceAt;
             puppet.pose(log, frame.clock.combatLog, frame.clock.seconds, floor, inTrench);
             e.frame = frameCount;
             posed += 1;

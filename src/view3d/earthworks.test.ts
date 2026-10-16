@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { earthworkShape, sinkDepth, STANDING_FROM_LEVEL } from './earthworks';
+import {
+  earthworkShape,
+  hardGroundPosture,
+  sandbagCourses,
+  sinkDepth,
+  STANDING_FROM_LEVEL,
+} from './earthworks';
 
 // Fighting positions as drawn (docs/behavior-lab/force-on-force/09): from a
 // scrape to a trench as a defence digs in.
@@ -25,5 +31,15 @@ describe('a fighting position', () => {
     expect(sinkDepth(STANDING_FROM_LEVEL)).toBeGreaterThan(0.4);
     expect(sinkDepth(1)).toBeGreaterThan(sinkDepth(0.75));
     expect(sinkDepth(1)).toBeLessThan(1.5);
+  });
+});
+
+describe('on hard ground: sandbags', () => {
+  it('one course while he lies behind it, three as he kneels, five once he stands', () => {
+    expect(sandbagCourses(0)).toBe(0);
+    expect([0.1, 0.4].map(sandbagCourses)).toEqual([1, 1]);
+    expect([0.5, 0.9].map(sandbagCourses)).toEqual([3, 3]);
+    expect(sandbagCourses(1)).toBe(5);
+    expect([0.2, 0.7, 1].map(hardGroundPosture)).toEqual(['prone', 'kneeling', 'standing']);
   });
 });

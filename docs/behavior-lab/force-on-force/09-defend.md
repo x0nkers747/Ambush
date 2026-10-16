@@ -88,9 +88,15 @@ the squad's dig-in (`FofForce.earthworks`). The 3D view draws it on the ground
 
 **Hard ground.** Nothing can be dug on the carriageway of a paved or major road
 (or a paved path), on mapped paved ground (a car park, a square), or inside a
-building (`hardGround`, decided where each soldier lies). A soldier there lies
-prone with the same protection as his squad's dig-in, and no position is drawn
-under him. Dirt tracks, unpaved roads and trails can be dug.
+building (`hardGround`, decided where each soldier lies). A soldier there builds
+a wall of sandbags in front of him instead, with the same protection as his
+squad's dig-in. Dirt tracks, unpaved roads and trails can be dug.
+
+| Dig-in | Sandbags                                        | The soldier          |
+| ------ | ----------------------------------------------- | -------------------- |
+| 0–50%  | One course in front of him                      | Lying behind it      |
+| 50–99% | Three courses, their ends turned back round him | Kneeling behind them |
+| 100%   | Five courses                                    | Standing behind them |
 
 The ground itself is not cut. The hole is a dark patch on it, soil-coloured in a
 scrape and darker the deeper it is. A soldier standing in his position is drawn
