@@ -73,6 +73,11 @@ When contact interrupts an order, the squad's own behaviour takes over. It
 halts, returns fire, assaults or breaks contact. Once the contact is over,
 it resumes the active order.
 
+A player's order to a squad holding after contact is carried out at once,
+even when the squad is spent or still recovering. A planned order waits until
+the squad resumes on its own (recovered, force-on-force 03 §4), so a spent
+squad never starts one.
+
 A squad with no pending order holds where it is. A squad with no plan at all
 holds from the start.
 

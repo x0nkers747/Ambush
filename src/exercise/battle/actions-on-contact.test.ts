@@ -3,7 +3,7 @@ import type { ActionsOn, ForcePhaseChangedEvent, SimEvent } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
 import { woodsFeatures } from '../force-on-force/woods';
 import { assaultFormationId } from '../forces/forces';
-import { createBattle, type BattleSpec } from './battle';
+import { createBattle, orderSquad, type BattleSpec } from './battle';
 import {
   actionsOnOf,
   addOrder,
@@ -220,5 +220,48 @@ describe('an order’s actions on contact in a scenario', () => {
     const first = bad.squads[0]?.plan[0];
     if (first) first.actionsOn = 'panic';
     expect(() => parseBattleScenario(bad)).toThrow(/actions on contact are unknown/);
+  });
+});
+
+describe('a broken squad', { timeout: 300_000 }, () => {
+  it('falls back 500 m and holds, spent; ordered on, it goes at once', () => {
+    let found = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const battle = createBattle(spec(seed, 'continue'), ground(seed));
+      const blue = () => battle.sim.state.fof?.forces[0];
+      const events: SimEvent[] = [];
+      let brokeAt: { x: number; y: number } | null = null;
+      const centre = () => {
+        const up = battle.sim.state.soldiers.filter(
+          (s) => s.unitId.startsWith('B1-') && s.status === 'active',
+        );
+        return {
+          x: up.reduce((a, s) => a + s.position.x, 0) / up.length,
+          y: up.reduce((a, s) => a + s.position.y, 0) / up.length,
+        };
+      };
+      while (battle.sim.timeSeconds < 900) {
+        events.push(...battle.step());
+        const force = blue();
+        if (force?.phase === 'withdrawing' && force.brokenWithdrawal) brokeAt ??= centre();
+        if (brokeAt && force?.phase === 'holding') break;
+      }
+      const force = blue();
+      if (!brokeAt || force?.phase !== 'holding') continue;
+      found += 1;
+      // All the way back (500 m from the threat, less what the ground allows), not just clear.
+      const back = centre();
+      expect(Math.hypot(back.x - brokeAt.x, back.y - brokeAt.y)).toBeGreaterThan(350);
+      expect(events.at(-1)).toMatchObject({ reason: 'reached its withdrawal point' });
+      // Holding (spent or recovering), the player's order takes it on at once.
+      const to = { x: back.x, y: back.y - 80 };
+      battle.submit(orderSquad(battle, 'B1', 'replace', [{ kind: 'move', destination: to }]));
+      const later: SimEvent[] = [];
+      for (let tick = 0; tick < 30; tick += 1) later.push(...battle.step());
+      expect(later).toContainEqual(
+        expect.objectContaining({ type: 'forcePhaseChanged', from: 'holding', to: 'moving' }),
+      );
+    }
+    expect(found).toBeGreaterThan(0);
   });
 });

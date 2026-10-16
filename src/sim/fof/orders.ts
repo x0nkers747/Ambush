@@ -337,7 +337,10 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
     enter(context, force, 'withdrawing', 'ordered to withdraw');
     return;
   }
-  switch (force.phase) {
+  // Holding after contact, it carries out a player's order at once, even spent;
+  // a planned one waits until it resumes (recovered).
+  const phase = force.phase === 'holding' && next.source === 'player' ? 'atObjective' : force.phase;
+  switch (phase) {
     case 'moving':
     case 'atObjective':
     case 'inAmbush':
