@@ -13,6 +13,7 @@ feature: the game never runs it.
 - [05 The lab page](05-lab.md)
 - [06 Weapons, ammunition and grenade launchers](06-weapons-and-ammunition.md)
 - [07 Actions on contact](07-actions-on-contact.md)
+- [08 Ambush](08-ambush.md)
 - [Implementation journal](journal.md)
 
 Open it: `npm run dev`, then http://localhost:5173/#force-on-force, and press **Run the default demonstration**.

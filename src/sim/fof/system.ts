@@ -130,6 +130,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       kind: spec.kind,
       actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
+      killZone: spec.killZone ?? null,
       source: 'scenario',
       issuedTick: 0,
       issuedAt: 0,
@@ -171,6 +172,10 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       contactAt: null,
       lastAimedFireAt: null,
       pressOnUntil: null,
+      killZoneInside: [],
+      ambushSprungAt: null,
+      surprisedUntil: null,
+      concealed: false,
       lastFireAt: null,
       lastFiredUponAt: null,
       suppressedSince: null,
@@ -364,6 +369,10 @@ function scan(context: FofContext): void {
   const firedAt = schedule.firedAt;
   const thresholds = fof.thresholds;
   const maxRange = conditions.maxObservationRangeM;
+  // Forces lying in wait in ambush: their soldiers cannot be detected beyond the concealment range.
+  const concealedFrom = setup.config.force.concealmentRangeM;
+  const concealed = fof.forces.map((f) => f.concealed);
+  const camouflage = setup.config.force.concealedDetectionFactor;
   const regard = detection.regardHalfAngleDeg;
   const central = detection.centralHalfAngleDeg;
   const n50 = detection.detectionCycles50;
@@ -398,12 +407,17 @@ function scan(context: FofContext): void {
       const dx = target.position.x - ox;
       const dy = target.position.y - oy;
       const rangeM = Math.hypot(dx, dy);
+      // Concealed in ambush, and farther than the concealment range: not looked at (no deferral:
+      // concealment ends when the ambush is sprung, without anyone moving).
+      const hidden = concealed[fof.soldiers[j]?.force ?? -1] === true;
+      if (hidden && rangeM > concealedFrom) continue;
       if (rangeM > maxRange) {
         deferLook(context, i, j, rangeM, maxRange);
         continue;
       }
       if (rangeM < 1e-6) continue;
-      const cue = cues[j] ?? 1;
+      // Within it, camouflaged and still: harder to make out.
+      const cue = (cues[j] ?? 1) * (hidden ? camouflage : 1);
       const dimension = detection.criticalDimensionM[target.posture];
       // Cheaper first: haze only lowers the cycles, so short of what the pair
       // needs even without it, he is not detectable now (as below, exactly).

@@ -10,7 +10,8 @@ import { orgUnitId, type Soldier, type SoldierId } from '../state';
 import type { AgentState, FormationNode, FormationSpec, UnitOrder } from '../behavior/types';
 import { fofWeapon } from './config';
 import { confidenceAt, vegetationTransmission } from './detection';
-import { activeOrder, updatePlan } from './orders';
+import { occupyAmbush, springAmbush, updateAmbush } from './ambush';
+import { activeOrder, updatePlan, withinArrival } from './orders';
 import { roundsLeft } from './weapons';
 import type { FofContext } from './system';
 import { forceActive, glimpse, setLevel, soldierOf } from './system';
@@ -108,6 +109,7 @@ export function updateForces(context: FofContext): void {
     // Its orders first (a planned squad): the active one checked, the next started.
     updatePlan(context, force, setup.forces[i]?.actionsOn ?? 'continue');
     if (!forceActive(force)) return;
+    if (force.phase !== 'inAmbush') force.concealed = false;
     // Avoiding contact, any confirmed contact is close enough to fall back from.
     const close =
       force.actionsOn === 'withdraw'
@@ -130,8 +132,20 @@ export function updateForces(context: FofContext): void {
             picture.confirmed ? 'distant contact' : 'possible contact',
           );
         } else if (force.phase === 'moving' && !runningTask(context, force)) {
-          enter(context, force, 'atObjective', 'arrived');
+          // On an ambush order, at its position: it occupies it and lies in wait.
+          const order = activeOrder(force);
+          if (
+            order?.kind === 'ambush' &&
+            order.destination &&
+            force.ambushSprungAt === null &&
+            withinArrival(context, force, order.destination)
+          ) {
+            occupyAmbush(context, force, order);
+          } else enter(context, force, 'atObjective', 'arrived');
         }
+        break;
+      case 'inAmbush':
+        updateAmbush(context, force);
         break;
       case 'possibleContact':
         if (close) {
@@ -326,14 +340,15 @@ export function halt(
   }
   force.pressOnUntil = null;
   enter(context, force, phase, reason);
-  // Reaction delays, drawn in soldier order.
+  // Reaction delays, drawn in soldier order (after the surprise of being caught in an ambush).
   const delay = context.setup.config.force.reactionDelay;
+  const from = Math.max(t, force.surprisedUntil ?? t);
   for (const id of force.memberIds) {
     const member = context.fof.soldiers[context.memberIndex.get(id) ?? -1];
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
     if (!member || soldier?.status !== 'active') continue;
     member.reactAt =
-      t + delay.minSeconds + nextFloat(state.rng) * (delay.maxSeconds - delay.minSeconds);
+      from + delay.minSeconds + nextFloat(state.rng) * (delay.maxSeconds - delay.minSeconds);
     member.reacted = false;
     member.nextFireAt = null;
   }
@@ -886,6 +901,23 @@ function carryOut(
     const member = fof.soldiers[context.memberIndex.get(id) ?? -1];
     const soldier = context.state.soldiers[context.soldierIndex.get(id) ?? -1];
     if (!member || soldier?.status !== 'active') continue;
+    if (force.phase === 'inAmbush') {
+      // Lying in wait (once deployed): prone, watching the kill zone, holding fire.
+      holdAgent(agents.get(id), false);
+      member.nextFireAt = null;
+      member.reactAt = null;
+      member.reacted = false;
+      if (force.concealed) {
+        soldier.posture = 'prone';
+        const zone = activeOrder(force)?.killZone;
+        if (zone) {
+          const dx = zone.centre.x - soldier.position.x;
+          const dy = zone.centre.y - soldier.position.y;
+          if (dx !== 0 || dy !== 0) soldier.azimuth = azimuthOf(dx, dy);
+        }
+      } else soldier.posture = 'standing';
+      continue;
+    }
     // Assaulting, the bounding element moves; the rest are down, firing (the base of fire).
     const stopped = halted(force.phase) || (assaulting && !force.bounding.includes(id));
     holdAgent(agents.get(id), !stopped && member.level === 'pinned');
@@ -1080,6 +1112,10 @@ export function underFire(context: FofContext, force: number, shooter: Soldier):
     setLevel(context, track, from, null, null);
   }
   if (pressingOn(context, own)) return;
+  if (own.phase === 'inAmbush') {
+    springAmbush(context, own, activeOrder(own)?.killZone ?? null, 'ambush sprung: fired upon');
+    return;
+  }
   if (
     own.phase === 'moving' ||
     own.phase === 'atObjective' ||

@@ -1,7 +1,7 @@
 import type { ScenarioSoldier, ScenarioUnit } from '../scenario';
 import type { SimState } from '../state';
 import { fofWeapon, validateFofConfig, VISIBILITY_CLASSES } from './config';
-import { ORDER_KINDS, type ActionsOn, type FofSetup, type OrderSpec } from './types';
+import { ORDER_KINDS, type ActionsOn, type FofSetup, type KillZone, type OrderSpec } from './types';
 
 /** The actions on contact a force can be given. */
 export const ACTIONS_ON: readonly ActionsOn[] = ['continue', 'attack', 'hold', 'withdraw'];
@@ -85,6 +85,31 @@ export function orderSpecProblem(order: OrderSpec): string | null {
   const actionsOn: string | undefined = order.actionsOn;
   if (actionsOn !== undefined && !(ACTIONS_ON as readonly string[]).includes(actionsOn))
     return `unknown actions on contact "${actionsOn}"`;
+  const zone = order.killZone;
+  if (order.kind !== 'ambush')
+    return zone === undefined ? null : `a ${order.kind} order has no kill zone`;
+  if (zone === undefined) return 'an ambush order needs a kill zone';
+  return killZoneProblem(zone);
+}
+
+/** Kill zones are this many metres across and deep, at least and at most. */
+export const KILL_ZONE_MIN_M = 5;
+export const KILL_ZONE_MAX_M = 1000;
+
+/** What is wrong with a kill zone, or `null`. */
+export function killZoneProblem(zone: KillZone): string | null {
+  if (
+    !Number.isFinite(zone.centre.x) ||
+    !Number.isFinite(zone.centre.y) ||
+    !Number.isFinite(zone.facing)
+  ) {
+    return 'the kill zone must be finite';
+  }
+  for (const size of [zone.widthM, zone.depthM]) {
+    if (!(size >= KILL_ZONE_MIN_M && size <= KILL_ZONE_MAX_M)) {
+      return `the kill zone must be ${String(KILL_ZONE_MIN_M)}–${String(KILL_ZONE_MAX_M)} m across and deep`;
+    }
+  }
   return null;
 }
 

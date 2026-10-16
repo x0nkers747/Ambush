@@ -9,6 +9,8 @@ import {
   moveOrder,
   moveSquad,
   ORDER_LABELS,
+  resizeKillZone,
+  setKillZone,
   scenarioIssues,
   soldierStarts,
   type BattleEdit,
@@ -38,7 +40,9 @@ export type PlannerTool =
   /** Place squads of a side and organization (Scenario Setup). */
   | { readonly kind: 'place'; readonly side: Side; readonly organization: SquadOrganization }
   /** Give the selected squad orders of a kind, one per click. */
-  | { readonly kind: 'order'; readonly order: OrderKind };
+  | { readonly kind: 'order'; readonly order: OrderKind }
+  /** Set the kill zone of the selected ambush order: a click centres it. */
+  | { readonly kind: 'killZone' };
 
 export interface PlannerSelection {
   readonly squadId: string | null;
@@ -94,6 +98,19 @@ export interface Planner {
   moveSquadTo(id: string, point: Vec2, saving: boolean): boolean;
   turnSquadToward(id: string, point: Vec2, saving: boolean): boolean;
   moveOrderTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
+  /**
+   * Arms the kill zone tool for the selected squad's ambush order (the
+   * selected order, else its last ambush). Returns whether there is one.
+   */
+  armKillZone(): boolean;
+  /** Moves corner `corner` of an ambush order's kill zone to `point`. */
+  resizeKillZoneTo(
+    id: string,
+    index: number,
+    corner: number,
+    point: Vec2,
+    saving: boolean,
+  ): boolean;
   removeOrder(id: string, index: number): void;
   removeSquad(id: string): void;
   /** What still stops the scenario from being played (memoized per scenario). */
@@ -319,8 +336,28 @@ export function createPlanner(o: PlannerOptions): Planner {
         const kind = tool.order;
         // After the selected order, or at the end of the plan.
         const at = selection.orderIndex === null ? selected.plan.length : selection.orderIndex + 1;
-        if (apply((d) => addOrder(terrain, d, selected.id, kind, point, at), true))
+        if (apply((d) => addOrder(terrain, d, selected.id, kind, point, at), true)) {
           planner.select(selected.id, at);
+          // An ambush needs its kill zone: the next click sets it.
+          if (kind === 'ambush') {
+            tool = { kind: 'killZone' };
+            changed();
+          }
+        }
+        return;
+      }
+      if (tool.kind === 'killZone') {
+        const selected = planner.selectedSquad;
+        const index = selection.orderIndex;
+        if (!selected || index === null || selected.plan[index]?.kind !== 'ambush') {
+          o.notify('Select an ambush order first, then click its kill zone.');
+          return;
+        }
+        if (!canPlan(selected)) return;
+        if (apply((d) => setKillZone(terrain, d, selected.id, index, point), true)) {
+          tool = { kind: 'select' };
+          changed();
+        }
         return;
       }
       planner.select(null);
@@ -337,6 +374,22 @@ export function createPlanner(o: PlannerOptions): Planner {
     moveOrderTo(id, index, point, saving) {
       if (!canPlan(squad(id))) return false;
       return apply((d) => moveOrder(terrain, d, id, index, point), saving);
+    },
+    armKillZone() {
+      const s = planner.selectedSquad;
+      if (!s || !canPlan(s)) return false;
+      const chosen = selection.orderIndex;
+      let index = chosen !== null && s.plan[chosen]?.kind === 'ambush' ? chosen : -1;
+      if (index < 0) index = s.plan.map((x) => x.kind).lastIndexOf('ambush');
+      if (index < 0) return false;
+      selection = { squadId: s.id, orderIndex: index };
+      tool = { kind: 'killZone' };
+      changed();
+      return true;
+    },
+    resizeKillZoneTo(id, index, corner, point, saving) {
+      if (!canPlan(squad(id))) return false;
+      return apply((d) => resizeKillZone(terrain, d, id, index, corner, point), saving);
     },
     removeOrder(id, index) {
       const s = squad(id);

@@ -5,6 +5,7 @@ import {
   type BattleScenarioDefinition,
   ACTIONS_ON_LABELS,
   defaultActionsOn,
+  defaultKillZone,
 } from '#exercise/battle';
 import type {
   ForcePhase,
@@ -68,6 +69,8 @@ export interface Combat {
     point: Vec2,
     mode: 'replace' | 'append',
     actionsOn?: ActionsOn | null,
+    /** An ambush's kill zone centre (`point` is its position): a default kill zone there. */
+    killZoneAt?: Vec2 | null,
   ): boolean;
   /** Clears a squad's orders: it holds where it is. */
   hold(squadId: string): void;
@@ -191,9 +194,13 @@ export function createCombat(o: CombatOptions): Combat {
       }
       return events;
     },
-    order(squadId, kind, point, mode, actionsOn = null) {
+    order(squadId, kind, point, mode, actionsOn = null, killZoneAt = null) {
       const squad = byId.get(squadId);
       if (ended || !squad) return false;
+      if (kind === 'ambush' && !killZoneAt) {
+        o.notify('An ambush needs its kill zone: click it after the ambush position.');
+        return false;
+      }
       const placed = placeDestination(o.terrain, point);
       if ('problem' in placed) {
         o.notify(placed.problem);
@@ -201,7 +208,14 @@ export function createCombat(o: CombatOptions): Combat {
       }
       if (placed.note !== undefined) o.notify(placed.note);
       give(squadId, mode, [
-        { kind, destination: placed.point, actionsOn: actionsOn ?? defaultActionsOn(kind) },
+        {
+          kind,
+          destination: placed.point,
+          actionsOn: actionsOn ?? defaultActionsOn(kind),
+          ...(kind === 'ambush' && killZoneAt
+            ? { killZone: defaultKillZone(placed.point, killZoneAt) }
+            : {}),
+        },
       ]);
       return true;
     },
@@ -235,7 +249,7 @@ export function describeOrder(order: {
 }): string {
   const d = order.destination;
   const what = d
-    ? `${ORDER_LABELS[order.kind]} to ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N`
+    ? `${ORDER_LABELS[order.kind]} ${order.kind === 'ambush' ? 'at' : 'to'} ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N`
     : ORDER_LABELS[order.kind];
   // Its actions on contact, when not its kind's.
   const on = order.actionsOn;
@@ -253,6 +267,7 @@ export const PHASE_LABELS: Readonly<Record<ForcePhase, string>> = {
   assaulting: 'Assaulting',
   withdrawing: 'Withdrawing',
   atObjective: 'On objective',
+  inAmbush: 'In ambush',
   withdrawn: 'Withdrawn',
   ineffective: 'Combat ineffective',
 };

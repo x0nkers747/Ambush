@@ -9,7 +9,7 @@ import {
   type CombatSummary,
   type SquadStatus,
 } from './combat';
-import type { BattleDisplay, CombatUi } from './combat-editor';
+import { pendingAmbush, type BattleDisplay, type CombatUi } from './combat-editor';
 import type { TimedEvent } from './session';
 
 // The Combat stage's side panel (docs/constructive-simulation/04): the clock
@@ -44,12 +44,19 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     <div class="speed" role="group" aria-label="Simulation speed">${speeds}</div>
     <h3>Orders, to either side</h3>
     <div class="tool-grid order-tools" role="group" aria-label="Orders">
-      ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k], k[0]?.toUpperCase() ?? '')).join('')}
+      ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k], k === 'ambush' ? 'B' : (k[0]?.toUpperCase() ?? ''))).join('')}
       ${tool(null, 'Select', 'S')}
     </div>
+    ${
+      ui.tool === 'ambush'
+        ? `<div class="tool-row kill-zone-row">
+      <button class="tool kill-zone" data-cact="kill-zone" aria-pressed="${String(pendingAmbush(ui) !== null)}" title="After the ambush position, click the kill zone's centre: a 50 m square facing the position">Set kill zone</button>
+    </div>`
+        : ''
+    }
     <label class="on-contact">On contact
       <select data-act="combat-actions" title="What a squad ordered now does on contact">
-        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid)</option>
+        <option value="order"${ui.actionsOn === null ? ' selected' : ''}>By order (Move: Continue, Attack: Attack, Withdraw: Avoid, Ambush: Continue)</option>
         ${ACTIONS_ON.map((a) => `<option value="${a}"${ui.actionsOn === a ? ' selected' : ''} title="${escapeHtml(ACTIONS_ON_HINTS[a])}">${ACTIONS_ON_LABELS[a]}</option>`).join('')}
       </select>
     </label>
@@ -75,9 +82,13 @@ function hintFor(c: Combat, ui: CombatUi): string {
   const s = c.squad(ui.selected);
   if (ui.tool === null)
     return s
-      ? `${s.name} selected: press M, A or W, then click the map to order it.`
+      ? `${s.name} selected: press M, A, W or B, then click the map to order it.`
       : 'Click a squad of either side to select it. Space plays or pauses.';
   if (!s) return 'Select a squad first (click it on the map or in the roster).';
+  if (ui.tool === 'ambush')
+    return pendingAmbush(ui)
+      ? `Now click the kill zone's centre: ${s.name} gets the Ambush order, its kill zone a 50 m square facing the ambush position (Esc: start again).`
+      : `Click the ambush position for ${s.name}, then its kill zone.`;
   return `Click the map: ${s.name} gets a ${ORDER_LABELS[ui.tool]} order there, ${ui.append ? 'after its pending orders' : 'replacing its orders'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
 }
 

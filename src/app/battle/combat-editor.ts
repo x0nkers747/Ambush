@@ -1,10 +1,10 @@
 import { emptyMotionSample, type MotionLog } from '#exercise';
 import type { Battle } from '#exercise/battle';
-import type { OrderKind, Vec2, ActionsOn } from '#sim';
+import type { OrderKind, Vec2, ActionsOn, KillZone } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { TimedEvent } from './session';
 import type { SquadStatus } from './status';
-import { chevron, OUTLINE, ring, SIDE_COLORS, unitSymbol, waypoint } from './map-editor';
+import { chevron, killZone, OUTLINE, ring, SIDE_COLORS, unitSymbol, waypoint } from './map-editor';
 
 // The Combat stage on the map (docs/constructive-simulation/04): every
 // soldier where the battle has him at the time drawn (smooth between
@@ -31,6 +31,7 @@ export interface BattleDisplay {
     point: Vec2,
     mode: 'replace' | 'append',
     actionsOn: ActionsOn | null,
+    killZoneAt?: Vec2 | null,
   ): boolean;
 }
 
@@ -45,6 +46,16 @@ export interface CombatUi {
   shift: boolean;
   /** What a squad ordered now does on contact (`null`: its order kind's). */
   actionsOn: ActionsOn | null;
+  /**
+   * An ambush being given: its position, clicked first, for the selected
+   * squad; the next click sets its kill zone and gives the order. `null`: none.
+   */
+  ambush: { readonly squadId: string; readonly at: Vec2 } | null;
+}
+
+/** The ambush position being given to the selected squad, if any. */
+export function pendingAmbush(ui: CombatUi): Vec2 | null {
+  return ui.tool === 'ambush' && ui.ambush?.squadId === ui.selected ? ui.ambush.at : null;
 }
 
 /** How long a burst stays drawn (s of simulation). */
@@ -124,13 +135,18 @@ export function createCombatMapEditor(
         notify('Select a squad first (of either side), then click where its order takes it.');
         return;
       }
-      c.order(
-        ui.selected,
-        ui.tool,
-        point,
-        ui.append !== ui.shift ? 'append' : 'replace',
-        ui.actionsOn,
-      );
+      const mode = ui.append !== ui.shift ? 'append' : 'replace';
+      if (ui.tool === 'ambush') {
+        // First its position; then its kill zone, which gives the order.
+        const at = pendingAmbush(ui);
+        if (!at) {
+          ui.ambush = { squadId: ui.selected, at: point };
+          return;
+        }
+        if (c.order(ui.selected, 'ambush', at, mode, ui.actionsOn, point)) ui.ambush = null;
+        return;
+      }
+      c.order(ui.selected, ui.tool, point, mode, ui.actionsOn);
     },
     cursor(_point, screen) {
       const hit = squadAt(screen);
@@ -154,6 +170,31 @@ export function createCombatMapEditor(
       const ordered = [...squads].sort(
         (a, b) => Number(a.id === ui.selected) - Number(b.id === ui.selected),
       );
+      // Kill zones of ambush orders (active, pending and queued), under the routes.
+      for (const s of ordered) {
+        if (s.up === 0) continue;
+        const zones: { zone: KillZone; from: Vec2 }[] = [];
+        for (const x of [s.active, ...s.pending]) {
+          if (x?.killZone && x.destination) zones.push({ zone: x.killZone, from: x.destination });
+        }
+        for (const q of s.queued) {
+          for (const x of q.orders) {
+            if (x.killZone && x.destination) zones.push({ zone: x.killZone, from: x.destination });
+          }
+        }
+        zones.forEach(({ zone, from }, k) => {
+          killZone(
+            ctx,
+            zone,
+            toScreen(from),
+            toScreen,
+            SIDE_COLORS[s.side],
+            k + 1,
+            s.id === ui.selected,
+            false,
+          );
+        });
+      }
       for (const s of ordered) {
         if (s.up === 0) continue;
         const isSelected = s.id === ui.selected;
@@ -200,6 +241,23 @@ export function createCombatMapEditor(
           if (p) waypoint(ctx, p, x.kind, k + 1, color, isSelected && k === 0, false);
         });
         ctx.globalAlpha = 1;
+      }
+
+      // The ambush position being given, waiting for its kill zone.
+      const pending = pendingAmbush(ui);
+      const pendingSquad = c.squad(ui.selected);
+      if (pending && pendingSquad) {
+        const p = toScreen(pending);
+        const from = toScreen(pendingSquad.centre);
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        waypoint(ctx, p, 'ambush', 1, SIDE_COLORS[pendingSquad.side], true, false);
       }
 
       // Bursts of the last moments: shooter to aim point (2D only: the 3D view

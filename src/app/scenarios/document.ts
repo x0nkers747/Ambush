@@ -288,7 +288,8 @@ const SQUAD_KEYS = [
   'facingDeg',
   'plan',
 ];
-const ORDER_KEYS = ['kind', 'destination', 'actionsOn'];
+const ORDER_KEYS = ['kind', 'destination', 'actionsOn', 'killZone'];
+const KILL_ZONE_KEYS = ['centre', 'widthM', 'depthM', 'facingDeg'];
 const POINT_KEYS = ['east', 'north'];
 const SCENARIO_KEYS = [
   'schema',
@@ -330,6 +331,17 @@ function readScenario(raw: unknown, fail: Fail): BattleScenarioDefinition {
               `${where}, order ${String(k + 1)}'s destination`,
               fail,
             );
+          const zone = o['killZone'];
+          if (isObject(zone)) {
+            onlyKnown(zone, KILL_ZONE_KEYS, `${where}, order ${String(k + 1)}'s kill zone`, fail);
+            if (isObject(zone['centre']))
+              onlyKnown(
+                zone['centre'],
+                POINT_KEYS,
+                `${where}, order ${String(k + 1)}'s kill zone centre`,
+                fail,
+              );
+          }
         });
       }
     });

@@ -37,7 +37,8 @@ export {
   type OrderSquadCommand,
   type OrderSquadRejection,
 } from './orders';
-export { orderSpecProblem } from './setup';
+export { KILL_ZONE_MAX_M, KILL_ZONE_MIN_M, killZoneProblem, orderSpecProblem } from './setup';
+export { inKillZone, killZoneCorners } from './ambush';
 export { hitProbabilityAt, type RangeProbability } from './hit-probability';
 export { armed, roundsLeft } from './weapons';
 export { areaIncapacitation } from './fire';

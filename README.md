@@ -2,7 +2,7 @@
 
 A real-time, interactive and deterministic force-on-force constructive
 simulation: any number of BLUEFOR and OPFOR squads, each following a plan of
-typed orders (Move, Attack, Withdraw) and reacting to contact on its own, fight
+typed orders (Move, Attack, Withdraw, Ambush) and reacting to contact on its own, fight
 on real-world or synthetic terrain. The user sets the scenario up, plans
 BLUEFOR, commands either side live during combat, and reviews the whole battle
 afterwards, replayed from its start and verified
@@ -121,7 +121,7 @@ Next says what is missing, and the side panel says the same next to the stage's 
    buttons), one per click. Drag a squad to move it and the white knob to turn it; rename it,
    change its organization or formation in the side panel. Soldiers that would stand in water or
    a building step out to the nearest clear ground. Give OPFOR its plans: select an OPFOR squad,
-   press **M**, **A** or **W** (Move, Attack, Withdraw) and click the map once per order. The
+   press **M**, **A**, **W** or **B** (Move, Attack, Withdraw, Ambush) and click the map once per order. The
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
@@ -132,10 +132,17 @@ Next says what is missing, and the side panel says the same next to the stage's 
    fight, and press on when there is nothing to engage), **Attack** (assault in an extended
    line), **Hold** (halt, fight from there and wait for new orders) or **Avoid** (fall back,
    firing only if fired upon); by default a Move continues, an Attack attacks and a Withdraw
-   avoids ([docs](docs/behavior-lab/force-on-force/07-actions-on-contact.md)).
+   avoids ([docs](docs/behavior-lab/force-on-force/07-actions-on-contact.md)). An **Ambush**
+   order's click is the ambush position; the next click (or **Set kill zone**, shown only for
+   ambushes, **K**) centres its kill zone, a 50 m square facing the position: drag its corners
+   to resize it. The squad goes there, lies in wait in a line facing the kill zone, concealed
+   (the enemy cannot see it beyond 100 m), and opens fire on its own when the enemy is in the
+   kill zone (or getting through it, or has found it); it fights until the enemy is down and
+   waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)).
 4. **Combat** ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)). The
    battle starts paused: **Space** plays and pauses, ½× to 32× sets the speed. Select any squad,
-   of either side, and give it orders live: **M**, **A** or **W**, then click; **Replace plan**
+   of either side, and give it orders live: **M**, **A**, **W** or **B**, then click (an ambush:
+   its position, then its kill zone, **Set kill zone**); **Replace plan**
    or **Append** (Shift for the other, for one click); **H** holds. **On contact** sets what
    squads ordered now do on contact (by default, their order's kind's). With an order tool, clicking
    an enemy squad targets it. Orders given while paused apply when play resumes. The battle never

@@ -260,6 +260,26 @@ export interface ForceBehaviorConfig {
    * contact again for as long (s).
    */
   readonly pressOnSeconds: number;
+  /**
+   * Ambush (docs/behavior-lab/force-on-force/08): a force lying in wait in
+   * its ambush position is concealed: the enemy cannot detect its soldiers
+   * farther than this (m).
+   */
+  readonly concealmentRangeM: number;
+  /**
+   * Ambush: within the concealment range, what a concealed soldier
+   * (camouflaged, still, prone) shows of himself: the resolvable cycles on
+   * him are multiplied by this (1: as any prone soldier).
+   */
+  readonly concealedDetectionFactor: number;
+  /** Ambush: it opens fire once this share of an enemy squad's active soldiers is in its kill zone. */
+  readonly ambushTriggerShare: number;
+  /**
+   * Ambush: an enemy squad caught in the kill zone is surprised: its
+   * soldiers react (take cover, return fire) this much later than they
+   * otherwise would (s).
+   */
+  readonly ambushSurpriseSeconds: number;
   /** Attacking: seconds in contact (returning fire, locating the enemy) before it assaults. */
   readonly assaultAfterSeconds: number;
   /**
@@ -719,6 +739,10 @@ export function validateFofConfig(data: unknown): FofConfig {
     'resumeEffectiveness',
     'withdrawEffectiveness',
     'pressOnSeconds',
+    'concealmentRangeM',
+    'concealedDetectionFactor',
+    'ambushTriggerShare',
+    'ambushSurpriseSeconds',
     'withdrawSuppression',
     'withdrawSuppressedSeconds',
     'withdrawAmmunitionFraction',
@@ -747,6 +771,10 @@ export function validateFofConfig(data: unknown): FofConfig {
     resumeEffectiveness: [0, 1],
     withdrawEffectiveness: [0, 1],
     pressOnSeconds: [1, 3600],
+    concealmentRangeM: [0],
+    concealedDetectionFactor: [0.01, 1],
+    ambushTriggerShare: [0.01, 1],
+    ambushSurpriseSeconds: [0, 60],
     withdrawSuppression: [0, 1],
     withdrawSuppressedSeconds: [0],
     withdrawAmmunitionFraction: [0, 1],

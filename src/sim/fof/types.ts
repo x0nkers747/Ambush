@@ -41,10 +41,26 @@ export type ActionsOn = 'continue' | 'attack' | 'hold' | 'withdraw';
  * - `attack`: toward the destination, assaulting the enemy it meets (fire and
  *   movement); done on the objective with no enemy within reach for a while;
  * - `withdraw`: to the destination, breaking contact: it does not halt to
- *   fight, firing on the move at what it can see.
+ *   fight, firing on the move at what it can see;
+ * - `ambush`: to the destination (the ambush position), where it lies in
+ *   wait, concealed and holding its fire, facing its kill zone; it opens fire
+ *   when the enemy is in the kill zone (docs/behavior-lab/force-on-force/08),
+ *   fights until the enemy is down and waits there for new orders.
  */
-export type OrderKind = 'move' | 'attack' | 'withdraw';
-export const ORDER_KINDS: readonly OrderKind[] = ['move', 'attack', 'withdraw'];
+export type OrderKind = 'move' | 'attack' | 'withdraw' | 'ambush';
+export const ORDER_KINDS: readonly OrderKind[] = ['move', 'attack', 'withdraw', 'ambush'];
+
+/**
+ * An ambush's kill zone: a rectangle on the map, `widthM` across and
+ * `depthM` deep, centred on `centre`; `facing` (an azimuth, radians) is its
+ * depth axis, from the ambush position toward the zone.
+ */
+export interface KillZone {
+  readonly centre: Vec2;
+  readonly widthM: number;
+  readonly depthM: number;
+  readonly facing: number;
+}
 
 /**
  * An order's state: `pending` (waiting its turn), `active` (being carried
@@ -61,6 +77,8 @@ export interface OrderSpec {
   readonly destination: Vec2 | null;
   /** What the squad does on contact while carrying it out (default: by the order's kind, `actionsOnFor`). */
   readonly actionsOn?: ActionsOn;
+  /** An ambush's kill zone (required for an ambush, refused for any other kind). */
+  readonly killZone?: KillZone;
 }
 
 /** Who gave an order: the scenario's initial plan, or a player during the run. */
@@ -77,6 +95,8 @@ export interface FofOrder {
   /** What the squad does on contact while carrying it out. */
   readonly actionsOn: ActionsOn;
   readonly destination: Vec2 | null;
+  /** An ambush's kill zone; `null` for every other kind. */
+  readonly killZone: KillZone | null;
   readonly source: OrderSource;
   /** When it was issued (tick and seconds), started, and ended. */
   readonly issuedTick: number;
@@ -169,6 +189,8 @@ export interface FofTrack {
  * - `assaulting`: attacking the enemy's believed position by fire and movement;
  * - `withdrawing`: breaking contact, moving away from the threat;
  * - `atObjective`: arrived, observing (reacts to contact as before);
+ * - `inAmbush`: on an ambush order, at its position: deploying, then lying
+ *   in wait, concealed, holding its fire until the enemy is in its kill zone;
  * - `withdrawn`, `ineffective`: terminal.
  */
 export type ForcePhase =
@@ -180,6 +202,7 @@ export type ForcePhase =
   | 'assaulting'
   | 'withdrawing'
   | 'atObjective'
+  | 'inAmbush'
   | 'withdrawn'
   | 'ineffective';
 
@@ -272,6 +295,14 @@ export interface FofForce {
   lastAimedFireAt: number | null;
   /** Pressing on through contact (actions on contact `continue`) until then: it does not halt for contact. */
   pressOnUntil: number | null;
+  /** In ambush: the enemy soldiers in its kill zone at the last decision, in soldier order. */
+  killZoneInside: SoldierId[];
+  /** Caught in an ambush's kill zone: surprised until then, its soldiers react only after (`null`: not). */
+  surprisedUntil: number | null;
+  /** When it sprang its ambush (`null`: it has not). */
+  ambushSprungAt: number | null;
+  /** Lying in wait in its ambush position, deployed: the enemy cannot detect it beyond `concealmentRangeM`. */
+  concealed: boolean;
   lastFireAt: number | null;
   lastFiredUponAt: number | null;
   /** Since when its mean suppression has stayed above `withdrawSuppression`. */

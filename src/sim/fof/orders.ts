@@ -1,10 +1,11 @@
 import { nearestInArea } from '../behavior/slots';
 import type { UnitOrder } from '../behavior/types';
 import type { SimEvent } from '../events';
-import type { Vec2 } from '../geometry';
+import { azimuthOf, type Vec2 } from '../geometry';
 import type { SimState } from '../state';
 import { isOnTerrain } from '../terrain';
 import type { SimWorld } from '../world';
+import { occupyAmbush } from './ambush';
 import {
   cancelTask,
   centreOf,
@@ -39,6 +40,9 @@ import type { ActionsOn, FofForce, FofOrder, OrderKind, OrderSpec, OrderStatus }
 //   active attack   ─ on its objective, no enemy within reach for attackClearSeconds ─▶ completed
 //                   ─ attackTimeoutSeconds since it began ─▶ failed
 //   active withdraw ─ at its destination ─▶ completed
+//   active ambush   ─ never ends by itself: at its position it lies in wait,
+//                     springs the ambush, fights and waits there for new orders
+//                     (docs/behavior-lab/force-on-force/08)
 //   active          ─ no way to its destination ─▶ failed
 //   active, pending ─ the squad combat ineffective ─▶ failed
 //   active          ─ the squad spent, breaking contact on its own ─▶ failed
@@ -138,6 +142,7 @@ export function applyOrderSquad(
       kind: spec.kind,
       actionsOn: spec.actionsOn ?? actionsOnFor(spec.kind),
       destination: spec.destination ? { x: spec.destination.x, y: spec.destination.y } : null,
+      killZone: spec.killZone ?? null,
       source: 'player',
       issuedTick: state.tick,
       issuedAt: startSeconds,
@@ -219,6 +224,11 @@ function checkActive(context: FofContext, force: FofForce, order: FofOrder): voi
       else if (stopped)
         endOrder(context, force, order, 'failed', 'could not reach the withdrawal point');
       return;
+    case 'ambush':
+      // At its position it lies in wait (`inAmbush`); stopped anywhere else, it could not get there.
+      if (stopped && force.ambushSprungAt === null)
+        endOrder(context, force, order, 'failed', 'could not reach the ambush position');
+      return;
   }
 }
 
@@ -280,9 +290,16 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   force.objectiveQuietSince = null;
   force.actionsOn = next.actionsOn;
   force.pressOnUntil = null;
+  force.ambushSprungAt = null;
+  force.killZoneInside = [];
   context.events.push(orderEvent(context.tick, context.t, force, next, 'pending', 'started'));
   if (!next.destination) return;
-  const mission = missionTo(context, force, next.destination);
+  const zone = next.killZone;
+  // An ambush faces its kill zone at its position.
+  const facing = zone
+    ? azimuthOf(zone.centre.x - next.destination.x, zone.centre.y - next.destination.y)
+    : undefined;
+  const mission = missionTo(context, force, next.destination, facing);
   if (!mission) {
     endOrder(context, force, next, 'failed', 'no way to the destination');
     return;
@@ -305,9 +322,17 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   switch (force.phase) {
     case 'moving':
     case 'atObjective':
+    case 'inAmbush':
     case 'withdrawing':
       // On its way (or breaking contact on an order now ended): to the new destination.
       standUp(context, force);
+      force.concealed = false;
+      // An ambush already at its position occupies it.
+      if (next.kind === 'ambush' && withinArrival(context, force, next.destination)) {
+        cancelTask(context, force);
+        occupyAmbush(context, force, next);
+        return;
+      }
       if (issue(context, force, mission))
         enter(context, force, 'moving', `ordered to ${next.kind}`);
       else endOrder(context, force, next, 'failed', 'no way to the destination');
@@ -325,8 +350,22 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   }
 }
 
-/** The movement order to `destination` in the force's formation, or `null` when it cannot get there. */
-function missionTo(context: FofContext, force: FofForce, destination: Vec2): UnitOrder | null {
+/** Whether the force's centre is within the arrival radius of `point`. */
+export function withinArrival(context: FofContext, force: FofForce, point: Vec2): boolean {
+  const centre = centreOf(context, force);
+  return (
+    centre !== null &&
+    Math.hypot(point.x - centre.x, point.y - centre.y) <= context.setup.config.force.arrivalRadiusM
+  );
+}
+
+/** The movement order to `destination` in the force's formation (facing `finalFacing` there), or `null` when it cannot get there. */
+function missionTo(
+  context: FofContext,
+  force: FofForce,
+  destination: Vec2,
+  finalFacing?: number,
+): UnitOrder | null {
   const { world } = context;
   const forceSetup = context.setup.forces.find((f) => f.unitId === force.unitId);
   const formation = force.mission?.formation ?? forceSetup?.formation;
@@ -340,6 +379,7 @@ function missionTo(context: FofContext, force: FofForce, destination: Vec2): Uni
     kind: 'moveInFormation',
     destination: point,
     formation,
+    ...(finalFacing !== undefined ? { finalFacing } : {}),
     ...(forceSetup?.pace !== undefined ? { pace: forceSetup.pace } : {}),
   };
 }

@@ -2,12 +2,16 @@ import {
   ACTIONS_ON,
   azimuthOf,
   isOnTerrain,
+  KILL_ZONE_MAX_M,
+  KILL_ZONE_MIN_M,
+  killZoneCorners,
   nearestClearPoint,
   ORDER_KINDS,
   planPath,
   pointProblem,
   terrainModelId,
   type ActionsOn,
+  type KillZone,
   type OrderKind,
   type PointProblem,
   type Side,
@@ -90,10 +94,27 @@ export function describePathProblem(
   }
 }
 
+/**
+ * An ambush's kill zone, as the scenario holds it: a rectangle `widthM`
+ * across and `depthM` deep around `centre`, its depth axis at `facingDeg`
+ * (compass degrees, from the ambush position toward the zone).
+ */
+export interface PlannedKillZone {
+  readonly centre: MapPoint;
+  readonly widthM: number;
+  readonly depthM: number;
+  readonly facingDeg: number;
+}
+
+/** A new kill zone's size (m), across and deep. */
+export const KILL_ZONE_DEFAULT_M = 50;
+
 /** An order of a plan, as the scenario holds it. */
 export interface PlannedOrder {
   readonly kind: OrderKind;
   readonly destination: MapPoint;
+  /** An ambush's kill zone (absent until set; only an ambush has one). */
+  readonly killZone?: PlannedKillZone;
   /** What the squad does on contact while carrying it out; absent: its kind's (`defaultActionsOn`). */
   readonly actionsOn?: ActionsOn;
 }
@@ -158,6 +179,7 @@ export const ORDER_LABELS: Readonly<Record<OrderKind, string>> = {
   move: 'Move',
   attack: 'Attack',
   withdraw: 'Withdraw',
+  ambush: 'Ambush',
 };
 
 /** What each actions on contact is called (docs/behavior-lab/force-on-force/07). */
@@ -370,10 +392,34 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
         (typeof actionsOn !== 'string' || !(ACTIONS_ON as readonly string[]).includes(actionsOn))
       )
         fail(`${what}, order ${String(k + 1)}: the actions on contact are unknown`);
+      const rawZone = o['killZone'];
+      let killZone: PlannedKillZone | undefined;
+      if (rawZone !== undefined) {
+        const zoneWhat = `${what}, order ${String(k + 1)}'s kill zone`;
+        if (kind !== 'ambush')
+          fail(`${what}, order ${String(k + 1)}: only an ambush has a kill zone`);
+        const z = (rawZone ?? {}) as Record<string, unknown>;
+        const size = (v: unknown, name: string): number =>
+          typeof v === 'number' && v >= KILL_ZONE_MIN_M && v <= KILL_ZONE_MAX_M
+            ? v
+            : fail(
+                `${zoneWhat}: the ${name} is not ${String(KILL_ZONE_MIN_M)}–${String(KILL_ZONE_MAX_M)} m`,
+              );
+        const facingDeg = z['facingDeg'];
+        if (typeof facingDeg !== 'number' || !Number.isFinite(facingDeg))
+          fail(`${zoneWhat}: the facing is not a number`);
+        killZone = {
+          centre: point(z['centre'], `${zoneWhat}'s centre`),
+          widthM: size(z['widthM'], 'width'),
+          depthM: size(z['depthM'], 'depth'),
+          facingDeg: facingDeg as number,
+        };
+      }
       return {
         kind: kind as OrderKind,
         destination: point(o['destination'], `${what}, order ${String(k + 1)}'s destination`),
         ...(typeof actionsOn === 'string' ? { actionsOn: actionsOn as ActionsOn } : {}),
+        ...(killZone ? { killZone } : {}),
       };
     });
     return {
@@ -726,10 +772,126 @@ export function moveOrder(
     ok: true,
     definition: withSquad(d, id, (s) => ({
       ...s,
-      plan: s.plan.map((o, k) => (k === index ? { ...o, destination: toPoint(placed.point) } : o)),
+      plan: s.plan.map((o, k) =>
+        k !== index
+          ? o
+          : {
+              ...o,
+              destination: toPoint(placed.point),
+              // An ambush's kill zone turns to face its new position.
+              ...(o.killZone
+                ? {
+                    killZone: {
+                      ...o.killZone,
+                      facingDeg: degreesToward(toPoint(placed.point), o.killZone.centre),
+                    },
+                  }
+                : {}),
+            },
+      ),
     })),
     ...(placed.note !== undefined ? { note: placed.note } : {}),
   };
+}
+
+/**
+ * Sets an ambush's kill zone: `KILL_ZONE_DEFAULT_M` square around `point`,
+ * facing the ambush position (resize it by its corners, `resizeKillZone`).
+ */
+export function setKillZone(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  point: Vec2,
+): BattleEdit {
+  const order = orderAt(d, id, index);
+  if (!order) return refused('There is no such order.');
+  if (order.kind !== 'ambush') return refused('Only an ambush has a kill zone.');
+  if (!isOnTerrain(terrain, point.x, point.y)) return refused('A kill zone must be on the map.');
+  const centre = toPoint(point);
+  if (Math.hypot(point.x - order.destination.east, point.y - order.destination.north) < 1)
+    return refused('The kill zone must be away from the ambush position.');
+  const zone = defaultKillZone(toVec(order.destination), point);
+  const killZone: PlannedKillZone = {
+    centre,
+    widthM: zone.widthM,
+    depthM: zone.depthM,
+    facingDeg: degreesToward(order.destination, centre),
+  };
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, killZone } : o)),
+    })),
+  );
+}
+
+/** A new kill zone centred on `centre`: `KILL_ZONE_DEFAULT_M` square, facing the ambush position `from`. */
+export function defaultKillZone(from: Vec2, centre: Vec2): KillZone {
+  return {
+    centre,
+    widthM: KILL_ZONE_DEFAULT_M,
+    depthM: KILL_ZONE_DEFAULT_M,
+    facing: azimuthOf(centre.x - from.x, centre.y - from.y),
+  };
+}
+
+/** A kill zone as the simulation takes it. */
+export function killZoneSpec(zone: PlannedKillZone): KillZone {
+  return {
+    centre: toVec(zone.centre),
+    widthM: zone.widthM,
+    depthM: zone.depthM,
+    facing: (zone.facingDeg * Math.PI) / 180,
+  };
+}
+
+/**
+ * Moves corner `corner` of an ambush's kill zone (`killZoneCorners`' order)
+ * to `point`: the opposite corner stays, the zone keeps its facing, and
+ * its sides stay within `KILL_ZONE_MIN_M`–`KILL_ZONE_MAX_M`.
+ */
+export function resizeKillZone(
+  terrain: TerrainDataset,
+  d: BattleScenarioDefinition,
+  id: string,
+  index: number,
+  corner: number,
+  point: Vec2,
+): BattleEdit {
+  const zone = orderAt(d, id, index)?.killZone;
+  if (!zone) return refused('That order has no kill zone.');
+  if (!isOnTerrain(terrain, point.x, point.y)) return refused('A kill zone must be on the map.');
+  const corners = killZoneCorners(killZoneSpec(zone));
+  const fixed = corners[(corner + 2) % 4];
+  if (!fixed || !corners[corner]) return refused('There is no such corner.');
+  const f = (zone.facingDeg * Math.PI) / 180;
+  const fx = Math.sin(f);
+  const fy = Math.cos(f);
+  // The dragged corner, in the zone's axes from the fixed one: depth along the facing, width to its right.
+  const dx = point.x - fixed.x;
+  const dy = point.y - fixed.y;
+  const clamp = (v: number) =>
+    (v < 0 ? -1 : 1) * Math.min(KILL_ZONE_MAX_M, Math.max(KILL_ZONE_MIN_M, Math.abs(v)));
+  const along = clamp(dx * fx + dy * fy);
+  const right = clamp(dx * fy - dy * fx);
+  const centre = {
+    x: fixed.x + (fx * along + fy * right) / 2,
+    y: fixed.y + (fy * along - fx * right) / 2,
+  };
+  const killZone: PlannedKillZone = {
+    centre: toPoint(centre),
+    widthM: Math.abs(right),
+    depthM: Math.abs(along),
+    facingDeg: zone.facingDeg,
+  };
+  return ok(
+    withSquad(d, id, (s) => ({
+      ...s,
+      plan: s.plan.map((o, k) => (k === index ? { ...o, killZone } : o)),
+    })),
+  );
 }
 
 export function setOrderKind(
@@ -747,7 +909,7 @@ export function setOrderKind(
         k !== index
           ? o
           : {
-              ...o,
+              ...withoutKillZone(o, kind),
               kind,
               // Its actions on contact follow the kind, unless they were chosen apart from it.
               actionsOn:
@@ -758,6 +920,16 @@ export function setOrderKind(
       ),
     })),
   );
+}
+
+/** An order without its kill zone, unless it stays an ambush. */
+function withoutKillZone(order: PlannedOrder, kind: OrderKind): PlannedOrder {
+  if (kind === 'ambush' || !order.killZone) return order;
+  return {
+    kind: order.kind,
+    destination: order.destination,
+    ...(order.actionsOn ? { actionsOn: order.actionsOn } : {}),
+  };
 }
 
 /** Sets what a squad does on contact while carrying out order `index`. */
@@ -837,6 +1009,7 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
         kind: o.kind,
         destination: toVec(o.destination),
         actionsOn: actionsOnOf(o),
+        ...(o.killZone ? { killZone: killZoneSpec(o.killZone) } : {}),
       })),
     })),
   };
@@ -904,6 +1077,14 @@ export function scenarioIssues(
     squad.plan.forEach((order, k) => {
       const to = toVec(order.destination);
       const label = `${squad.name}, order ${String(k + 1)} (${ORDER_LABELS[order.kind]})`;
+      if (order.kind === 'ambush' && !order.killZone)
+        issues.push({ squadId: squad.id, orderIndex: k, message: `${label}: set its kill zone.` });
+      if (k > 0 && squad.plan[k - 1]?.kind === 'ambush')
+        issues.push({
+          squadId: squad.id,
+          orderIndex: k,
+          message: `${label}: an ambush waits for new orders, so no order after it is carried out. Delete it, or give it in combat.`,
+        });
       const spot = destinationProblem(terrain, to);
       if (spot) issues.push({ squadId: squad.id, orderIndex: k, message: `${label}: ${spot}` });
       else {

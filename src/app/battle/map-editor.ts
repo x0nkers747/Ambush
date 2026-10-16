@@ -1,5 +1,5 @@
-import { ORDER_LABELS, type ScenarioSquad } from '#exercise/battle';
-import type { OrderKind, Side, Vec2 } from '#sim';
+import { killZoneSpec, ORDER_LABELS, type ScenarioSquad } from '#exercise/battle';
+import { killZoneCorners, type KillZone, type OrderKind, type Side, type Vec2 } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { Planner } from './planner';
 
@@ -14,6 +14,7 @@ import type { Planner } from './planner';
 //   click a squad        select it          drag it    move it (Scenario Setup)
 //   click a waypoint     select its order   drag it    move the destination
 //   drag the knob        turn the selected squad (its facing at the start)
+//   drag a corner        resize the selected ambush order's kill zone
 //   right-click a waypoint  delete the order
 
 /** Friendly blue and hostile red (APP-6 affiliation colours, as the map has always drawn them). */
@@ -30,15 +31,23 @@ const SQUAD_HIT_PX = 16;
 const SOLDIER_HIT_PX = 6;
 const KNOB_PX = 46;
 const KNOB_HIT_PX = 9;
+const CORNER_HIT_PX = 9;
 
 export const ORDER_INITIALS: Readonly<Record<OrderKind, string>> = {
   move: 'M',
   attack: 'A',
   withdraw: 'W',
+  ambush: 'B',
 };
 
 type Hit =
   | { readonly kind: 'waypoint'; readonly squad: ScenarioSquad; readonly index: number }
+  | {
+      readonly kind: 'corner';
+      readonly squad: ScenarioSquad;
+      readonly index: number;
+      readonly corner: number;
+    }
   | { readonly kind: 'knob'; readonly squad: ScenarioSquad }
   | { readonly kind: 'squad'; readonly squad: ScenarioSquad };
 
@@ -86,6 +95,17 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     if (selected && visible(selected)) {
       const knob = knobOf(selected, at);
       if (knob && near(knob, KNOB_HIT_PX)) return { kind: 'knob', squad: selected };
+      // The selected ambush order's kill zone corners.
+      const index = planner.selection.orderIndex;
+      const zone = index === null ? undefined : selected.plan[index]?.killZone;
+      if (zone && index !== null && planner.canPlan(selected)) {
+        const corners = killZoneCorners(killZoneSpec(zone));
+        for (let corner = 0; corner < corners.length; corner += 1) {
+          const p = corners[corner];
+          if (p && near(at(p), CORNER_HIT_PX))
+            return { kind: 'corner', squad: selected, index, corner };
+        }
+      }
     }
     const ordered = selected ? [selected, ...list.filter((s) => s !== selected)] : list;
     for (const s of ordered) {
@@ -127,6 +147,8 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       const id = drag.squad.id;
       if (drag.kind === 'squad') planner.moveSquadTo(id, point, false);
       else if (drag.kind === 'knob') planner.turnSquadToward(id, point, false);
+      else if (drag.kind === 'corner')
+        planner.resizeKillZoneTo(id, drag.index, drag.corner, point, false);
       else planner.moveOrderTo(id, drag.index, point, false);
     },
     drop() {
@@ -139,6 +161,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     cursor(_point, screen) {
       const hit = hitAt(screen);
       if (hit?.kind === 'knob') return 'grab';
+      if (hit?.kind === 'corner') return 'nwse-resize';
       if (hit?.kind === 'squad') return planner.canPlace() ? 'move' : 'pointer';
       if (hit?.kind === 'waypoint') return planner.canPlan(hit.squad) ? 'move' : 'pointer';
       return planner.tool.kind === 'select' ? null : 'crosshair';
@@ -171,6 +194,23 @@ function drawBattle(
   const order = [...squads].sort(
     (a, b) => Number(a.id === selected.squadId) - Number(b.id === selected.squadId),
   );
+  // Kill zones of ambush orders, under the routes.
+  for (const s of order) {
+    s.plan.forEach((o, k) => {
+      if (!o.killZone) return;
+      const isSelected = s.id === selected.squadId && selected.orderIndex === k;
+      killZone(
+        ctx,
+        killZoneSpec(o.killZone),
+        at(toVec(o.destination)),
+        at,
+        SIDE_COLORS[s.side],
+        k + 1,
+        isSelected,
+        isSelected && planner.canPlan(s),
+      );
+    });
+  }
   for (const s of order) {
     if (s.plan.length === 0) continue;
     const isSelected = s.id === selected.squadId;
@@ -280,7 +320,7 @@ export function chevron(
   ctx.restore();
 }
 
-/** A waypoint: its order's kind by shape and initial (move ●, attack ◆, withdraw ■) and its number. */
+/** A waypoint: its order's kind by shape and initial (move ●, attack ◆, withdraw ■, ambush ▲) and its number. */
 export function waypoint(
   ctx: CanvasRenderingContext2D,
   p: Vec2,
@@ -299,7 +339,12 @@ export function waypoint(
     ctx.lineTo(p.x - r - 2, p.y);
     ctx.closePath();
   } else if (kind === 'withdraw') ctx.rect(p.x - r, p.y - r, 2 * r, 2 * r);
-  else ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
+  else if (kind === 'ambush') {
+    ctx.moveTo(p.x, p.y - r - 3);
+    ctx.lineTo(p.x + r + 2, p.y + r - 1);
+    ctx.lineTo(p.x - r - 2, p.y + r - 1);
+    ctx.closePath();
+  } else ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
   ctx.fillStyle = color;
   ctx.fill();
   ctx.lineWidth = isSelected ? 3 : 1.5;
@@ -316,6 +361,68 @@ export function waypoint(
   ctx.strokeText(label, p.x + r + 5, p.y);
   ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
   ctx.fillText(label, p.x + r + 5, p.y);
+}
+
+/**
+ * An ambush's kill zone: a shaded rectangle with a dashed edge, a line to it
+ * from the ambush position, its label, and (resizing) its corner handles.
+ */
+export function killZone(
+  ctx: CanvasRenderingContext2D,
+  zone: KillZone,
+  from: Vec2,
+  at: (p: Vec2) => Vec2,
+  color: string,
+  n: number,
+  isSelected: boolean,
+  handles: boolean,
+): void {
+  const corners = killZoneCorners(zone).map(at);
+  const centre = at(zone.centre);
+  ctx.save();
+  ctx.globalAlpha = isSelected ? 1 : 0.8;
+  // From the ambush position to the zone: its line of fire.
+  ctx.setLineDash([3, 4]);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(centre.x, centre.y);
+  ctx.stroke();
+  ctx.beginPath();
+  corners.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = isSelected ? 0.28 : 0.18;
+  ctx.fill();
+  ctx.globalAlpha = isSelected ? 1 : 0.8;
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = isSelected ? 2.5 : 1.5;
+  ctx.strokeStyle = isSelected ? '#fff' : color;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign = 'center';
+  const label = `Kill zone ${String(n)}`;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = OUTLINE;
+  ctx.strokeText(label, centre.x, centre.y);
+  ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
+  ctx.fillText(label, centre.x, centre.y);
+  if (handles) {
+    for (const p of corners) {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(p.x - 4.5, p.y - 4.5, 9, 9);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 export function ring(ctx: CanvasRenderingContext2D, p: Vec2, r: number): void {

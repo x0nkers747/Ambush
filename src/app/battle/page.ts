@@ -44,7 +44,12 @@ import {
 } from '../shell';
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
 import { COMBAT_SPEEDS, createCombat, type Combat, type CombatSpeed } from './combat';
-import { createCombatMapEditor, type BattleDisplay, type CombatUi } from './combat-editor';
+import {
+  createCombatMapEditor,
+  pendingAmbush,
+  type BattleDisplay,
+  type CombatUi,
+} from './combat-editor';
 import { createLocalDriver, type DriverFactory } from './driver';
 import { createWorkerChannel, createWorkerDriver, type BattleChannel } from './worker-combat';
 import { createReview, type Review, type ReviewSpeed } from './review';
@@ -122,12 +127,18 @@ export interface PageScenario {
 
 const PLACE_ORGANIZATIONS: readonly SquadOrganization[] = ['squad', 'fireTeam', 'element3'];
 
-const ORDER_KEYS: Readonly<Record<string, OrderKind>> = { m: 'move', a: 'attack', w: 'withdraw' };
+const ORDER_KEYS: Readonly<Record<string, OrderKind>> = {
+  m: 'move',
+  a: 'attack',
+  w: 'withdraw',
+  b: 'ambush',
+};
 
 const HELP_HTML = `<dl class="kv help">
   <dt>S, Esc</dt><dd>Select tool; Esc again clears the selection</dd>
   <dt>P</dt><dd>Place squads (Scenario Setup): pick the side and organization, then click the map</dd>
-  <dt>M, A, W</dt><dd>Give the selected squad Move, Attack or Withdraw orders: each click adds one, after the selected order</dd>
+  <dt>M, A, W, B</dt><dd>Give the selected squad Move, Attack, Withdraw or Ambush orders: each click adds one, after the selected order</dd>
+  <dt>K</dt><dd>Set the kill zone of the selected ambush order: click its centre; drag its corners to resize it</dd>
   <dt>Drag</dt><dd>A squad to move it (Setup), a waypoint to move its destination, the white knob to turn the selected squad</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
   <dt>Delete</dt><dd>The selected order, or else the selected squad (Setup)</dd>
@@ -135,7 +146,8 @@ const HELP_HTML = `<dl class="kv help">
 </dl>
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
 <b>Attack</b> takes and clears the objective, assaulting with fire and movement; <b>Withdraw</b> falls back
-without halting to fight. Contact interrupts an order: the squad reacts on its own, then resumes it.
+without halting to fight; <b>Ambush</b> goes to the ambush position and lies in wait, concealed, facing its
+kill zone: it opens fire when the enemy is in the kill zone, then holds there until ordered on. Contact interrupts an order: the squad reacts on its own, then resumes it.
 A squad with no orders left holds where it is.</p>`;
 
 const sideClass = (side: Side) => (side === 'BLUEFOR' ? 'blue' : 'red');
@@ -267,6 +279,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     append: false,
     shift: false,
     actionsOn: null,
+    ambush: null,
   };
   /** The live battle, in Combat. */
   const inCombat = (): Combat | null => (planner.stage === 'combat' ? combat : null);
@@ -279,7 +292,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     battle: c.session.battle,
     squads: () => c.squads(),
     squad: (id) => c.squad(id),
-    order: (id, kind, point, mode, actionsOn) => c.order(id, kind, point, mode, actionsOn),
+    order: (id, kind, point, mode, actionsOn, killZoneAt) =>
+      c.order(id, kind, point, mode, actionsOn, killZoneAt),
   });
   const reviewDisplay = (r: Review): BattleDisplay => ({
     motion: r.replay.motion,
@@ -661,7 +675,23 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         ),
       ).join('')}
       ${toolButton({ kind: 'select' }, 'Select', 'S', 'Select and drag squads and waypoints')}
+    </div>
+    ${killZoneButton()}`;
+
+  /** "Set kill zone": only with the Ambush tool, or an ambush order selected (of a squad being planned). */
+  const killZoneButton = (): string => {
+    const t = planner.tool;
+    const s = planner.selectedSquad;
+    const index = planner.selection.orderIndex;
+    const ambushSelected = index !== null && s?.plan[index]?.kind === 'ambush';
+    const shown =
+      (t.kind === 'order' && t.order === 'ambush') || t.kind === 'killZone' || ambushSelected;
+    if (!shown || !planner.canPlan(s)) return '';
+    const hasAmbush = s?.plan.some((o) => o.kind === 'ambush') === true;
+    return `<div class="tool-row kill-zone-row">
+      <button class="tool kill-zone" data-act="set-kill-zone" aria-pressed="${String(t.kind === 'killZone')}"${hasAmbush ? '' : ' disabled'} title="Click the map to centre the selected ambush order's kill zone: a 50 m square facing the ambush position (K)">Set kill zone</button>
     </div>`;
+  };
 
   const toolsHtml = (): string => {
     switch (planner.stage) {
@@ -703,18 +733,24 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const selected = planner.selectedSquad;
     if (t.kind === 'place')
       return `Click the map to place a ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}; Esc to stop.`;
+    if (t.kind === 'killZone') {
+      const index = planner.selection.orderIndex;
+      return selected && index !== null
+        ? `Click the map at the centre of order ${String(index + 1)}'s kill zone: a 50 m square, facing the ambush position. Then drag its corners to resize it.`
+        : 'Select an ambush order first.';
+    }
     if (t.kind === 'order') {
       if (!selected) return 'Select a squad first (click it, or pick it in the roster).';
       if (!planner.canPlan(selected))
         return planner.stage === 'bluefor'
           ? `${selected.name} is OPFOR: its plan is set in Scenario Setup.`
           : `${selected.name} is BLUEFOR: its plan is made in BLUEFOR Planning.`;
-      return `Click the map: ${selected.name} gets a ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.`;
+      return `Click the map: ${selected.name} gets a${t.order === 'ambush' || t.order === 'attack' ? 'n' : ''} ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.${t.order === 'ambush' ? ' That is the ambush position; the next click sets its kill zone.' : ''}`;
     }
     if (planner.stage === 'scenario')
-      return 'Place both sides’ squads, then give OPFOR its plans (select an OPFOR squad, then M, A or W).';
+      return 'Place both sides’ squads, then give OPFOR its plans (select an OPFOR squad, then M, A, W or B).';
     if (planner.stage === 'bluefor')
-      return 'Select a BLUEFOR squad, then M, A or W and click the map for each order.';
+      return 'Select a BLUEFOR squad, then M, A, W or B and click the map for each order.';
     return '';
   };
 
@@ -758,7 +794,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           <button class="order-pick small" data-act="pick-order" data-index="${String(k)}" title="Select this order">${String(k + 1)}</button>
           ${kindSelect}
           ${actionsSelect}
-          <span class="muted coords">${String(Math.round(order.destination.east))} E, ${String(Math.round(order.destination.north))} N</span>
+          <span class="muted coords">${String(Math.round(order.destination.east))} E, ${String(Math.round(order.destination.north))} N${
+            order.kind === 'ambush'
+              ? order.killZone
+                ? ` · kill zone ${String(Math.round(order.killZone.widthM))} × ${String(Math.round(order.killZone.depthM))} m`
+                : ' · <span class="warn">no kill zone</span>'
+              : ''
+          }</span>
           ${
             planning
               ? `<span class="order-buttons">
@@ -889,13 +931,18 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (ctool !== undefined) {
       const kind = ctool === 'select' ? null : (ctool as OrderKind);
       combatUi.tool = combatUi.tool === kind ? null : kind;
+      combatUi.ambush = null;
     } else if (cmode !== undefined) combatUi.append = cmode === 'append';
     else if (speed !== undefined) c.setSpeed(Number(speed) as CombatSpeed);
     else if (cact === 'play') {
       if (c.playing) c.pause();
       else c.play();
     } else if (cact === 'end') endCombat();
-    else if (cact === 'hold') {
+    else if (cact === 'kill-zone') {
+      // Before the ambush position it cannot be set; after it, the button starts again.
+      if (pendingAmbush(combatUi)) combatUi.ambush = null;
+      else notify('Click the ambush position on the map first, then the kill zone.');
+    } else if (cact === 'hold') {
       if (combatUi.selected !== null) c.hold(combatUi.selected);
     } else if (cact === 'centre') {
       const s = c.squad(combatUi.selected);
@@ -1002,6 +1049,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       }
       case 'pick-order':
         if (s) planner.select(s.id, index);
+        return;
+      case 'set-kill-zone':
+        if (planner.tool.kind === 'killZone') planner.setTool({ kind: 'select' });
+        else if (!planner.armKillZone()) notify('Give the squad an ambush order first.');
         return;
       case 'order-up':
       case 'order-down':
@@ -1192,6 +1243,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 's':
         planner.setTool({ kind: 'select' });
         break;
+      case 'k':
+        if (planner.stage === 'scenario' || planner.stage === 'bluefor') planner.armKillZone();
+        break;
       case 'p':
         if (planner.stage === 'scenario') {
           const last = lastPlace;
@@ -1218,6 +1272,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const combatKey = (c: Combat, key: string, event: KeyboardEvent) => {
     const order = ORDER_KEYS[key];
     if (order && !c.ended) {
+      if (combatUi.tool !== order) combatUi.ambush = null;
       combatUi.tool = order;
       return;
     }
@@ -1247,7 +1302,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         c.setSpeed(COMBAT_SPEEDS[Math.max(0, speedAt - 1)] ?? c.speed);
         break;
       case 'escape':
-        if (combatUi.tool !== null) combatUi.tool = null;
+        if (pendingAmbush(combatUi)) combatUi.ambush = null;
+        else if (combatUi.tool !== null) combatUi.tool = null;
         else combatUi.selected = null;
         break;
     }
@@ -1514,7 +1570,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               total: q.total,
               phase: q.phase,
               centre: q.centre,
-              active: q.active ? { kind: q.active.kind, destination: q.active.destination } : null,
+              active: q.active
+                ? {
+                    kind: q.active.kind,
+                    destination: q.active.destination,
+                    killZone: q.active.killZone,
+                  }
+                : null,
               pending: q.pending.length,
               orders: q.orders.map((x) => `${x.kind}:${x.status}`),
               queued: q.queued.length,

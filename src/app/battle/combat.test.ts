@@ -118,6 +118,26 @@ describe('orders in combat', () => {
     expect(c.order('O1', 'move', { x: 9000, y: 0 }, 'replace')).toBe(false);
     expect(notices.at(-1)).toBe('A destination must be on the map.');
   });
+
+  it('an ambush takes its kill zone: 50 m square around the second point, facing the first', () => {
+    const { c, notices } = combat();
+    // Without a kill zone it is refused.
+    expect(c.order('B1', 'ambush', { x: -150, y: -350 }, 'replace')).toBe(false);
+    expect(notices.at(-1)).toMatch(/kill zone/);
+    expect(
+      c.order('B1', 'ambush', { x: -150, y: -350 }, 'replace', null, { x: -150, y: -280 }),
+    ).toBe(true);
+    c.play();
+    c.frame(0.1);
+    const active = c.squad('B1')?.active;
+    expect(active?.kind).toBe('ambush');
+    expect(active?.killZone).toEqual({
+      centre: { x: -150, y: -280 },
+      widthM: 50,
+      depthM: 50,
+      facing: 0,
+    });
+  });
 });
 
 describe('ending', () => {
