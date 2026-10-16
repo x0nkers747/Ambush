@@ -2,6 +2,7 @@ import { emptyMotionSample, type MotionLog } from '#exercise';
 import type { Battle } from '#exercise/battle';
 import type { OrderKind, Vec2, ActionsOn, KillZone } from '#sim';
 import type { MapEditor } from '#view2d';
+import { SECOND_CLICK } from './planner';
 import type { TimedEvent } from './session';
 import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status';
 import {
@@ -185,7 +186,7 @@ export function createCombatMapEditor(
       const car = c.vehicles().find((v) => v.id === ui.selected);
       if (car) {
         if (ui.tool !== 'move') {
-          notify(`${car.name} is a vehicle: it only takes Move orders (M).`);
+          notify(`${car.name} is a vehicle: it only takes Move orders.`);
           return;
         }
         c.orderVehicle?.(car.id, point, mode);
@@ -196,6 +197,7 @@ export function createCombatMapEditor(
         const at = pendingAmbush(ui);
         if (!at) {
           ui.ambush = { squadId: ui.selected, at: point };
+          notify(ui.tool === 'ambush' ? SECOND_CLICK.killZone : SECOND_CLICK.sector);
           return;
         }
         if (c.order(ui.selected, ui.tool, at, mode, ui.actionsOn, point)) ui.ambush = null;

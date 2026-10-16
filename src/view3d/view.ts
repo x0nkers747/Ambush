@@ -146,6 +146,8 @@ export interface BattlefieldView3d {
   projection(): GroundProjection;
   /** Who gets clicks and drags on the view; `null`: the camera alone. */
   setPointerHandler(handler: PointerHandler | null): void;
+  /** Shows these soldiers (and vehicles) from now on, or none: a view handed from one page to another. */
+  setFigures(figures: (() => ViewFigures | null) | null): void;
   /** Draws the 2D overlay after each frame (on `overlay`, cleared first, in CSS pixels). */
   setOverlayPainter(paint: ((ctx: CanvasRenderingContext2D) => void) | null): void;
   /** Paints a raster on the ground (a viewshed), or none; kept across terrain reloads. */
@@ -331,6 +333,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
 
   const markers = createMarkerLayer();
   scene.add(markers.group);
+  /** The soldiers shown (`o.figures`, or as set since). */
+  let figuresOf = o.figures;
   const charactersOn =
     o.characters ?? new URLSearchParams(location.search).get('characters') !== 'off';
   const characters = charactersOn
@@ -739,6 +743,9 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       gesture = null;
       if (!handler) canvas.style.cursor = '';
     },
+    setFigures(next) {
+      figuresOf = next ?? undefined;
+    },
     setOverlayPainter(paint) {
       paintOverlay = paint;
     },
@@ -801,7 +808,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       }
       entry.vegetation?.update(eye);
       followWithShadows(entry);
-      const figures = o.figures?.() ?? null;
+      const figures = figuresOf?.() ?? null;
       const units = figures?.units ?? [];
       const surfaceAt = (x: number, y: number) =>
         isOnTerrain(terrain, x, y) ? surfaceHeightAt(terrain, x, y) : Number.NaN;
@@ -1091,7 +1098,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
               (current.groundAt(pose.position.x, pose.position.z) ?? current.apronZ)
             : null,
         // Marker (or character) feet back in battlefield metres, beside the simulated positions.
-        soldiers: (o.figures?.()?.units ?? []).map((s) => {
+        soldiers: (figuresOf?.()?.units ?? []).map((s) => {
           const m = (characters?.ready ? characters.positions() : markers.positions()).get(s.id);
           return {
             id: s.id,

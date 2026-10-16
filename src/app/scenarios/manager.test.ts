@@ -202,7 +202,7 @@ describe('saving from the planning stages', () => {
     expect((await w.library.get(entries[0]?.id ?? '')).scenario.squads[0]?.name).toBe('Alpha');
   });
 
-  it('BLUEFOR Planning: saves with incomplete plans, and remembers the stage', async () => {
+  it('Planning: saves with incomplete plans, and remembers the stage', async () => {
     const w = await world();
     const m = managerOf(w, scripted(['Half planned']));
     const incomplete = {

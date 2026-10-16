@@ -270,7 +270,7 @@ const when = (iso: string) => {
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 };
 const stageLabel = (stage: LibraryEntry['stage']) =>
-  stage === 'bluefor' ? 'BLUEFOR Planning' : 'Scenario Setup';
+  stage === 'bluefor' ? 'Planning' : 'Scenario Setup';
 
 /**
  * The scenario library: saved scenarios, most recently modified first, each
@@ -305,7 +305,7 @@ export function openLibraryDialog(actions: LibraryDialogActions): { close(): voi
   const render = (saved: ReadonlySet<string>, damaged: number) => {
     if (!list) return;
     if (entries.length === 0) {
-      list.innerHTML = `<li class="muted">No saved scenarios yet. Save one from Scenario Setup or BLUEFOR Planning, or import a file.</li>${damaged > 0 ? `<li class="warn">${String(damaged)} saved scenario${damaged === 1 ? '' : 's'} could not be read.</li>` : ''}`;
+      list.innerHTML = `<li class="muted">No saved scenarios yet. Save one from Scenario Setup or Planning, or import a file.</li>${damaged > 0 ? `<li class="warn">${String(damaged)} saved scenario${damaged === 1 ? '' : 's'} could not be read.</li>` : ''}`;
       return;
     }
     list.innerHTML =

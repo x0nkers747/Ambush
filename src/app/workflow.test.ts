@@ -38,7 +38,7 @@ describe('the workflow', () => {
     expect(WORKFLOW_STAGES.map((s) => [stageNumber(s), STAGE_NAMES[s]])).toEqual([
       [1, 'Select Terrain'],
       [2, 'Scenario Setup'],
-      [3, 'BLUEFOR Planning'],
+      [3, 'Planning'],
       [4, 'Combat'],
       [5, 'After-Action Review'],
     ]);
@@ -76,7 +76,7 @@ describe('the workflow', () => {
     expect(stageBlocker('scenario', 'bluefor', blocked)).toBe('Place at least one OPFOR squad.');
     // Further on: Next's reason first, then the stage to go through.
     expect(stageBlocker('scenario', 'aar', blocked)).toBe('Place at least one OPFOR squad.');
-    expect(stageBlocker('scenario', 'combat', open)).toBe('Go through BLUEFOR Planning first.');
+    expect(stageBlocker('scenario', 'combat', open)).toBe('Go through Planning first.');
     expect(stageBlocker('terrain', 'aar', open)).toBe('Go through Scenario Setup first.');
     // Back: as the page says.
     const noBack = rules({}, { scenario: 'End the combat first.' });

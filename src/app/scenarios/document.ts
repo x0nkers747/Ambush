@@ -17,7 +17,7 @@ import { fingerprintPlainData } from '#sim';
 // Saved scenarios (docs/scenarios.md): a battle scenario as the user keeps
 // it, in the scenario library or in a `.ambush.json` file. One document
 // format serves both. It holds the scenario itself (`ambush.scenario`
-// version 2, as Scenario Setup and BLUEFOR Planning edit it), its name and
+// version 2, as Scenario Setup and Planning edit it), its name and
 // times, the planning stage it was saved at, and a reference to the
 // battlefield it was made on: never the terrain itself, which the browser's
 // battlefields keep (or which is generated again from the reference).

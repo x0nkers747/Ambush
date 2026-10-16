@@ -1,4 +1,4 @@
-# Constructive simulation 03: Scenario Setup and BLUEFOR Planning
+# Constructive simulation 03: Scenario Setup and Planning
 
 - Status: implemented (Milestone B, 2026-10-15)
 - Part of: [Constructive simulation](README.md)
@@ -8,21 +8,25 @@
 
 ## 1. The workflow
 
-| Stage                  | Address        | What happens                                                                            |
-| ---------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| 1. Terrain             | `#select/<id>` | Choose or generate a battlefield. The preview draws its battle's squads and plans.      |
-| 2. Scenario Setup      | `#setup/<id>`  | Place both sides' squads, and give OPFOR its plans.                                     |
-| 3. BLUEFOR Planning    | `#plan/<id>`   | Give BLUEFOR's squads their plans. OPFOR is shown read-only, or hidden with Show OPFOR. |
-| 4. Combat              | —              | Milestone C. The stage opens once the plans are valid, and says what comes next.        |
-| 5. After-Action Review | —              | Milestone D.                                                                            |
+| Stage                  | Address        | What happens                                                                                                                                 |
+| ---------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Terrain             | `#select/<id>` | Choose or generate a battlefield. The preview shows the terrain alone (no squads or markers). A scenario loaded here opens at once in Setup. |
+| 2. Scenario Setup      | `#setup/<id>`  | Place and turn both sides' squads and vehicles. No orders.                                                                                   |
+| 3. Planning            | `#plan/<id>`   | Give both sides' squads, and the vehicles, their orders. OPFOR can be hidden with Show OPFOR.                                                |
+| 4. Combat              | —              | Milestone C. The stage opens once the plans are valid, and says what comes next.                                                             |
+| 5. After-Action Review | —              | Milestone D.                                                                                                                                 |
 
-The header's stages are renamed: Setup, BLUEFOR, Combat and AAR. Their
+The header labels the stages Terrain, Setup, Planning, Sim and AAR. Their
 gates come from the page (`WorkflowRules`):
 
-- Setup → Planning needs at least one squad per side, every squad standing
-  clear, and every OPFOR order reachable.
-- Planning → Combat also needs every BLUEFOR order reachable.
-- Earlier stages are always open.
+- Setup → Planning needs at least one squad per side, and every squad and
+  vehicle standing clear.
+- Planning → Combat also needs every order valid and reachable.
+- Earlier stages are always open. Going back to Terrain unloads the scenario
+  (the battlefield's working scenario is emptied), after a warning that says
+  whether it has unsaved changes.
+- Opening a battlefield from Terrain in 3D keeps the same 3D view: the 2D map
+  never shows meanwhile.
 
 **The legacy ambush exercise** keeps its own page at `#edit/<id>` and
 `#play/<id>`, with its own version 1 scenario. It is reached from Battlefield
@@ -82,29 +86,30 @@ The 3D view hands its pointer to the 2D map's surface, which calls the same
 editor (docs/adr/0039), and draws the same overlay through its own
 projection. So everything below works the same in 2D and 3D.
 
-| Input                     | Effect                                                                                                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P, or a Place button      | Place squads of the chosen side and organization: one per click.                                                                                                                                        |
-| M, A or W                 | Move, Attack or Withdraw orders for the selected squad: each click adds one after the selected order, or at the end of the plan. An OPFOR Move clicked on a road becomes Moves along the roads (below). |
-| S or Esc                  | The Select tool. Esc again clears the selection.                                                                                                                                                        |
-| Click a squad or waypoint | Select it.                                                                                                                                                                                              |
-| Drag a squad              | Move it (Setup only).                                                                                                                                                                                   |
-| Drag a waypoint           | Move its destination.                                                                                                                                                                                   |
-| Drag the white knob       | Turn the selected squad: its facing at the start.                                                                                                                                                       |
-| Right-click a waypoint    | Delete its order.                                                                                                                                                                                       |
-| Delete                    | Delete the selected order, or else the selected squad (Setup only).                                                                                                                                     |
+| Input                      | Effect                                                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A Place button (Setup)     | Place squads (or vehicles) of the chosen side and organization: one per click.                                                                                                              |
+| An order button (Planning) | Orders of that kind for the selected squad: each click adds one after the selected order, or at the end of the plan. An OPFOR Move clicked on a road becomes Moves along the roads (below). |
+| Esc                        | The Select tool. Esc again clears the selection.                                                                                                                                            |
+| Click a squad or waypoint  | Select it.                                                                                                                                                                                  |
+| Drag a squad               | Move it (Setup only).                                                                                                                                                                       |
+| Drag a waypoint            | Move its destination.                                                                                                                                                                       |
+| Drag the white knob        | Turn the selected squad: its facing at the start.                                                                                                                                           |
+| Right-click a waypoint     | Delete its order.                                                                                                                                                                           |
 
 **Who may change what:**
 
 - In Setup:
-  - squads of either side can be placed, moved, renamed, reorganized and
-    deleted;
-  - OPFOR plans can be edited.
+  - squads and vehicles of either side can be placed, moved, turned, renamed,
+    reorganized and deleted;
+  - no orders are given.
 - In Planning:
-  - BLUEFOR plans can be edited;
-  - BLUEFOR squads can be turned and their formation changed;
-  - squads cannot be moved;
-  - OPFOR is read-only.
+  - either side's orders, and the vehicles' routes, can be edited;
+  - squads can be turned and their formation changed;
+  - squads and vehicles cannot be moved.
+
+There are no shortcut keys: Esc cancels (a tool, a selection, a dialog), and
+Shift-click in Combat appends orders instead of replacing them.
 
 **The side panel** shows:
 
@@ -196,8 +201,8 @@ go straight to the point clicked.
 ## Viewsheds
 
 Each squad's start, and each of its waypoints, has an eye in the squad panel that turns its
-viewshed on or off. **V** does the same for the selected squad or waypoint. Any number can be on,
-of either side, in Scenario Setup and BLUEFOR Planning.
+viewshed on or off (the start's eye is beside the squad's name). Any number can be on,
+of either side, in Scenario Setup and Planning.
 
 - **What it shows:** what the squad's soldiers can see, all round, out to 1,200 m (the detection
   model's longest observation range). It is seen from where they start; for a waypoint, from where

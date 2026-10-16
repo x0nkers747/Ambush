@@ -38,9 +38,9 @@ real time.
     keyframe before the tick and re-simulates from there. Keyframes are
     every 5 s, so a seek costs at most 5 s of simulation.
 - **Moving the playhead:**
-  - play and pause (Space), at ¼× to 16×;
-  - ±5 s (← →), the start and the end (Home, End);
-  - the previous or next marker (, and .);
+  - play and pause, at ¼× to 16×;
+  - ±5 s, the start and the end;
+  - the previous or next marker;
   - dragging or clicking the timeline;
   - clicking a marker, a key moment, a phase or an event.
 - **Exactness, tested:** at any second, forward or back, the view's state

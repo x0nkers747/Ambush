@@ -2,16 +2,16 @@
 // Terrain selection is one page; stages 2–5 of one battlefield's battle
 // share another (battle/page.ts). Moving between the two happens in place
 // (main.ts) as a new history entry; Back, Forward and a reload load the page
-// at the address reached (Combat and the review reload as BLUEFOR Planning:
+// at the address reached (Combat and the review reload as Planning:
 // a battle is not stored).
 //
 //   ''                 1. Terrain selection
 //   '#select/<id>'     1. Terrain selection with battlefield <id> selected
 //   '#setup/<id>'      2. Scenario Setup of battlefield <id>'s battle
-//   '#plan/<id>'       3. BLUEFOR Planning of that battle
+//   '#plan/<id>'       3. Planning of that battle
 //
 // The retired ambush exercise's addresses still lead somewhere sensible:
-// '#edit/<id>' to Scenario Setup, '#play/<id>' to BLUEFOR Planning, and
+// '#edit/<id>' to Scenario Setup, '#play/<id>' to Planning, and
 // '#demo' (and '#demo/play') to terrain selection.
 
 export type Stage =

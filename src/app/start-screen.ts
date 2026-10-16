@@ -676,7 +676,7 @@ export function startBattlefieldSelection(
   const openSelection = () => {
     if (opening || selection.kind !== 'saved') return;
     opening = true;
-    // The page opens as the preview was looked at: in 3D, from the same camera.
+    // The page opens as the preview was looked at: in 3D, in the same view.
     const view = preview.viewState();
     o.openBattlefield(selection.summary.id, preview.release(), view);
   };

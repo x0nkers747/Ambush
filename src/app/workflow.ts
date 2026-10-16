@@ -1,5 +1,5 @@
 // The five-stage workflow (docs/adr/0025, docs/constructive-simulation/03):
-// Terrain, Scenario Setup, BLUEFOR Planning, Combat and the After-Action
+// Terrain, Scenario Setup, Planning, Combat and the After-Action
 // Review. A workflow stage says what the user is doing; it is not the
 // simulation's phase. What blocks a stage change is read from the page's own
 // rules (`WorkflowRules`: terrain selection's, or the battle's: its scenario's
@@ -18,7 +18,7 @@ export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
 export const STAGE_NAMES: Readonly<Record<WorkflowStage, string>> = {
   terrain: 'Select Terrain',
   scenario: 'Scenario Setup',
-  bluefor: 'BLUEFOR Planning',
+  bluefor: 'Planning',
   combat: 'Combat',
   aar: 'After-Action Review',
 };

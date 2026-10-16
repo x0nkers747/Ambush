@@ -42,7 +42,11 @@ export interface BattlefieldPreview {
    * when no map is shown yet. The preview is empty afterwards.
    */
   release(): TacticalMap | null;
-  /** How the battlefield is being looked at (2D or 3D, and the 3D camera), for the page it opens on. */
+  /**
+   * How the battlefield is being looked at (2D or 3D, and the 3D camera), for
+   * the page it opens on. In 3D, the 3D view itself is given away with it
+   * (`HandedView.view3d`), so the page opens in it at once.
+   */
   viewState(): HandedView;
 }
 
@@ -50,6 +54,8 @@ export interface BattlefieldPreview {
 export interface HandedView {
   readonly mode: '2d' | '3d';
   readonly pose: CameraPose | null;
+  /** The preview's 3D view, given away (not disposed): the page shows it as it is. */
+  readonly view3d?: BattlefieldView3d;
 }
 
 export function createBattlefieldPreview(container: HTMLElement): BattlefieldPreview {
@@ -81,6 +87,8 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   let viewMode: '2d' | '3d' = '2d';
   let view3d: BattlefieldView3d | null = null;
   let loading3d = false;
+  /** The 3D view has been given away with the map (`viewState`): the map stays hidden as it goes. */
+  let handingOver = false;
   /** The map's gameplay on the 3D view, forgotten with the view. */
   let surface3d: MapSurface | null = null;
 
@@ -92,7 +100,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
   const stop3d = () => {
     surface3d?.detach();
     surface3d = null;
-    if (map) map.canvas.style.visibility = '';
+    if (map && !handingOver) map.canvas.style.visibility = '';
     if (!view3d) return;
     view3d.canvas.remove();
     view3d.overlay.remove();
@@ -303,6 +311,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     show(id, load) {
       if (id === shownId) return;
       shownId = id;
+      handingOver = false;
       const mine = (generation += 1);
       container.hidden = false;
       status('Loading the preview…');
@@ -323,6 +332,7 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
     adopt(id, handed, data) {
       generation += 1;
       shownId = id;
+      handingOver = false;
       container.hidden = false;
       present(data, handed);
     },
@@ -333,7 +343,18 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
       container.hidden = true;
     },
     viewState() {
-      return { mode: viewMode, pose: showing3d() ? (view3d?.cameraPose() ?? null) : null };
+      const given = showing3d() ? view3d : null;
+      if (!given) return { mode: viewMode, pose: null };
+      // Given away: no longer the preview's to drive or dispose.
+      const pose = given.cameraPose();
+      surface3d?.detach();
+      surface3d = null;
+      given.setPointerHandler(null);
+      given.setOverlayPainter(null);
+      view3d = null;
+      // The 2D map stays hidden under it until the page that takes both shows them.
+      handingOver = true;
+      return { mode: viewMode, pose, view3d: given };
     },
     release() {
       generation += 1;

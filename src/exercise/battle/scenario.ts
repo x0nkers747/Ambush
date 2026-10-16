@@ -39,7 +39,7 @@ import {
 } from './vehicles';
 
 // Battle scenarios (docs/constructive-simulation/03): what Scenario Setup
-// and BLUEFOR Planning make on a battlefield. A scenario is any number of
+// and Planning make on a battlefield. A scenario is any number of
 // squads of both sides, each placed, facing a way, with its plan of orders
 // (OPFOR's from Scenario Setup, BLUEFOR's from planning). It is plain data,
 // saved with the battlefield (schema `ambush.scenario` version 2); a

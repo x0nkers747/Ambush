@@ -35,13 +35,13 @@ export function reviewToolsHtml(): string {
       <input type="range" class="replay-scrub" data-ui="review-scrub" min="0" max="1" step="0.1" value="0" aria-label="Playhead: time in the battle">
     </div>
     <div class="replay-buttons" role="group" aria-label="Replay">
-      <button data-ract="start" title="To the start (Home)" aria-label="To the start">⏮</button>
-      <button data-ract="prev" title="The previous marker (,)" aria-label="The previous marker">◆◀</button>
-      <button data-ract="back" title="Back 5 s (←)" aria-label="Back five seconds">◀ 5 s</button>
-      <button class="action" data-ract="play" data-ui="review-play" title="Play or pause (Space)">Play</button>
-      <button data-ract="forward" title="Forward 5 s (→)" aria-label="Forward five seconds">5 s ▶</button>
-      <button data-ract="next" title="The next marker (.)" aria-label="The next marker">▶◆</button>
-      <button data-ract="end" title="To the end (End)" aria-label="To the end">⏭</button>
+      <button data-ract="start" title="To the start" aria-label="To the start">⏮</button>
+      <button data-ract="prev" title="The previous marker" aria-label="The previous marker">◆◀</button>
+      <button data-ract="back" title="Back 5 s" aria-label="Back five seconds">◀ 5 s</button>
+      <button class="action" data-ract="play" data-ui="review-play" title="Play or pause">Play</button>
+      <button data-ract="forward" title="Forward 5 s" aria-label="Forward five seconds">5 s ▶</button>
+      <button data-ract="next" title="The next marker" aria-label="The next marker">▶◆</button>
+      <button data-ract="end" title="To the end" aria-label="To the end">⏭</button>
     </div>
     <div class="speed" role="group" aria-label="Replay speed" data-ui="review-speeds">${speeds}</div>
     <h3>Result</h3>

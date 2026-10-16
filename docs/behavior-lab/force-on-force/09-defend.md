@@ -10,10 +10,11 @@ it waits for new orders.
 
 ## 1. Giving the order
 
-**Planning** (Scenario Setup for OPFOR, BLUEFOR Planning for BLUEFOR):
+**Planning** (either side's squads):
 
-1. Select the squad and press **Defend** (**D**).
-2. Click the defensive position. This adds the order and arms the direction tool.
+1. Select the squad and press **Defend**.
+2. Click the defensive position. This adds the order and arms the direction tool
+   ("Click again to set direction" shows at the bottom of the map).
 3. Click in the direction it defends toward. The sector is a 90° wedge that way,
    drawn 45 m out from the position. Its label ("Defend 1 · 90°") is just under
    the middle of its arc.
@@ -22,13 +23,13 @@ it waits for new orders.
 5. Drag the small circle at the middle of the arc to turn the wedge round the
    position. Its width stays the same.
 
-**Set direction** (**K**) sets the direction again. It is shown with the Defend
-tool, or with a defend order selected.
+**Set direction**, under the order's drop-downs in the squad panel, arms that
+click again.
 
-The order's row in the squad panel shows the facing and the arc, and a
-**prepared** choice: how long the position was prepared before the battle, 0 to
+The order's row in the squad panel has a preparation choice (Not dug in,
+Prepared 5–25 min, Dug in): how long the position was prepared before the battle, 0 to
 30 minutes. The squad starts that far dug in when it occupies the position. So a
-defence set up in Scenario Setup can start partly or fully dug in.
+defence planned before the battle can start partly or fully dug in.
 
 - A defend order without a direction blocks the scenario ("set the direction it
   defends toward").

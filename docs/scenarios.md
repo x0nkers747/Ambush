@@ -16,8 +16,8 @@ battlefield resolution `terrain.ts`, the user interface `ui.ts` and
 | Stage                       | Save | Save As | Load | Import | Export |
 | --------------------------- | ---- | ------- | ---- | ------ | ------ |
 | Select Terrain              | –    | –       | yes  | yes    | –      |
-| Scenario Setup (OPFOR)      | yes  | yes     | yes  | yes    | yes    |
-| BLUEFOR Planning            | yes  | yes     | yes  | yes    | yes    |
+| Scenario Setup              | yes  | yes     | yes  | yes    | yes    |
+| Planning                    | yes  | yes     | yes  | yes    | yes    |
 | Combat, After-Action Review | –    | –       | –    | –      | –      |
 
 Scenario management is a planning activity: Combat and the review have no

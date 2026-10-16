@@ -44,7 +44,9 @@ import {
 import type { WorkflowRules, WorkflowStage } from '../workflow';
 
 // The battle planner (docs/constructive-simulation/03): what Scenario Setup
-// and BLUEFOR Planning edit, and the rules of both stages, without the page.
+// and Planning edit, and the rules of both stages, without the page. Setup
+// places and turns both sides' squads and vehicles; Planning gives them all
+// their orders.
 // It holds the scenario, the selection and the tool; every accepted edit is
 // saved; a refused one is reported and changes nothing. The map editor
 // (map-editor.ts) and the side panel (page.ts) only call it, so the 2D map
@@ -117,7 +119,7 @@ export interface Planner {
   selectVehicle(id: string, waypointIndex?: number | null): void;
   vehicle(id: string | null | undefined): PlannedVehicle | undefined;
   readonly selectedVehicle: PlannedVehicle | undefined;
-  /** Whether a vehicle's route can be edited now: in Scenario Setup, and BLUEFOR's in planning. */
+  /** Whether a vehicle's route can be edited now: in Planning. */
   canRoute(vehicle: PlannedVehicle | undefined): boolean;
   moveVehicleTo(id: string, point: Vec2, saving: boolean): boolean;
   turnVehicleToward(id: string, point: Vec2, saving: boolean): boolean;
@@ -126,7 +128,7 @@ export interface Planner {
   removeVehicle(id: string): void;
   /** Whether a squad can be placed, moved, turned or deleted now (Scenario Setup). */
   canPlace(): boolean;
-  /** Whether a squad's plan can be edited now: OPFOR's in Scenario Setup, BLUEFOR's in planning. */
+  /** Whether a squad's plan can be edited now: in Planning (either side's). */
   canPlan(squad: ScenarioSquad | undefined): boolean;
   /**
    * Applies an edit of the scenario: saved and `true` when accepted;
@@ -205,6 +207,12 @@ export interface StartVehicle {
   readonly heading: number;
 }
 
+/** What the message at the bottom of the map says while an ambush's or defence's second click is awaited. */
+export const SECOND_CLICK = {
+  killZone: 'Click again to set killzone',
+  sector: 'Click again to set direction',
+} as const;
+
 /** The tick rate of battles (Hz). */
 export const BATTLE_TICK_RATE_HZ = 30;
 
@@ -212,17 +220,13 @@ export const BATTLE_TICK_RATE_HZ = 30;
 export function battleNextBlocker(
   stage: WorkflowStage,
   issues: readonly ScenarioIssue[],
-  d: BattleScenarioDefinition,
 ): string | null {
   switch (stage) {
     case 'terrain':
       return null;
     case 'scenario': {
-      const first = issues.find((i) => {
-        const squad = d.squads.find((s) => s.id === i.squadId);
-        // BLUEFOR plans are made in the next stage: their issues wait for it.
-        return !(squad?.side === 'BLUEFOR' && i.orderIndex !== null);
-      });
+      // Orders are given in the next stage: their issues wait for it.
+      const first = issues.find((i) => i.orderIndex === null);
       return first?.message ?? null;
     }
     case 'bluefor':
@@ -348,13 +352,10 @@ export function createPlanner(o: PlannerOptions): Planner {
   const squad = (id: string | null) =>
     id === null ? undefined : definition.squads.find((s) => s.id === id);
   const canPlace = () => stage === 'scenario';
-  const canPlan = (s: ScenarioSquad | undefined) =>
-    s !== undefined &&
-    ((stage === 'scenario' && s.side === 'OPFOR') || (stage === 'bluefor' && s.side === 'BLUEFOR'));
+  const canPlan = (s: ScenarioSquad | undefined) => s !== undefined && stage === 'bluefor';
   const vehicle = (id: string | null | undefined) =>
     id === null || id === undefined ? undefined : vehiclesOf(definition).find((v) => v.id === id);
-  const canRoute = (v: PlannedVehicle | undefined) =>
-    v !== undefined && (stage === 'scenario' || (stage === 'bluefor' && v.side === 'BLUEFOR'));
+  const canRoute = (v: PlannedVehicle | undefined) => v !== undefined && stage === 'bluefor';
 
   const apply = (change: (d: BattleScenarioDefinition) => BattleEdit, saving: boolean) => {
     const result = change(definition);
@@ -496,8 +497,8 @@ export function createPlanner(o: PlannerOptions): Planner {
         }, true);
         if (placed && id !== undefined) {
           planner.selectVehicle(id);
-          // Placed: the next clicks give it its route.
-          tool = { kind: 'order', order: 'move' };
+          // One at a time: placed, it can be dragged and turned; its route is given in Planning.
+          tool = { kind: 'select' };
           changed();
         }
         return;
@@ -505,7 +506,7 @@ export function createPlanner(o: PlannerOptions): Planner {
       const car = planner.selectedVehicle;
       if (tool.kind === 'order' && car) {
         if (!canRoute(car)) {
-          o.notify(`${car.name} is OPFOR: its route is set in Scenario Setup.`);
+          o.notify('Orders are given in Planning.');
           return;
         }
         if (tool.order !== 'move') {
@@ -535,11 +536,7 @@ export function createPlanner(o: PlannerOptions): Planner {
           return;
         }
         if (!canPlan(selected)) {
-          o.notify(
-            stage === 'bluefor'
-              ? `${selected.name} is OPFOR: its plan is set in Scenario Setup.`
-              : `${selected.name} is BLUEFOR: its plan is made in BLUEFOR Planning.`,
-          );
+          o.notify('Orders are given in Planning.');
           return;
         }
         const kind = tool.order;
@@ -576,6 +573,7 @@ export function createPlanner(o: PlannerOptions): Planner {
           if (kind === 'ambush' || kind === 'defend') {
             tool = { kind: kind === 'ambush' ? 'killZone' : 'sector' };
             changed();
+            o.notify(kind === 'ambush' ? SECOND_CLICK.killZone : SECOND_CLICK.sector);
           }
         }
         return;
@@ -634,8 +632,10 @@ export function createPlanner(o: PlannerOptions): Planner {
         for (let k = s.plan.length - 1; k >= 0 && index < 0; k -= 1) if (second(k)) index = k;
       if (index < 0) return false;
       selection = { squadId: s.id, orderIndex: index };
-      tool = { kind: s.plan[index]?.kind === 'defend' ? 'sector' : 'killZone' };
+      const armed = s.plan[index]?.kind === 'defend' ? 'sector' : 'killZone';
+      tool = { kind: armed };
       changed();
+      o.notify(SECOND_CLICK[armed]);
       return true;
     },
     turnDefendTo(id, index, point, saving) {
@@ -710,7 +710,7 @@ export function createPlanner(o: PlannerOptions): Planner {
     soldiers,
     figures,
     rules: {
-      next: (s) => battleNextBlocker(s, issues(), definition),
+      next: (s) => battleNextBlocker(s, issues()),
       back: () => null,
     },
   };

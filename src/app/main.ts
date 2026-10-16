@@ -22,7 +22,6 @@ import type { HandedView, PreviewData } from './battlefield-preview';
 import { installFeedbackButton } from './feedback';
 import { battlefieldInfoHtml, describePointFor, startBattlefieldSelection } from './start-screen';
 import { parseStage, stageHash, type Stage } from './stages';
-import { battleOverlay } from './battle/overlay';
 import { battleNextBlocker } from './battle/planner';
 import { startBattlePage, type PageScenario, type ScenarioMenu } from './battle/page';
 import type { BattlefieldSelection } from './start-screen';
@@ -39,7 +38,7 @@ import {
 
 // Composition root: the five-stage workflow (docs/adr/0025). Terrain
 // selection (stage 1, docs/adr/0014) is one page; stages 2–5 of a
-// battlefield's battle (Scenario Setup, BLUEFOR Planning, Combat and the
+// battlefield's battle (Scenario Setup, Planning, Combat and the
 // After-Action Review, docs/constructive-simulation/03) share another
 // (battle/page.ts). Each page has its own address
 // (stages.ts). Moving between the two happens in place, without a reload:
@@ -156,7 +155,7 @@ function unresolvedNotice(quality: DemQualityReport): string | null {
 
 /** What the terrain-selection preview shows of a battlefield and its battle scenario. */
 function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition): PreviewData {
-  // The map shows the terrain; the battle's squads and plans are drawn over it.
+  // The terrain alone: no squads or markers (a scenario is set up, and shown, from Setup on).
   return {
     name: pkg.name,
     centre: pkg.request.centre,
@@ -164,9 +163,8 @@ function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition):
     attribution: pkg.attribution,
     caption:
       battle.squads.length === 0
-        ? 'No scenario yet: place the squads in Scenario Setup'
+        ? 'Open the battlefield to set up a scenario, or load one'
         : `Current scenario: ${scenarioSummary(battle)}`,
-    overlay: battleOverlay(pkg.terrain, battle),
   };
 }
 
@@ -217,8 +215,9 @@ async function main(root: HTMLElement): Promise<void> {
     library,
     dialogs: browserDialogs(windowToast()),
     terrain: terrainSources,
-    open: (battlefieldId, stage, notice) =>
-      showBattle(battlefieldId, stage, null, selection, notice),
+    // A scenario loaded opens at Setup, whatever stage it was saved at.
+    open: (battlefieldId, _stage, notice) =>
+      showBattle(battlefieldId, 'scenario', null, selection, notice),
   });
   /** The terrain-selection page while it is shown (a scenario loaded from it replaces it). */
   let selection: BattlefieldSelection | null = null;
@@ -320,14 +319,21 @@ async function main(root: HTMLElement): Promise<void> {
     view: HandedView | null = null,
   ): Promise<void> => {
     let map = handed;
+    let shown = view;
     try {
       let pkg: OpenedBattlefield;
       if (loaded?.pkg.id === id) pkg = loaded.pkg;
       else {
         pkg = await openBattlefield(store, id);
-        // A map of another load of this battlefield shows another terrain object.
+        // A map (or 3D view) of another load of this battlefield shows another terrain object.
         map?.dispose();
         map = null;
+        if (shown?.view3d) {
+          shown.view3d.canvas.remove();
+          shown.view3d.overlay.remove();
+          shown.view3d.dispose();
+          shown = { mode: shown.mode, pose: shown.pose };
+        }
       }
       // The working scenario as stored (a scenario just loaded has replaced it).
       const read = await loadBattle(store, pkg);
@@ -342,8 +348,7 @@ async function main(root: HTMLElement): Promise<void> {
       };
       await save(definition);
       // Planning opens only on a scenario that is set up; otherwise Scenario Setup.
-      const ready =
-        battleNextBlocker('scenario', scenarioIssues(pkg.terrain, definition), definition) === null;
+      const ready = battleNextBlocker('scenario', scenarioIssues(pkg.terrain, definition)) === null;
       const initialStage = stage === 'bluefor' && ready ? 'bluefor' : 'scenario';
       const address = (s: 'scenario' | 'bluefor'): Stage => ({
         kind: s === 'bluefor' ? 'plan' : 'setup',
@@ -410,9 +415,20 @@ async function main(root: HTMLElement): Promise<void> {
         initialStage,
         notice: [notice, unresolvedNotice(pkg.quality)].filter((n) => n !== null).join(' ') || null,
         map,
-        view,
-        leave: (m) => {
-          backToSelection(pkg, latest, m);
+        view: shown,
+        leave: (m, unload) => {
+          if (!unload) {
+            backToSelection(pkg, latest, m);
+            return;
+          }
+          // Unloaded: the battlefield's working scenario is empty again.
+          const empty = {
+            ...newBattleScenario(pkg.terrain, pkg.id, latest.name),
+            seed: latest.seed,
+          };
+          void scenarios.detach(pkg.id);
+          void save(empty);
+          backToSelection(pkg, empty, m);
         },
         setAddress: (s) => {
           setAddress(address(s));
@@ -422,6 +438,7 @@ async function main(root: HTMLElement): Promise<void> {
     } catch (error) {
       previous?.dispose();
       map?.dispose();
+      shown?.view3d?.dispose();
       showFatal(root, error instanceof Error ? error.message : String(error));
     }
   };

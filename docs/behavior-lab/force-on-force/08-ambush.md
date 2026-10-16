@@ -8,11 +8,12 @@ the enemy is down, and waits in place for new orders.
 
 ## 1. Giving the order
 
-**Planning** (Scenario Setup for OPFOR, BLUEFOR Planning for BLUEFOR):
+**Planning** (either side's squads):
 
-1. Select the squad and press **Ambush** (**B**).
+1. Select the squad and press **Ambush**.
 2. Click the ambush position. This adds the order and arms the kill-zone tool,
-   so the next click sets the kill zone.
+   so the next click sets the kill zone ("Click again to set killzone" shows at
+   the bottom of the map).
 3. Click the kill zone's centre. The zone is a 50 m × 50 m square turned to face
    the ambush position (one side toward it).
 4. Resize the zone by dragging its corners. The opposite corner stays put and
@@ -20,8 +21,8 @@ the enemy is down, and waits in place for new orders.
 
 Moving the ambush position turns the zone to face it again.
 
-**Set kill zone** (**K**) sets the zone again. It is shown only while the
-Ambush tool is selected, or while an ambush order is selected. An ambush order
+**Set kill zone**, under the order's drop-downs in the squad panel, arms that
+click again. An ambush order
 without a kill zone blocks the scenario ("set its kill zone"). So does any
 order after an ambush, because the ambush waits for new orders and would never
 reach it.

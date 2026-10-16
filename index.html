@@ -935,15 +935,20 @@
       .battle .order-row select[data-act='order-actions'] {
         min-width: 0;
       }
-      .battle .order-row .coords {
-        grid-column: 2;
-        font-size: 11px;
-        font-variant-numeric: tabular-nums;
-      }
       .battle .order-row .order-buttons {
+        grid-column: 2 / -1;
         justify-self: end;
         display: flex;
         gap: 2px;
+      }
+      /* An ambush's "Set kill zone", a defence's "Set direction": under its drop-downs. */
+      .battle .order-row .kill-zone {
+        grid-column: 2 / -1;
+        justify-self: start;
+      }
+      .battle .order-row .kill-zone[aria-pressed='true'] {
+        background: var(--blue-bg);
+        border-color: #5aaeff;
       }
       .battle .order-row .order-buttons button {
         padding: 1px 5px;
@@ -965,8 +970,7 @@
         border-color: #ff6b5e;
         color: #fff;
       }
-      .battle .start-row .vs-toggle {
-        margin-left: 6px;
+      .battle .squad-head .vs-toggle {
         padding: 1px 5px;
       }
       .battle .order-row .prepared {

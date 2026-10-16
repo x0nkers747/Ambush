@@ -11,21 +11,21 @@ so the After-Action Review replays it.
 
 **Scenario Setup:**
 
-1. Press **BLUEFOR M113 APC** (or **OPFOR M113 APC**) under **Place vehicles**.
+1. Press **M113 APC** in the BLUEFOR or OPFOR row under **Place vehicles**.
 2. Click the map. The vehicle is placed there, facing north (OPFOR's: south),
-   and the **Move** tool is armed.
-3. Each click after that adds a waypoint to its route. The waypoint goes after
-   the selected one, or at the end.
+   and the Select tool is back: drag the vehicle to move it, its knob to turn it.
+
+**Planning:** select the vehicle, pick **Move**, and click the map. Each click
+adds a waypoint to its route, after the selected one, or at the end.
 
 With a vehicle selected:
 
-| Action                       | What it does                                  |
-| ---------------------------- | --------------------------------------------- |
-| Drag it (Setup only)         | Moves it                                      |
-| Drag its knob (Select tool)  | Turns it                                      |
-| Drag a waypoint              | Moves the waypoint                            |
-| Right-click a waypoint, or ✕ | Deletes the waypoint                          |
-| **Delete**                   | Deletes the selected waypoint, or the vehicle |
+| Action                       | What it does         |
+| ---------------------------- | -------------------- |
+| Drag it (Setup only)         | Moves it             |
+| Drag its knob (Select tool)  | Turns it             |
+| Drag a waypoint (Planning)   | Moves the waypoint   |
+| Right-click a waypoint, or ✕ | Deletes the waypoint |
 
 The panel has its name, facing, start and route, with **Clear route** and
 **Delete vehicle**. The roster lists vehicles under **Vehicles**.
@@ -35,17 +35,17 @@ waypoint there is moved out of it, as a squad's destination is. A waypoint the
 vehicle cannot reach (planned as a soldier's route would be) blocks the
 scenario.
 
-**BLUEFOR Planning:** a BLUEFOR vehicle's route can be edited, but not where it
-starts. An OPFOR vehicle's route is set in Setup.
+In Planning, either side's vehicle can be routed, but not moved from where it
+starts.
 
 **Sim:**
 
 1. Select the vehicle (on the map or in the roster).
-2. Press **M** and click the map.
+2. Pick **Move** and click the map.
 
 **Replace plan** drops its route for the new destination. **Append** adds the
-destination after the route. Shift swaps the two for one click. **H** stops
-it. Other order kinds are refused: a vehicle only takes Move orders.
+destination after the route. Shift-click swaps the two for one click. **Hold**
+stops it. Other order kinds are refused: a vehicle only takes Move orders.
 
 The scenario file stores vehicles as
 `vehicles: [{ id, name, side, kind: "m113", position, facingDeg, route }]`. A

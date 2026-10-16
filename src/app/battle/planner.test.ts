@@ -11,7 +11,7 @@ import {
 import { battleNextBlocker, createPlanner, type BattleStage } from './planner';
 
 // The battle planner (docs/constructive-simulation/03): the rules of Scenario
-// Setup and BLUEFOR Planning that the map editor and the side panel use, in
+// Setup and Planning that the map editor and the side panel use, in
 // both the 2D and the 3D view.
 
 const terrain = labTerrain();
@@ -54,8 +54,20 @@ describe('Scenario Setup', () => {
     expect(saved).toHaveLength(2);
   });
 
-  it('gives OPFOR its plan, each click after the selected order', () => {
-    const { p } = planner('scenario');
+  it('gives no orders: they are given in Planning', () => {
+    const { p, notices } = planner('scenario');
+    for (const id of ['B1', 'O1']) {
+      p.select(id);
+      p.setTool({ kind: 'order', order: 'move' });
+      p.click({ x: 0, y: 0 });
+      expect(p.squad(id)?.plan).toEqual([]);
+      expect(p.canPlan(p.squad(id))).toBe(false);
+    }
+    expect(notices).toEqual(['Orders are given in Planning.', 'Orders are given in Planning.']);
+  });
+
+  it('gives either side its orders in Planning, each click after the selected order', () => {
+    const { p } = planner('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     p.click({ x: 0, y: 200 });
@@ -66,15 +78,6 @@ describe('Scenario Setup', () => {
     p.click({ x: 100, y: 100 });
     expect(p.squad('O1')?.plan.map((o) => o.kind)).toEqual(['move', 'attack', 'move']);
     expect(p.selection).toEqual({ squadId: 'O1', orderIndex: 1 });
-  });
-
-  it('leaves BLUEFOR plans to planning', () => {
-    const { p, notices } = planner('scenario');
-    p.select('B1');
-    p.setTool({ kind: 'order', order: 'move' });
-    p.click({ x: 0, y: -200 });
-    expect(p.squad('B1')?.plan).toEqual([]);
-    expect(notices.at(-1)).toMatch(/plan is made in BLUEFOR Planning/);
   });
 
   it('moves, turns and deletes squads; drags are saved when they end', () => {
@@ -130,8 +133,8 @@ describe('Scenario Setup', () => {
   });
 });
 
-describe('BLUEFOR Planning', () => {
-  it('starts on a BLUEFOR squad and plans BLUEFOR only', () => {
+describe('Planning', () => {
+  it('starts on a BLUEFOR squad and plans both sides', () => {
     const { p, notices } = planner('scenario');
     p.select('O1');
     p.setStage('bluefor');
@@ -143,8 +146,8 @@ describe('BLUEFOR Planning', () => {
     expect(p.squad('B1')?.plan.map((o) => o.kind)).toEqual(['move', 'withdraw']);
     p.select('O1');
     p.click({ x: 0, y: 0 });
-    expect(p.squad('O1')?.plan).toEqual([]);
-    expect(notices.at(-1)).toMatch(/OPFOR: its plan is set in Scenario Setup/);
+    expect(p.squad('O1')?.plan.map((o) => o.kind)).toEqual(['withdraw']);
+    expect(notices).toEqual([]);
   });
 
   it('cannot place, move or delete squads', () => {
@@ -154,9 +157,9 @@ describe('BLUEFOR Planning', () => {
     expect(p.moveSquadTo('B1', { x: 50, y: -400 }, true)).toBe(false);
     p.removeSquad('B1');
     expect(p.definition.squads).toHaveLength(2);
-    // Turning its own squads is part of the plan.
+    // Turning squads (either side's) is part of the plan.
     expect(p.turnSquadToward('B1', { x: 0, y: 0 }, true)).toBe(true);
-    expect(p.turnSquadToward('O1', { x: 0, y: 0 }, true)).toBe(false);
+    expect(p.turnSquadToward('O1', { x: 0, y: 0 }, true)).toBe(true);
   });
 
   it('removes an order and selects the one before it', () => {
@@ -171,7 +174,7 @@ describe('BLUEFOR Planning', () => {
 });
 
 describe('the stage gates', () => {
-  it('Setup needs both sides, and every squad and OPFOR order valid', () => {
+  it('Setup needs both sides, and every squad placed validly', () => {
     const empty = planner('scenario', newBattleScenario(terrain, 'bf')).p;
     expect(empty.rules.next('scenario')).toBe('Place at least one BLUEFOR squad.');
     const { p } = planner('scenario');
@@ -180,7 +183,7 @@ describe('the stage gates', () => {
     expect(p.rules.back('scenario')).toBeNull();
   });
 
-  it('a BLUEFOR plan problem blocks planning, not setup', () => {
+  it('an order problem blocks planning, not setup', () => {
     const d = twoSides();
     const bad: BattleScenarioDefinition = {
       ...d,
@@ -191,9 +194,9 @@ describe('the stage gates', () => {
       ),
     };
     const { p } = planner('scenario', bad);
-    expect(battleNextBlocker('scenario', p.issues(), bad)).toBeNull();
-    expect(battleNextBlocker('bluefor', p.issues(), bad)).toMatch(/destination must be on the map/);
-    expect(battleNextBlocker('combat', p.issues(), bad)).toMatch(/End the combat first/);
+    expect(battleNextBlocker('scenario', p.issues())).toBeNull();
+    expect(battleNextBlocker('bluefor', p.issues())).toMatch(/destination must be on the map/);
+    expect(battleNextBlocker('combat', p.issues())).toMatch(/End the combat first/);
   });
 });
 
@@ -251,7 +254,7 @@ describe('OPFOR moves along roads', () => {
       ?.plan.map((o) => [o.kind, Math.round(o.destination.east), Math.round(o.destination.north)]);
 
   it('a move clicked on a road: to the road, along it, to the point', () => {
-    const { p, notices } = make('scenario');
+    const { p, notices } = make('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     p.click({ x: 300, y: -50 });
@@ -272,7 +275,7 @@ describe('OPFOR moves along roads', () => {
   });
 
   it('off the road it goes straight there; an attack, or BLUEFOR, is not routed', () => {
-    const { p } = make('scenario');
+    const { p } = make('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     p.click({ x: 100, y: 100 });
@@ -312,7 +315,7 @@ describe('the 3D view’s figures', () => {
 
 describe('viewsheds turned on', () => {
   it('any number, either side; they follow their orders as orders are added, moved and deleted', () => {
-    const { p } = planner('scenario');
+    const { p } = planner('bluefor');
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     for (const y of [300, 200, 100]) p.click({ x: 0, y });
@@ -339,7 +342,8 @@ describe('viewsheds turned on', () => {
     // No such order or squad: nothing turned on.
     expect(p.toggleViewshed('O1', 9)).toBe(false);
     expect(p.toggleViewshed('X1', null)).toBe(false);
-    // The squad deleted: its viewsheds go with it.
+    // The squad deleted (in Setup): its viewsheds go with it.
+    p.setStage('scenario');
     p.removeSquad('B1');
     expect(pins()).toEqual([]);
   });
@@ -374,13 +378,21 @@ describe('a defend order', () => {
 });
 
 describe('vehicles (docs/vehicles.md)', () => {
-  it('places a vehicle in Scenario Setup, then gives it a route, one waypoint per click', () => {
-    const { p, saved } = planner('scenario');
-    p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
-    p.click({ x: -100, y: -300 });
-    expect(p.selection).toEqual({ squadId: null, orderIndex: null, vehicleId: 'V1' });
-    // Placed: the Move tool is armed, and each click adds a waypoint after the selected one.
-    expect(p.tool).toEqual({ kind: 'order', order: 'move' });
+  it('places a vehicle in Scenario Setup; its route is given in Planning, one waypoint per click', () => {
+    const setup = planner('scenario');
+    setup.p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
+    setup.p.click({ x: -100, y: -300 });
+    expect(setup.p.selection).toEqual({ squadId: null, orderIndex: null, vehicleId: 'V1' });
+    // Placed, the Select tool: it can be dragged and turned, but not routed in Setup.
+    expect(setup.p.tool).toEqual({ kind: 'select' });
+    expect(setup.p.canRoute(setup.p.selectedVehicle)).toBe(false);
+    setup.p.setTool({ kind: 'order', order: 'move' });
+    setup.p.click({ x: -100, y: -100 });
+    expect(setup.p.selectedVehicle?.route).toEqual([]);
+    expect(setup.notices.at(-1)).toBe('Orders are given in Planning.');
+    const { p, saved } = planner('bluefor', setup.p.definition);
+    p.selectVehicle('V1');
+    p.setTool({ kind: 'order', order: 'move' });
     p.click({ x: -100, y: -100 });
     p.click({ x: 100, y: -100 });
     p.selectVehicle('V1', 0);
@@ -391,24 +403,25 @@ describe('vehicles (docs/vehicles.md)', () => {
       { east: 100, north: -100 },
     ]);
     expect(p.selection.orderIndex).toBe(1);
-    expect(saved).toHaveLength(4);
+    expect(saved).toHaveLength(3);
   });
 
-  it('refuses other orders for a vehicle, and edits its route in planning, not its place', () => {
+  it('refuses other orders for a vehicle, and edits its route in Planning, not its place', () => {
     const setup = planner('scenario');
-    setup.p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
-    setup.p.click({ x: -100, y: -300 });
-    setup.p.setTool({ kind: 'order', order: 'attack' });
-    setup.p.click({ x: 0, y: 0 });
-    expect(setup.notices.at(-1)).toMatch(/only takes Move orders/);
-    const { p } = planner('bluefor', setup.p.definition);
+    setup.p.setTool({ kind: 'placeVehicle', side: 'OPFOR' });
+    setup.p.click({ x: -100, y: 300 });
+    const { p, notices } = planner('bluefor', setup.p.definition);
     p.selectVehicle('V1');
+    p.setTool({ kind: 'order', order: 'attack' });
+    p.click({ x: 0, y: 0 });
+    expect(notices.at(-1)).toMatch(/only takes Move orders/);
+    // Either side's vehicle is routed in Planning.
     expect(p.canRoute(p.selectedVehicle)).toBe(true);
     expect(p.moveVehicleTo('V1', { x: 0, y: 0 }, true)).toBe(false);
     p.setTool({ kind: 'order', order: 'move' });
-    p.click({ x: -100, y: -100 });
+    p.click({ x: -100, y: 100 });
     expect(p.selectedVehicle?.route).toHaveLength(1);
-    expect(p.moveVehicleWaypointTo('V1', 0, { x: -50, y: -100 }, true)).toBe(true);
+    expect(p.moveVehicleWaypointTo('V1', 0, { x: -50, y: 100 }, true)).toBe(true);
     p.removeVehicleWaypoint('V1', 0);
     expect(p.selectedVehicle?.route).toEqual([]);
     // The vehicle stands in the 3D view's start figures.

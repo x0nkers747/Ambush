@@ -8,19 +8,19 @@
 
 ## 1. The stage
 
-Continuing from BLUEFOR Planning (once nothing blocks the scenario) starts a
+Continuing from Planning (once nothing blocks the scenario) starts a
 battle: `createBattle` with the scenario's squads, plans and seed, at 30 Hz.
 The battle starts paused.
 
 | Control                                 | Effect                                                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Play / Pause, Space                     | Runs or stops the clock                                                                                       |
-| ½× to 32×, + and −                      | Speed                                                                                                         |
+| Play / Pause                            | Runs or stops the clock                                                                                       |
+| ½× to 32×                               | Speed                                                                                                         |
 | Click a squad (map, 3D or roster)       | Select it, either side                                                                                        |
-| M, A, W (or the buttons), then click    | Order the selected squad there: Move, Attack, Withdraw                                                        |
-| Replace plan / Append, Shift            | Whether the order replaces the squad's orders or follows its pending ones; Shift does the other for one click |
+| An order button, then click             | Order the selected squad there: Move, Attack, Withdraw, Ambush, Defend                                        |
+| Replace plan / Append, Shift-click      | Whether the order replaces the squad's orders or follows its pending ones; Shift does the other for one click |
 | Click an enemy squad with an order tool | The order's destination is that point (an attack on it), not a new selection                                  |
-| Hold, H                                 | Clear the squad's orders: it holds where it is                                                                |
+| Hold                                    | Clear the squad's orders: it holds where it is                                                                |
 | End combat (button or the primary)      | After asking: the battle ends for good and the review opens                                                   |
 
 **Orders** are `orderSquad` commands
@@ -43,7 +43,7 @@ runs, the header's Previous arrow and earlier stages still work: the battle
 is paused and the user asked whether to discard it ("Discard battle"), and
 leaves only if they agree. After
 it ends, the review cannot go back into the ended battle; going back to
-BLUEFOR Planning fights a new one.
+Planning fights a new one.
 
 ## 2. What is shown
 

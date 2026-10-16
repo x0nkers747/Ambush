@@ -36,18 +36,18 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     (s) =>
       `<button class="small" data-speed="${String(s)}" aria-pressed="${String(c.speed === s)}">${s === 0.5 ? '½' : String(s)}×</button>`,
   ).join('');
-  const tool = (kind: (typeof ORDER_KINDS)[number] | null, label: string, key: string) =>
-    `<button class="tool${kind ? ` order-${kind}` : ''}" data-ctool="${kind ?? 'select'}" aria-pressed="${String(ui.tool === kind)}" title="${label} (${key})">${label}</button>`;
+  const tool = (kind: (typeof ORDER_KINDS)[number] | null, label: string) =>
+    `<button class="tool${kind ? ` order-${kind}` : ''}" data-ctool="${kind ?? 'select'}" aria-pressed="${String(ui.tool === kind)}" title="${label}">${label}</button>`;
   return `<div class="combat-clock">
       <span class="clock" data-ui="combat-clock"></span>
-      <button class="action" data-cact="play" title="Play or pause (Space)">${c.playing ? 'Pause' : 'Play'}</button>
+      <button class="action" data-cact="play" title="Play or pause">${c.playing ? 'Pause' : 'Play'}</button>
       <button class="small danger" data-cact="end" title="End the battle: it never ends by itself">End combat</button>
     </div>
     <div class="speed" role="group" aria-label="Simulation speed">${speeds}</div>
     <h3>Orders, to either side</h3>
     <div class="tool-grid order-tools" role="group" aria-label="Orders">
-      ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k], k === 'ambush' ? 'B' : (k[0]?.toUpperCase() ?? ''))).join('')}
-      ${tool(null, 'Select', 'S')}
+      ${ORDER_KINDS.map((k) => tool(k, ORDER_LABELS[k])).join('')}
+      ${tool(null, 'Select')}
     </div>
     ${
       ui.tool === 'ambush'
@@ -69,7 +69,7 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     <div class="tool-row mode-row" role="group" aria-label="How a new order is given">
       <button class="small" data-cmode="replace" aria-pressed="${String(!ui.append)}" title="A new order replaces the squad's orders">Replace plan</button>
       <button class="small" data-cmode="append" aria-pressed="${String(ui.append)}" title="A new order follows the squad's pending orders">Append</button>
-      <button class="small" data-cact="hold" title="Clear the selected squad's orders: it holds where it is (H)"${ui.selected === null ? ' disabled' : ''}>Hold</button>
+      <button class="small" data-cact="hold" title="Clear the selected squad's orders: it holds where it is"${ui.selected === null ? ' disabled' : ''}>Hold</button>
     </div>`;
 }
 
@@ -88,15 +88,15 @@ function hintFor(c: Combat, ui: CombatUi): string {
   const car = c.vehicle(ui.selected);
   if (car) {
     if (ui.tool === null)
-      return `${car.name} selected: press M, then click the map to send it there (H: stop).`;
-    if (ui.tool !== 'move') return `${car.name} is a vehicle: it only takes Move orders (M).`;
+      return `${car.name} selected: pick Move, then click the map to send it there (Hold stops it).`;
+    if (ui.tool !== 'move') return `${car.name} is a vehicle: it only takes Move orders.`;
     return `Click the map: ${car.name} drives there, ${ui.append ? 'after its route' : 'instead of its route'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
   }
   const s = c.squad(ui.selected);
   if (ui.tool === null)
     return s
-      ? `${s.name} selected: press M, A, W, B or D, then click the map to order it.`
-      : 'Click a squad of either side to select it. Space plays or pauses.';
+      ? `${s.name} selected: pick an order, then click the map to order it.`
+      : 'Click a squad of either side to select it.';
   if (!s) return 'Select a squad first (click it on the map or in the roster).';
   if (ui.tool === 'ambush')
     return pendingAmbush(ui)

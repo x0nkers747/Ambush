@@ -64,7 +64,7 @@ import {
   wireHeader,
 } from '../shell';
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
-import { COMBAT_SPEEDS, createCombat, type Combat, type CombatSpeed } from './combat';
+import { createCombat, type Combat, type CombatSpeed } from './combat';
 import {
   createCombatMapEditor,
   pendingAmbush,
@@ -91,7 +91,7 @@ import {
   combatVehicleHtml,
   combatToolsHtml,
 } from './combat-panel';
-import { createBattleMapEditor, ORDER_INITIALS } from './map-editor';
+import { createBattleMapEditor } from './map-editor';
 import { createPlanner, type BattleStage, type PlannerTool, type ViewshedPin } from './planner';
 
 /** A viewshed shown: its pin, its side's colour, where it looks from, and its latest result shown. */
@@ -109,8 +109,8 @@ import {
 } from './squad-viewshed';
 
 // Stages 2–5 of a battle on one battlefield (docs/constructive-simulation/03,
-// 04): Scenario Setup (place both sides' squads, give OPFOR its plans),
-// BLUEFOR Planning (give BLUEFOR's squads their plans), Combat (the battle
+// 04): Scenario Setup (place and turn both sides' squads and vehicles),
+// Planning (give them all their orders), Combat (the battle
 // fought live: play, pause, speed, orders to either side, End Combat) and
 // the After-Action Review (its summary; the full replay is milestone D). The workflow header, the map (2D, or 3D through
 // the same editor), and a side panel: the stage's tools, the selected squad
@@ -133,7 +133,8 @@ export interface BattlePageOptions {
   /** How terrain selection's preview was looked at: in 3D, the page opens in 3D from that camera. */
   readonly view?: HandedView | null;
   /** Back to terrain selection, handing the map over (the page has stopped by then). */
-  readonly leave: (map: TacticalMap) => void;
+  /** Back to terrain selection with the map; `unload`: the scenario is unloaded (the working scenario emptied). */
+  readonly leave: (map: TacticalMap, unload: boolean) => void;
   readonly setAddress: (stage: 'scenario' | 'bluefor') => void;
   /** Scenario management (docs/scenarios.md): only in the planning stages. */
   readonly scenarios: ScenarioMenu;
@@ -165,27 +166,16 @@ export interface PageScenario {
 
 const PLACE_ORGANIZATIONS: readonly SquadOrganization[] = ['squad', 'fireTeam', 'element3'];
 
-const ORDER_KEYS: Readonly<Record<string, OrderKind>> = {
-  m: 'move',
-  a: 'attack',
-  w: 'withdraw',
-  b: 'ambush',
-  d: 'defend',
-};
-
 /** An eye, in `currentColor`, for the viewshed toggles. */
 const EYE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 
 const HELP_HTML = `<dl class="kv help">
-  <dt>S, Esc</dt><dd>Select tool; Esc again clears the selection</dd>
-  <dt>P</dt><dd>Place squads (Scenario Setup): pick the side and organization, then click the map</dd>
-  <dt>M, A, W, B, D</dt><dd>Give the selected squad Move, Attack, Withdraw, Ambush or Defend orders: each click adds one, after the selected order</dd>
-  <dt>K</dt><dd>Set the kill zone of the selected ambush order (click its centre; drag its corners to resize it), or the direction of the selected defend order (click that way; drag the square on its edge to widen it)</dd>
-  <dt>Drag</dt><dd>A squad to move it (Setup), a waypoint to move its destination, the white knob to turn the selected squad</dd>
+  <dt>Setup</dt><dd>Place both sides' squads and vehicles: pick the side and organization, then click the map. Drag one to move it, drag the white knob to turn it</dd>
+  <dt>Orders</dt><dd>In Planning, select a squad (either side) or vehicle, pick an order and click the map: each click adds one, after the selected order. An ambush's second click sets its kill zone (drag its corners to resize it); a defence's sets its direction (drag the square on its edge to widen it, the circle at its middle to turn it)</dd>
+  <dt>Drag</dt><dd>A waypoint to move its destination</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
-  <dt>Delete</dt><dd>The selected order, or else the selected squad (Setup)</dd>
-  <dt>V</dt><dd>Turn the viewshed of the selected squad (from its start) or waypoint on or off, as its eye in the squad panel does: what its soldiers can see, all round to 1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple; any number can be on. The Viewsheds box on the map bar shows or hides them all</dd>
-  <dt>F</dt><dd>Fit the map (2D) or return to the overhead view (3D)</dd>
+  <dt>Esc</dt><dd>Back to the Select tool; again, clears the selection</dd>
+  <dt>Eye</dt><dd>Turns the viewshed of a squad (from its start) or waypoint on or off: what its soldiers can see, all round to 1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple; any number can be on. The Viewsheds box on the map bar shows or hides them all</dd>
 </dl>
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
 <b>Attack</b> takes and clears the objective, assaulting with fire and movement; <b>Withdraw</b> falls back
@@ -211,10 +201,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       <span class="pointer" data-ui="pointer"></span>
       <span class="spacer"></span>
       <span class="mapbar-tool" data-ui="viewshed-status"></span>
-      <label class="mapbar-check" data-ui="viewshed-toggle" title="Show or hide every viewshed turned on (each squad's start or waypoint: its eye in the squad panel, or V)">
+      <label class="mapbar-check" data-ui="viewshed-toggle" title="Show or hide every viewshed turned on (each squad's start or waypoint: its eye in the squad panel)">
         <input type="checkbox" data-ui="show-viewshed" checked> Viewsheds
       </label>
-      <label class="mapbar-check" data-ui="opfor-toggle" title="Show the OPFOR squads and their plans while BLUEFOR plans">
+      <label class="mapbar-check" data-ui="opfor-toggle" title="Show the OPFOR squads and their plans">
         <input type="checkbox" data-ui="show-opfor" checked> Show OPFOR
       </label>
       <span class="mapbar-tool" data-ui="tool-label"></span>
@@ -222,13 +212,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         <button class="small" data-view="2d" aria-pressed="true" title="The 2D tactical map">2D</button>
         <button class="small" data-view="3d" aria-pressed="false" title="The 3D battlefield view">3D</button>
       </div>
-      <button class="small" data-ui="fit" title="Fit the whole map (F)">Fit map</button>
+      <button class="small" data-ui="fit" title="Fit the whole map">Fit map</button>
     </div>
   </main>
   <aside class="side" aria-label="Stage tools and status">
     <div class="primary-action">
-      <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
-      <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
+      <button class="primary-btn" data-ui="primary"></button>
     </div>
     <section class="sec" data-sec="tools">
       <h2 data-ui="tools-title"></h2>
@@ -418,7 +407,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         : planner.rules.next(stage),
     back: (to) => {
       if (planner.stage === 'aar' && to === 'combat')
-        return 'The battle has ended: go back to BLUEFOR Planning to fight it again.';
+        return 'The battle has ended: go back to Planning to fight it again.';
       return null;
     },
   };
@@ -840,7 +829,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const header = wireHeader(app, {
     go: (target) => {
       const go = () => {
-        if (target === 'terrain') leave();
+        if (target === 'terrain') toTerrain();
         else enter(target);
       };
       // Leaving a battle under way discards it: asked first.
@@ -910,15 +899,29 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     });
     if (wasPlaying) notify('Paused. End the battle, or Cancel to go on.');
   };
-  const leave = () => {
+  const leave = (unload = false) => {
     stop();
-    o.leave(map);
+    o.leave(map, unload);
+  };
+  /** Back to Terrain: the scenario is unloaded, after a warning. */
+  const toTerrain = () => {
+    const { savedName, dirty } = o.scenarios.status(planner.definition);
+    const unsaved = dirty
+      ? ' Its unsaved changes will be lost: Cancel, and save it first to keep them.'
+      : '';
+    confirm({
+      message: `Go back to Terrain? ${savedName === null ? 'This scenario' : `The scenario ${savedName}`} will be unloaded.${unsaved}`,
+      action: 'Unload scenario',
+      onConfirm: () => {
+        leave(true);
+      },
+    });
   };
   const PRIMARY: Readonly<Record<BattleStage, string>> = {
-    scenario: 'Continue to BLUEFOR Planning →',
+    scenario: 'Continue to Planning →',
     bluefor: 'Simulate →',
     combat: 'End combat and review →',
-    aar: '← Back to BLUEFOR Planning',
+    aar: '← Back to Planning',
   };
   const NEXT: Readonly<Record<BattleStage, BattleStage>> = {
     scenario: 'bluefor',
@@ -948,8 +951,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (now.kind === 'placeVehicle' && t.kind === 'placeVehicle') return now.side === t.side;
     return true;
   };
-  const toolButton = (t: PlannerTool, label: string, key: string, title: string, extra = '') =>
-    `<button class="tool ${extra}" data-tool='${escapeHtml(JSON.stringify(t))}' aria-pressed="${String(toolPressed(t))}" title="${escapeHtml(title)}${key ? ` (${key})` : ''}">${escapeHtml(label)}</button>`;
+  const toolButton = (t: PlannerTool, label: string, title: string, extra = '') =>
+    `<button class="tool ${extra}" data-tool='${escapeHtml(JSON.stringify(t))}' aria-pressed="${String(toolPressed(t))}" title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
 
   const orderTools = () =>
     `<div class="tool-grid order-tools" role="group" aria-label="Orders">
@@ -957,49 +960,34 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         toolButton(
           { kind: 'order', order: k },
           ORDER_LABELS[k],
-          ORDER_INITIALS[k],
           `Give the selected squad ${ORDER_LABELS[k]} orders: each click on the map adds one`,
           `order-${k}`,
         ),
       ).join('')}
-      ${toolButton({ kind: 'select' }, 'Select', 'S', 'Select and drag squads and waypoints')}
-    </div>
-    ${killZoneButton()}`;
+      ${toolButton({ kind: 'select' }, 'Select', 'Select and drag squads and waypoints')}
+    </div>`;
 
   /**
-   * "Set kill zone" (an ambush) or "Set direction" (a defence): only with the
-   * Ambush or Defend tool, or such an order selected (of a squad being planned).
+   * An ambush order's "Set kill zone", or a defend order's "Set direction",
+   * under its row's drop-downs: the next click on the map sets it.
    */
-  const killZoneButton = (): string => {
+  const secondClickButton = (kind: OrderKind, k: number): string => {
+    if (kind !== 'ambush' && kind !== 'defend') return '';
     const t = planner.tool;
-    const s = planner.selectedSquad;
-    const index = planner.selection.orderIndex;
-    const selectedKind = index === null ? undefined : s?.plan[index]?.kind;
-    const defence =
-      (t.kind === 'order' && t.order === 'defend') ||
-      t.kind === 'sector' ||
-      (selectedKind === 'defend' && !(t.kind === 'order' && t.order === 'ambush'));
-    const ambush =
-      (t.kind === 'order' && t.order === 'ambush') ||
-      t.kind === 'killZone' ||
-      selectedKind === 'ambush';
-    if ((!defence && !ambush) || !planner.canPlan(s)) return '';
-    if (defence) {
-      const has = s?.plan.some((o) => o.kind === 'defend') === true;
-      return `<div class="tool-row kill-zone-row">
-      <button class="tool kill-zone" data-act="set-kill-zone" aria-pressed="${String(t.kind === 'sector')}"${has ? '' : ' disabled'} title="Click the map in the direction the selected defend order defends toward; then drag the square on its arc to widen or narrow it, up to all round (K)">Set direction</button>
-    </div>`;
-    }
-    const hasAmbush = s?.plan.some((o) => o.kind === 'ambush') === true;
-    return `<div class="tool-row kill-zone-row">
-      <button class="tool kill-zone" data-act="set-kill-zone" aria-pressed="${String(t.kind === 'killZone')}"${hasAmbush ? '' : ' disabled'} title="Click the map to centre the selected ambush order's kill zone: a 50 m square facing the ambush position (K)">Set kill zone</button>
-    </div>`;
+    const armed =
+      planner.selection.orderIndex === k &&
+      (kind === 'ambush' ? t.kind === 'killZone' : t.kind === 'sector');
+    const title =
+      kind === 'ambush'
+        ? "Click the map to centre this ambush's kill zone: a 50 m square facing the ambush position"
+        : 'Click the map in the direction this defence defends toward; then drag the square on its arc to widen or narrow it, the circle to turn it';
+    return `<button class="small kill-zone" data-act="set-kill-zone" data-index="${String(k)}" aria-pressed="${String(armed)}" title="${escapeHtml(title)}">${kind === 'ambush' ? 'Set kill zone' : 'Set direction'}</button>`;
   };
 
   const toolsHtml = (): string => {
     switch (planner.stage) {
       case 'scenario':
-        return `<h3>Place squads <span class="muted">(P)</span></h3>
+        return `<h3>Place squads</h3>
           ${(['BLUEFOR', 'OPFOR'] as const)
             .map(
               (
@@ -1010,7 +998,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
                 toolButton(
                   { kind: 'place', side, organization },
                   ORGANIZATION_LABELS[organization],
-                  '',
                   `Click the map to place a ${side} ${ORGANIZATION_LABELS[organization].toLowerCase()} (${String(SQUAD_ORGANIZATIONS[organization].slots.length)} soldiers)`,
                   sideClass(side),
                 ),
@@ -1019,23 +1006,23 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             )
             .join('')}
           <h3>Place vehicles</h3>
-          <div class="tool-grid place-tools" role="group" aria-label="Place vehicles">
-            ${(['BLUEFOR', 'OPFOR'] as const)
-              .map((side) =>
-                toolButton(
-                  { kind: 'placeVehicle', side },
-                  `${side} ${VEHICLE_LABELS.m113}`,
-                  '',
-                  `Click the map to place a ${side} M113 armoured personnel carrier; then click where it drives`,
-                  sideClass(side),
-                ),
-              )
-              .join('')}
-          </div>
-          <h3>OPFOR plans and vehicle routes</h3>
-          ${orderTools()}`;
+          ${(['BLUEFOR', 'OPFOR'] as const)
+            .map(
+              (
+                side,
+              ) => `<div class="tool-grid place-tools" role="group" aria-label="Place ${side} vehicles">
+              <span class="place-side ${sideClass(side)}">${side}</span>
+              ${toolButton(
+                { kind: 'placeVehicle', side },
+                VEHICLE_LABELS.m113,
+                `Click the map to place a ${side} M113 armoured personnel carrier`,
+                sideClass(side),
+              )}
+            </div>`,
+            )
+            .join('')}`;
       case 'bluefor':
-        return `<h3>BLUEFOR orders</h3>${orderTools()}`;
+        return orderTools();
       case 'combat':
         return combat ? combatToolsHtml(combat, combatUi) : '';
       case 'aar':
@@ -1050,13 +1037,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const selected = planner.selectedSquad;
     if (t.kind === 'place')
       return `Click the map to place a ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}; Esc to stop.`;
-    if (t.kind === 'placeVehicle')
-      return `Click the map to place a ${t.side} M113; then each click adds a waypoint to its route.`;
+    if (t.kind === 'placeVehicle') return `Click the map to place a ${t.side} M113.`;
     const car = planner.selectedVehicle;
     if (t.kind === 'order' && car) {
-      if (!planner.canRoute(car))
-        return `${car.name} is OPFOR: its route is set in Scenario Setup.`;
-      if (t.order !== 'move') return `${car.name} is a vehicle: it only takes Move orders (M).`;
+      if (!planner.canRoute(car)) return 'Orders are given in Planning.';
+      if (t.order !== 'move') return `${car.name} is a vehicle: it only takes Move orders.`;
       return `Click the map: ${car.name} drives there${planner.selection.orderIndex === null ? ', after its last waypoint' : `, after waypoint ${String(planner.selection.orderIndex + 1)}`}.`;
     }
     if (t.kind === 'sector') {
@@ -1073,27 +1058,25 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     }
     if (t.kind === 'order') {
       if (!selected) return 'Select a squad first (click it, or pick it in the roster).';
-      if (!planner.canPlan(selected))
-        return planner.stage === 'bluefor'
-          ? `${selected.name} is OPFOR: its plan is set in Scenario Setup.`
-          : `${selected.name} is BLUEFOR: its plan is made in BLUEFOR Planning.`;
+      if (!planner.canPlan(selected)) return 'Orders are given in Planning.';
       return `Click the map: ${selected.name} gets a${t.order === 'ambush' || t.order === 'attack' ? 'n' : ''} ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.${t.order === 'ambush' ? ' That is the ambush position; the next click sets its kill zone.' : t.order === 'defend' ? ' That is the defensive position; the next click sets the direction it defends toward.' : ''}`;
     }
     if (planner.stage === 'scenario')
-      return 'Place both sides’ squads, then give OPFOR its plans (select an OPFOR squad, then M, A, W, B or D).';
+      return 'Place both sides’ squads and vehicles; drag them to move them, their knobs to turn them.';
     if (planner.stage === 'bluefor')
-      return 'Select a BLUEFOR squad, then M, A, W, B or D and click the map for each order.';
+      return 'Select a squad or vehicle (either side), pick an order and click the map for each one.';
     return '';
   };
 
   /** A defence's preparation before the battle: chosen while planning it, else shown. */
   const preparedHtml = (minutes: number, k: number, planning: boolean): string => {
-    const label = (m: number) => (m === 0 ? 'not prepared' : `prepared ${String(m)} min`);
+    const label = (m: number) =>
+      m === 0 ? 'Not dug in' : m >= 30 ? 'Dug in' : `Prepared ${String(m)} min`;
     if (!planning) return `<span class="muted prepared">${label(minutes)}</span>`;
     const options = [0, 5, 10, 15, 20, 25, 30]
       .map(
         (m) =>
-          `<option value="${String(m)}"${m === minutes ? ' selected' : ''}>${label(m)}${m === 30 ? ' (dug in)' : ''}</option>`,
+          `<option value="${String(m)}"${m === minutes ? ' selected' : ''}>${label(m)}</option>`,
       )
       .join('');
     return `<select class="prepared" data-act="order-prepared" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: how long its position was prepared before the battle" title="How long the position was prepared before the battle: it starts that far dug in (30 minutes: fully)">${options}</select>`;
@@ -1102,7 +1085,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const viewshedButton = (s: ScenarioSquad, index: number | null): string => {
     const on = planner.hasViewshed(s.id, index);
     const what = index === null ? 'from where it starts' : `from waypoint ${String(index + 1)}`;
-    return `<button class="small vs-toggle ${sideClass(s.side)}" data-act="viewshed" data-index="${index === null ? 'start' : String(index)}" aria-pressed="${String(on)}" title="${on ? 'Hide' : 'Show'} the viewshed ${what} (V)" aria-label="Viewshed ${what}">${EYE_ICON}</button>`;
+    return `<button class="small vs-toggle ${sideClass(s.side)}" data-act="viewshed" data-index="${index === null ? 'start' : String(index)}" aria-pressed="${String(on)}" title="${on ? 'Hide' : 'Show'} the viewshed ${what}" aria-label="Viewshed ${what}">${EYE_ICON}</button>`;
   };
   const squadHtml = (s: ScenarioSquad | undefined): string => {
     if (!s) return '<p class="muted">No squad selected. Click one on the map or in the roster.</p>';
@@ -1145,17 +1128,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           <button class="order-pick small" data-act="pick-order" data-index="${String(k)}" title="Select this order">${String(k + 1)}</button>
           ${kindSelect}
           ${actionsSelect}
-          <span class="muted coords">${String(Math.round(order.destination.east))} E, ${String(Math.round(order.destination.north))} N${
-            order.kind === 'ambush'
-              ? order.killZone
-                ? ` · kill zone ${String(Math.round(order.killZone.widthM))} × ${String(Math.round(order.killZone.depthM))} m`
-                : ' · <span class="warn">no kill zone</span>'
-              : order.kind === 'defend'
-                ? order.sector
-                  ? ` · facing ${String(Math.round(((order.sector.facingDeg % 360) + 360) % 360)).padStart(3, '0')}°, ${order.sector.arcDeg >= 360 ? 'all round' : `${String(Math.round(order.sector.arcDeg))}° arc`}`
-                  : ' · <span class="warn">no direction</span>'
-                : ''
-          }</span>
           ${
             planning
               ? `<span class="order-buttons">${eye}
@@ -1164,6 +1136,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               <button class="small" data-act="order-delete" data-index="${String(k)}" title="Delete" aria-label="Delete order ${String(k + 1)}">✕</button></span>`
               : `<span class="order-buttons">${eye}</span>`
           }
+          ${planning ? secondClickButton(order.kind, k) : ''}
           ${order.kind === 'defend' ? preparedHtml(order.preparedMinutes ?? 0, k, planning) : ''}
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
         </li>`;
@@ -1177,6 +1150,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input class="squad-name" data-act="rename" value="${escapeHtml(s.name)}" aria-label="Squad name" maxlength="40">`
             : `<span class="squad-name">${escapeHtml(s.name)}</span>`
         }
+        ${viewshedButton(s, null)}
       </div>
       <dl class="kv">
         <dt>Organization</dt><dd>${
@@ -1194,13 +1168,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input type="number" class="facing-input" data-act="facing" min="0" max="359" step="1" value="${String(s.facingDeg)}" aria-label="Facing, degrees from north">°`
             : `${String(s.facingDeg)}°`
         }</dd>
-        <dt>Start</dt><dd class="start-row">${String(Math.round(s.position.east))} E, ${String(Math.round(s.position.north))} N ${viewshedButton(s, null)}</dd>
+        <dt>Start</dt><dd class="start-row">${String(Math.round(s.position.east))} E, ${String(Math.round(s.position.north))} N</dd>
       </dl>
       ${squadIssues.map((i) => `<p class="warn">${escapeHtml(i.message)}</p>`).join('')}
       <h3>Plan${s.plan.length > 0 ? ` (${String(s.plan.length)} order${s.plan.length === 1 ? '' : 's'})` : ''}</h3>
       ${
         s.plan.length === 0
-          ? `<p class="muted">No orders: it holds where it starts.${planning ? ' Press M, A or W and click the map.' : ''}</p>`
+          ? `<p class="muted">No orders: it holds where it starts.${planning ? ' Pick an order and click the map.' : ''}</p>`
           : `<ol class="plan-list">${orders}</ol>`
       }
       <p class="buttons">
@@ -1216,13 +1190,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const routing = planner.canRoute(v);
     const issues = planner.issues().filter((i) => i.vehicleId === v.id);
     const rows = v.route
-      .map((p, k) => {
+      .map((_, k) => {
         const selected = planner.selection.orderIndex === k;
         const issue = issues.find((i) => i.orderIndex === k);
         return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
           <span>Move</span>
-          <span class="muted coords">${String(Math.round(p.east))} E, ${String(Math.round(p.north))} N</span>
           ${routing ? `<span class="order-buttons"><button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button></span>` : ''}
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
         </li>`;
@@ -1252,7 +1225,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       <h3>Route${v.route.length > 0 ? ` (${String(v.route.length)} waypoint${v.route.length === 1 ? '' : 's'})` : ''}</h3>
       ${
         v.route.length === 0
-          ? `<p class="muted">No route: it stays where it starts.${routing ? ' Press M and click the map.' : ''}</p>`
+          ? `<p class="muted">No route: it stays where it starts.${routing ? ' Pick Move and click the map.' : ''}</p>`
           : `<ol class="plan-list">${rows}</ol>`
       }
       <p class="buttons">
@@ -1317,17 +1290,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const d = planner.definition;
     const issues = planner.issues();
     const stage = planner.stage;
-    // BLUEFOR plan issues belong to planning; setup shows the others.
-    const shown =
-      stage === 'scenario'
-        ? issues.filter(
-            (i) =>
-              !(
-                d.squads.find((s) => s.id === i.squadId)?.side === 'BLUEFOR' &&
-                i.orderIndex !== null
-              ),
-          )
-        : issues;
+    // Order issues belong to Planning; Setup shows the others.
+    const shown = stage === 'scenario' ? issues.filter((i) => i.orderIndex === null) : issues;
     return `<dl class="kv">
         <dt>Name</dt><dd>${escapeHtml(d.name)}</dd>
         <dt>Forces</dt><dd>${escapeHtml(scenarioSummary(d))}</dd>
@@ -1508,10 +1472,17 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'pick-order':
         if (s) planner.select(s.id, index);
         return;
-      case 'set-kill-zone':
-        if (planner.tool.kind === 'killZone') planner.setTool({ kind: 'select' });
-        else if (!planner.armKillZone()) notify('Give the squad an ambush order first.');
+      case 'set-kill-zone': {
+        // This order's second click: armed (or, armed already, put down).
+        const t = planner.tool.kind;
+        if (s && planner.selection.orderIndex === index && (t === 'killZone' || t === 'sector')) {
+          planner.setTool({ kind: 'select' });
+          return;
+        }
+        if (s) planner.select(s.id, index);
+        planner.armKillZone();
         return;
+      }
       case 'order-up':
       case 'order-down':
         if (s && planner.canPlan(s)) {
@@ -1668,147 +1639,36 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Keys ---------------------------------------------------------------
 
+  // No shortcut keys: Escape cancels (a dialog, a tool, a selection), and
+  // Shift with a click in combat appends orders instead of replacing them.
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Shift') {
+      combatUi.shift = true;
+      return;
+    }
+    if (event.key !== 'Escape') return;
     if (
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLSelectElement ||
-      event.target instanceof HTMLTextAreaElement ||
-      event.ctrlKey ||
-      event.metaKey ||
-      event.altKey
+      event.target instanceof HTMLTextAreaElement
     )
       return;
-    if (!ui('confirm').hidden && event.key === 'Escape') {
+    if (!ui('confirm').hidden) {
       ui('confirm').hidden = true;
       return;
     }
-    const key = event.key.toLowerCase();
-    if (key === 'shift') combatUi.shift = true;
-    const c = inCombat();
-    if (c) {
-      combatKey(c, key, event);
+    if (inCombat()) {
+      if (pendingAmbush(combatUi)) combatUi.ambush = null;
+      else if (combatUi.tool !== null) combatUi.tool = null;
+      else combatUi.selected = null;
       return;
     }
-    const r = inReview();
-    if (r) {
-      const action = (
-        {
-          ' ': 'play',
-          arrowleft: 'back',
-          arrowright: 'forward',
-          home: 'start',
-          end: 'end',
-          ',': 'prev',
-          '.': 'next',
-        } as Record<string, string | undefined>
-      )[key];
-      if (action) {
-        event.preventDefault();
-        reviewAction(r, action);
-      } else if (key === 'escape') combatUi.selected = null;
-      else if (key === 'f') fitView();
+    if (inReview()) {
+      combatUi.selected = null;
       return;
     }
-    const order = ORDER_KEYS[key];
-    if (order && (planner.stage === 'scenario' || planner.stage === 'bluefor')) {
-      planner.setTool({ kind: 'order', order });
-      return;
-    }
-    switch (key) {
-      case 'f':
-        fitView();
-        break;
-      case 's':
-        planner.setTool({ kind: 'select' });
-        break;
-      case 'k':
-        if (planner.stage === 'scenario' || planner.stage === 'bluefor') planner.armKillZone();
-        break;
-      case 'v': {
-        // The selected squad's (or waypoint's) viewshed on or off.
-        const sel = planner.selection;
-        if ((planner.stage === 'scenario' || planner.stage === 'bluefor') && sel.squadId !== null) {
-          const on = planner.toggleViewshed(sel.squadId, sel.orderIndex);
-          const what =
-            sel.orderIndex === null
-              ? 'from its start'
-              : `from waypoint ${String(sel.orderIndex + 1)}`;
-          notify(
-            `${planner.squad(sel.squadId)?.name ?? 'Squad'}: viewshed ${what} ${on ? 'on' : 'off'}.`,
-          );
-          if (on && !showViewshed.checked) showViewshed.checked = true;
-        }
-        break;
-      }
-      case 'p':
-        if (planner.stage === 'scenario') {
-          const last = lastPlace;
-          planner.setTool(planner.tool.kind === 'place' ? { kind: 'select' } : last);
-        }
-        break;
-      case 'escape':
-        if (planner.tool.kind !== 'select') planner.setTool({ kind: 'select' });
-        else planner.select(null);
-        break;
-      case 'delete':
-      case 'backspace': {
-        const car = planner.selectedVehicle;
-        if (car) {
-          event.preventDefault();
-          const index = planner.selection.orderIndex;
-          if (index !== null) planner.removeVehicleWaypoint(car.id, index);
-          else planner.removeVehicle(car.id);
-          break;
-        }
-        const s = planner.selectedSquad;
-        if (!s) break;
-        event.preventDefault();
-        const index = planner.selection.orderIndex;
-        if (index !== null && planner.canPlan(s)) planner.removeOrder(s.id, index);
-        else if (index === null && planner.canPlace()) planner.removeSquad(s.id);
-        break;
-      }
-    }
-  };
-  /** The Combat stage's and the review's keys. */
-  const combatKey = (c: Combat, key: string, event: KeyboardEvent) => {
-    const order = ORDER_KEYS[key];
-    if (order && !c.ended) {
-      if (combatUi.tool !== order) combatUi.ambush = null;
-      combatUi.tool = order;
-      return;
-    }
-    const speedAt = COMBAT_SPEEDS.indexOf(c.speed);
-    switch (key) {
-      case ' ':
-        if (c.ended) break;
-        event.preventDefault();
-        if (c.playing) c.pause();
-        else c.play();
-        break;
-      case 'f':
-        fitView();
-        break;
-      case 's':
-        combatUi.tool = null;
-        break;
-      case 'h':
-        if (combatUi.selected !== null) c.hold(combatUi.selected);
-        break;
-      case '+':
-      case '=':
-        c.setSpeed(COMBAT_SPEEDS[Math.min(COMBAT_SPEEDS.length - 1, speedAt + 1)] ?? c.speed);
-        break;
-      case '-':
-      case '_':
-        c.setSpeed(COMBAT_SPEEDS[Math.max(0, speedAt - 1)] ?? c.speed);
-        break;
-      case 'escape':
-        if (pendingAmbush(combatUi)) combatUi.ambush = null;
-        else if (combatUi.tool !== null) combatUi.tool = null;
-        else combatUi.selected = null;
-        break;
-    }
+    if (planner.tool.kind !== 'select') planner.setTool({ kind: 'select' });
+    else planner.select(null);
   };
   const onKeyUp = (event: KeyboardEvent) => {
     if (event.key === 'Shift') combatUi.shift = false;
@@ -1819,7 +1679,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
-  let lastPlace: PlannerTool = { kind: 'place', side: 'BLUEFOR', organization: 'squad' };
 
   // --- Frame loop -------------------------------------------------------------
 
@@ -1833,7 +1692,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     setText(primary, PRIMARY[stage]);
     primary.classList.toggle('danger-solid', fighting);
     primary.setAttribute('aria-disabled', String(reason !== null));
-    setText(ui('primary-reason'), reason ?? '');
     const c = inCombat();
     const r = inReview();
     const events = app.querySelector<HTMLElement>('[data-sec="events"]');
@@ -1860,17 +1718,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     );
     if (planner.version === lastVersion) return;
     lastVersion = planner.version;
-    if (planner.tool.kind === 'place') lastPlace = planner.tool;
     app.dataset['stage'] = stage;
     ui('opfor-toggle').hidden = stage !== 'bluefor';
     ui('new-scenario').hidden = stage !== 'scenario';
     setText(
       ui('tools-title'),
-      stage === 'scenario'
-        ? 'Scenario tools'
-        : stage === 'bluefor'
-          ? 'Planning tools'
-          : STAGE_NAMES[stage],
+      stage === 'scenario' ? 'Scenario tools' : stage === 'bluefor' ? 'Orders' : STAGE_NAMES[stage],
     );
     setHtml(ui('tools'), toolsHtml());
     setText(ui('tool-hint'), toolHint());
@@ -2166,8 +2019,17 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   enter(o.initialStage);
   if (o.notice) notify(o.notice);
-  // Terrain selection was in 3D: so is the page, its camera where it was.
-  if (o.view?.mode === '3d') {
+  // Terrain selection was in 3D: so is the page, in the same 3D view (never
+  // showing the 2D map meanwhile), or a new one with its camera where it was.
+  if (o.view?.view3d) {
+    const given = o.view.view3d;
+    view3d = given;
+    given.setFigures(figures);
+    ui('attribution').before(given.canvas, given.overlay);
+    connect3d(given);
+    viewMode = '3d';
+    showViewMode();
+  } else if (o.view?.mode === '3d') {
     handedPose = o.view.pose;
     setViewMode('3d');
   }

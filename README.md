@@ -113,53 +113,56 @@ Next says what is missing, and the side panel says the same next to the stage's 
    from Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
    network needed; double-click to open it; the bin beside it deletes it, on a second click): it
-   is previewed with its scenario's squads and plans, and opens with **Open battlefield**.
-   **3D** on the preview's map bar shows the terrain in 3D. **Load scenario…** opens the
-   scenario library, and **Import JSON…** a scenario file: a scenario opens on its own
-   battlefield, which is generated again if it is not saved in this browser (see
-   [Saved scenarios](#saved-scenarios)).
+   is previewed (the terrain alone: no squads or markers), and opens with **Open battlefield**.
+   **3D** on the preview's map bar shows the terrain in 3D; the battlefield then opens in the
+   same 3D view. **Load scenario…** opens the scenario library, and **Import JSON…** a scenario
+   file: a scenario opens at once in Setup on its own battlefield, which is generated again if
+   it is not saved in this browser (see [Saved scenarios](#saved-scenarios)). Going back to
+   Terrain from a later stage unloads the scenario, after a warning.
 2. **Scenario Setup** ([docs/constructive-simulation/03](docs/constructive-simulation/03-scenario-setup-and-planning.md)).
-   Place BLUEFOR and OPFOR squads, fire teams and three-man elements (**P**, or the Place
-   buttons), one per click. Drag a squad to move it and the white knob to turn it; rename it,
+   Place BLUEFOR and OPFOR squads, fire teams and three-man elements, and vehicles, with the
+   Place buttons, one per click. Drag a squad to move it and the white knob to turn it; rename it,
    change its organization or formation in the side panel. Soldiers that would stand in water or
-   a building step out to the nearest clear ground. Give OPFOR its plans: select an OPFOR squad,
-   press **M**, **A**, **W** or **B** (Move, Attack, Withdraw, Ambush) and click the map once per order.
-   A Move clicked on a road goes along the roads: it becomes a Move to where the squad joins the
-   nearest road, one to each turn of the road, and one to the point clicked (OPFOR only;
-   [ADR 0043](docs/adr/0043-bridge-and-road-navigation.md)). The
+   a building step out to the nearest clear ground. Setup only places and turns: orders are given
+   in Planning. The
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
-   **Viewsheds:** the eye beside a squad's start, or beside any of its waypoints, in the squad
-   panel (or **V** for the selected one) shows what its soldiers can see from there, all round to
+   **Viewsheds:** the eye beside a squad's name, or beside any of its waypoints, in the squad
+   panel shows what its soldiers can see from there, all round to
    1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple, on the map and on
    the 3D ground; any number can be on, and a dragged squad's or waypoint's is worked out again when it is dropped
    ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). The **Viewsheds** box on the map
    bar shows or hides them all.
-3. **BLUEFOR Planning.** Give BLUEFOR's squads their plans the same way. OPFOR is shown read-only,
-   or hidden with **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
+3. **Planning.** Give both sides' squads, and the vehicles, their orders: select one, pick an
+   order (**Move**, **Attack**, **Withdraw**, **Ambush**, **Defend**) and click the map once per
+   order. A Move clicked on a road for OPFOR goes along the roads: it becomes a Move to where the
+   squad joins the nearest road, one to each turn of the road, and one to the point clicked
+   ([ADR 0043](docs/adr/0043-bridge-and-road-navigation.md)). OPFOR can be hidden with
+   **Show OPFOR**. Drag a waypoint to move it, right-click it to delete it;
    change an order's kind, order and deletion in the plan list. Each order's **On contact**
    drop-down says what the squad does when it meets the enemy on the way: **Continue** (halt,
    fight, and press on when there is nothing to engage), **Attack** (assault in an extended
    line), **Hold** (halt, fight from there and wait for new orders) or **Avoid** (fall back,
    firing only if fired upon); by default a Move continues, an Attack attacks and a Withdraw
    avoids ([docs](docs/behavior-lab/force-on-force/07-actions-on-contact.md)). An **Ambush**
-   order's click is the ambush position; the next click (or **Set kill zone**, shown only for
-   ambushes, **K**) centres its kill zone, a 50 m square facing the position: drag its corners
+   order's click is the ambush position; "Click again to set killzone" appears, and the next
+   click (or **Set kill zone**, under the order's drop-downs) centres its kill zone, a 50 m square facing the position: drag its corners
    to resize it. The squad goes there, lies in wait in a line facing the kill zone, concealed
    (the enemy cannot see it beyond 100 m), and opens fire on its own when the enemy is in the
    kill zone (or getting through it, or has found it), steady and accurate until fired upon,
    the enemy surprised; it fights until the enemy is down and
    waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)). A
-   **Defend** order (**D**) is clicked at the defensive position, then in the direction it
-   defends toward: a 90° wedge, widened or narrowed by dragging the square on its edge, up to all
-   round. The squad deploys across it, lies prone and digs in over 30 minutes (from shell scrapes
+   **Defend** order is clicked at the defensive position, then ("Click again to set direction",
+   or **Set direction** under its drop-downs) in the direction it defends toward: a 90° wedge,
+   widened or narrowed by dragging the square on its edge, up to all round, and turned by
+   dragging the circle at its middle. The squad deploys across it, lies prone and digs in over 30 minutes (from shell scrapes
    to a trench, drawn in 3D), harder to hit, see and suppress the deeper it is; its row's
-   **prepared** choice starts it partly or fully dug in. It fights from there and waits for new
+   preparation choice (Not dug in, Prepared 5–25 min, Dug in) starts it partly or fully dug in. It fights from there and waits for new
    orders ([docs](docs/behavior-lab/force-on-force/09-defend.md)).
    **Vehicles** (a prototype): in Setup, **Place vehicles** puts an M113 armoured personnel
-   carrier on the map; each click after that adds a waypoint to its route (**M** with it
-   selected). It drives the route as a tracked vehicle does, pivoting to face a turn it cannot
+   carrier on the map; in Planning, with it selected, each **Move** click adds a waypoint to its
+   route. It drives the route as a tracked vehicle does, pivoting to face a turn it cannot
    drive round, speeding up to the ground's speed (a road, open ground, woods; slower uphill),
    slowing for bends and stopping on its last waypoint. In Sim it takes Move orders like a squad.
    It only drives: no crew, no weapons, and nothing sees or shoots it
@@ -167,10 +170,10 @@ Next says what is missing, and the side panel says the same next to the stage's 
 4. **Sim**, Combat ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)),
    from **Simulate →** in planning. The header labels the stages Terrain, Setup, Planning, Sim
    and AAR. Going back to an earlier stage during a battle asks first, then discards it. The
-   battle starts paused: **Space** plays and pauses, ½× to 32× sets the speed. Select any squad,
-   of either side, and give it orders live: **M**, **A**, **W** or **B**, then click (an ambush:
-   its position, then its kill zone, **Set kill zone**); **Replace plan**
-   or **Append** (Shift for the other, for one click); **H** holds. **On contact** sets what
+   battle starts paused: **Play** plays and pauses, ½× to 32× sets the speed. Select any squad,
+   of either side, and give it orders live: pick an order, then click (an ambush: its position,
+   then its kill zone); **Replace plan** or **Append** (Shift-click for the other, for one
+   click); **Hold** holds. **On contact** sets what
    squads ordered now do on contact (by default, their order's kind's). With an order tool, clicking
    an enemy squad targets it. Orders given while paused apply when play resumes. The battle never
    ends by itself: **End combat** ends it. Soldiers carry finite ammunition and fire at their
@@ -185,7 +188,7 @@ Next says what is missing, and the side panel says the same next to the stage's 
    battle fought. Play, pause, ±5 s, jump to markers (contact, casualties, squads combat
    ineffective or withdrawn, your orders), drag the timeline; select a squad to see its state,
    orders and phases at that moment. **Export recording** saves a file that reproduces the
-   battle exactly. **Back to BLUEFOR Planning** fights it again.
+   battle exactly. **Back to Planning** fights it again.
 
 Battles are simulated in a background worker, so the map keeps drawing at full frame rate
 whatever a battle costs.
@@ -195,7 +198,7 @@ Reloading the page returns to Setup or Planning (a battle is not stored).
 
 Scenarios are saved in the browser's scenario library, any number per battlefield, and survive
 closing the browser ([docs/scenarios.md](docs/scenarios.md)). The **Scenario** menu in Scenario
-Setup and BLUEFOR Planning has **Save scenario** (asks for a name the first time; plans need not
+Setup and Planning has **Save scenario** (asks for a name the first time; plans need not
 be complete), **Save as…** (a new copy; the original is unchanged), **Load scenario…**,
 **Import scenario…** and **Export scenario…** (downloads `<name>.ambush.json`, saved or not).
 The panel says whether the scenario is saved and has unsaved changes; loading or importing

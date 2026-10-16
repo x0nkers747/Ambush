@@ -14,7 +14,7 @@ import type { BattleRecording } from './session';
 // The reference battle (docs/constructive-simulation/05): three BLUEFOR
 // squads against three OPFOR squads, made, fought and reviewed end to end
 // through the same planner, combat and review the page uses, as a user
-// would: squads placed and planned in Scenario Setup and BLUEFOR Planning,
+// would: squads placed in Scenario Setup and given their orders in Planning,
 // the battle fought with orders to both sides (replacing, appending,
 // holding, some while paused) until the user ends it, then replayed from
 // tick 0 and verified, and inspected at moments of it.
@@ -30,7 +30,7 @@ const terrain = labTerrain({
   ],
 });
 
-/** The scenario, made through the planner as Scenario Setup and BLUEFOR Planning make it. */
+/** The scenario, made through the planner as Scenario Setup and Planning make it. */
 function makeScenario(): BattleScenarioDefinition {
   const saved: BattleScenarioDefinition[] = [];
   const notices: string[] = [];
@@ -61,13 +61,13 @@ function makeScenario(): BattleScenarioDefinition {
   place('BLUEFOR', 'squad', { x: -250, y: -500 });
   place('BLUEFOR', 'squad', { x: 0, y: -550 });
   place('BLUEFOR', 'fireTeam', { x: 250, y: -500 });
-  // OPFOR plans: O1 occupies the hamlet's west; O3 moves down the east, then withdraws.
+  expect(p.rules.next('scenario')).toBeNull();
+  // Planning. OPFOR: O1 occupies the hamlet's west; O3 moves down the east, then withdraws.
+  p.setStage('bluefor');
   order('O1', 'move', { x: -100, y: 60 });
   order('O3', 'move', { x: 200, y: 0 });
   order('O3', 'withdraw', { x: 300, y: 500 });
-  expect(p.rules.next('scenario')).toBeNull();
-  // BLUEFOR Planning: B1 attacks the hamlet; B2 moves up, then attacks; B3 holds.
-  p.setStage('bluefor');
+  // BLUEFOR: B1 attacks the hamlet; B2 moves up, then attacks; B3 holds.
   order('B1', 'attack', { x: -60, y: 70 });
   order('B2', 'move', { x: 0, y: -250 });
   order('B2', 'attack', { x: 20, y: 60 });
