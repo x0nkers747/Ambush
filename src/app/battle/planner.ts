@@ -20,7 +20,15 @@ import {
   type SquadOrganization,
 } from '#exercise/battle';
 import { createMotionRecorder } from '#exercise';
-import type { Azimuth, OrderKind, Side, SoldierId, TerrainDataset, Vec2 } from '#sim';
+import {
+  roadWaypoints,
+  type Azimuth,
+  type OrderKind,
+  type Side,
+  type SoldierId,
+  type TerrainDataset,
+  type Vec2,
+} from '#sim';
 import type { WorkflowRules, WorkflowStage } from '../workflow';
 
 // The battle planner (docs/constructive-simulation/03): what Scenario Setup
@@ -336,8 +344,29 @@ export function createPlanner(o: PlannerOptions): Planner {
         const kind = tool.order;
         // After the selected order, or at the end of the plan.
         const at = selection.orderIndex === null ? selected.plan.length : selection.orderIndex + 1;
-        if (apply((d) => addOrder(terrain, d, selected.id, kind, point, at), true)) {
-          planner.select(selected.id, at);
+        // OPFOR moving to a point on a road goes along the roads: a move to
+        // where it joins the nearest road, then one to each turn of the road.
+        const before = at > 0 ? selected.plan[at - 1]?.destination : undefined;
+        const from = before ?? selected.position;
+        const route =
+          kind === 'move' && selected.side === 'OPFOR'
+            ? roadWaypoints(terrain, { x: from.east, y: from.north }, point)
+            : null;
+        const points = route && route.length > 1 ? route : [point];
+        const added = apply((d) => {
+          let edit: BattleEdit = { ok: true, definition: d };
+          for (const [k, p] of points.entries()) {
+            if (!edit.ok) return edit;
+            edit = addOrder(terrain, edit.definition, selected.id, kind, p, at + k);
+          }
+          return edit;
+        }, true);
+        if (added && points.length > 1)
+          o.notify(
+            `Along the road: ${String(points.length)} move orders, to where it joins the road and along it.`,
+          );
+        if (added) {
+          planner.select(selected.id, at + points.length - 1);
           // An ambush needs its kill zone: the next click sets it.
           if (kind === 'ambush') {
             tool = { kind: 'killZone' };

@@ -258,8 +258,10 @@ export {
 } from './bridge-navigation';
 export {
   ROAD_REACH_M,
+  ROAD_WAYPOINT_SPACING_M,
   planRoadPath,
   roadNetwork,
   roadPointAt,
+  roadWaypoints,
   type RoadNetwork,
 } from './road-network';

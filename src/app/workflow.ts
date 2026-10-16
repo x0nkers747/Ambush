@@ -27,8 +27,8 @@ export const STAGE_NAMES: Readonly<Record<WorkflowStage, string>> = {
 export const STAGE_LABELS: Readonly<Record<WorkflowStage, string>> = {
   terrain: 'Terrain',
   scenario: 'Setup',
-  bluefor: 'BLUEFOR',
-  combat: 'Combat',
+  bluefor: 'Planning',
+  combat: 'Sim',
   aar: 'AAR',
 };
 

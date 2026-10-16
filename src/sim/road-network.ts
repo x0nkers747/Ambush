@@ -597,11 +597,89 @@ function roadRoute(
  * roads when `to` is on one the soldier can join, else off road.
  */
 export function planRoadPath(terrain: TerrainDataset, from: Vec2, to: Vec2): PathResult {
+  const best = bestRoadRoute(terrain, from, to);
+  // Off the roads, or no road the soldier can join: off road, if anything.
+  return best ? { ok: true, turns: best.turns } : planOffRoad(terrain, from, to);
+}
+
+/** Of a road waypoint route, points kept no closer than this (metres), but for the last. */
+export const ROAD_WAYPOINT_SPACING_M = 25;
+/** A road waypoint route keeps only turns that leave the straight line by more than this (metres). */
+const ROAD_WAYPOINT_TOLERANCE_M = 3;
+
+/**
+ * Waypoints from `from` along the roads to `to` (docs/adr/0043), for a squad
+ * told to move to a point on a road: where it joins the nearest road it can
+ * walk to, the road's turns (simplified to within a few metres of the road,
+ * at most one every `ROAD_WAYPOINT_SPACING_M`), and `to`. `null` when `to`
+ * is off the roads or no road leading there can be joined.
+ */
+export function roadWaypoints(terrain: TerrainDataset, from: Vec2, to: Vec2): Vec2[] | null {
+  const best = bestRoadRoute(terrain, from, to);
+  if (!best) return null;
+  const road = simplify(
+    best.road.map((p) => ({ x: p.x, y: p.y })),
+    ROAD_WAYPOINT_TOLERANCE_M,
+  );
+  const out: Vec2[] = [];
+  for (const p of [...road, { x: to.x, y: to.y }]) {
+    const last = out.at(-1);
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) < ROAD_WAYPOINT_SPACING_M) out.pop();
+    out.push(p);
+  }
+  // Where it joins the road is kept (spacing aside), unless it is about where it stands.
+  const first = road[0];
+  if (first && out[0] !== first) out.unshift(first);
+  while (out.length > 1 && out[0] && Math.hypot(out[0].x - from.x, out[0].y - from.y) < 5)
+    out.shift();
+  return out;
+}
+
+/** Douglas–Peucker: the points of a polyline that keep it within `tolerance` metres. */
+function simplify(points: readonly Vec2[], tolerance: number): Vec2[] {
+  if (points.length <= 2) return [...points];
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [i, j] = stack.pop() ?? [0, 0];
+    const a = points[i];
+    const b = points[j];
+    if (!a || !b) continue;
+    let worst = -1;
+    let far = tolerance;
+    for (let k = i + 1; k < j; k += 1) {
+      const p = points[k];
+      if (!p) continue;
+      const d = distanceToSegment(p, a, b);
+      if (d > far) {
+        far = d;
+        worst = k;
+      }
+    }
+    if (worst > 0) {
+      keep[worst] = 1;
+      stack.push([i, worst], [worst, j]);
+    }
+  }
+  return points.filter((_, k) => keep[k] === 1);
+}
+
+/**
+ * The way from `from` to `to` along the roads: the walk to join them, the
+ * road route (from where it joins to where it leaves), and the walk off to
+ * `to`. `null` when `to` is off the roads or no road leading there can be joined.
+ */
+function bestRoadRoute(
+  terrain: TerrainDataset,
+  from: Vec2,
+  to: Vec2,
+): { turns: PathPoint[]; road: PathPoint[] } | null {
   const b = built(terrain);
   const net = b.network;
   const goal = roadPointAt(terrain, to);
-  // Off the roads: as before.
-  if (!goal) return planOffRoad(terrain, from, to);
+  if (!goal) return null;
   const goalEdge = net.edges[goal.edge];
   const part = goalEdge ? (net.component[goalEdge.a] ?? -1) : -1;
   const toGoal = distancesTo(b, goal);
@@ -614,7 +692,7 @@ export function planRoadPath(terrain: TerrainDataset, from: Vec2, to: Vec2): Pat
     here && hereEdge && net.component[hereEdge.a] === part
       ? [here]
       : nearestEdges(b, from, part, ENTRY_CHECKS);
-  let best: { turns: PathPoint[]; walk: number; road: number } | null = null;
+  let best: { turns: PathPoint[]; walk: number; road: number; points: PathPoint[] } | null = null;
   for (const entry of candidates) {
     const route = roadRoute(b, entry, goal, toGoal);
     if (!route) continue;
@@ -629,10 +707,10 @@ export function planRoadPath(terrain: TerrainDataset, from: Vec2, to: Vec2): Pat
       turns: dedupe([...join.turns, ...route.points, ...leave.turns], from, to),
       walk,
       road: route.length,
+      points: route.points,
     };
   }
-  // No road the soldier can join: off road, if anything.
-  return best ? { ok: true, turns: best.turns } : planOffRoad(terrain, from, to);
+  return best ? { turns: best.turns, road: best.points } : null;
 }
 
 /** Drops points equal to the one before them (and to the start or the destination). */

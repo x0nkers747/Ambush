@@ -213,3 +213,79 @@ describe('what the views show', () => {
     expect(p.figures()).not.toBe(figures);
   });
 });
+
+describe('OPFOR moves along roads', () => {
+  // A road west to east at y = 250, turning south at x = 300.
+  const roads = labTerrain({
+    ...NO_FEATURES,
+    roads: [
+      {
+        id: 'r1',
+        roadClass: 'unpaved',
+        widthMeters: 6,
+        centerline: [
+          { x: -400, y: 250 },
+          { x: 300, y: 250 },
+          { x: 300, y: -100 },
+        ],
+      },
+    ],
+  });
+  const make = (stage: BattleStage) => {
+    let d = newBattleScenario(roads, 'bf');
+    d = done(addSquad(roads, d, 'BLUEFOR', 'squad', { x: 0, y: -400 }));
+    d = done(addSquad(roads, d, 'OPFOR', 'fireTeam', { x: 0, y: 400 }));
+    const notices: string[] = [];
+    const p = createPlanner({
+      terrain: roads,
+      definition: d,
+      stage,
+      save: () => Promise.resolve(),
+      notify: (m) => notices.push(m),
+    });
+    return { p, notices };
+  };
+  const plan = (p: ReturnType<typeof createPlanner>, id: string) =>
+    p.definition.squads
+      .find((s) => s.id === id)
+      ?.plan.map((o) => [o.kind, Math.round(o.destination.east), Math.round(o.destination.north)]);
+
+  it('a move clicked on a road: to the road, along it, to the point', () => {
+    const { p, notices } = make('scenario');
+    p.select('O1');
+    p.setTool({ kind: 'order', order: 'move' });
+    p.click({ x: 300, y: -50 });
+    // Joins the road nearest it (straight south of it), then the corner, then the point.
+    expect(plan(p, 'O1')).toEqual([
+      ['move', 0, 250],
+      ['move', 300, 250],
+      ['move', 300, -50],
+    ]);
+    expect(notices.at(-1)).toMatch(/Along the road: 3 move orders/);
+    expect(p.selection.orderIndex).toBe(2);
+    // Next from there, on the road already: no move to where it stands.
+    p.click({ x: -300, y: 250 });
+    expect(plan(p, 'O1')?.slice(3)).toEqual([
+      ['move', 300, 250],
+      ['move', -300, 250],
+    ]);
+  });
+
+  it('off the road it goes straight there; an attack, or BLUEFOR, is not routed', () => {
+    const { p } = make('scenario');
+    p.select('O1');
+    p.setTool({ kind: 'order', order: 'move' });
+    p.click({ x: 100, y: 100 });
+    p.setTool({ kind: 'order', order: 'attack' });
+    p.click({ x: 300, y: 0 });
+    expect(plan(p, 'O1')).toEqual([
+      ['move', 100, 100],
+      ['attack', 300, 0],
+    ]);
+    const blue = make('bluefor').p;
+    blue.select('B1');
+    blue.setTool({ kind: 'order', order: 'move' });
+    blue.click({ x: 300, y: -50 });
+    expect(plan(blue, 'B1')).toEqual([['move', 300, -50]]);
+  });
+});

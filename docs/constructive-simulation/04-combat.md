@@ -36,7 +36,9 @@ The battle starts paused.
   reason says so). One with nobody left refuses it, and the page says so.
 
 **No automatic end.** The battle runs until the user ends it. While it
-runs, the header will not leave the stage (leaving would discard it). After
+runs, the header's Previous arrow and earlier stages still work: the battle
+is paused and the user asked whether to discard it ("Discard battle"), and
+leaves only if they agree. After
 it ends, the review cannot go back into the ended battle; going back to
 BLUEFOR Planning fights a new one.
 

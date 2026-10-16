@@ -337,8 +337,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           : 'End the combat first: the battle runs until you end it.'
         : planner.rules.next(stage),
     back: (to) => {
-      if (planner.stage === 'combat' && combat && !combat.ended)
-        return 'End the combat first: leaving now would discard the battle.';
       if (planner.stage === 'aar' && to === 'combat')
         return 'The battle has ended: go back to BLUEFOR Planning to fight it again.';
       return null;
@@ -568,8 +566,24 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   const header = wireHeader(app, {
     go: (target) => {
-      if (target === 'terrain') leave();
-      else enter(target);
+      const go = () => {
+        if (target === 'terrain') leave();
+        else enter(target);
+      };
+      // Leaving a battle under way discards it: asked first.
+      const c = combat;
+      if (planner.stage !== 'combat' || !c || c.ended) {
+        go();
+        return;
+      }
+      const wasPlaying = c.playing;
+      c.pause();
+      confirm({
+        message: `Leave the battle at ${clockText(c.session.seconds)}? It will be discarded.`,
+        action: 'Discard battle',
+        onConfirm: go,
+      });
+      if (wasPlaying) notify('Paused. Discard the battle, or Cancel to go on.');
     },
     blocked: notify,
   });
@@ -629,7 +643,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   };
   const PRIMARY: Readonly<Record<BattleStage, string>> = {
     scenario: 'Continue to BLUEFOR Planning →',
-    bluefor: 'Continue to Combat →',
+    bluefor: 'Simulate →',
     combat: 'End combat and review →',
     aar: '← Back to BLUEFOR Planning',
   };
@@ -1383,13 +1397,25 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     );
     const squadSection = app.querySelector<HTMLElement>('[data-sec="squad"]');
     if (squadSection) squadSection.hidden = false;
-    // Not while the user is typing in it.
+    // Not while the user is typing or choosing in it (a button pressed there,
+    // such as an order's ✕, keeps the focus but must not stop it); drawn once
+    // they are done.
     const squadEl = ui('squad');
-    if (!squadEl.contains(document.activeElement) || document.activeElement === document.body)
-      setHtml(squadEl, squadHtml(planner.selectedSquad));
-    setHtml(ui('roster'), rosterHtml());
     const scenarioEl = ui('scenario');
-    if (!scenarioEl.contains(document.activeElement)) setHtml(scenarioEl, scenarioHtml());
+    if (editingIn(squadEl) || editingIn(scenarioEl)) lastVersion = -1;
+    if (!editingIn(squadEl)) setHtml(squadEl, squadHtml(planner.selectedSquad));
+    setHtml(ui('roster'), rosterHtml());
+    if (!editingIn(scenarioEl)) setHtml(scenarioEl, scenarioHtml());
+  };
+  /** Whether the user is typing or choosing in a field of `el`. */
+  const editingIn = (el: HTMLElement) => {
+    const a = document.activeElement;
+    return (
+      (a instanceof HTMLInputElement ||
+        a instanceof HTMLSelectElement ||
+        a instanceof HTMLTextAreaElement) &&
+      el.contains(a)
+    );
   };
 
   /** The Combat stage's and the review's panels: the clock every frame, the rest a few times a second. */

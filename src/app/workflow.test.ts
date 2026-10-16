@@ -52,8 +52,8 @@ describe('the workflow', () => {
     expect(WORKFLOW_STAGES.map((s) => STAGE_LABELS[s])).toEqual([
       'Terrain',
       'Setup',
-      'BLUEFOR',
-      'Combat',
+      'Planning',
+      'Sim',
       'AAR',
     ]);
   });

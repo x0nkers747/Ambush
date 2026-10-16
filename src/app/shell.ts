@@ -25,8 +25,10 @@ export const TRASH_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" aria-
 const STAGE_ICONS: Readonly<Record<WorkflowStage, string>> = {
   terrain: `<path d="M2 20 9.5 6 17 20Z M13.2 12.2 16 8.5 22 20H17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>`,
   scenario: `<path d="M3 6 9 4l6 2 6-2v14l-6 2-6-2-6 2Z M9 4v14 M15 6v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`,
-  bluefor: `<g fill="currentColor"><circle cx="12" cy="7" r="3"/><circle cx="5.5" cy="9" r="2.2"/><circle cx="18.5" cy="9" r="2.2"/><path d="M7 19a5 5 0 0 1 10 0Z M1.5 19a4 4 0 0 1 6.3-3.3A6.5 6.5 0 0 0 6 19Z M22.5 19a4 4 0 0 0-6.3-3.3A6.5 6.5 0 0 1 18 19Z"/></g>`,
-  combat: `<path d="M12 3.5 20.5 12 12 20.5 3.5 12Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>`,
+  // Planning: a route of waypoints, ending in an arrow (the plan's orders).
+  bluefor: `<g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="18.5" r="2.2"/><path d="M6.8 16.8 11 12.5 14 14 19.5 7.5" stroke-dasharray="2.2 2.2"/><path d="M15.2 7.2h4.6v4.6"/></g>`,
+  // Sim: play, in a circle (the battle runs).
+  combat: `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 8.2v7.6L16 12Z" fill="currentColor"/>`,
   aar: `<path d="M4 3v17h17" fill="none" stroke="currentColor" stroke-width="1.6"/><g fill="currentColor"><rect x="7" y="13" width="2.4" height="6"/><rect x="11" y="9" width="2.4" height="10"/><rect x="15" y="5" width="2.4" height="14"/><rect x="19" y="10" width="1.6" height="9"/></g>`,
 };
 

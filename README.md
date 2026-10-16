@@ -106,8 +106,10 @@ Next says what is missing, and the side panel says the same next to the stage's 
 
 1. **Terrain.** Search for a place, enter a latitude and longitude in decimal degrees (e.g.
    `38.5223`, `-77.2934`; pasting "lat, lon" into the first field works), or use your current
-   position; then **Generate battlefield**. The new battlefield is then selected and previewed on
-   the map, so you can check it before **Open battlefield**. **Cancel** stops it; buildings come
+   position: choosing a search result, pressing **Use** or using your current position starts
+   generating the battlefield at once. The new battlefield is then selected and previewed on
+   the map, so you can check it before **Open battlefield**, which is always the stage's
+   primary button. **Cancel** stops it; buildings come
    from Overture Maps, or from OpenStreetMap when Overture cannot be reached; if OpenStreetMap is
    unavailable you can retry or continue without it. Or select a **saved battlefield** (no
    network needed; double-click to open it; the bin beside it deletes it, on a second click): it
@@ -121,7 +123,10 @@ Next says what is missing, and the side panel says the same next to the stage's 
    buttons), one per click. Drag a squad to move it and the white knob to turn it; rename it,
    change its organization or formation in the side panel. Soldiers that would stand in water or
    a building step out to the nearest clear ground. Give OPFOR its plans: select an OPFOR squad,
-   press **M**, **A**, **W** or **B** (Move, Attack, Withdraw, Ambush) and click the map once per order. The
+   press **M**, **A**, **W** or **B** (Move, Attack, Withdraw, Ambush) and click the map once per order.
+   A Move clicked on a road goes along the roads: it becomes a Move to where the squad joins the
+   nearest road, one to each turn of the road, and one to the point clicked (OPFOR only;
+   [ADR 0043](docs/adr/0043-bridge-and-road-navigation.md)). The
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
@@ -140,7 +145,9 @@ Next says what is missing, and the side panel says the same next to the stage's 
    kill zone (or getting through it, or has found it), steady and accurate until fired upon,
    the enemy surprised; it fights until the enemy is down and
    waits there for new orders ([docs](docs/behavior-lab/force-on-force/08-ambush.md)).
-4. **Combat** ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)). The
+4. **Sim**, Combat ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)),
+   from **Simulate →** in planning. The header labels the stages Terrain, Setup, Planning, Sim
+   and AAR. Going back to an earlier stage during a battle asks first, then discards it. The
    battle starts paused: **Space** plays and pauses, ½× to 32× sets the speed. Select any squad,
    of either side, and give it orders live: **M**, **A**, **W** or **B**, then click (an ambush:
    its position, then its kill zone, **Set kill zone**); **Replace plan**

@@ -330,7 +330,7 @@ export function startBattlefieldSelection(
     blocked: (reason) => {
       notify(
         selection.kind === 'location'
-          ? 'Generate the battlefield first: a new location has no terrain yet.'
+          ? 'Wait for the battlefield to be generated: a new location has no terrain yet.'
           : reason,
       );
     },
@@ -380,15 +380,19 @@ export function startBattlefieldSelection(
         : 'A new battlefield can be previewed once it is generated.'
       : 'Select a saved battlefield to preview it here.';
 
-  /** The one primary action: open the selection, or generate a new location. */
+  /**
+   * The one primary action, always Open battlefield: a new location is
+   * generated as soon as it is chosen, and opened once it is (pressed before
+   * then, after a failed or cancelled generation, it generates it again).
+   */
   const updatePrimary = () => {
     const button = ui('primary');
-    const label = selection.kind === 'location' ? 'Generate battlefield' : 'Open battlefield →';
+    const label = 'Open battlefield →';
     const reason =
       selection.kind === 'none'
-        ? 'Select a battlefield first: a saved one, or generate a new one.'
+        ? 'Select a battlefield first: a saved one, or find a place or enter a position to generate a new one.'
         : selection.kind === 'location' && generating
-          ? 'Generating…'
+          ? 'Generating the battlefield…'
           : null;
     button.textContent = label;
     button.setAttribute('aria-disabled', String(reason !== null));
@@ -437,7 +441,13 @@ export function startBattlefieldSelection(
       return;
     }
     positionMessage(null);
+    // A new choice replaces one still being generated.
+    const previous = generating;
+    generating = null;
+    previous?.abort();
     select({ kind: 'location', position, name });
+    // Chosen, it is generated at once.
+    generate(false);
   };
   const positionMessage = (text: string | null) => {
     ui('position-message').hidden = text === null;
@@ -605,7 +615,7 @@ export function startBattlefieldSelection(
       signal: controller.signal,
       allowMissingOsm,
       onProgress: (p) => {
-        if (disposed) return;
+        if (disposed || generating !== controller) return;
         lastStep = p.step;
         renderSteps(p.step);
         show('message', escapeHtml(p.message));
@@ -620,11 +630,14 @@ export function startBattlefieldSelection(
         ui('progress').hidden = true;
         ui('cancel').hidden = true;
         notify(`${pkg.name} is ready. Check it on the map, then choose Open battlefield.`);
+        // Replaced by a newer choice: that one goes on.
+        if (generating !== controller) return;
         await refresh(pkg.id);
         generating = null;
         if (live()) updatePrimary();
       })
       .catch((error: unknown) => {
+        if (generating !== controller) return;
         generating = null;
         if (disposed) return;
         ui('cancel').hidden = true;
