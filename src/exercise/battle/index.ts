@@ -16,6 +16,10 @@ export {
   type BattleSquad,
   type ClearedStart,
   type SquadSpec,
+  ANTI_TANK_LOADOUTS,
+  antiTankLoadoutOf,
+  antiTankWeapons,
+  type AntiTankLoadout,
 } from './battle';
 export {
   ACTIONS_ON_HINTS,
@@ -73,6 +77,7 @@ export {
   setSeed,
   setSquadFacing,
   setSquadFormation,
+  setSquadAntiTank,
   setSquadOrganization,
   soldierStarts,
   squadPlacementProblem,
@@ -104,7 +109,9 @@ export {
   VEHICLE_KINDS,
   VEHICLE_LABELS,
   vehicleLabel,
+  vehicleShortName,
   vehiclesOf,
   type PlannedVehicle,
   type RouteWaypoint,
 } from './vehicles';
+export { RANGE_SCENARIOS, rangeTerrain, type RangeScenario } from './range-scenarios';

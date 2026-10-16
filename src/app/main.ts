@@ -465,7 +465,8 @@ async function main(root: HTMLElement): Promise<void> {
 installFeedbackButton();
 // The Behavior Lab (docs/behavior-lab/04) has its own address and is loaded
 // only there: nothing else in the game imports it.
-// The Force-on-Force Lab (docs/behavior-lab/force-on-force) likewise.
+// The Force-on-Force Lab (docs/behavior-lab/force-on-force) likewise, and the
+// combined-arms range (docs/combined-arms.md §14).
 const start = window.location.hash.startsWith('#behavior-lab')
   ? import('#view3d/behavior-lab').then(({ startBehaviorLab }) => {
       startBehaviorLab(app);
@@ -474,7 +475,9 @@ const start = window.location.hash.startsWith('#behavior-lab')
     ? import('#view3d/force-on-force').then(({ startForceOnForceLab }) => {
         startForceOnForceLab(app);
       })
-    : main(app);
+    : window.location.hash.startsWith('#combined-arms')
+      ? import('./range/range').then(({ startCombinedArmsRange }) => startCombinedArmsRange(app))
+      : main(app);
 start.catch((error: unknown) => {
   showFatal(app, error instanceof Error ? error.message : String(error));
 });

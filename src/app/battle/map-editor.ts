@@ -14,6 +14,10 @@ import {
   type Side,
   type TerrainDataset,
   type Vec2,
+  builtInCatalog,
+  platformOf,
+  type PlatformSpec,
+  type VehicleCondition,
 } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { Planner } from './planner';
@@ -428,6 +432,8 @@ function drawVehicles(
   for (const v of vehicles) {
     const isSelected = selection.vehicleId === v.id;
     const c = at(toVec(v.position));
+    const heading = (v.facingDeg * Math.PI) / 180;
+    if (!perspective) vehicleHull(ctx, at, toVec(v.position), heading, v.kind, v.side, heading);
     const knob = knobOf(v);
     if (knob) drawKnob(ctx, c, knob);
     const issue = issues.some((i) => i.vehicleId === v.id && i.orderIndex === null);
@@ -439,6 +445,7 @@ function drawVehicles(
       issue,
       perspective,
       pxPerMetre(at, toVec(v.position)),
+      v.kind,
     );
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;
@@ -486,6 +493,8 @@ export function vehicleMarker(
   issue: boolean,
   perspective: boolean,
   pxPerM = 0,
+  kind = 'm113',
+  condition: VehicleCondition = 'operational',
 ): Vec2 {
   const s = vehicleSymbolAt(c, perspective, pxPerM);
   if (perspective) {
@@ -502,14 +511,104 @@ export function vehicleMarker(
     ctx.stroke();
     ctx.restore();
   }
-  vehicleSymbol(ctx, s, side, isSelected, issue);
+  vehicleSymbol(ctx, s, side, isSelected, issue, kind, condition);
   return s;
+}
+
+/** A platform by id (an unknown one: the M113's, to draw something). */
+function platformFor(kind: string): PlatformSpec {
+  return builtInCatalog().platforms.get(kind) ?? platformOf(builtInCatalog(), 'm113');
+}
+
+/** Below this scale (screen px per metre) a vehicle is its symbol only, without its hull drawn. */
+const HULL_MIN_PX_PER_M = 1.2;
+
+/**
+ * A vehicle's hull on the 2D map at its true size (when the map is zoomed in
+ * enough to show it): its footprint turned to its heading, a notch at its
+ * front, and its main weapon's line where its mount points (`gunAzimuth`,
+ * grid, radians; `null`: none). Destroyed, charred.
+ */
+export function vehicleHull(
+  ctx: CanvasRenderingContext2D,
+  at: (p: Vec2) => Vec2,
+  centre: Vec2,
+  heading: number,
+  kind: string,
+  side: Side,
+  gunAzimuth: number | null,
+  condition: VehicleCondition = 'operational',
+): void {
+  if (pxPerMetre(at, centre) < HULL_MIN_PX_PER_M) return;
+  const p = platformFor(kind);
+  const l = p.dimensions.lengthM / 2;
+  const w = p.dimensions.widthM / 2;
+  const fx = Math.sin(heading);
+  const fy = Math.cos(heading);
+  // Right of forward (fx, fy) is (fy, −fx).
+  const corner = (a: number, r: number) =>
+    at({ x: centre.x + a * fx + r * fy, y: centre.y + a * fy - r * fx });
+  const outline = [corner(l, -w), corner(l, w), corner(-l, w), corner(-l, -w)];
+  const dead = condition === 'destroyed';
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = dead
+    ? '#3a3330'
+    : side === 'BLUEFOR'
+      ? 'rgba(80, 150, 220, 0.55)'
+      : 'rgba(220, 90, 80, 0.55)';
+  ctx.strokeStyle = OUTLINE;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  outline.forEach((q, i) => {
+    if (i === 0) ctx.moveTo(q.x, q.y);
+    else ctx.lineTo(q.x, q.y);
+  });
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Its front: a short bar across the bow.
+  const b0 = corner(l * 0.8, -w * 0.8);
+  const b1 = corner(l * 0.8, w * 0.8);
+  ctx.beginPath();
+  ctx.moveTo(b0.x, b0.y);
+  ctx.lineTo(b1.x, b1.y);
+  ctx.stroke();
+  if (gunAzimuth !== null && !dead) {
+    const gun = p.weapons[0];
+    const mount = gun ? p.mounts.find((m) => m.id === gun.mount) : undefined;
+    const pivot = mount?.parent === null ? mount.pivot : { forward: 0, right: 0 };
+    const length = Math.max(2.5, (gun?.muzzle.forward ?? 2) + (mount?.kind === 'turret' ? 0 : 0.5));
+    const px = centre.x + pivot.forward * fx + pivot.right * fy;
+    const py = centre.y + pivot.forward * fy - pivot.right * fx;
+    const a = at({ x: px, y: py });
+    const e = at({ x: px + Math.sin(gunAzimuth) * length, y: py + Math.cos(gunAzimuth) * length });
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = OUTLINE;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#f2f2ea';
+    ctx.stroke();
+    if (mount?.kind === 'turret') {
+      ctx.fillStyle = '#f2f2ea';
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, Math.max(2, pxPerMetre(at, centre) * 0.8), 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 /**
  * A vehicle's symbol (APP-6 / MIL-STD-2525 style): the frame of its side (a
- * rectangle friendly, a diamond hostile) holding an armoured personnel
- * carrier: the infantry cross over the oval of tracks.
+ * rectangle friendly, a diamond hostile) holding its role: armour (a tank)
+ * the oval of tracks; mechanized infantry (an APC, an IFV) the infantry
+ * cross over the oval. Its condition: a mission kill struck through, a
+ * destroyed one crossed out and greyed, a damaged one with an orange mark.
  */
 export function vehicleSymbol(
   ctx: CanvasRenderingContext2D,
@@ -517,14 +616,17 @@ export function vehicleSymbol(
   side: Side,
   isSelected: boolean,
   issue = false,
+  kind = 'm113',
+  condition: VehicleCondition = 'operational',
 ): void {
+  const tank = platformFor(kind).targetClass === 'heavyArmor';
   const color = SIDE_COLORS[side];
   const w = 13;
   const h = 9;
   ctx.save();
   ctx.lineWidth = isSelected ? 2.5 : 1.5;
   ctx.strokeStyle = isSelected ? '#fff' : OUTLINE;
-  ctx.fillStyle = color;
+  ctx.fillStyle = condition === 'destroyed' ? '#5d6064' : color;
   ctx.beginPath();
   if (side === 'BLUEFOR') ctx.rect(c.x - w, c.y - h, 2 * w, 2 * h);
   else {
@@ -538,19 +640,41 @@ export function vehicleSymbol(
   ctx.stroke();
   ctx.lineWidth = 1.3;
   ctx.strokeStyle = OUTLINE;
-  // Tracks: a long oval low in the frame.
+  // Tracks: a long oval (low in the frame, under the infantry's cross; centred for armour).
   ctx.beginPath();
   const ow = side === 'BLUEFOR' ? 8.5 : 6.5;
-  ctx.ellipse(c.x, c.y + 3, ow, 2.6, 0, 0, 2 * Math.PI);
+  ctx.ellipse(c.x, tank ? c.y : c.y + 3, ow, tank ? 3.6 : 2.6, 0, 0, 2 * Math.PI);
   ctx.stroke();
-  // Infantry: a cross above it.
-  ctx.beginPath();
-  const cw = side === 'BLUEFOR' ? 7 : 5;
-  ctx.moveTo(c.x - cw, c.y - 6);
-  ctx.lineTo(c.x + cw, c.y - 0.5);
-  ctx.moveTo(c.x + cw, c.y - 6);
-  ctx.lineTo(c.x - cw, c.y - 0.5);
-  ctx.stroke();
+  if (!tank) {
+    // Infantry: a cross above it.
+    ctx.beginPath();
+    const cw = side === 'BLUEFOR' ? 7 : 5;
+    ctx.moveTo(c.x - cw, c.y - 6);
+    ctx.lineTo(c.x + cw, c.y - 0.5);
+    ctx.moveTo(c.x + cw, c.y - 6);
+    ctx.lineTo(c.x - cw, c.y - 0.5);
+    ctx.stroke();
+  }
+  if (condition === 'destroyed' || condition === 'missionKill') {
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#111';
+    ctx.beginPath();
+    ctx.moveTo(c.x - 13, c.y + 11);
+    ctx.lineTo(c.x + 13, c.y - 11);
+    if (condition === 'destroyed') {
+      ctx.moveTo(c.x - 13, c.y - 11);
+      ctx.lineTo(c.x + 13, c.y + 11);
+    }
+    ctx.stroke();
+  } else if (condition === 'damaged') {
+    ctx.fillStyle = '#ff9a2e';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(c.x + 12, c.y - 9, 3.5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
+  }
   ctx.restore();
   if (issue) ring(ctx, c, 20);
 }

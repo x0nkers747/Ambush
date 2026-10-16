@@ -169,6 +169,9 @@ export function chooseEngagement(
     if (!same || o.utility > same.utility + 1e-12) same = o;
   }
   if (!same) return best;
+  // Its weapon too: kept (a coaxial gun reloading its belt) unless another is markedly better.
+  const kept = options.find((o) => o.targetId === current.targetId && o.weapon === current.weapon);
+  if (kept && same !== kept && same.utility <= kept.utility * config.switchFactor) same = kept;
   if (t < current.reassessAt - 1e-9) return same;
   return best.targetId !== same.targetId && best.utility > same.utility * config.switchFactor
     ? best

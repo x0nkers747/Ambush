@@ -11,6 +11,8 @@ import {
   renameVehicle,
   setVehicleFacing,
   vehicleLabel,
+  vehicleShortName,
+  VEHICLE_KINDS,
   vehiclesOf,
   type PlannedVehicle,
   formationsForOrganization,
@@ -27,6 +29,9 @@ import {
   setSeed,
   setSquadFacing,
   setSquadFormation,
+  setSquadAntiTank,
+  ANTI_TANK_LOADOUTS,
+  type AntiTankLoadout,
   setSquadOrganization,
   SQUAD_ORGANIZATIONS,
   squadPlacementProblem,
@@ -75,7 +80,7 @@ import {
 } from '../shell';
 import { STAGE_NAMES, type WorkflowRules } from '../workflow';
 import { createCombat, type Combat, type CombatSpeed } from './combat';
-import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status';
+import type { SquadStatus, VehicleStatus } from './status';
 import {
   createCombatMapEditor,
   pendingAmbush,
@@ -100,6 +105,7 @@ import {
   combatRosterHtml,
   combatSquadHtml,
   combatVehicleHtml,
+  vehicleDiagnosticsHtml,
   combatStatusRowsHtml,
   combatToolsHtml,
 } from './combat-panel';
@@ -134,6 +140,21 @@ import {
 // the same editor), and a side panel: the stage's tools, the selected squad
 // and its plan, the roster by force, and the scenario. Every edit goes
 // through the planner (planner.ts) and is saved as it is made.
+
+/** A squad's anti-tank weapons in words (docs/combined-arms.md §9). */
+const ANTI_TANK_TEXT: Readonly<Record<AntiTankLoadout | 'default', string>> = {
+  default: 'By default (rockets if the enemy has vehicles)',
+  none: 'None',
+  rockets: 'Rockets (AT4 / RPG-7)',
+  rocketsAndMissile: 'Rockets and a missile (Javelin / 9K111)',
+};
+const antiTankOptions = (current: AntiTankLoadout | undefined): string =>
+  (['default', ...ANTI_TANK_LOADOUTS] as const)
+    .map(
+      (k) =>
+        `<option value="${k}"${(current ?? 'default') === k ? ' selected' : ''}>${escapeHtml(ANTI_TANK_TEXT[k])}</option>`,
+    )
+    .join('');
 
 export interface BattlePageOptions {
   /** Shown in the header: the battlefield's name. */
@@ -556,6 +577,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         vehicles: (inCombat()?.vehicles() ?? inReview()?.vehicles() ?? []).map((v) => ({
           id: v.id,
           side: v.side,
+          kind: v.kind,
         })),
       };
     }
@@ -578,7 +600,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       units,
       clock: { log: f.log, combatLog: [], seconds: 0 },
       weapons: f.weapons,
-      vehicles: f.vehicles.filter((v) => !hidden(v.side)).map((v) => ({ id: v.id, side: v.side })),
+      vehicles: f.vehicles
+        .filter((v) => !hidden(v.side))
+        .map((v) => ({ id: v.id, side: v.side, kind: v.kind })),
     };
   };
   const showViewMode = () => {
@@ -993,7 +1017,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (now.kind === 'order' && t.kind === 'order') return now.order === t.order;
     if (now.kind === 'place' && t.kind === 'place')
       return now.side === t.side && now.organization === t.organization;
-    if (now.kind === 'placeVehicle' && t.kind === 'placeVehicle') return now.side === t.side;
+    if (now.kind === 'placeVehicle' && t.kind === 'placeVehicle')
+      return now.side === t.side && (now.vehicle ?? 'm113') === (t.vehicle ?? 'm113');
     return true;
   };
   const toolButton = (t: PlannerTool, label: string, title: string, extra = '') =>
@@ -1053,12 +1078,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
                 side,
               ) => `<div class="tool-grid place-tools" role="group" aria-label="Place ${side} vehicles">
               <span class="place-side ${sideClass(side)}">${side}</span>
-              ${toolButton(
-                { kind: 'placeVehicle', side },
-                vehicleLabel('m113'),
-                `Click the map to place a ${side} M113 armoured personnel carrier`,
-                sideClass(side),
-              )}
+              ${VEHICLE_KINDS.map((vehicle) =>
+                toolButton(
+                  { kind: 'placeVehicle', side, vehicle },
+                  vehicleShortName(vehicle),
+                  `Click the map to place a ${side} ${vehicleLabel(vehicle)}`,
+                  sideClass(side),
+                ),
+              ).join('')}
             </div>`,
             )
             .join('')}`;
@@ -1078,7 +1105,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const selected = planner.selectedSquad;
     if (t.kind === 'place')
       return `Click the map to place a ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}; Esc to stop.`;
-    if (t.kind === 'placeVehicle') return `Click the map to place a ${t.side} M113.`;
+    if (t.kind === 'placeVehicle')
+      return `Click the map to place a ${t.side} ${vehicleLabel(t.vehicle ?? 'm113')}.`;
     const car = planner.selectedVehicle;
     if (t.kind === 'order' && car) {
       if (!planner.canRoute(car)) return 'Orders are given in Planning.';
@@ -1167,6 +1195,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           placing || planning
             ? `<select data-act="formation" aria-label="Formation">${formationOptions}</select>`
             : escapeHtml(formations.find((f) => f.id === formation)?.name ?? formation)
+        }</dd>
+        <dt>Anti-tank</dt><dd>${
+          placing
+            ? `<select data-act="anti-tank" aria-label="Anti-tank weapons">${antiTankOptions(s.antiTank)}</select>`
+            : escapeHtml(ANTI_TANK_TEXT[s.antiTank ?? 'default'])
         }</dd>
         <dt>Facing</dt><dd>${
           placing || planning
@@ -1286,10 +1319,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         <span class="side-badge">${v.side}</span>
         <span class="squad-name">${escapeHtml(v.name)}</span>
       </div>
-      <dl class="kv">
-        <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
-        <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
-      </dl>
+      ${vehicleDiagnosticsHtml(v, new Map(c.vehicles().map((x) => [x.id, x.name])))}
       <h3>Route${route.length > 0 ? ` (${String(route.length)} waypoint${route.length === 1 ? '' : 's'})` : ''}</h3>
       ${
         route.length === 0
@@ -1860,6 +1890,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       case 'formation':
         if (s) planner.edit((d) => setSquadFormation(o.terrain, d, s.id, value));
         break;
+      case 'anti-tank':
+        if (s)
+          planner.edit((d) =>
+            setSquadAntiTank(d, s.id, value === 'default' ? null : (value as AntiTankLoadout)),
+          );
+        break;
       case 'facing':
         if (s) planner.edit((d) => setSquadFacing(o.terrain, d, s.id, Number(value)));
         break;
@@ -2017,7 +2053,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       t.kind === 'place'
         ? `Placing ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}s`
         : t.kind === 'placeVehicle'
-          ? `Placing a ${t.side} M113`
+          ? `Placing a ${t.side} ${vehicleShortName(t.vehicle ?? 'm113')}`
           : t.kind === 'order'
             ? `${ORDER_LABELS[t.order]} orders`
             : '',
@@ -2153,7 +2189,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     setHtml(
       ui('squad'),
       car
-        ? combatVehicleHtml(car)
+        ? combatVehicleHtml(car, new Map(r.vehicles().map((x) => [x.id, x.name])))
         : combatSquadHtml(r.squad(combatUi.selected)) + phasesHtml(r, combatUi.selected),
     );
     setHtml(ui('roster'), combatRosterHtml(r, combatUi));

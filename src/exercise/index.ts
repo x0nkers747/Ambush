@@ -3,13 +3,22 @@ export {
   combatEventOf,
   type CombatEvent,
   type GrenadeImpactEvent,
+  type HeavyShotEvent,
+  type MissileArrivedEvent,
   type ShotFiredEvent,
+  type VehicleStruckEvent,
 } from './combat-events';
 export { DEMO_TERRAIN } from './demo-terrain';
 export {
+  ARTICULATION_STRIDE,
   createMotionRecorder,
+  emptyArticulation,
   emptyMotionSample,
+  MAX_LOGGED_MOUNTS,
   motionMovers,
+  readArticulation,
+  writeArticulation,
+  type ArticulationSample,
   type MotionLog,
   type MotionRecorder,
   type MotionSample,

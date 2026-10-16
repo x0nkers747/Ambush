@@ -16,7 +16,13 @@ import {
   WebGLRenderer,
 } from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { groundFieldInput, isOnTerrain, surfaceHeightAt, type TerrainDataset } from '#sim';
+import {
+  COMBAT_WEAPONS,
+  groundFieldInput,
+  isOnTerrain,
+  surfaceHeightAt,
+  type TerrainDataset,
+} from '#sim';
 import {
   compileField,
   createSurface,
@@ -52,6 +58,7 @@ import { createEarthworksLayer, type ViewEarthwork } from './earthworks';
 import { createVehicleLayer, type ViewVehicle } from './vehicles';
 import { createImpactLayer } from './impacts';
 import { createTracerLayer } from './tracers';
+import { createHeavyEffectsLayer } from './heavy-effects';
 import { createMarkerLayer } from './markers';
 import {
   detectQuality,
@@ -349,6 +356,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   scene.add(impacts.group);
   const tracers = createTracerLayer();
   scene.add(tracers.group);
+  // Combined arms' fire, missiles, impacts and burning wrecks (docs/combined-arms.md §11).
+  const weaponKinds = new Map(COMBAT_WEAPONS.map((w) => [w.id, w.kind as string]));
+  const heavy = createHeavyEffectsLayer((w) => weaponKinds.get(w) ?? 'machineGun');
+  scene.add(heavy.group);
   const aftermath = createAftermath();
   /** A stand-in crowd for measuring (`ambushBenchCharacters`), replacing the soldiers while set. */
   let bench: { crowd: BenchCrowd; startMs: number } | null = null;
@@ -863,9 +874,11 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
           surfaceAt,
           eye.position,
         );
+        heavy.update(figures.clock.combatLog, figures.clock.seconds, vehicles.wrecks, surfaceAt);
       } else {
         impacts.update([], 0, surfaceAt, eye.position);
         tracers.update(NO_SOLDIERS.log, [], 0, surfaceAt, eye.position);
+        heavy.update([], 0, [], surfaceAt);
       }
       const drawing = performance.now();
       renderer.render(scene, eye);
@@ -948,6 +961,7 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       earthworks.dispose();
       vehicles.dispose();
       tracers.dispose();
+      heavy.dispose();
       characters?.dispose();
       sky.geometry.dispose();
       sky.material.dispose();

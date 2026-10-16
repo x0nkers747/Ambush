@@ -175,8 +175,13 @@ export class SoldierMotion {
     if (combatLog.length < this.combatSeen) this.combat = { shots: [], downAt: -1, hitBy: null };
     for (let i = Math.max(0, this.combatSeen); i < combatLog.length; i += 1) {
       const e = combatLog[i];
-      // A grenade fired is a shot too: he aims and fires.
-      if ((e?.type === 'shotFired' || e?.type === 'grenadeImpact') && e.shooterId === this.id)
+      // A grenade or an anti-tank weapon fired is a shot too: he aims and fires.
+      if (
+        (e?.type === 'shotFired' ||
+          e?.type === 'grenadeImpact' ||
+          (e?.type === 'heavyShot' && e.shooter === 'soldier')) &&
+        e.shooterId === this.id
+      )
         this.combat.shots.push(e.atSeconds);
       if (e?.type === 'soldierIncapacitated' && e.soldierId === this.id)
         this.combat.downAt = e.atSeconds;

@@ -40,6 +40,7 @@ import {
   type SoldierId,
   type TerrainDataset,
   type Vec2,
+  type VehicleKind,
 } from '#sim';
 import type { WorkflowRules, WorkflowStage } from '../workflow';
 
@@ -67,8 +68,8 @@ export type PlannerTool =
   | { readonly kind: 'killZone' }
   /** The next click sets the selected defend order's direction (its sector's facing). */
   | { readonly kind: 'sector' }
-  /** Place a vehicle of a side (Scenario Setup; docs/vehicles.md). */
-  | { readonly kind: 'placeVehicle'; readonly side: Side };
+  /** Place a vehicle of a side and platform (Scenario Setup; docs/vehicles.md); default an M113. */
+  | { readonly kind: 'placeVehicle'; readonly side: Side; readonly vehicle?: VehicleKind };
 
 export interface PlannerSelection {
   readonly squadId: string | null;
@@ -207,6 +208,8 @@ export interface StartVehicle {
   readonly side: Side;
   readonly position: { readonly x: number; readonly y: number; readonly z: number };
   readonly heading: number;
+  /** Its platform (`m113`, `m1a1`…). */
+  readonly kind: string;
 }
 
 /** What the message at the bottom of the map says while an ambush's or defence's second click is awaited. */
@@ -347,6 +350,7 @@ export function createPlanner(o: PlannerOptions): Planner {
         side: v.side,
         position: { x: v.position.x, y: v.position.y, z: v.position.z },
         heading: v.heading,
+        kind: v.kind,
       })),
     };
   };
@@ -491,9 +495,10 @@ export function createPlanner(o: PlannerOptions): Planner {
     click(point) {
       if (tool.kind === 'placeVehicle') {
         const { side } = tool;
+        const kind = tool.vehicle ?? 'm113';
         let id: string | undefined;
         const placed = apply((d) => {
-          const result = addVehicle(terrain, d, side, point);
+          const result = addVehicle(terrain, d, side, point, undefined, kind);
           id = result.vehicleId;
           return result;
         }, true);

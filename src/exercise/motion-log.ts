@@ -1,4 +1,13 @@
-import type { DeepReadonly, Posture, SimState, SoldierId, SoldierStatus } from '#sim';
+import {
+  conditionOf,
+  type DeepReadonly,
+  type Posture,
+  type SimState,
+  type SoldierId,
+  type SoldierStatus,
+  type VehicleCombat,
+  type VehicleCondition,
+} from '#sim';
 
 // The soldiers' motion at every tick of a battle (docs/character-animation.md):
 // where each stood, which way it faced, its posture and status, from the
@@ -12,7 +21,73 @@ import type { DeepReadonly, Posture, SimState, SoldierId, SoldierStatus } from '
 //
 // Vehicles (docs/vehicles.md) are recorded after the soldiers, as movers of
 // their own: where each is, its heading as the azimuth, always standing and
-// active (`motionMovers`).
+// active (`motionMovers`). Each vehicle's articulation is recorded beside
+// (docs/combined-arms.md §11): its mounts' traverse and elevation, its
+// condition, immobilized and burning, so the views pose turrets and show
+// damage from the log alone, live and in the review alike.
+
+/** Mounts recorded per vehicle (their azimuth and elevation, in platform order). */
+export const MAX_LOGGED_MOUNTS = 4;
+/** Numbers per vehicle per tick: two per mount, then its condition and its flags. */
+export const ARTICULATION_STRIDE = MAX_LOGGED_MOUNTS * 2 + 2;
+const CONDITIONS: readonly VehicleCondition[] = [
+  'operational',
+  'damaged',
+  'missionKill',
+  'destroyed',
+];
+
+/** A vehicle's articulation at one tick. */
+export interface ArticulationSample {
+  /** Azimuth (rad, from its parent's forward, clockwise) and elevation of each mount, in pairs. */
+  readonly mounts: Float64Array;
+  condition: VehicleCondition;
+  immobilized: boolean;
+  burning: boolean;
+}
+
+export const emptyArticulation = (): ArticulationSample => ({
+  mounts: new Float64Array(MAX_LOGGED_MOUNTS * 2),
+  condition: 'operational',
+  immobilized: false,
+  burning: false,
+});
+
+/** Writes the state's vehicles' articulation into `out` from `at` (`ARTICULATION_STRIDE` each). */
+export function writeArticulation(
+  state: DeepReadonly<SimState>,
+  tickRateHz: number,
+  out: Float32Array,
+  at: number,
+): void {
+  const now = state.tick / tickRateHz;
+  (state.vehicles ?? []).forEach((v, i) => {
+    const o = at + i * ARTICULATION_STRIDE;
+    for (let m = 0; m < MAX_LOGGED_MOUNTS; m += 1) {
+      const mount = v.combat.mounts[m];
+      out[o + m * 2] = mount?.azimuth ?? 0;
+      out[o + m * 2 + 1] = mount?.elevation ?? 0;
+    }
+    const d = v.combat.damage;
+    out[o + MAX_LOGGED_MOUNTS * 2] = CONDITIONS.indexOf(conditionOf(v.combat as VehicleCombat));
+    out[o + MAX_LOGGED_MOUNTS * 2 + 1] =
+      (d.mobility ? 1 : 0) | (d.burningUntil !== null && now < d.burningUntil ? 2 : 0);
+  });
+}
+
+/** Reads one vehicle's articulation from `from` at `at`. */
+export function readArticulation(
+  from: ArrayLike<number>,
+  at: number,
+  out: ArticulationSample,
+): ArticulationSample {
+  for (let m = 0; m < MAX_LOGGED_MOUNTS * 2; m += 1) out.mounts[m] = from[at + m] ?? 0;
+  out.condition = CONDITIONS[from[at + MAX_LOGGED_MOUNTS * 2] ?? 0] ?? 'operational';
+  const flags = from[at + MAX_LOGGED_MOUNTS * 2 + 1] ?? 0;
+  out.immobilized = (flags & 1) !== 0;
+  out.burning = (flags & 2) !== 0;
+  return out;
+}
 
 const POSTURES: readonly Posture[] = ['standing', 'kneeling', 'prone'];
 const STATUSES: readonly SoldierStatus[] = ['active', 'incapacitated'];
@@ -81,6 +156,12 @@ export interface MotionLog {
   indexOf(id: SoldierId | string): number;
   /** Soldier `index` at `tick`, clamped to the recorded ticks, written into `out`. */
   read(index: number, tick: number, out: MotionSample): MotionSample;
+  /**
+   * The articulation of the vehicle at mover `index` (a vehicle's index in
+   * `soldierIds`) at `tick`, clamped to the recorded ticks; a soldier's or
+   * an unrecorded one: `out` unchanged.
+   */
+  readArticulation(index: number, tick: number, out: ArticulationSample): ArticulationSample;
 }
 
 export interface MotionRecorder extends MotionLog {
@@ -96,12 +177,16 @@ interface Track {
   readonly numbers: Float64Array[];
   /** posture and status codes per tick. */
   readonly codes: Uint8Array[];
+  /** A vehicle's articulation per tick (`ARTICULATION_STRIDE` each). */
+  readonly articulation: Float32Array[];
 }
 
 export function createMotionRecorder(tickRateHz: number): MotionRecorder {
   let soldierIds: SoldierId[] = [];
   let index = new Map<string, number>();
   let tracks: Track[] = [];
+  let soldierCount = 0;
+  const scratch = new Float32Array(ARTICULATION_STRIDE * 64);
   let firstTick = 0;
   let lastTick = -1;
   let epoch = 0;
@@ -109,7 +194,8 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
   const restart = (state: DeepReadonly<SimState>) => {
     soldierIds = motionMovers(state).map((s) => s.id as SoldierId);
     index = new Map(soldierIds.map((id, i) => [id, i]));
-    tracks = soldierIds.map(() => ({ numbers: [], codes: [] }));
+    tracks = soldierIds.map(() => ({ numbers: [], codes: [], articulation: [] }));
+    soldierCount = state.soldiers.length;
     firstTick = state.tick;
     lastTick = state.tick - 1;
     epoch += 1;
@@ -118,6 +204,12 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
   const write = (state: DeepReadonly<SimState>, offset: number) => {
     const chunk = Math.floor(offset / CHUNK);
     const at = offset - chunk * CHUNK;
+    const vehicles = state.vehicles?.length ?? 0;
+    const art =
+      vehicles * ARTICULATION_STRIDE <= scratch.length
+        ? scratch
+        : new Float32Array(vehicles * ARTICULATION_STRIDE);
+    if (vehicles > 0) writeArticulation(state, tickRateHz, art, 0);
     motionMovers(state).forEach((s, i) => {
       const track = tracks[i];
       if (!track) return;
@@ -134,6 +226,14 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
       n[at * 4 + 3] = s.azimuth;
       c[at * 2] = Math.max(0, POSTURES.indexOf(s.posture));
       c[at * 2 + 1] = Math.max(0, STATUSES.indexOf(s.status));
+      const v = i - soldierCount;
+      if (v < 0) return;
+      while (track.articulation.length <= chunk)
+        track.articulation.push(new Float32Array(CHUNK * ARTICULATION_STRIDE));
+      track.articulation[chunk]?.set(
+        art.subarray(v * ARTICULATION_STRIDE, (v + 1) * ARTICULATION_STRIDE),
+        at * ARTICULATION_STRIDE,
+      );
     });
   };
 
@@ -173,6 +273,15 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
       out.posture = POSTURES[c[at * 2] ?? 0] ?? 'standing';
       out.status = STATUSES[c[at * 2 + 1] ?? 0] ?? 'active';
       return out;
+    },
+    readArticulation(i, tick, out) {
+      const track = tracks[i];
+      if (!track || lastTick < firstTick) return out;
+      const offset = Math.min(Math.max(tick, firstTick), lastTick) - firstTick;
+      const chunk = Math.floor(offset / CHUNK);
+      const a = track.articulation[chunk];
+      if (!a) return out;
+      return readArticulation(a, (offset - chunk * CHUNK) * ARTICULATION_STRIDE, out);
     },
     record(state) {
       const followsOn = state.tick === lastTick || state.tick === lastTick + 1;

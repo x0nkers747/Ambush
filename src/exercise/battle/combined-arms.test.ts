@@ -108,9 +108,9 @@ describe('vehicles in a battle', () => {
         tickRateHz: 30,
         squads: [
           BX,
-          squad('O', 'OPFOR', 0, 300, 180, {
+          squad('O', 'OPFOR', 0, 0, 180, {
             antiTank: 'none',
-            plan: [{ kind: 'move', destination: { x: 0, y: -200 } }],
+            plan: [{ kind: 'move', destination: { x: 0, y: -300 } }],
           }),
         ],
         vehicles: [vehicle('A1', 'm1a1', 'BLUEFOR', 0, -500, 0)],

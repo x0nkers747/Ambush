@@ -57,6 +57,10 @@ export const SHOWN_EVENTS: ReadonlySet<SimEvent['type']> = new Set([
   'ammunitionExhausted',
   'soldierIncapacitated',
   'commandRejected',
+  'vehicleFire',
+  'missileImpact',
+  'vehicleHit',
+  'vehicleCondition',
 ]);
 
 /** Seconds between keyframes. */

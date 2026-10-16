@@ -1,4 +1,11 @@
-import { motionMovers, type MotionLog, type MotionSample } from '#exercise';
+import {
+  ARTICULATION_STRIDE,
+  motionMovers,
+  readArticulation,
+  writeArticulation,
+  type MotionLog,
+  type MotionSample,
+} from '#exercise';
 import type { DeepReadonly, Posture, SimState, SoldierId, SoldierStatus } from '#sim';
 
 // Every soldier's motion as compact frames (docs/constructive-simulation/04):
@@ -14,13 +21,27 @@ export const STATUSES: readonly SoldierStatus[] = ['active', 'incapacitated'];
 export const NUMBERS_PER_SOLDIER = 4;
 export const CODES_PER_SOLDIER = 2;
 
-/** Writes `state` (its soldiers, then its vehicles: `motionMovers`) as frame `k` of the arrays. */
+/**
+ * Writes `state` (its soldiers, then its vehicles: `motionMovers`) as frame
+ * `k` of the arrays, and its vehicles' articulation (`articulation`, at
+ * `tickRateHz`) when given.
+ */
 export function writeFrame(
   state: DeepReadonly<SimState>,
   numbers: Float64Array,
   codes: Uint8Array,
   k: number,
+  articulation?: { readonly out: Float32Array; readonly tickRateHz: number },
 ): void {
+  if (articulation) {
+    const v = state.vehicles?.length ?? 0;
+    writeArticulation(
+      state,
+      articulation.tickRateHz,
+      articulation.out,
+      k * v * ARTICULATION_STRIDE,
+    );
+  }
   const movers = motionMovers(state);
   const n = movers.length;
   movers.forEach((s, i) => {
@@ -41,6 +62,8 @@ export interface FrameBatch {
   readonly count: number;
   readonly numbers: Float64Array;
   readonly codes: Uint8Array;
+  /** The vehicles' articulation (`ARTICULATION_STRIDE` per vehicle per frame); absent: none. */
+  readonly articulation?: Float32Array;
 }
 
 export interface FrameLog extends MotionLog {
@@ -48,8 +71,13 @@ export interface FrameLog extends MotionLog {
   add(batch: FrameBatch): void;
 }
 
-export function createFrameLog(tickRateHz: number, soldierIds: readonly SoldierId[]): FrameLog {
+export function createFrameLog(
+  tickRateHz: number,
+  soldierIds: readonly SoldierId[],
+  vehicleCount = 0,
+): FrameLog {
   const n = soldierIds.length;
+  const firstVehicle = n - vehicleCount;
   const index = new Map<string, number>(soldierIds.map((id, i) => [id, i]));
   const batches: FrameBatch[] = [];
   let firstTick = 0;
@@ -92,6 +120,13 @@ export function createFrameLog(tickRateHz: number, soldierIds: readonly SoldierI
           count: batch.count - skip,
           numbers: batch.numbers.subarray(skip * n * NUMBERS_PER_SOLDIER),
           codes: batch.codes.subarray(skip * n * CODES_PER_SOLDIER),
+          ...(batch.articulation
+            ? {
+                articulation: batch.articulation.subarray(
+                  skip * vehicleCount * ARTICULATION_STRIDE,
+                ),
+              }
+            : {}),
         };
       }
       if (batch.count === 0) return;
@@ -118,6 +153,15 @@ export function createFrameLog(tickRateHz: number, soldierIds: readonly SoldierI
       out.posture = POSTURES[b.codes[c] ?? 0] ?? 'standing';
       out.status = STATUSES[b.codes[c + 1] ?? 0] ?? 'active';
       return out;
+    },
+    readArticulation(i, tick, out) {
+      const v = i - firstVehicle;
+      if (lastTick < firstTick || v < 0 || i >= n) return out;
+      const t = Math.min(Math.max(tick, firstTick), lastTick);
+      const b = batchOf(t);
+      if (!b?.articulation) return out;
+      const k = t - b.firstTick;
+      return readArticulation(b.articulation, (k * vehicleCount + v) * ARTICULATION_STRIDE, out);
     },
   };
 }

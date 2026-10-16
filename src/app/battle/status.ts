@@ -413,9 +413,11 @@ export function vehicleStatuses(state: DeepReadonly<SimState>): VehicleStatus[] 
   }));
 }
 
-/** A vehicle's activity in words: "Driving 28 km/h", "Stopped". */
+/** A vehicle's activity in words: "Driving 28 km/h", "Stopped", "Immobilized", "Destroyed". */
 export function vehicleActivity(v: VehicleStatus): string {
+  if (v.condition === 'destroyed') return 'Destroyed';
   const kmh = Math.round(v.speed * 3.6);
+  if (kmh < 1 && v.immobilized) return 'Immobilized';
   if (kmh >= 1) return `Driving ${String(kmh)} km/h`;
   return v.route.length > 0 ? 'Turning' : 'Stopped';
 }

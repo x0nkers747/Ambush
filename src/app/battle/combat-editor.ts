@@ -1,4 +1,4 @@
-import { emptyMotionSample, type MotionLog } from '#exercise';
+import { emptyArticulation, emptyMotionSample, type MotionLog } from '#exercise';
 import {
   addOrder,
   deleteOrder,
@@ -38,6 +38,7 @@ import {
   unitSymbol,
   pxPerMetre,
   routeLine,
+  vehicleHull,
   vehicleMarker,
   vehicleSymbolAt,
   waypoint,
@@ -128,6 +129,8 @@ export function shownPlan(c: BattleDisplay, s: SquadStatus): readonly PlannedOrd
 
 /** How long a burst stays drawn (s of simulation). */
 const BURST_SECONDS = 0.6;
+/** How long a heavy shot's line stays drawn (s of simulation). */
+const HEAVY_SECONDS = 1.2;
 /** How long a grenade shows on the map (s), and its effect radius drawn (m; the M203's). */
 const GRENADE_SECONDS = 2;
 const GRENADE_EFFECT_M = 10;
@@ -160,6 +163,7 @@ export function createCombatMapEditor(
 ): MapEditor {
   let project: ((p: Vec2) => Vec2) | null = null;
   const sample = emptyMotionSample();
+  const articulation = emptyArticulation();
   /** Whether the view drawn last is the 3D view. */
   let perspective = false;
   /** A drag of a live plan: what was pressed, and where the pointer is now. */
@@ -172,16 +176,31 @@ export function createCombatMapEditor(
     const exact = seconds * log.tickRateHz;
     const t0 = Math.floor(exact);
     const f = exact - t0;
-    const out = new Map<string, { x: number; y: number; active: boolean }>();
+    const out = new Map<string, { x: number; y: number; active: boolean; azimuth: number }>();
     log.soldierIds.forEach((id, i) => {
       log.read(i, t0, sample);
       const ax = sample.x;
       const ay = sample.y;
+      const az = sample.azimuth;
       const active = sample.status === 'active';
       log.read(i, t0 + 1, sample);
-      out.set(id, { x: ax + (sample.x - ax) * f, y: ay + (sample.y - ay) * f, active });
+      let turn = sample.azimuth - az;
+      turn -= 2 * Math.PI * Math.round(turn / (2 * Math.PI));
+      out.set(id, {
+        x: ax + (sample.x - ax) * f,
+        y: ay + (sample.y - ay) * f,
+        active,
+        azimuth: az + turn * f,
+      });
     });
     return out;
+  };
+  /** A vehicle's articulation at the time drawn (its mounts and condition), from the motion log. */
+  const articulationOf = (c: BattleDisplay, id: string) => {
+    const log = c.motion;
+    const index = log.indexOf(id);
+    if (index < 0) return null;
+    return log.readArticulation(index, Math.round(c.renderSeconds * log.tickRateHz), articulation);
   };
 
   const squadAt = (screen: Vec2): SquadStatus | null => {
@@ -584,6 +603,55 @@ export function createCombatMapEditor(
       }
       ctx.globalAlpha = 1;
 
+      // Heavy fire of the last moments (vehicles' guns, anti-tank weapons): muzzle to where it
+      // landed, a missile as a dot along its flight until it arrives, a burst where it struck.
+      for (let i = log.length - 1; i >= 0; i -= 1) {
+        const e = log[i];
+        if (!e) continue;
+        if (e.seconds < now - HEAVY_SECONDS) break;
+        if (e.seconds > now || e.event.type !== 'vehicleFire') continue;
+        const ev = e.event;
+        const a = toScreen(ev.from);
+        const b = toScreen(ev.impact);
+        const color = ev.side === 'BLUEFOR' ? '#9fd8ff' : '#ffb0a0';
+        if (ev.missileId !== null && ev.impactAt !== null) {
+          const flight = Math.max(0.05, ev.impactAt - ev.atSeconds);
+          const f = (now - ev.atSeconds) / flight;
+          if (f <= 1) {
+            ctx.globalAlpha = 0.8;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ffd36b';
+            ctx.beginPath();
+            ctx.arc(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 3, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          continue;
+        }
+        const age = now - e.seconds;
+        if (age > HEAVY_SECONDS) continue;
+        ctx.globalAlpha = 1 - age / HEAVY_SECONDS;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = ev.slot === 'main' || ev.shooter === 'soldier' ? 2.5 : 1.5;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        if (ev.hit && ev.target === 'vehicle') {
+          ctx.fillStyle = '#ffc45a';
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, 5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+
       // Grenades of the last moments: an arc from the grenadier to the burst, and its effect radius.
       for (let i = log.length - 1; i >= 0; i -= 1) {
         const e = log[i];
@@ -676,6 +744,14 @@ export function createCombatMapEditor(
       for (const v of c.vehicles()) {
         const isSelected = v.id === ui.selected;
         const ground = where.get(v.id) ?? v.position;
+        const heading = where.get(v.id)?.azimuth ?? v.heading;
+        const art = articulationOf(c, v.id);
+        const condition = art?.condition ?? v.condition;
+        if (!inPerspective) {
+          // Its hull to scale, and its main mount's bearing (the first mount's, on the hull).
+          const turret = art ? (art.mounts[0] ?? 0) : (v.mounts[0]?.azimuth ?? 0);
+          vehicleHull(ctx, toScreen, ground, heading, v.kind, v.side, heading + turret, condition);
+        }
         const p = vehicleMarker(
           ctx,
           toScreen(ground),
@@ -684,6 +760,8 @@ export function createCombatMapEditor(
           false,
           inPerspective,
           pxPerMetre(toScreen, ground),
+          v.kind,
+          condition,
         );
         ctx.textAlign = 'center';
         const label = `${v.name} · ${vehicleActivity(v)}`;

@@ -73,6 +73,8 @@ export const COMBAT_TUNING = {
   maxObservationM: 3000,
   /** A target seen within this is in sight to be laid on and fired at (s). */
   inSightSeconds: 1.5,
+  /** A confirmed target seen within this is followed while it stays in sight (s): its crew tracks it. */
+  trackingSeconds: 15,
   /** A catastrophic kill burns this long (s). */
   burnSeconds: 150,
   /** A target that fired within this is more dangerous (threat × `firingThreatFactor`). */
@@ -583,6 +585,23 @@ function ageVehicleTracks(context: FofContext, vehicles: readonly VehicleState[]
 
 // --- Fire --------------------------------------------------------------------------
 
+/**
+ * A crew follows the confirmed targets it has seen lately while they stay in
+ * sight (a gunner on his target needs no new detection): seen now, a track
+ * is current again where the target is.
+ */
+function keepTracking(context: FofContext, catalog: CombatCatalog, v: VehicleState): void {
+  const t = context.t;
+  for (const track of v.combat.tracks) {
+    const age = t - track.lastSeenAt;
+    if (!track.confirmed || age <= 1e-9 || age > COMBAT_TUNING.trackingSeconds) continue;
+    const target = targetOf(context, track.target, track.targetId);
+    if (!target || vehicleSees(context, catalog, v, target) <= 0) continue;
+    track.lastSeenAt = t;
+    track.lastKnown = { x: target.position.x, y: target.position.y };
+  }
+}
+
 /** A whole number in [min, max], one draw. */
 function drawInt(context: FofContext, r: { readonly min: number; readonly max: number }): number {
   const u = nextFloat(context.state.rng);
@@ -750,6 +769,7 @@ function vehicleFire(
   const hull = { x: v.position.x, y: v.position.y, z: v.position.z, heading: v.heading };
   for (const ws of vc.weapons) updateMountedReload(platform, ws, t);
   if (vc.haltUntil !== null && t >= vc.haltUntil - 1e-9) vc.haltUntil = null;
+  keepTracking(context, catalog, v);
   for (const mount of platform.mounts) {
     if (laidByParent(mount)) continue;
     const ms = vc.mounts.find((m) => m.id === mount.id);

@@ -1,4 +1,4 @@
-import type { CombatEvent } from '#exercise';
+import { ARTICULATION_STRIDE, type CombatEvent } from '#exercise';
 import { createBattle, type BattleCommandOrigin } from '#exercise/battle';
 import {
   soldierId,
@@ -73,16 +73,19 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
     const { squads } = start;
     const state = start.sim.state;
     // Soldiers, then vehicles (`motionMovers`).
-    const motion = createFrameLog(rate, [
-      ...state.soldiers.map((s) => s.id),
-      ...(state.vehicles ?? []).map((v) => soldierId(v.id)),
-    ]);
+    const vehicleCount = state.vehicles?.length ?? 0;
+    const motion = createFrameLog(
+      rate,
+      [...state.soldiers.map((s) => s.id), ...(state.vehicles ?? []).map((v) => soldierId(v.id))],
+      vehicleCount,
+    );
     {
-      const movers = state.soldiers.length + (state.vehicles?.length ?? 0);
+      const movers = state.soldiers.length + vehicleCount;
       const numbers = new Float64Array(movers * NUMBERS_PER_SOLDIER);
       const codes = new Uint8Array(movers * CODES_PER_SOLDIER);
-      writeFrame(state, numbers, codes, 0);
-      motion.add({ firstTick: state.tick, count: 1, numbers, codes });
+      const articulation = new Float32Array(vehicleCount * ARTICULATION_STRIDE);
+      writeFrame(state, numbers, codes, 0, { out: articulation, tickRateHz: rate });
+      motion.add({ firstTick: state.tick, count: 1, numbers, codes, articulation });
     }
     const commands: SimCommand[] = replay ? [...replay.commands] : [];
     const origins: BattleCommandOrigin[] = replay ? [...replay.origins] : [];
@@ -108,6 +111,7 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
           count: batch.frameCount,
           numbers: batch.numbers,
           codes: batch.codes,
+          articulation: batch.articulation,
         });
       for (const e of batch.events) {
         events.push(e);

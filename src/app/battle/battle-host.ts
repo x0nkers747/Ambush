@@ -1,5 +1,5 @@
 import type { BattleReplay, BattleSpec } from '#exercise/battle';
-import { motionMovers } from '#exercise';
+import { ARTICULATION_STRIDE, motionMovers } from '#exercise';
 import type { SimCommand, SimSnapshot, TerrainDataset } from '#sim';
 import { CODES_PER_SOLDIER, NUMBERS_PER_SOLDIER, writeFrame } from './frame-log';
 import {
@@ -54,6 +54,8 @@ export interface HostBatch {
   readonly frameCount: number;
   readonly numbers: Float64Array;
   readonly codes: Uint8Array;
+  /** The vehicles' articulation for the frames (`ARTICULATION_STRIDE` per vehicle per frame). */
+  readonly articulation: Float32Array;
   /** The events shown, since the last batch. */
   readonly events: readonly TimedEvent[];
   /** Per-second state hashes from second `hashesFrom` on. */
@@ -98,14 +100,21 @@ export function createBattleHost(
   let applied: { id: number; tick: number }[] = [];
   /** The next tick whose frame has not been sent. */
   let frameFrom = 0;
-  let frames: { numbers: Float64Array; codes: Uint8Array; count: number } | null = null;
+  let frames: {
+    numbers: Float64Array;
+    codes: Uint8Array;
+    articulation: Float32Array;
+    count: number;
+  } | null = null;
 
   const soldierCount = () => (session ? motionMovers(session.battle.sim.state).length : 0);
+  const vehicleCount = () => session?.battle.sim.state.vehicles?.length ?? 0;
   const newFrames = () => {
     const n = soldierCount();
     return {
       numbers: new Float64Array(MAX_FRAMES * n * NUMBERS_PER_SOLDIER),
       codes: new Uint8Array(MAX_FRAMES * n * CODES_PER_SOLDIER),
+      articulation: new Float32Array(MAX_FRAMES * vehicleCount() * ARTICULATION_STRIDE),
       count: 0,
     };
   };
@@ -113,7 +122,10 @@ export function createBattleHost(
   const frame = () => {
     if (!session) return;
     frames ??= newFrames();
-    writeFrame(session.battle.sim.state, frames.numbers, frames.codes, frames.count);
+    writeFrame(session.battle.sim.state, frames.numbers, frames.codes, frames.count, {
+      out: frames.articulation,
+      tickRateHz: session.battle.spec.tickRateHz,
+    });
     frames.count += 1;
   };
 
@@ -121,9 +133,15 @@ export function createBattleHost(
     if (!session) return;
     const s = session;
     const n = soldierCount();
-    const f = frames ?? { numbers: new Float64Array(0), codes: new Uint8Array(0), count: 0 };
+    const f = frames ?? {
+      numbers: new Float64Array(0),
+      codes: new Uint8Array(0),
+      articulation: new Float32Array(0),
+      count: 0,
+    };
     const numbers = f.numbers.slice(0, f.count * n * NUMBERS_PER_SOLDIER);
     const codes = f.codes.slice(0, f.count * n * CODES_PER_SOLDIER);
+    const articulation = f.articulation.slice(0, f.count * vehicleCount() * ARTICULATION_STRIDE);
     const keyframes = [...s.keyframes].filter(([tick]) => !sentKeyframes.has(tick));
     for (const [tick] of keyframes) sentKeyframes.add(tick);
     const batch: HostBatch = {
@@ -134,6 +152,7 @@ export function createBattleHost(
       frameCount: f.count,
       numbers,
       codes,
+      articulation,
       events: s.events.slice(sentEvents),
       hashesFrom: sentHashes,
       hashes: Array.from(s.hashes.slice(sentHashes), (h) => h ?? null),
@@ -152,7 +171,7 @@ export function createBattleHost(
     frames = null;
     applied = [];
     wantRecording = false;
-    post(batch, [numbers.buffer, codes.buffer]);
+    post(batch, [numbers.buffer, codes.buffer, articulation.buffer]);
   };
 
   const run = () => {

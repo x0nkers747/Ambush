@@ -25,9 +25,11 @@ import {
   type SquadOrganization,
 } from '../forces/forces';
 import {
+  ANTI_TANK_LOADOUTS,
   battleScenario,
   CLEAR_START_SEARCH_M,
   squadSoldierStarts,
+  type AntiTankLoadout,
   type BattleSpec,
   type ClearedStart,
 } from './battle';
@@ -170,6 +172,11 @@ export interface ScenarioSquad {
   /** The way it faces at the start, degrees clockwise from north. */
   readonly facingDeg: number;
   readonly plan: readonly PlannedOrder[];
+  /**
+   * Its anti-tank weapons (docs/combined-arms.md §9); absent: by default
+   * (rockets when the enemy has vehicles), so files from before load as they were.
+   */
+  readonly antiTank?: AntiTankLoadout;
 }
 
 export interface BattleScenarioDefinition {
@@ -485,6 +492,9 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
         ...(roads === true ? { followRoads: true as const } : {}),
       };
     });
+    const antiTank = s['antiTank'];
+    if (antiTank !== undefined && !(ANTI_TANK_LOADOUTS as readonly unknown[]).includes(antiTank))
+      fail(`${what}'s anti-tank weapons are unknown`);
     return {
       id,
       name,
@@ -494,6 +504,7 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
       position: point(s['position'], `${what}'s position`),
       facingDeg: facing,
       plan,
+      ...(antiTank !== undefined ? { antiTank: antiTank as AntiTankLoadout } : {}),
     };
   });
   const vehicles = parseVehicles(d['vehicles'], ids, point, fail);
@@ -728,6 +739,24 @@ export function setSquadOrganization(
     return { ...rest, organization };
   });
   return squadEdit(terrain, next, id);
+}
+
+/** Sets a squad's anti-tank weapons (`null`: back to the default). */
+export function setSquadAntiTank(
+  d: BattleScenarioDefinition,
+  id: string,
+  loadout: AntiTankLoadout | null,
+): BattleEdit {
+  const squad = squadOf(d, id);
+  if (!squad) return refused(`There is no squad ${id}.`);
+  return {
+    ok: true,
+    definition: withSquad(d, id, (s) => {
+      const rest = { ...s };
+      delete rest.antiTank;
+      return loadout === null ? rest : { ...rest, antiTank: loadout };
+    }),
+  };
 }
 
 /** Changes a squad's formation; soldiers then in water or a building are moved clear (with a note). */
@@ -1289,6 +1318,7 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
       position: toVec(s.position),
       facingDeg: s.facingDeg,
       plan: s.plan.map(orderSpecOf),
+      ...(s.antiTank !== undefined ? { antiTank: s.antiTank } : {}),
     })),
     ...(vehiclesOf(d).length > 0 ? { vehicles: vehicleSpecs(d) } : {}),
   };

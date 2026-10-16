@@ -1,4 +1,4 @@
-import { ORDER_LABELS } from '#exercise/battle';
+import { ORDER_LABELS, vehicleLabel } from '#exercise/battle';
 import { ORDER_KINDS, type Side } from '#sim';
 import { escapeHtml } from '../shell';
 import {
@@ -109,8 +109,80 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
     <p class="buttons"><button class="small" data-cact="centre">Centre on map</button></p>`;
 }
 
-/** The selected vehicle's state and route (docs/vehicles.md). */
-export function combatVehicleHtml(v: VehicleStatus): string {
+const CONDITION_TEXT: Readonly<Record<string, string>> = {
+  operational: 'Operational',
+  damaged: 'Damaged',
+  missionKill: 'Knocked out (mission kill)',
+  destroyed: 'Destroyed',
+};
+
+const degrees = (rad: number) => `${String(Math.round((rad * 180) / Math.PI))}°`;
+
+/**
+ * A vehicle's combat diagnostics (docs/combined-arms.md §14): its condition,
+ * crew, mounts' bearings, weapons with their ammunition and readiness, its
+ * targets and its damage.
+ */
+export function vehicleDiagnosticsHtml(
+  v: VehicleStatus,
+  names: ReadonlyMap<string, string> = new Map(),
+): string {
+  const crew = v.crew
+    .map(
+      (c) =>
+        `<span class="${c.state === 'operational' ? '' : 'warn'}">${escapeHtml(c.role)}${c.state === 'operational' ? '' : ` (${escapeHtml(c.state)})`}</span>`,
+    )
+    .join(', ');
+  const mounts = v.mounts
+    .map(
+      (m) =>
+        `${escapeHtml(m.id)} ${degrees(m.azimuth)}${Math.abs(m.elevation) > 0.004 ? ` / ${degrees(m.elevation)} el` : ''}${m.disabled ? ' <span class="warn">disabled</span>' : ''}`,
+    )
+    .join('; ');
+  const weapons = v.weapons
+    .map((w) => {
+      const loads = w.loads
+        .map(
+          (l) =>
+            `${l.ammo === w.ammo ? '<b>' : ''}${escapeHtml(l.ammo)} ${String(l.ready)}+${String(l.stowed)}${l.ammo === w.ammo ? '</b>' : ''}`,
+        )
+        .join(', ');
+      const state = w.disabled
+        ? '<span class="warn">disabled</span>'
+        : w.reloading
+          ? 'reloading'
+          : 'ready';
+      return `<dt>${escapeHtml(w.id)}</dt><dd>${loads} <span class="muted">· ${state} · ${String(w.fired)} fired</span></dd>`;
+    })
+    .join('');
+  const targets = v.engagements
+    .map(
+      (e) =>
+        `${escapeHtml(e.mount)}: ${escapeHtml(names.get(e.targetId) ?? e.targetId)} with ${escapeHtml(e.weapon)} (${escapeHtml(e.ammo)})`,
+    )
+    .join('<br>');
+  const damage = [
+    v.immobilized ? 'immobilized' : '',
+    v.sensors < 1 ? `sights ${String(Math.round(v.sensors * 100))}%` : '',
+    v.hits > 0 ? `${String(v.hits)} hit${v.hits === 1 ? '' : 's'}` : '',
+  ]
+    .filter((x) => x !== '')
+    .join(', ');
+  return `<dl class="kv">
+      <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
+      <dt>Condition</dt><dd class="${v.condition === 'operational' ? '' : 'warn'}">${CONDITION_TEXT[v.condition] ?? v.condition}</dd>
+      <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
+      <dt>Heading</dt><dd>${String(Math.round((v.heading * 180) / Math.PI) % 360).padStart(3, '0')}°</dd>
+      <dt>Crew</dt><dd>${crew}</dd>
+      <dt>Mounts</dt><dd>${mounts || '<span class="muted">none</span>'}</dd>
+      <dt>Targets</dt><dd>${targets || '<span class="muted">none</span>'}</dd>
+      ${weapons}
+      <dt>Damage</dt><dd>${damage || '<span class="muted">none</span>'}</dd>
+    </dl>`;
+}
+
+/** The selected vehicle's state, diagnostics and route (docs/vehicles.md). */
+export function combatVehicleHtml(v: VehicleStatus, names?: ReadonlyMap<string, string>): string {
   const route = v.route
     .map((d) => `<li>Move to ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N</li>`)
     .join('');
@@ -118,11 +190,7 @@ export function combatVehicleHtml(v: VehicleStatus): string {
       <span class="side-badge">${v.side}</span>
       <span class="squad-name">${escapeHtml(v.name)}</span>
     </div>
-    <dl class="kv">
-      <dt>Type</dt><dd>M113 APC (tracked; drives only)</dd>
-      <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
-      <dt>Heading</dt><dd>${String(Math.round((v.heading * 180) / Math.PI) % 360).padStart(3, '0')}°</dd>
-    </dl>
+    ${vehicleDiagnosticsHtml(v, names)}
     <h3>Route</h3>
     ${route ? `<ol class="order-history">${route}</ol>` : '<p class="muted">None: it stays where it is.</p>'}
     <p class="buttons"><button class="small" data-cact="centre">Centre on map</button></p>`;
@@ -218,6 +286,16 @@ export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>)
       return `${ev.soldierId} is out of ${WEAPON_LABELS[ev.weapon]?.toLowerCase() ?? ev.weapon} ammunition`;
     case 'commandRejected':
       return `An order was refused (${ev.reason})`;
+    case 'vehicleFire':
+      // Machine-gun bursts are too many to list; guns, rockets and missiles are.
+      if (ev.slot === 'coax' || ev.slot === 'hmg') return null;
+      return `${name(ev.shooterId)} fired ${ev.ammo} at ${name(ev.targetId)} (${String(Math.round(ev.rangeM))} m)${ev.missileId !== null ? '' : ev.hit ? ': hit' : ': missed'}`;
+    case 'missileImpact':
+      return `${name(ev.shooterId)}'s missile ${ev.reason === 'hit' ? `struck ${name(ev.targetId)}` : ev.reason === 'guidanceLost' ? 'lost its guidance' : 'missed'}`;
+    case 'vehicleHit':
+      return `${name(ev.vehicleId)} hit on its ${ev.zone} (${String(Math.round(ev.penetrationMm))} mm vs ${String(Math.round(ev.protectionMm))} mm): ${ev.perforated ? 'perforated' : 'not perforated'}${ev.catastrophic ? ', destroyed' : ev.mobility ? ', immobilized' : ''}`;
+    case 'vehicleCondition':
+      return `${name(ev.vehicleId)}: ${ev.to === 'missionKill' ? 'knocked out (mission kill)' : ev.to}`;
     default:
       return null;
   }
@@ -225,7 +303,10 @@ export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>)
 
 /** The events up to the time drawn, newest first; `seekable` rows seek the review there. */
 export function combatEventsHtml(c: BattleDisplay, limit = 40, seekable = false): string {
-  const names = new Map(c.battle.squads.map((s) => [s.unitId, s.name]));
+  const names = new Map<string, string>([
+    ...c.battle.squads.map((s): [string, string] => [s.unitId, s.name]),
+    ...c.vehicles().map((v): [string, string] => [v.id, v.name]),
+  ]);
   const lines: string[] = [];
   const events = c.events;
   for (let i = events.length - 1; i >= 0 && lines.length < limit; i -= 1) {

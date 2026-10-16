@@ -55,6 +55,16 @@ export const VEHICLE_LABELS: Readonly<Record<string, string | undefined>> = Obje
 /** A platform's name (its id when it is not the catalog's). */
 export const vehicleLabel = (kind: VehicleKind): string => VEHICLE_LABELS[kind] ?? kind;
 
+/** What a platform's vehicles are called on the map (`M113 1`, `Abrams 2`…). */
+const SHORT_NAMES: Readonly<Record<string, string | undefined>> = {
+  m113: 'M113',
+  m1a1: 'Abrams',
+  bmp2: 'BMP-2',
+  t72b: 'T-72',
+};
+export const vehicleShortName = (kind: VehicleKind): string =>
+  SHORT_NAMES[kind] ?? vehicleLabel(kind);
+
 const toVec = (p: MapPoint): Vec2 => ({ x: p.east, y: p.north });
 const toPoint = (p: Vec2): MapPoint => ({ east: p.x, north: p.y });
 const ok = (definition: BattleScenarioDefinition): BattleEdit => ({ ok: true, definition });
@@ -122,7 +132,7 @@ export function addVehicle(
   const id = `V${String(n)}`;
   const vehicle: PlannedVehicle = {
     id,
-    name: `${side === 'BLUEFOR' ? '' : 'Enemy '}M113 ${String(n)}`,
+    name: `${side === 'BLUEFOR' ? '' : 'Enemy '}${vehicleShortName(kind)} ${String(n)}`,
     side,
     kind,
     position: toPoint(placed.point),
@@ -364,7 +374,8 @@ export function parseVehicles(
     if (side !== 'BLUEFOR' && side !== 'OPFOR')
       return fail(`${what}'s side is not BLUEFOR or OPFOR`);
     const kind = v['kind'];
-    if (kind !== 'm113') return fail(`${what}'s kind is unknown`);
+    if (typeof kind !== 'string' || !VEHICLE_KINDS.includes(kind))
+      return fail(`${what}'s kind "${String(kind)}" is not a known vehicle`);
     const facing = v['facingDeg'];
     if (typeof facing !== 'number' || !Number.isFinite(facing))
       return fail(`${what}'s facing is not a number`);
