@@ -11,6 +11,7 @@ import {
   type Scenario,
   type ScenarioSoldier,
   type ScenarioUnit,
+  type ScenarioVehicle,
   type Side,
   type SimCommand,
   type SimEvent,
@@ -61,6 +62,8 @@ export interface BattleSpec {
   readonly config?: FofConfig;
   /** The movement engine's integration rate (Hz); default 120. */
   readonly substepHz?: number;
+  /** Vehicles (docs/vehicles.md); absent: none. */
+  readonly vehicles?: readonly ScenarioVehicle[];
 }
 
 /** Spacing and pace of an organization's formation (m, m/s). */
@@ -248,6 +251,7 @@ export function battleScenario(
     movement: { speed, maxTurnRate: Math.PI / 2 },
     units,
     soldiers,
+    ...(spec.vehicles && spec.vehicles.length > 0 ? { vehicles: spec.vehicles } : {}),
     ...(spec.substepHz !== undefined
       ? { behavior: { ...DEFAULT_BEHAVIOR_PARAMS, substepHz: spec.substepHz } }
       : {}),
@@ -310,4 +314,16 @@ export function orderSquad(
     mode,
     orders,
   };
+}
+
+/** The `orderVehicle` command sending vehicle `vehicleId` to `destinations` (replacing or after its route) now. */
+export function orderVehicle(
+  battle: Battle,
+  vehicleId: string,
+  mode: 'replace' | 'append',
+  destinations: readonly Vec2[],
+): SimCommand {
+  if (!battle.spec.vehicles?.some((v) => v.id === vehicleId))
+    throw new Error(`no vehicle "${vehicleId}"`);
+  return { type: 'orderVehicle', tick: battle.sim.tick, vehicleId, mode, destinations };
 }

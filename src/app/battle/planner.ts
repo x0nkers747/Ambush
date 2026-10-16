@@ -1,6 +1,15 @@
 import {
   addOrder,
   addSquad,
+  addVehicle,
+  addVehicleWaypoint,
+  deleteVehicle,
+  deleteVehicleWaypoint,
+  faceVehicleToward,
+  moveVehicle,
+  moveVehicleWaypoint,
+  vehiclesOf,
+  type PlannedVehicle,
   battleSpecOf,
   createBattle,
   deleteOrder,
@@ -55,12 +64,16 @@ export type PlannerTool =
   /** Set the kill zone of the selected ambush order: a click centres it. */
   | { readonly kind: 'killZone' }
   /** The next click sets the selected defend order's direction (its sector's facing). */
-  | { readonly kind: 'sector' };
+  | { readonly kind: 'sector' }
+  /** Place a vehicle of a side (Scenario Setup; docs/vehicles.md). */
+  | { readonly kind: 'placeVehicle'; readonly side: Side };
 
 export interface PlannerSelection {
   readonly squadId: string | null;
-  /** An order of the selected squad's plan, or `null`. */
+  /** An order of the selected squad's plan (a waypoint of the selected vehicle's route), or `null`. */
   readonly orderIndex: number | null;
+  /** The selected vehicle (then no squad is selected). */
+  readonly vehicleId?: string;
 }
 
 export interface PlannerOptions {
@@ -100,6 +113,17 @@ export interface Planner {
   select(squadId: string | null, orderIndex?: number | null): void;
   squad(id: string | null): ScenarioSquad | undefined;
   readonly selectedSquad: ScenarioSquad | undefined;
+  /** Selects a vehicle, and a waypoint of its route. */
+  selectVehicle(id: string, waypointIndex?: number | null): void;
+  vehicle(id: string | null | undefined): PlannedVehicle | undefined;
+  readonly selectedVehicle: PlannedVehicle | undefined;
+  /** Whether a vehicle's route can be edited now: in Scenario Setup, and BLUEFOR's in planning. */
+  canRoute(vehicle: PlannedVehicle | undefined): boolean;
+  moveVehicleTo(id: string, point: Vec2, saving: boolean): boolean;
+  turnVehicleToward(id: string, point: Vec2, saving: boolean): boolean;
+  moveVehicleWaypointTo(id: string, index: number, point: Vec2, saving: boolean): boolean;
+  removeVehicleWaypoint(id: string, index: number): void;
+  removeVehicle(id: string): void;
   /** Whether a squad can be placed, moved, turned or deleted now (Scenario Setup). */
   canPlace(): boolean;
   /** Whether a squad's plan can be edited now: OPFOR's in Scenario Setup, BLUEFOR's in planning. */
@@ -167,6 +191,16 @@ export interface StartFigures {
     readonly posture: 'standing' | 'kneeling' | 'prone';
   }[];
   readonly weapons: Readonly<Record<string, string | null>>;
+  /** The vehicles where they start. */
+  readonly vehicles: readonly StartVehicle[];
+}
+
+/** A vehicle at the start of the battle, for the 3D view. */
+export interface StartVehicle {
+  readonly id: string;
+  readonly side: Side;
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
+  readonly heading: number;
 }
 
 /** The tick rate of battles (Hz). */
@@ -268,6 +302,7 @@ export function createPlanner(o: PlannerOptions): Planner {
         s.position,
         s.facingDeg,
       ]),
+      vehiclesOf(definition).map((v) => [v.id, v.side, v.position, v.facingDeg]),
     ]);
     if (figuresMade === null || key !== figuresKey) {
       figuresKey = key;
@@ -278,7 +313,12 @@ export function createPlanner(o: PlannerOptions): Planner {
   const startFigures = (d: BattleScenarioDefinition): StartFigures => {
     // No squads yet (a new battlefield): no figures; a battle needs a force.
     if (d.squads.length === 0)
-      return { log: createMotionRecorder(BATTLE_TICK_RATE_HZ), weapons: {}, soldiers: [] };
+      return {
+        log: createMotionRecorder(BATTLE_TICK_RATE_HZ),
+        weapons: {},
+        soldiers: [],
+        vehicles: [],
+      };
     const battle = createBattle(battleSpecOf(d, BATTLE_TICK_RATE_HZ), terrain);
     const log = createMotionRecorder(BATTLE_TICK_RATE_HZ);
     log.record(battle.sim.state);
@@ -294,6 +334,12 @@ export function createPlanner(o: PlannerOptions): Planner {
         azimuth: s.azimuth,
         posture: s.posture,
       })),
+      vehicles: (battle.sim.state.vehicles ?? []).map((v) => ({
+        id: v.id,
+        side: v.side,
+        position: { x: v.position.x, y: v.position.y, z: v.position.z },
+        heading: v.heading,
+      })),
     };
   };
 
@@ -303,6 +349,10 @@ export function createPlanner(o: PlannerOptions): Planner {
   const canPlan = (s: ScenarioSquad | undefined) =>
     s !== undefined &&
     ((stage === 'scenario' && s.side === 'OPFOR') || (stage === 'bluefor' && s.side === 'BLUEFOR'));
+  const vehicle = (id: string | null | undefined) =>
+    id === null || id === undefined ? undefined : vehiclesOf(definition).find((v) => v.id === id);
+  const canRoute = (v: PlannedVehicle | undefined) =>
+    v !== undefined && (stage === 'scenario' || (stage === 'bluefor' && v.side === 'BLUEFOR'));
 
   const apply = (change: (d: BattleScenarioDefinition) => BattleEdit, saving: boolean) => {
     const result = change(definition);
@@ -315,7 +365,11 @@ export function createPlanner(o: PlannerOptions): Planner {
       prunePins();
       // The selection follows what still exists.
       const selected = squad(selection.squadId);
-      if (!selected) selection = { squadId: null, orderIndex: null };
+      const car = vehicle(selection.vehicleId);
+      if (car) {
+        if (selection.orderIndex !== null && selection.orderIndex >= car.route.length)
+          selection = { ...selection, orderIndex: null };
+      } else if (!selected) selection = { squadId: null, orderIndex: null };
       else if (selection.orderIndex !== null && selection.orderIndex >= selected.plan.length)
         selection = { ...selection, orderIndex: null };
       changed();
@@ -362,7 +416,7 @@ export function createPlanner(o: PlannerOptions): Planner {
       changed();
     },
     setTool(next) {
-      if (next.kind === 'place' && stage !== 'scenario') return;
+      if ((next.kind === 'place' || next.kind === 'placeVehicle') && stage !== 'scenario') return;
       tool = next;
       changed();
     },
@@ -376,6 +430,48 @@ export function createPlanner(o: PlannerOptions): Planner {
     get selectedSquad() {
       return squad(selection.squadId);
     },
+    selectVehicle(id, waypointIndex = null) {
+      const v = vehicle(id);
+      if (!v) {
+        planner.select(null);
+        return;
+      }
+      const index = waypointIndex !== null && waypointIndex < v.route.length ? waypointIndex : null;
+      selection = { squadId: null, orderIndex: index, vehicleId: v.id };
+      changed();
+    },
+    vehicle,
+    get selectedVehicle() {
+      return vehicle(selection.vehicleId);
+    },
+    canRoute,
+    moveVehicleTo(id, point, saving) {
+      if (!canPlace()) return false;
+      return apply((d) => moveVehicle(terrain, d, id, point), saving);
+    },
+    turnVehicleToward(id, point, saving) {
+      if (!canPlace() && !canRoute(vehicle(id))) return false;
+      return apply((d) => faceVehicleToward(d, id, point), saving);
+    },
+    moveVehicleWaypointTo(id, index, point, saving) {
+      if (!canRoute(vehicle(id))) return false;
+      return apply((d) => moveVehicleWaypoint(terrain, d, id, index, point), saving);
+    },
+    removeVehicleWaypoint(id, index) {
+      if (!canRoute(vehicle(id))) return;
+      if (apply((d) => deleteVehicleWaypoint(d, id, index), true)) {
+        o.notify(`Removed waypoint ${String(index + 1)}.`);
+        planner.selectVehicle(id, index > 0 ? index - 1 : null);
+      }
+    },
+    removeVehicle(id) {
+      const v = vehicle(id);
+      if (!v || !canPlace()) return;
+      if (apply((d) => deleteVehicle(d, id), true)) {
+        o.notify(`Removed ${v.name}.`);
+        planner.select(null);
+      }
+    },
     canPlace,
     canPlan,
     edit: (change) => apply(change, true),
@@ -388,6 +484,37 @@ export function createPlanner(o: PlannerOptions): Planner {
       pendingNote = null;
     },
     click(point) {
+      if (tool.kind === 'placeVehicle') {
+        const { side } = tool;
+        let id: string | undefined;
+        const placed = apply((d) => {
+          const result = addVehicle(terrain, d, side, point);
+          id = result.vehicleId;
+          return result;
+        }, true);
+        if (placed && id !== undefined) {
+          planner.selectVehicle(id);
+          // Placed: the next clicks give it its route.
+          tool = { kind: 'order', order: 'move' };
+          changed();
+        }
+        return;
+      }
+      const car = planner.selectedVehicle;
+      if (tool.kind === 'order' && car) {
+        if (!canRoute(car)) {
+          o.notify(`${car.name} is OPFOR: its route is set in Scenario Setup.`);
+          return;
+        }
+        if (tool.order !== 'move') {
+          o.notify(`${car.name} is a vehicle: it only takes Move orders.`);
+          return;
+        }
+        const at = selection.orderIndex === null ? car.route.length : selection.orderIndex + 1;
+        if (apply((d) => addVehicleWaypoint(terrain, d, car.id, point, at), true))
+          planner.selectVehicle(car.id, at);
+        return;
+      }
       if (tool.kind === 'place') {
         const { side, organization } = tool;
         let id: string | undefined;

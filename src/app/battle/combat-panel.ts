@@ -8,7 +8,9 @@ import {
   type Combat,
   type CombatSummary,
   type SquadStatus,
+  type VehicleStatus,
 } from './combat';
+import { vehicleActivity } from './status';
 import { pendingAmbush, type BattleDisplay, type CombatUi } from './combat-editor';
 import type { TimedEvent } from './session';
 
@@ -83,6 +85,13 @@ export function combatHint(c: Combat, ui: CombatUi): string {
 }
 
 function hintFor(c: Combat, ui: CombatUi): string {
+  const car = c.vehicle(ui.selected);
+  if (car) {
+    if (ui.tool === null)
+      return `${car.name} selected: press M, then click the map to send it there (H: stop).`;
+    if (ui.tool !== 'move') return `${car.name} is a vehicle: it only takes Move orders (M).`;
+    return `Click the map: ${car.name} drives there, ${ui.append ? 'after its route' : 'instead of its route'} (Shift: ${ui.append ? 'replace' : 'append'} instead).${c.playing ? '' : ' It takes effect when play resumes.'}`;
+  }
   const s = c.squad(ui.selected);
   if (ui.tool === null)
     return s
@@ -141,8 +150,46 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
     <p class="buttons"><button class="small" data-cact="centre">Centre on map</button></p>`;
 }
 
-export function combatRosterHtml(c: { squads(): readonly SquadStatus[] }, ui: CombatUi): string {
+/** The selected vehicle's state and route (docs/vehicles.md). */
+export function combatVehicleHtml(v: VehicleStatus): string {
+  const route = v.route
+    .map((d) => `<li>Move to ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N</li>`)
+    .join('');
+  return `<div class="squad-head ${sideClass(v.side)}">
+      <span class="side-badge">${v.side}</span>
+      <span class="squad-name">${escapeHtml(v.name)}</span>
+    </div>
+    <dl class="kv">
+      <dt>Type</dt><dd>M113 APC (tracked; drives only)</dd>
+      <dt>State</dt><dd>${escapeHtml(vehicleActivity(v))}</dd>
+      <dt>Heading</dt><dd>${String(Math.round((v.heading * 180) / Math.PI) % 360).padStart(3, '0')}°</dd>
+    </dl>
+    <h3>Route</h3>
+    ${route ? `<ol class="order-history">${route}</ol>` : '<p class="muted">None: it stays where it is.</p>'}
+    <p class="buttons"><button class="small" data-cact="centre">Centre on map</button></p>`;
+}
+
+export function combatRosterHtml(
+  c: { squads(): readonly SquadStatus[]; vehicles(): readonly VehicleStatus[] },
+  ui: CombatUi,
+): string {
   const squads = c.squads();
+  const vehicles = c.vehicles();
+  const vehicleRows = vehicles
+    .map(
+      (
+        v,
+      ) => `<button class="squad-row ${sideClass(v.side)}" data-squad="${v.id}" aria-pressed="${String(ui.selected === v.id)}">
+            <span class="sq-id">${v.id}</span>
+            <span class="sq-name">${escapeHtml(v.name)}</span>
+            <span class="sq-org muted">vehicle</span>
+            <span class="sq-plan">${escapeHtml(vehicleActivity(v))}</span>
+          </button>`,
+    )
+    .join('');
+  const vehiclesHtml = vehicleRows
+    ? `<div class="force vehicles"><h3>Vehicles <span class="muted">· ${String(vehicles.length)}</span></h3>${vehicleRows}</div>`
+    : '';
   return (['BLUEFOR', 'OPFOR'] as const)
     .map((side) => {
       const list = squads.filter((s) => s.side === side);
@@ -165,7 +212,8 @@ export function combatRosterHtml(c: { squads(): readonly SquadStatus[] }, ui: Co
         ${rows}
       </div>`;
     })
-    .join('');
+    .join('')
+    .concat(vehiclesHtml);
 }
 
 /** What each weapon is called in the panels. */

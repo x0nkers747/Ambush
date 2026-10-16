@@ -1,6 +1,12 @@
 import { emptyMotionSample } from '#exercise';
 import {
   clearPlan,
+  clearVehicleRoute,
+  renameVehicle,
+  setVehicleFacing,
+  VEHICLE_LABELS,
+  vehiclesOf,
+  type PlannedVehicle,
   formationsForOrganization,
   ORDER_LABELS,
   ORGANIZATION_LABELS,
@@ -26,6 +32,7 @@ import {
   ACTIONS_ON,
   ORDER_KINDS,
   soldierId,
+  surfaceHeightAt,
   type ActionsOn,
   type OrderKind,
   type Side,
@@ -81,6 +88,7 @@ import {
   combatHint,
   combatRosterHtml,
   combatSquadHtml,
+  combatVehicleHtml,
   combatToolsHtml,
 } from './combat-panel';
 import { createBattleMapEditor, ORDER_INITIALS } from './map-editor';
@@ -228,7 +236,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       <p class="hint" data-ui="tool-hint"></p>
     </section>
     <section class="sec" data-sec="squad">
-      <h2>Selected squad</h2>
+      <h2 data-ui="squad-title">Selected squad</h2>
       <div data-ui="squad"></div>
     </section>
     <section class="sec" data-sec="roster">
@@ -349,6 +357,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     battle: c.session.battle,
     squads: () => c.squads(),
     squad: (id) => c.squad(id),
+    vehicles: () => c.vehicles(),
+    orderVehicle: (id, point, mode) => c.orderVehicle(id, point, mode),
     order: (id, kind, point, mode, actionsOn, killZoneAt) =>
       c.order(id, kind, point, mode, actionsOn, killZoneAt),
   });
@@ -359,6 +369,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     battle: r.replay.battle,
     squads: () => r.squads(),
     squad: (id) => r.squad(id),
+    vehicles: () => r.vehicles(),
   });
   /** What the map draws of a battle now: the live one, the replayed one, or none (planning). */
   const display = (): BattleDisplay | null => {
@@ -513,6 +524,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         clock: { log: c.log, combatLog: c.combatLog, seconds: c.seconds, ended: c.ended },
         weapons: combatWeapons.weapons,
         earthworks: squads.flatMap((s) => s.earthworks),
+        vehicles: (inCombat()?.vehicles() ?? inReview()?.vehicles() ?? []).map((v) => ({
+          id: v.id,
+          side: v.side,
+        })),
       };
     }
     const f = planner.figures();
@@ -530,7 +545,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         status: 'active',
         selected: selected !== null && s.id.startsWith(`${selected}-`),
       }));
-    return { units, clock: { log: f.log, combatLog: [], seconds: 0 }, weapons: f.weapons };
+    return {
+      units,
+      clock: { log: f.log, combatLog: [], seconds: 0 },
+      weapons: f.weapons,
+      vehicles: f.vehicles.filter((v) => !hidden(v.side)).map((v) => ({ id: v.id, side: v.side })),
+    };
   };
   const showViewMode = () => {
     for (const b of app.querySelectorAll<HTMLButtonElement>('[data-view]'))
@@ -925,6 +945,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (now.kind === 'order' && t.kind === 'order') return now.order === t.order;
     if (now.kind === 'place' && t.kind === 'place')
       return now.side === t.side && now.organization === t.organization;
+    if (now.kind === 'placeVehicle' && t.kind === 'placeVehicle') return now.side === t.side;
     return true;
   };
   const toolButton = (t: PlannerTool, label: string, key: string, title: string, extra = '') =>
@@ -997,7 +1018,21 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             </div>`,
             )
             .join('')}
-          <h3>OPFOR plans</h3>
+          <h3>Place vehicles</h3>
+          <div class="tool-grid place-tools" role="group" aria-label="Place vehicles">
+            ${(['BLUEFOR', 'OPFOR'] as const)
+              .map((side) =>
+                toolButton(
+                  { kind: 'placeVehicle', side },
+                  `${side} ${VEHICLE_LABELS.m113}`,
+                  '',
+                  `Click the map to place a ${side} M113 armoured personnel carrier; then click where it drives`,
+                  sideClass(side),
+                ),
+              )
+              .join('')}
+          </div>
+          <h3>OPFOR plans and vehicle routes</h3>
           ${orderTools()}`;
       case 'bluefor':
         return `<h3>BLUEFOR orders</h3>${orderTools()}`;
@@ -1015,6 +1050,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const selected = planner.selectedSquad;
     if (t.kind === 'place')
       return `Click the map to place a ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}; Esc to stop.`;
+    if (t.kind === 'placeVehicle')
+      return `Click the map to place a ${t.side} M113; then each click adds a waypoint to its route.`;
+    const car = planner.selectedVehicle;
+    if (t.kind === 'order' && car) {
+      if (!planner.canRoute(car))
+        return `${car.name} is OPFOR: its route is set in Scenario Setup.`;
+      if (t.order !== 'move') return `${car.name} is a vehicle: it only takes Move orders (M).`;
+      return `Click the map: ${car.name} drives there${planner.selection.orderIndex === null ? ', after its last waypoint' : `, after waypoint ${String(planner.selection.orderIndex + 1)}`}.`;
+    }
     if (t.kind === 'sector') {
       const index = planner.selection.orderIndex;
       return selected && index !== null
@@ -1166,6 +1210,79 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       </p>`;
   };
 
+  /** The selected vehicle's panel: its name, facing, start and route. */
+  const vehicleHtml = (v: PlannedVehicle): string => {
+    const placing = planner.canPlace();
+    const routing = planner.canRoute(v);
+    const issues = planner.issues().filter((i) => i.vehicleId === v.id);
+    const rows = v.route
+      .map((p, k) => {
+        const selected = planner.selection.orderIndex === k;
+        const issue = issues.find((i) => i.orderIndex === k);
+        return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
+          <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
+          <span>Move</span>
+          <span class="muted coords">${String(Math.round(p.east))} E, ${String(Math.round(p.north))} N</span>
+          ${routing ? `<span class="order-buttons"><button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button></span>` : ''}
+          ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
+        </li>`;
+      })
+      .join('');
+    return `<div class="squad-head ${sideClass(v.side)}">
+        <span class="side-badge">${v.side}</span>
+        ${
+          placing
+            ? `<input class="squad-name" data-act="vehicle-rename" value="${escapeHtml(v.name)}" aria-label="Vehicle name" maxlength="40">`
+            : `<span class="squad-name">${escapeHtml(v.name)}</span>`
+        }
+      </div>
+      <dl class="kv">
+        <dt>Type</dt><dd>${VEHICLE_LABELS[v.kind]} (tracked; drives only)</dd>
+        <dt>Facing</dt><dd>${
+          placing || routing
+            ? `<input type="number" class="facing-input" data-act="vehicle-facing" min="0" max="359" step="1" value="${String(v.facingDeg)}" aria-label="Facing, degrees from north">°`
+            : `${String(v.facingDeg)}°`
+        }</dd>
+        <dt>Start</dt><dd>${String(Math.round(v.position.east))} E, ${String(Math.round(v.position.north))} N</dd>
+      </dl>
+      ${issues
+        .filter((i) => i.orderIndex === null)
+        .map((i) => `<p class="warn">${escapeHtml(i.message)}</p>`)
+        .join('')}
+      <h3>Route${v.route.length > 0 ? ` (${String(v.route.length)} waypoint${v.route.length === 1 ? '' : 's'})` : ''}</h3>
+      ${
+        v.route.length === 0
+          ? `<p class="muted">No route: it stays where it starts.${routing ? ' Press M and click the map.' : ''}</p>`
+          : `<ol class="plan-list">${rows}</ol>`
+      }
+      <p class="buttons">
+        ${routing && v.route.length > 0 ? '<button class="small" data-act="vehicle-clear-route">Clear route</button>' : ''}
+        ${placing ? '<button class="small danger" data-act="delete-vehicle">Delete vehicle</button>' : ''}
+        <button class="small" data-act="centre">Centre on map</button>
+      </p>`;
+  };
+
+  const vehicleRosterHtml = (): string => {
+    const list = vehiclesOf(planner.definition);
+    if (list.length === 0) return '';
+    const issues = planner.issues();
+    const rows = list
+      .map((v) => {
+        const issue = issues.some((i) => i.vehicleId === v.id);
+        return `<button class="squad-row ${sideClass(v.side)}" data-act="pick-vehicle" data-vehicle="${v.id}" aria-pressed="${String(planner.selection.vehicleId === v.id)}">
+          <span class="sq-id">${v.id}</span>
+          <span class="sq-name">${escapeHtml(v.name)}</span>
+          <span class="sq-org muted">${v.side === 'BLUEFOR' ? 'BLUEFOR' : 'OPFOR'} vehicle</span>
+          <span class="sq-plan${issue ? ' warn' : ''}">${issue ? '⚠ ' : ''}${v.route.length === 0 ? 'stays' : `${String(v.route.length)} waypoint${v.route.length === 1 ? '' : 's'}`}</span>
+        </button>`;
+      })
+      .join('');
+    return `<div class="force vehicles">
+      <h3>Vehicles <span class="muted">· ${String(list.length)}</span></h3>
+      ${rows}
+    </div>`;
+  };
+
   const rosterHtml = (): string => {
     const issues = planner.issues();
     return (['BLUEFOR', 'OPFOR'] as const)
@@ -1192,7 +1309,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           ${rows || `<p class="muted">None yet.${planner.stage === 'scenario' ? ' Place one with the tools above.' : ''}</p>`}
         </div>`;
       })
-      .join('');
+      .join('')
+      .concat(vehicleRosterHtml());
   };
 
   const scenarioHtml = (): string => {
@@ -1258,11 +1376,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       if (combatUi.selected !== null) c.hold(combatUi.selected);
     } else if (cact === 'centre') {
       const s = c.squad(combatUi.selected);
+      const v = c.vehicle(combatUi.selected);
       if (s) centreOn(s.centre);
+      else if (v) centreOn(v.position);
     } else if (squad !== undefined && !el.hasAttribute('data-act')) {
       combatUi.selected = squad;
       const s = c.squad(squad);
+      const v = c.vehicle(squad);
       if (s && clicks >= 2) centreOn(s.centre);
+      else if (v && clicks >= 2) centreOn(v.position);
     } else return false;
     return true;
   };
@@ -1281,11 +1403,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     else if (ract !== undefined) reviewAction(r, ract);
     else if (cact === 'centre') {
       const s = r.squad(combatUi.selected);
+      const v = r.vehicles().find((x) => x.id === combatUi.selected);
       if (s) centreOn(s.centre);
+      else if (v) centreOn(v.position);
     } else if (squad !== undefined && !el.hasAttribute('data-act')) {
       combatUi.selected = squad;
       const s = r.squad(squad);
+      const v = r.vehicles().find((x) => x.id === squad);
       if (s && clicks >= 2) centreOn(s.centre);
+      else if (v && clicks >= 2) centreOn(v.position);
     } else return false;
     return true;
   };
@@ -1351,7 +1477,27 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (!el || !act || el instanceof HTMLSelectElement || el instanceof HTMLInputElement) return;
     const s = planner.selectedSquad;
     const index = Number(el.dataset['index']);
+    const car = planner.selectedVehicle;
     switch (act) {
+      case 'pick-vehicle': {
+        const picked = planner.vehicle(el.dataset['vehicle']);
+        if (!picked) return;
+        planner.selectVehicle(picked.id);
+        if (event.detail >= 2) centreOn({ x: picked.position.east, y: picked.position.north });
+        return;
+      }
+      case 'pick-waypoint':
+        if (car) planner.selectVehicle(car.id, index);
+        return;
+      case 'waypoint-delete':
+        if (car) planner.removeVehicleWaypoint(car.id, index);
+        return;
+      case 'vehicle-clear-route':
+        if (car && planner.canRoute(car)) planner.edit((d) => clearVehicleRoute(d, car.id));
+        return;
+      case 'delete-vehicle':
+        if (car) planner.removeVehicle(car.id);
+        return;
       case 'pick-squad': {
         const picked = planner.squad(el.dataset['squad'] ?? null);
         if (!picked) return;
@@ -1394,6 +1540,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         return;
       case 'centre':
         if (s) centreOn({ x: s.position.east, y: s.position.north });
+        else if (car) centreOn({ x: car.position.east, y: car.position.north });
         return;
       case 'scn-save':
       case 'scn-saveAs':
@@ -1408,7 +1555,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           message: `Delete every squad and plan of this scenario (${scenarioSummary(planner.definition)}) and start again?`,
           action: 'New scenario',
           onConfirm: () => {
-            planner.edit((d) => ({ ok: true, definition: { ...d, squads: [] } }));
+            planner.edit((d) => {
+              const rest = { ...d, squads: [] };
+              delete rest.vehicles;
+              return { ok: true, definition: rest };
+            });
             planner.select(null);
             o.scenarios.detach();
             scenarioEpoch += 1;
@@ -1421,8 +1572,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const el = event.target as HTMLElement;
     const act = el.dataset['act'];
     const s = planner.selectedSquad;
+    const car = planner.selectedVehicle;
     const value = el instanceof HTMLInputElement || el instanceof HTMLSelectElement ? el.value : '';
     switch (act) {
+      case 'vehicle-rename':
+        if (car) planner.edit((d) => renameVehicle(d, car.id, value));
+        break;
+      case 'vehicle-facing':
+        if (car) planner.edit((d) => setVehicleFacing(d, car.id, Number(value)));
+        break;
       case 'rename':
         if (s) planner.edit((d) => renameSquad(d, s.id, value));
         break;
@@ -1594,6 +1752,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         break;
       case 'delete':
       case 'backspace': {
+        const car = planner.selectedVehicle;
+        if (car) {
+          event.preventDefault();
+          const index = planner.selection.orderIndex;
+          if (index !== null) planner.removeVehicleWaypoint(car.id, index);
+          else planner.removeVehicle(car.id);
+          break;
+        }
         const s = planner.selectedSquad;
         if (!s) break;
         event.preventDefault();
@@ -1713,9 +1879,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       ui('tool-label'),
       t.kind === 'place'
         ? `Placing ${t.side} ${ORGANIZATION_LABELS[t.organization].toLowerCase()}s`
-        : t.kind === 'order'
-          ? `${ORDER_LABELS[t.order]} orders`
-          : '',
+        : t.kind === 'placeVehicle'
+          ? `Placing a ${t.side} M113`
+          : t.kind === 'order'
+            ? `${ORDER_LABELS[t.order]} orders`
+            : '',
     );
     const squadSection = app.querySelector<HTMLElement>('[data-sec="squad"]');
     if (squadSection) squadSection.hidden = false;
@@ -1725,7 +1893,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const squadEl = ui('squad');
     const scenarioEl = ui('scenario');
     if (editingIn(squadEl) || editingIn(scenarioEl)) lastVersion = -1;
-    if (!editingIn(squadEl)) setHtml(squadEl, squadHtml(planner.selectedSquad));
+    const car = planner.selectedVehicle;
+    setText(ui('squad-title'), car ? 'Selected vehicle' : 'Selected squad');
+    if (!editingIn(squadEl))
+      setHtml(squadEl, car ? vehicleHtml(car) : squadHtml(planner.selectedSquad));
     setHtml(ui('roster'), rosterHtml());
     if (!editingIn(scenarioEl)) setHtml(scenarioEl, scenarioHtml());
   };
@@ -1760,7 +1931,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         ? ''
         : `${ORDER_LABELS[combatUi.tool]} orders (${combatUi.append !== combatUi.shift ? 'append' : 'replace'})`,
     );
-    setHtml(ui('squad'), combatSquadHtml(c.squad(combatUi.selected)));
+    const car = c.vehicle(combatUi.selected);
+    setText(ui('squad-title'), car ? 'Selected vehicle' : 'Selected squad');
+    setHtml(
+      ui('squad'),
+      car ? combatVehicleHtml(car) : combatSquadHtml(c.squad(combatUi.selected)),
+    );
     setHtml(ui('roster'), combatRosterHtml(c, combatUi));
     setHtml(ui('events'), combatEventsHtml(combatDisplay(c)));
   };
@@ -1826,9 +2002,13 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (summary) setHtml(summary, aarSummaryHtml(r.summary()));
     const moments = q('review-moments');
     if (moments) setHtml(moments, momentsHtml(r));
+    const car = r.vehicles().find((v) => v.id === combatUi.selected);
+    setText(ui('squad-title'), car ? 'Selected vehicle' : 'Selected squad');
     setHtml(
       ui('squad'),
-      combatSquadHtml(r.squad(combatUi.selected)) + phasesHtml(r, combatUi.selected),
+      car
+        ? combatVehicleHtml(car)
+        : combatSquadHtml(r.squad(combatUi.selected)) + phasesHtml(r, combatUi.selected),
     );
     setHtml(ui('roster'), combatRosterHtml(r, combatUi));
     setHtml(ui('events'), combatEventsHtml(reviewDisplay(r), 60, true));
@@ -1944,6 +2124,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
               orders: q.orders.map((x) => `${x.kind}:${x.status}`),
               queued: q.queued.length,
             })),
+            vehicles: combat.vehicles().map((v) => ({ ...v })),
             summary: combat.summary(),
             hash: combat.session.hashes.at(-1) ?? null,
           }
@@ -1956,6 +2137,21 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   Object.defineProperty(app, 'ambushBattleCheck', {
     configurable: true,
     value: (x: number, y: number) => squadPlacementProblem(o.terrain, { x, y }),
+  });
+  // Puts the 3D camera looking at map point (x, y) on the ground from `distance` m away, `pitchDeg` down, from `bearingDeg`.
+  Object.defineProperty(app, 'ambushBattleCamera', {
+    configurable: true,
+    value: (x: number, y: number, distance: number, pitchDeg: number, bearingDeg: number) => {
+      const z = surfaceHeightAt(o.terrain, x, y);
+      const p = (pitchDeg * Math.PI) / 180;
+      const b = (bearingDeg * Math.PI) / 180;
+      const ex = x + distance * Math.cos(p) * Math.sin(b);
+      const ey = y + distance * Math.cos(p) * Math.cos(b);
+      view3d?.setCameraPose({
+        target: { x, y: z, z: -y },
+        position: { x: ex, y: z + distance * Math.sin(p), z: -ey },
+      });
+    },
   });
   Object.defineProperty(app, 'ambushBattleProject', {
     configurable: true,

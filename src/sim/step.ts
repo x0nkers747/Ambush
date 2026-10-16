@@ -3,6 +3,7 @@ import { applyCommands, type SimCommand } from './commands';
 import type { SimEvent } from './events';
 import { updateForceOnForce } from './fof/system';
 import { moveSoldiers } from './movement';
+import { updateVehicles } from './vehicles';
 import type { SimState } from './state';
 import type { SimWorld } from './world';
 
@@ -39,6 +40,8 @@ export function stepState(
   updateBehavior(state, world, time, events);
   moveSoldiers(state, world, time, events);
   updateForceOnForce(state, world, time, events);
+  // Vehicles (docs/vehicles.md) only drive: nothing else sees them yet.
+  updateVehicles(state, world, time.dtSeconds);
 
   // 3. Advance the clock.
   state.tick += 1;

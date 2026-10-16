@@ -18,6 +18,7 @@ import { isOnTerrain, validateTerrain, type TerrainDataset } from './terrain';
 import { validateBehaviorParams, type BehaviorParams } from './behavior/params';
 import { validateFofSetup } from './fof/setup';
 import type { FofSetup } from './fof/types';
+import { initialVehicles, type ScenarioVehicle } from './vehicles';
 import { validateMovementParams, type MovementParams, type SimWorld } from './world';
 
 // Scenario: the human-authored, plain-data description of a simulation's
@@ -52,6 +53,8 @@ export interface Scenario {
   readonly behavior?: BehaviorParams;
   /** A force-on-force experiment (docs/behavior-lab/force-on-force); absent everywhere else. */
   readonly fof?: FofSetup;
+  /** Vehicles (docs/vehicles.md); absent or empty: none. */
+  readonly vehicles?: readonly ScenarioVehicle[];
 }
 
 /** Builds the tick-0 simulation state. Throws an Error describing the first invalid entry. */
@@ -158,7 +161,27 @@ export function createInitialState(scenario: Scenario, seed: number): SimState {
     orders: null,
   }));
 
-  return { tick: 0, rng: createRngState(seed), units, soldiers };
+  const vehicleIds = new Set<string>();
+  for (const vehicle of scenario.vehicles ?? []) {
+    if (vehicleIds.has(vehicle.id) || soldiersById.has(vehicle.id))
+      fail(`duplicate vehicle id "${vehicle.id}"`);
+    vehicleIds.add(vehicle.id);
+    const { x, y } = vehicle.position;
+    if (![x, y, vehicle.headingDeg].every(Number.isFinite)) {
+      fail(`vehicle "${vehicle.id}" has a non-finite position or heading`);
+    }
+    if (!isOnTerrain(terrain, x, y)) fail(`vehicle "${vehicle.id}" is off the terrain`);
+    if (pointProblem(terrain, { x, y })) fail(`vehicle "${vehicle.id}" is in water or a building`);
+    if (vehicle.destinations.some((d) => !isOnTerrain(terrain, d.x, d.y))) {
+      fail(`vehicle "${vehicle.id}" has a destination off the terrain`);
+    }
+  }
+  // Vehicles are absent unless there are any, so states without them hash as before.
+  const vehicles = scenario.vehicles?.length
+    ? { vehicles: initialVehicles(terrain, scenario.vehicles) }
+    : {};
+
+  return { tick: 0, rng: createRngState(seed), units, soldiers, ...vehicles };
 }
 
 /**

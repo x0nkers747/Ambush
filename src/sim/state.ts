@@ -2,6 +2,7 @@ import type { Azimuth, Vec2, Vec3 } from './geometry';
 import type { RngState } from './rng';
 import type { BehaviorState } from './behavior/types';
 import type { FofState } from './fof/types';
+import type { VehicleState } from './vehicles';
 import type { PathPoint } from './bridge-navigation';
 
 // Mutable simulation state (docs/adr/0004). Plain data only: no classes,
@@ -135,6 +136,8 @@ export interface SimState {
    * Absent unless the world has a force-on-force setup.
    */
   fof?: FofState;
+  /** Vehicles (docs/vehicles.md). Absent unless the scenario has any. */
+  vehicles?: VehicleState[];
 }
 
 /** Read-only view of simulation state handed to code outside the simulation. */

@@ -280,3 +280,14 @@ export {
   type Viewshed,
   type ViewshedGrid,
 } from './viewshed';
+export {
+  VEHICLE_TYPES,
+  activeVehicleOrder,
+  groundSpeed,
+  type OrderVehicleCommand,
+  type ScenarioVehicle,
+  type VehicleKind,
+  type VehicleOrder,
+  type VehicleState,
+  type VehicleType,
+} from './vehicles';

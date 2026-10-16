@@ -1,4 +1,4 @@
-import type { MotionLog, MotionSample } from '#exercise';
+import { motionMovers, type MotionLog, type MotionSample } from '#exercise';
 import type { DeepReadonly, Posture, SimState, SoldierId, SoldierStatus } from '#sim';
 
 // Every soldier's motion as compact frames (docs/constructive-simulation/04):
@@ -14,15 +14,16 @@ export const STATUSES: readonly SoldierStatus[] = ['active', 'incapacitated'];
 export const NUMBERS_PER_SOLDIER = 4;
 export const CODES_PER_SOLDIER = 2;
 
-/** Writes `state` (its soldiers in `ids`' order) as frame `k` of the arrays. */
+/** Writes `state` (its soldiers, then its vehicles: `motionMovers`) as frame `k` of the arrays. */
 export function writeFrame(
   state: DeepReadonly<SimState>,
   numbers: Float64Array,
   codes: Uint8Array,
   k: number,
 ): void {
-  const n = state.soldiers.length;
-  state.soldiers.forEach((s, i) => {
+  const movers = motionMovers(state);
+  const n = movers.length;
+  movers.forEach((s, i) => {
     const at = (k * n + i) * NUMBERS_PER_SOLDIER;
     numbers[at] = s.position.x;
     numbers[at + 1] = s.position.y;

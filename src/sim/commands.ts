@@ -15,6 +15,7 @@ import { planPath } from './navigation';
 import { findSoldier, type Orders, type SimState, type SoldierId } from './state';
 import type { Vec2 } from './geometry';
 import { applyOrderSquad, validateOrderSquad, type OrderSquadCommand } from './fof/orders';
+import { applyOrderVehicle, type OrderVehicleCommand } from './vehicles';
 import type { SimWorld } from './world';
 
 // Commands are the only way to change simulation state from outside
@@ -33,7 +34,11 @@ export interface SetOrdersCommand {
 }
 
 export type SimCommand =
-  SetOrdersCommand | OrderUnitCommand | DisturbAgentCommand | OrderSquadCommand;
+  | SetOrdersCommand
+  | OrderUnitCommand
+  | DisturbAgentCommand
+  | OrderSquadCommand
+  | OrderVehicleCommand;
 
 /**
  * Rejects malformed commands with a RangeError. Checks only the command's own
@@ -61,6 +66,24 @@ export function validateCommand(command: SimCommand, currentTick: number): void 
       return;
     case 'orderSquad':
       validateOrderSquad(command);
+      return;
+    case 'orderVehicle':
+      if (typeof command.vehicleId !== 'string' || command.vehicleId === '') {
+        throw new RangeError('orderVehicle vehicleId must be a non-empty string');
+      }
+      {
+        const mode: string = command.mode;
+        if (mode !== 'replace' && mode !== 'append') {
+          throw new RangeError(`orderVehicle mode must be replace or append, got ${mode}`);
+        }
+      }
+      for (const { x, y } of command.destinations) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          throw new RangeError(
+            `orderVehicle destinations must be finite, got (${String(x)}, ${String(y)})`,
+          );
+        }
+      }
       return;
   }
 }
@@ -118,6 +141,9 @@ export function applyCommands(
         break;
       case 'orderSquad':
         applyOrderSquad(state, world, command, startSeconds, events);
+        break;
+      case 'orderVehicle':
+        applyOrderVehicle(state, world, command, events);
         break;
     }
   }

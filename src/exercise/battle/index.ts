@@ -6,6 +6,7 @@ export {
   CLEAR_START_SEARCH_M,
   clearStarts,
   orderSquad,
+  orderVehicle,
   squadSoldierStarts,
   validateBattleSpec,
   type Battle,
@@ -84,3 +85,18 @@ export {
   SQUAD_ORGANIZATIONS,
   type SquadOrganization,
 } from '../forces/forces';
+export {
+  addVehicle,
+  addVehicleWaypoint,
+  clearVehicleRoute,
+  deleteVehicle,
+  deleteVehicleWaypoint,
+  faceVehicleToward,
+  moveVehicle,
+  moveVehicleWaypoint,
+  renameVehicle,
+  setVehicleFacing,
+  VEHICLE_LABELS,
+  vehiclesOf,
+  type PlannedVehicle,
+} from './vehicles';

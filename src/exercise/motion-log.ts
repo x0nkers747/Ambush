@@ -9,9 +9,38 @@ import type { DeepReadonly, Posture, SimState, SoldierId, SoldierStatus } from '
 //
 // Compact (34 bytes per soldier per tick, in chunks), unlike the battle's
 // full-state keyframes.
+//
+// Vehicles (docs/vehicles.md) are recorded after the soldiers, as movers of
+// their own: where each is, its heading as the azimuth, always standing and
+// active (`motionMovers`).
 
 const POSTURES: readonly Posture[] = ['standing', 'kneeling', 'prone'];
 const STATUSES: readonly SoldierStatus[] = ['active', 'incapacitated'];
+
+/** What the log records of a soldier or a vehicle. */
+export interface Mover {
+  readonly id: string;
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
+  readonly azimuth: number;
+  readonly posture: Posture;
+  readonly status: SoldierStatus;
+}
+
+/** The state's movers in the log's order: its soldiers, then its vehicles. */
+export function motionMovers(state: DeepReadonly<SimState>): readonly Mover[] {
+  const vehicles = state.vehicles;
+  if (!vehicles || vehicles.length === 0) return state.soldiers;
+  return [
+    ...state.soldiers,
+    ...vehicles.map((v) => ({
+      id: v.id,
+      position: v.position,
+      azimuth: v.heading,
+      posture: 'standing' as const,
+      status: 'active' as const,
+    })),
+  ];
+}
 
 /** One soldier at one tick. */
 export interface MotionSample {
@@ -36,7 +65,7 @@ export const emptyMotionSample = (): MotionSample => ({
 
 export interface MotionLog {
   readonly tickRateHz: number;
-  /** The soldiers, in simulation order: a sample's soldier index. */
+  /** The soldiers, in simulation order, then the vehicles: a sample's index. */
   readonly soldierIds: readonly SoldierId[];
   /** The first and the latest tick recorded. */
   readonly firstTick: number;
@@ -78,7 +107,7 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
   let epoch = 0;
 
   const restart = (state: DeepReadonly<SimState>) => {
-    soldierIds = state.soldiers.map((s) => s.id);
+    soldierIds = motionMovers(state).map((s) => s.id as SoldierId);
     index = new Map(soldierIds.map((id, i) => [id, i]));
     tracks = soldierIds.map(() => ({ numbers: [], codes: [] }));
     firstTick = state.tick;
@@ -89,7 +118,7 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
   const write = (state: DeepReadonly<SimState>, offset: number) => {
     const chunk = Math.floor(offset / CHUNK);
     const at = offset - chunk * CHUNK;
-    state.soldiers.forEach((s, i) => {
+    motionMovers(state).forEach((s, i) => {
       const track = tracks[i];
       if (!track) return;
       while (track.numbers.length <= chunk) {
@@ -108,9 +137,10 @@ export function createMotionRecorder(tickRateHz: number): MotionRecorder {
     });
   };
 
-  const sameSoldiers = (state: DeepReadonly<SimState>) =>
-    state.soldiers.length === soldierIds.length &&
-    state.soldiers.every((s, i) => s.id === soldierIds[i]);
+  const sameSoldiers = (state: DeepReadonly<SimState>) => {
+    const movers = motionMovers(state);
+    return movers.length === soldierIds.length && movers.every((s, i) => s.id === soldierIds[i]);
+  };
 
   return {
     tickRateHz,

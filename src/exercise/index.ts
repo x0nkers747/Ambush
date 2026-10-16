@@ -9,6 +9,7 @@ export { DEMO_TERRAIN } from './demo-terrain';
 export {
   createMotionRecorder,
   emptyMotionSample,
+  motionMovers,
   type MotionLog,
   type MotionRecorder,
   type MotionSample,

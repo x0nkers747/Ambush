@@ -6,8 +6,10 @@ import {
   squadStatus,
   squadStatuses,
   summarize,
+  vehicleStatuses,
   type BattleSummary,
   type SquadStatus,
+  type VehicleStatus,
 } from './status';
 
 // The After-Action Review (docs/constructive-simulation/05): the whole
@@ -82,6 +84,8 @@ export interface Review {
   readonly view: Battle;
   squads(): readonly SquadStatus[];
   squad(id: string | null): SquadStatus | undefined;
+  /** The vehicles at the playhead (docs/vehicles.md). */
+  vehicles(): readonly VehicleStatus[];
   /** The timeline's markers so far, in time order. */
   markers(): readonly ReviewMarker[];
   /** A squad's phases up to the playhead. */
@@ -280,6 +284,7 @@ export function createReview(o: ReviewOptions): Review {
     },
     view,
     squads: () => squadStatuses(view, view.sim.state),
+    vehicles: () => vehicleStatuses(view.sim.state),
     squad: (id) => (id === null ? undefined : squadStatus(view, view.sim.state, id)),
     markers: () => markers,
     phases(squadId) {

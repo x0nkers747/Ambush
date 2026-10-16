@@ -11,7 +11,7 @@ import type { HostBatch, HostIn } from './battle-host';
 import type { BattleDriver, DriverFactory } from './driver';
 import { createFrameLog } from './frame-log';
 import { combatEventOf, type BattleRecording, type BattleRun, type TimedEvent } from './session';
-import type { SquadStatus } from './status';
+import type { SquadStatus, VehicleStatus } from './status';
 
 // The page's side of the battle worker (docs/constructive-simulation/04): a
 // driver whose battle is simulated in the worker (battle-host.ts), and a
@@ -68,10 +68,11 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
     const rate = spec.tickRateHz;
     // The squads and soldiers, laid out here as the worker lays them out.
     const { scenario, squads } = battleScenario(spec, terrain);
-    const motion = createFrameLog(
-      rate,
-      scenario.soldiers.map((s) => soldierId(s.id)),
-    );
+    // Soldiers, then vehicles (`motionMovers`).
+    const motion = createFrameLog(rate, [
+      ...scenario.soldiers.map((s) => soldierId(s.id)),
+      ...(scenario.vehicles ?? []).map((v) => soldierId(v.id)),
+    ]);
     const commands: SimCommand[] = replay ? [...replay.commands] : [];
     const origins: BattleCommandOrigin[] = replay ? [...replay.origins] : [];
     const events: TimedEvent[] = [];
@@ -83,6 +84,7 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
     let headTick = 0;
     let cpu = { mean: 0, p95: 0 };
     let statuses: readonly SquadStatus[] = [];
+    let vehicles: readonly VehicleStatus[] = [];
     let asked = 0;
     let nextId = 0;
     let waiting: ((recording: BattleRecording) => void)[] = [];
@@ -108,6 +110,7 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
       for (const [tick, snapshot] of batch.keyframes) keyframes.set(tick, snapshot);
       for (const a of batch.applied) appliedTicks.set(a.id, a.tick);
       statuses = batch.squads;
+      vehicles = batch.vehicles;
       headTick = batch.headTick;
       cpu = batch.cpu;
       if (batch.recording) {
@@ -155,6 +158,7 @@ export function createWorkerDriver(channel: BattleChannel, terrain: TerrainDatas
         return () => appliedTicks.get(id) ?? null;
       },
       squads: () => statuses,
+      vehicles: () => vehicles,
       recording() {
         return new Promise((resolve) => {
           waiting.push(resolve);

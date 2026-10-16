@@ -30,6 +30,13 @@ import {
   type BattleSpec,
   type ClearedStart,
 } from './battle';
+import {
+  parseVehicles,
+  vehicleIssues,
+  vehicleSpecs,
+  vehiclesOf,
+  type PlannedVehicle,
+} from './vehicles';
 
 // Battle scenarios (docs/constructive-simulation/03): what Scenario Setup
 // and BLUEFOR Planning make on a battlefield. A scenario is any number of
@@ -174,6 +181,8 @@ export interface BattleScenarioDefinition {
   /** The battle's random seed. */
   readonly seed: number;
   readonly squads: readonly ScenarioSquad[];
+  /** Its vehicles (docs/vehicles.md); absent: none. */
+  readonly vehicles?: readonly PlannedVehicle[];
 }
 
 export type BattleEdit =
@@ -478,6 +487,7 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
       plan,
     };
   });
+  const vehicles = parseVehicles(d['vehicles'], ids, point, fail);
   return {
     schema: SCENARIO_SCHEMA,
     schemaVersion: BATTLE_SCHEMA_VERSION,
@@ -487,6 +497,7 @@ export function parseBattleScenario(data: unknown): BattleScenarioDefinition {
     ...(typeof d['terrainModel'] === 'string' ? { terrainModel: d['terrainModel'] } : {}),
     seed: seed as number,
     squads,
+    ...(vehicles.length > 0 ? { vehicles } : {}),
   };
 }
 
@@ -1126,6 +1137,8 @@ export function setSeed(d: BattleScenarioDefinition, seed: number): BattleEdit {
 /** Something that stops a scenario from being played, and where. */
 export interface ScenarioIssue {
   readonly squadId: string | null;
+  /** The vehicle it is about (then `orderIndex` is a waypoint of its route), if any. */
+  readonly vehicleId?: string;
   /** The order it is about (index in the squad's plan), or `null` for the squad itself. */
   readonly orderIndex: number | null;
   readonly message: string;
@@ -1163,6 +1176,7 @@ export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): B
           : {}),
       })),
     })),
+    ...(vehiclesOf(d).length > 0 ? { vehicles: vehicleSpecs(d) } : {}),
   };
 }
 
@@ -1268,6 +1282,7 @@ export function scenarioIssues(
       from = to;
     });
   }
+  issues.push(...vehicleIssues(terrain, d, paths));
   return issues;
 }
 
@@ -1275,5 +1290,6 @@ export function scenarioIssues(
 export function scenarioSummary(d: BattleScenarioDefinition): string {
   const count = (side: Side) => d.squads.filter((s) => s.side === side).length;
   const part = (n: number, side: Side) => `${String(n)} ${side} squad${n === 1 ? '' : 's'}`;
-  return `${part(count('BLUEFOR'), 'BLUEFOR')}, ${part(count('OPFOR'), 'OPFOR')}`;
+  const vehicles = vehiclesOf(d).length;
+  return `${part(count('BLUEFOR'), 'BLUEFOR')}, ${part(count('OPFOR'), 'OPFOR')}${vehicles > 0 ? `, ${String(vehicles)} vehicle${vehicles === 1 ? '' : 's'}` : ''}`;
 }

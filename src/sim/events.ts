@@ -45,7 +45,8 @@ export interface CommandRejectedEvent {
     | 'notSteered'
     | 'unitInContact'
     | 'noForceModel'
-    | 'unitIneffective';
+    | 'unitIneffective'
+    | 'unknownVehicle';
 }
 
 /** A soldier arrived at one of its waypoints. */

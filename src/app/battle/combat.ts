@@ -20,7 +20,13 @@ import type {
 import { BATTLE_TICK_RATE_HZ } from './planner';
 import { createLocalDriver, type DriverFactory } from './driver';
 import type { BattleRecording, BattleRun } from './session';
-import { summarize, type BattleSummary, type QueuedOrder, type SquadStatus } from './status';
+import {
+  summarize,
+  type BattleSummary,
+  type QueuedOrder,
+  type SquadStatus,
+  type VehicleStatus,
+} from './status';
 
 // The Combat stage (docs/constructive-simulation/04), without the page: the
 // battle the scenario makes, its clock (play, pause, speed), live orders to
@@ -35,7 +41,7 @@ import { summarize, type BattleSummary, type QueuedOrder, type SquadStatus } fro
 export const COMBAT_SPEEDS = [0.5, 1, 2, 4, 8, 16, 32] as const;
 export type CombatSpeed = (typeof COMBAT_SPEEDS)[number];
 
-export type { QueuedOrder, SquadStatus } from './status';
+export type { QueuedOrder, SquadStatus, VehicleStatus } from './status';
 /** The battle's results by side. */
 export type CombatSummary = BattleSummary;
 
@@ -77,10 +83,15 @@ export interface Combat {
      */
     killZoneAt?: Vec2 | null,
   ): boolean;
-  /** Clears a squad's orders: it holds where it is. */
+  /** Clears a squad's orders: it holds where it is (a vehicle: it stops). */
   hold(squadId: string): void;
   squads(): readonly SquadStatus[];
   squad(id: string | null): SquadStatus | undefined;
+  /** The vehicles (docs/vehicles.md). */
+  vehicles(): readonly VehicleStatus[];
+  vehicle(id: string | null): VehicleStatus | undefined;
+  /** Sends a vehicle to `point` (snapped clear of water and buildings). `true` when given. */
+  orderVehicle(vehicleId: string, point: Vec2, mode: 'replace' | 'append'): boolean;
   /** Ends the battle (for good): the clock stops. */
   end(): void;
   summary(): CombatSummary;
@@ -193,6 +204,7 @@ export function createCombat(o: CombatOptions): Combat {
               destinationOffTerrain: 'the destination is off the map',
               unknownUnit: 'there is no such squad',
               noForceModel: 'the battle has no force model',
+              unknownVehicle: 'there is no such vehicle',
             }[event.reason as string] ?? event.reason;
           o.notify(`Order refused: ${reason}.`);
         }
@@ -237,6 +249,19 @@ export function createCombat(o: CombatOptions): Combat {
       return true;
     },
     hold(squadId) {
+      const vehicle = combat.vehicle(squadId);
+      if (vehicle) {
+        if (ended) return;
+        driver.submit({
+          type: 'orderVehicle',
+          tick: session.tick,
+          vehicleId: vehicle.id,
+          mode: 'replace',
+          destinations: [],
+        });
+        o.notify(`${vehicle.name} will stop.`);
+        return;
+      }
       const squad = byId.get(squadId);
       if (ended || !squad) return;
       give(squadId, 'replace', []);
@@ -244,6 +269,25 @@ export function createCombat(o: CombatOptions): Combat {
     },
     squads: () => battle.squads.flatMap((s) => statusOf(s.spec.id) ?? []),
     squad: (id) => (id === null ? undefined : statusOf(id)),
+    vehicles: () => driver.vehicles(),
+    vehicle: (id) => (id === null ? undefined : driver.vehicles().find((v) => v.id === id)),
+    orderVehicle(vehicleId, point, mode) {
+      if (ended || !spec.vehicles?.some((v) => v.id === vehicleId)) return false;
+      const placed = placeDestination(o.terrain, point);
+      if ('problem' in placed) {
+        o.notify(placed.problem);
+        return false;
+      }
+      if (placed.note !== undefined) o.notify(placed.note);
+      driver.submit({
+        type: 'orderVehicle',
+        tick: session.tick,
+        vehicleId,
+        mode,
+        destinations: [placed.point],
+      });
+      return true;
+    },
     end() {
       ended = true;
       playing = false;

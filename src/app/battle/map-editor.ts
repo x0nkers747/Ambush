@@ -1,7 +1,9 @@
 import {
   killZoneSpec,
   ORDER_LABELS,
+  vehiclesOf,
   type PlannedSector,
+  type PlannedVehicle,
   type ScenarioSquad,
 } from '#exercise/battle';
 import { killZoneCorners, type KillZone, type OrderKind, type Side, type Vec2 } from '#sim';
@@ -22,6 +24,10 @@ import type { Planner } from './planner';
 //   drag a corner        resize the selected ambush order's kill zone
 //   drag the arc handle  widen or narrow the selected defend order's sector
 //   right-click a waypoint  delete the order
+//
+// Vehicles (docs/vehicles.md) alike: click to select, drag to move (Scenario
+// Setup), drag the knob to turn, drag a waypoint of the route to move it,
+// right-click it to delete it.
 
 /** Friendly blue and hostile red (APP-6 affiliation colours, as the map has always drawn them). */
 export const SIDE_COLORS: Readonly<Record<Side, string>> = {
@@ -58,7 +64,10 @@ type Hit =
   /** The handle that widens or narrows the selected defend order's arc. */
   | { readonly kind: 'arc'; readonly squad: ScenarioSquad; readonly index: number }
   | { readonly kind: 'knob'; readonly squad: ScenarioSquad }
-  | { readonly kind: 'squad'; readonly squad: ScenarioSquad };
+  | { readonly kind: 'squad'; readonly squad: ScenarioSquad }
+  | { readonly kind: 'vehicle'; readonly vehicle: PlannedVehicle }
+  | { readonly kind: 'vehicleKnob'; readonly vehicle: PlannedVehicle }
+  | { readonly kind: 'vehicleWaypoint'; readonly vehicle: PlannedVehicle; readonly index: number };
 
 export interface BattleMapEditor extends MapEditor {
   /** Whether OPFOR is drawn (and can be picked) while BLUEFOR plans. */
@@ -70,33 +79,64 @@ const toVec = (p: { east: number; north: number }): Vec2 => ({ x: p.east, y: p.n
 export function createBattleMapEditor(planner: Planner): BattleMapEditor {
   /** The projection of the view drawn last: the one the pointer is over. */
   let project: ((p: Vec2) => Vec2) | null = null;
+  /** Whether that view is the 3D view (vehicles' symbols drawn above them). */
+  let perspective = false;
   let drag: Hit | null = null;
 
   const visible = (s: ScenarioSquad) =>
     editor.showOpfor || planner.stage !== 'bluefor' || s.side === 'BLUEFOR';
   const squads = () => planner.definition.squads.filter(visible);
 
+  const vehiclesShown = () =>
+    vehiclesOf(planner.definition).filter(
+      (v) => editor.showOpfor || planner.stage !== 'bluefor' || v.side === 'BLUEFOR',
+    );
+
   /** The facing knob of the selected squad, on screen, when it can be turned. */
   const knobOf = (s: ScenarioSquad, at: (p: Vec2) => Vec2): Vec2 | null => {
     if (planner.selection.squadId !== s.id) return null;
     if (!planner.canPlace() && !planner.canPlan(s)) return null;
-    const c = at(toVec(s.position));
-    const rad = (s.facingDeg * Math.PI) / 180;
-    // A point 20 m ahead gives the screen direction of the facing in either view.
-    const ahead = at({
-      x: s.position.east + 20 * Math.sin(rad),
-      y: s.position.north + 20 * Math.cos(rad),
-    });
-    const dx = ahead.x - c.x;
-    const dy = ahead.y - c.y;
-    const n = Math.hypot(dx, dy);
-    if (!Number.isFinite(n) || n < 1e-6) return null;
-    return { x: c.x + (dx / n) * KNOB_PX, y: c.y + (dy / n) * KNOB_PX };
+    return knobAt(s.position, s.facingDeg, at);
+  };
+  /** The facing knob of the selected vehicle, on screen, when it can be turned. */
+  const vehicleKnobOf = (v: PlannedVehicle, at: (p: Vec2) => Vec2): Vec2 | null => {
+    if (planner.selection.vehicleId !== v.id) return null;
+    if (!planner.canPlace() && !planner.canRoute(v)) return null;
+    // Giving it waypoints, a click ahead of it is one, not its knob.
+    if (planner.tool.kind === 'order') return null;
+    return knobAt(v.position, v.facingDeg, at);
   };
 
+  const hitVehicle = (screen: Vec2, at: (p: Vec2) => Vec2): Hit | null => {
+    const near = (p: Vec2, r: number) => Math.hypot(p.x - screen.x, p.y - screen.y) <= r;
+    const list = vehiclesShown();
+    const selected = planner.selectedVehicle;
+    if (selected) {
+      const knob = vehicleKnobOf(selected, at);
+      if (knob && near(knob, KNOB_HIT_PX)) return { kind: 'vehicleKnob', vehicle: selected };
+    }
+    const ordered = selected ? [selected, ...list.filter((v) => v.id !== selected.id)] : list;
+    for (const v of ordered) {
+      for (let k = v.route.length - 1; k >= 0; k -= 1) {
+        const p = v.route[k];
+        if (p && near(at(toVec(p)), WAYPOINT_HIT_PX))
+          return { kind: 'vehicleWaypoint', vehicle: v, index: k };
+      }
+    }
+    for (const v of ordered) {
+      const c = at(toVec(v.position));
+      const lifted = vehicleSymbolAt(c, perspective, pxPerMetre(at, toVec(v.position)));
+      if (near(c, SQUAD_HIT_PX) || near(lifted, SQUAD_HIT_PX))
+        return { kind: 'vehicle', vehicle: v };
+    }
+    return null;
+  };
   const hitAt = (screen: Vec2): Hit | null => {
     const at = project;
     if (!at) return null;
+    // Vehicles over squads: one is easily lost in a squad's soldiers.
+    const car = hitVehicle(screen, at);
+    if (car) return car;
     const near = (p: Vec2, r: number) => Math.hypot(p.x - screen.x, p.y - screen.y) <= r;
     const list = squads();
     // The selected squad's handles first, then waypoints, then squads.
@@ -149,16 +189,32 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       if (!hit) return false;
       if (button === 2) {
         if (hit.kind === 'waypoint') planner.removeOrder(hit.squad.id, hit.index);
+        if (hit.kind === 'vehicleWaypoint')
+          planner.removeVehicleWaypoint(hit.vehicle.id, hit.index);
         return true;
       }
       if (button !== 0) return false;
       if (hit.kind === 'waypoint') planner.select(hit.squad.id, hit.index);
       else if (hit.kind === 'squad') planner.select(hit.squad.id);
+      else if (hit.kind === 'vehicle') planner.selectVehicle(hit.vehicle.id);
+      else if (hit.kind === 'vehicleWaypoint') planner.selectVehicle(hit.vehicle.id, hit.index);
       drag = hit;
       return true;
     },
     drag(point) {
       if (!drag) return;
+      if (drag.kind === 'vehicle') {
+        planner.moveVehicleTo(drag.vehicle.id, point, false);
+        return;
+      }
+      if (drag.kind === 'vehicleKnob') {
+        planner.turnVehicleToward(drag.vehicle.id, point, false);
+        return;
+      }
+      if (drag.kind === 'vehicleWaypoint') {
+        planner.moveVehicleWaypointTo(drag.vehicle.id, drag.index, point, false);
+        return;
+      }
       const id = drag.squad.id;
       if (drag.kind === 'squad') planner.moveSquadTo(id, point, false);
       else if (drag.kind === 'knob') planner.turnSquadToward(id, point, false);
@@ -176,18 +232,262 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     },
     cursor(_point, screen) {
       const hit = hitAt(screen);
-      if (hit?.kind === 'knob') return 'grab';
+      if (hit?.kind === 'knob' || hit?.kind === 'vehicleKnob') return 'grab';
+      if (hit?.kind === 'vehicle') return planner.canPlace() ? 'move' : 'pointer';
+      if (hit?.kind === 'vehicleWaypoint')
+        return planner.canRoute(hit.vehicle) ? 'move' : 'pointer';
       if (hit?.kind === 'corner' || hit?.kind === 'arc') return 'nwse-resize';
       if (hit?.kind === 'squad') return planner.canPlace() ? 'move' : 'pointer';
       if (hit?.kind === 'waypoint') return planner.canPlan(hit.squad) ? 'move' : 'pointer';
       return planner.tool.kind === 'select' ? null : 'crosshair';
     },
-    draw(ctx, toScreen) {
+    draw(ctx, toScreen, inPerspective = false) {
       project = toScreen;
+      perspective = inPerspective;
       drawBattle(ctx, planner, toScreen, squads(), (s) => knobOf(s, toScreen));
+      drawVehicles(
+        ctx,
+        planner,
+        toScreen,
+        vehiclesShown(),
+        (v) => vehicleKnobOf(v, toScreen),
+        inPerspective,
+      );
     },
   };
   return editor;
+}
+
+/** A facing knob on screen: `KNOB_PX` from `position` the way `facingDeg` points, in either view. */
+function knobAt(
+  position: { east: number; north: number },
+  facingDeg: number,
+  at: (p: Vec2) => Vec2,
+): Vec2 | null {
+  const c = at(toVec(position));
+  const rad = (facingDeg * Math.PI) / 180;
+  // A point 20 m ahead gives the screen direction of the facing in either view.
+  const ahead = at({
+    x: position.east + 20 * Math.sin(rad),
+    y: position.north + 20 * Math.cos(rad),
+  });
+  const dx = ahead.x - c.x;
+  const dy = ahead.y - c.y;
+  const n = Math.hypot(dx, dy);
+  if (!Number.isFinite(n) || n < 1e-6) return null;
+  return { x: c.x + (dx / n) * KNOB_PX, y: c.y + (dy / n) * KNOB_PX };
+}
+
+function drawKnob(ctx: CanvasRenderingContext2D, c: Vec2, knob: Vec2): void {
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y);
+  ctx.lineTo(knob.x, knob.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = OUTLINE;
+  ctx.beginPath();
+  ctx.arc(knob.x, knob.y, 5, 0, 2 * Math.PI);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** A route on the map: a line from `points[0]` through the rest, a chevron along each leg. */
+export function drawRoute(
+  ctx: CanvasRenderingContext2D,
+  points: readonly Vec2[],
+  color: string,
+  isSelected: boolean,
+  dash: readonly number[] = [],
+): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = isSelected ? 1 : 0.75;
+  ctx.setLineDash(dash as number[]);
+  for (const [width, stroke] of [
+    [isSelected ? 5 : 4, OUTLINE],
+    [isSelected ? 3 : 2, color],
+  ] as const) {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = stroke;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (!a || !b) continue;
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 40) continue;
+    chevron(ctx, (a.x + b.x) / 2, (a.y + b.y) / 2, Math.atan2(b.y - a.y, b.x - a.x), color);
+  }
+  ctx.restore();
+}
+
+/** The scenario's vehicles: their routes, symbols, knobs and names. */
+function drawVehicles(
+  ctx: CanvasRenderingContext2D,
+  planner: Planner,
+  at: (p: Vec2) => Vec2,
+  vehicles: readonly PlannedVehicle[],
+  knobOf: (v: PlannedVehicle) => Vec2 | null,
+  perspective: boolean,
+): void {
+  const issues = planner.issues();
+  const selection = planner.selection;
+  ctx.save();
+  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const v of vehicles) {
+    const isSelected = selection.vehicleId === v.id;
+    const color = SIDE_COLORS[v.side];
+    if (v.route.length > 0) {
+      const points = [toVec(v.position), ...v.route.map(toVec)].map(at);
+      drawRoute(ctx, points, color, isSelected, [12, 4, 2, 4]);
+      v.route.forEach((_, k) => {
+        const q = points[k + 1];
+        if (!q) return;
+        const issue = issues.some((i) => i.vehicleId === v.id && i.orderIndex === k);
+        waypoint(ctx, q, 'move', k + 1, color, isSelected && selection.orderIndex === k, issue);
+      });
+    }
+  }
+  for (const v of vehicles) {
+    const isSelected = selection.vehicleId === v.id;
+    const c = at(toVec(v.position));
+    const knob = knobOf(v);
+    if (knob) drawKnob(ctx, c, knob);
+    const issue = issues.some((i) => i.vehicleId === v.id && i.orderIndex === null);
+    const s = vehicleMarker(
+      ctx,
+      c,
+      v.side,
+      isSelected,
+      issue,
+      perspective,
+      pxPerMetre(at, toVec(v.position)),
+    );
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = OUTLINE;
+    ctx.strokeText(v.name, s.x, s.y + 22);
+    ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
+    ctx.fillText(v.name, s.x, s.y + 22);
+  }
+  ctx.restore();
+}
+
+/** How far above a vehicle its symbol is drawn in the 3D view (px), clear of the model. */
+const VEHICLE_SYMBOL_LIFT_PX = 48;
+/** The height above the ground the model reaches (m), its machine gun's top. */
+const VEHICLE_HEIGHT_M = 2.5;
+
+/**
+ * Where a vehicle's symbol is drawn for a vehicle at `c` on screen: on it in
+ * 2D; in 3D above it, clear of the model (`pxPerM`: the view's scale there).
+ */
+export function vehicleSymbolAt(c: Vec2, perspective: boolean, pxPerM = 0): Vec2 {
+  if (!perspective) return c;
+  const lift = Math.min(400, VEHICLE_SYMBOL_LIFT_PX + VEHICLE_HEIGHT_M * pxPerM);
+  return { x: c.x, y: c.y - lift };
+}
+
+/** The view's scale at map point `p` (screen px per metre, across the screen). */
+export function pxPerMetre(at: (p: Vec2) => Vec2, p: Vec2): number {
+  const a = at(p);
+  const b = at({ x: p.x + 2, y: p.y });
+  const c = at({ x: p.x, y: p.y + 2 });
+  const s = Math.max(Math.hypot(b.x - a.x, b.y - a.y), Math.hypot(c.x - a.x, c.y - a.y)) / 2;
+  return Number.isFinite(s) ? s : 0;
+}
+
+/**
+ * A vehicle's marker: its symbol on it (2D), or above it on a leader line (3D,
+ * so the model shows). Returns where the symbol is.
+ */
+export function vehicleMarker(
+  ctx: CanvasRenderingContext2D,
+  c: Vec2,
+  side: Side,
+  isSelected: boolean,
+  issue: boolean,
+  perspective: boolean,
+  pxPerM = 0,
+): Vec2 {
+  const s = vehicleSymbolAt(c, perspective, pxPerM);
+  if (perspective) {
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = OUTLINE;
+    ctx.beginPath();
+    // From the top of the model (not across it) to the symbol.
+    ctx.moveTo(c.x, Math.max(s.y + 9, c.y - VEHICLE_HEIGHT_M * pxPerM));
+    ctx.lineTo(s.x, s.y + 9);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = isSelected ? '#fff' : SIDE_COLORS[side];
+    ctx.stroke();
+    ctx.restore();
+  }
+  vehicleSymbol(ctx, s, side, isSelected, issue);
+  return s;
+}
+
+/**
+ * A vehicle's symbol (APP-6 / MIL-STD-2525 style): the frame of its side (a
+ * rectangle friendly, a diamond hostile) holding an armoured personnel
+ * carrier: the infantry cross over the oval of tracks.
+ */
+export function vehicleSymbol(
+  ctx: CanvasRenderingContext2D,
+  c: Vec2,
+  side: Side,
+  isSelected: boolean,
+  issue = false,
+): void {
+  const color = SIDE_COLORS[side];
+  const w = 13;
+  const h = 9;
+  ctx.save();
+  ctx.lineWidth = isSelected ? 2.5 : 1.5;
+  ctx.strokeStyle = isSelected ? '#fff' : OUTLINE;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if (side === 'BLUEFOR') ctx.rect(c.x - w, c.y - h, 2 * w, 2 * h);
+  else {
+    ctx.moveTo(c.x, c.y - 14);
+    ctx.lineTo(c.x + 14, c.y);
+    ctx.lineTo(c.x, c.y + 14);
+    ctx.lineTo(c.x - 14, c.y);
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = OUTLINE;
+  // Tracks: a long oval low in the frame.
+  ctx.beginPath();
+  const ow = side === 'BLUEFOR' ? 8.5 : 6.5;
+  ctx.ellipse(c.x, c.y + 3, ow, 2.6, 0, 0, 2 * Math.PI);
+  ctx.stroke();
+  // Infantry: a cross above it.
+  ctx.beginPath();
+  const cw = side === 'BLUEFOR' ? 7 : 5;
+  ctx.moveTo(c.x - cw, c.y - 6);
+  ctx.lineTo(c.x + cw, c.y - 0.5);
+  ctx.moveTo(c.x + cw, c.y - 6);
+  ctx.lineTo(c.x - cw, c.y - 0.5);
+  ctx.stroke();
+  ctx.restore();
+  if (issue) ring(ctx, c, 20);
 }
 
 function drawBattle(
@@ -301,22 +601,7 @@ function drawBattle(
     const c = at(toVec(s.position));
     const issue = issues.some((i) => i.squadId === s.id && i.orderIndex === null);
     const knob = knobOf(s);
-    if (knob) {
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(knob.x, knob.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = OUTLINE;
-      ctx.beginPath();
-      ctx.arc(knob.x, knob.y, 5, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.stroke();
-    }
+    if (knob) drawKnob(ctx, c, knob);
     unitSymbol(ctx, c, s, isSelected, issue);
     const label = s.name;
     ctx.textAlign = 'center';

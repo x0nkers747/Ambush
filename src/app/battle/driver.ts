@@ -6,7 +6,7 @@ import {
   type BattleRun,
   type TimedEvent,
 } from './session';
-import { squadStatuses, type SquadStatus } from './status';
+import { squadStatuses, vehicleStatuses, type SquadStatus, type VehicleStatus } from './status';
 
 // Where a battle is simulated (docs/constructive-simulation/04): here, on the
 // page's thread (`createLocalDriver`), or in the battle worker
@@ -27,6 +27,8 @@ export interface BattleDriver {
   submit(command: SimCommand): () => number | null;
   /** The squads, as last known. */
   squads(): readonly SquadStatus[];
+  /** The vehicles, as last known. */
+  vehicles(): readonly VehicleStatus[];
   /** The recording of the battle so far. */
   recording(): Promise<BattleRecording>;
   /** Stops it (the worker's battle is dropped). */
@@ -54,6 +56,7 @@ export function createLocalDriver(terrain: TerrainDataset): DriverFactory {
         return () => tick;
       },
       squads: () => squadStatuses(session.battle, session.battle.sim.state),
+      vehicles: () => vehicleStatuses(session.battle.sim.state),
       recording: () => Promise.resolve(session.recording()),
       dispose() {
         // Nothing to stop on this thread.

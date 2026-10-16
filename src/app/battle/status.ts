@@ -311,3 +311,39 @@ export function summarize(squads: readonly SquadStatus[], seconds: number): Batt
     },
   };
 }
+
+/** What the page shows of a vehicle at a moment (docs/vehicles.md). */
+export interface VehicleStatus {
+  readonly id: string;
+  readonly name: string;
+  readonly side: Side;
+  readonly position: Vec2;
+  /** Radians clockwise from grid north. */
+  readonly heading: number;
+  /** m/s. */
+  readonly speed: number;
+  /** Where it still drives: its active order's destination, then the pending ones. */
+  readonly route: readonly Vec2[];
+}
+
+/** The vehicles of a battle state. */
+export function vehicleStatuses(state: DeepReadonly<SimState>): VehicleStatus[] {
+  return (state.vehicles ?? []).map((v) => ({
+    id: v.id,
+    name: v.name,
+    side: v.side,
+    position: { x: v.position.x, y: v.position.y },
+    heading: v.heading,
+    speed: v.speed,
+    route: v.orders
+      .filter((o) => o.status === 'active' || o.status === 'pending')
+      .map((o) => ({ x: o.destination.x, y: o.destination.y })),
+  }));
+}
+
+/** A vehicle's activity in words: "Driving 28 km/h", "Stopped". */
+export function vehicleActivity(v: VehicleStatus): string {
+  const kmh = Math.round(v.speed * 3.6);
+  if (kmh >= 1) return `Driving ${String(kmh)} km/h`;
+  return v.route.length > 0 ? 'Turning' : 'Stopped';
+}

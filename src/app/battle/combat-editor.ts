@@ -3,15 +3,19 @@ import type { Battle } from '#exercise/battle';
 import type { OrderKind, Vec2, ActionsOn, KillZone } from '#sim';
 import type { MapEditor } from '#view2d';
 import type { TimedEvent } from './session';
-import type { SquadStatus } from './status';
+import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status';
 import {
-  chevron,
   defenceSector,
+  drawRoute,
+  chevron,
   killZone,
   OUTLINE,
   ring,
   SIDE_COLORS,
   unitSymbol,
+  pxPerMetre,
+  vehicleMarker,
+  vehicleSymbolAt,
   waypoint,
 } from './map-editor';
 
@@ -34,6 +38,9 @@ export interface BattleDisplay {
   readonly battle: Pick<Battle, 'squads'>;
   squads(): readonly SquadStatus[];
   squad(id: string | null): SquadStatus | undefined;
+  /** The vehicles (docs/vehicles.md). */
+  vehicles(): readonly VehicleStatus[];
+  orderVehicle?(vehicleId: string, point: Vec2, mode: 'replace' | 'append'): boolean;
   order?(
     squadId: string,
     kind: OrderKind,
@@ -45,7 +52,7 @@ export interface BattleDisplay {
 }
 
 export interface CombatUi {
-  /** The squad selected (either side), or `null`. */
+  /** The squad (or vehicle) selected (either side), or `null`. */
   selected: string | null;
   /** The order a map click gives the selected squad, or `null` (select only). */
   tool: OrderKind | null;
@@ -85,6 +92,8 @@ export function createCombatMapEditor(
 ): MapEditor {
   let project: ((p: Vec2) => Vec2) | null = null;
   const sample = emptyMotionSample();
+  /** Whether the view drawn last is the 3D view. */
+  let perspective = false;
 
   /** Where each soldier is at the time drawn, from the motion log (interpolated). */
   const positions = (c: BattleDisplay) => {
@@ -123,8 +132,34 @@ export function createCombatMapEditor(
     return null;
   };
 
+  /** The vehicle under `screen`, where the motion log has it at the time drawn. */
+  const vehicleAt = (screen: Vec2): VehicleStatus | null => {
+    const c = combat();
+    const at = project;
+    if (!c || !at) return null;
+    const vehicles = c.vehicles();
+    if (vehicles.length === 0) return null;
+    const where = positions(c);
+    for (const v of vehicles) {
+      const ground = where.get(v.id) ?? v.position;
+      const p = at(ground);
+      const s = vehicleSymbolAt(p, perspective, pxPerMetre(at, ground));
+      if (
+        Math.hypot(p.x - screen.x, p.y - screen.y) <= SQUAD_HIT_PX ||
+        Math.hypot(s.x - screen.x, s.y - screen.y) <= SQUAD_HIT_PX
+      )
+        return v;
+    }
+    return null;
+  };
+
   return {
     press(_point, screen, button) {
+      const car = vehicleAt(screen);
+      if (car) {
+        if (button === 0) ui.selected = car.id;
+        return true;
+      }
       const hit = squadAt(screen);
       if (!hit) return false;
       // With an order to give, a click on the selected squad's enemy is the
@@ -147,6 +182,15 @@ export function createCombatMapEditor(
         return;
       }
       const mode = ui.append !== ui.shift ? 'append' : 'replace';
+      const car = c.vehicles().find((v) => v.id === ui.selected);
+      if (car) {
+        if (ui.tool !== 'move') {
+          notify(`${car.name} is a vehicle: it only takes Move orders (M).`);
+          return;
+        }
+        c.orderVehicle?.(car.id, point, mode);
+        return;
+      }
       if (ui.tool === 'ambush' || ui.tool === 'defend') {
         // First its position; then its kill zone (an ambush) or direction (a defence), which gives the order.
         const at = pendingAmbush(ui);
@@ -160,13 +204,15 @@ export function createCombatMapEditor(
       c.order(ui.selected, ui.tool, point, mode, ui.actionsOn);
     },
     cursor(_point, screen) {
+      if (vehicleAt(screen)) return 'pointer';
       const hit = squadAt(screen);
       const selected = combat()?.squad(ui.selected);
       if (hit && !(ui.tool !== null && selected && hit.side !== selected.side)) return 'pointer';
       return ui.tool === null ? null : 'crosshair';
     },
-    draw(ctx, toScreen, perspective = false) {
+    draw(ctx, toScreen, inPerspective = false) {
       project = toScreen;
+      perspective = inPerspective;
       const c = combat();
       if (!c) return;
       const where = positions(c);
@@ -393,6 +439,40 @@ export function createCombatMapEditor(
           ctx.fill();
           ctx.stroke();
         }
+      }
+
+      // Vehicles: where each still drives, its symbol where it is, and its state.
+      for (const v of c.vehicles()) {
+        const isSelected = v.id === ui.selected;
+        const at = where.get(v.id) ?? v.position;
+        const color = SIDE_COLORS[v.side];
+        if (v.route.length > 0) {
+          const points = [at, ...v.route].map(toScreen);
+          drawRoute(ctx, points, color, isSelected, [12, 4, 2, 4]);
+          v.route.forEach((d, k) => {
+            waypoint(ctx, toScreen(d), 'move', k + 1, color, isSelected && k === 0, false);
+          });
+        }
+      }
+      for (const v of c.vehicles()) {
+        const isSelected = v.id === ui.selected;
+        const ground = where.get(v.id) ?? v.position;
+        const p = vehicleMarker(
+          ctx,
+          toScreen(ground),
+          v.side,
+          isSelected,
+          false,
+          inPerspective,
+          pxPerMetre(toScreen, ground),
+        );
+        ctx.textAlign = 'center';
+        const label = `${v.name} · ${vehicleActivity(v)}`;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = OUTLINE;
+        ctx.strokeText(label, p.x, p.y + 22);
+        ctx.fillStyle = isSelected ? '#fff' : '#d8dde2';
+        ctx.fillText(label, p.x, p.y + 22);
       }
 
       // Squad symbols with their state.

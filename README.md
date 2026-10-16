@@ -157,6 +157,13 @@ Next says what is missing, and the side panel says the same next to the stage's 
    to a trench, drawn in 3D), harder to hit, see and suppress the deeper it is; its row's
    **prepared** choice starts it partly or fully dug in. It fights from there and waits for new
    orders ([docs](docs/behavior-lab/force-on-force/09-defend.md)).
+   **Vehicles** (a prototype): in Setup, **Place vehicles** puts an M113 armoured personnel
+   carrier on the map; each click after that adds a waypoint to its route (**M** with it
+   selected). It drives the route as a tracked vehicle does, pivoting to face a turn it cannot
+   drive round, speeding up to the ground's speed (a road, open ground, woods; slower uphill),
+   slowing for bends and stopping on its last waypoint. In Sim it takes Move orders like a squad.
+   It only drives: no crew, no weapons, and nothing sees or shoots it
+   ([docs](docs/vehicles.md)).
 4. **Sim**, Combat ([docs/constructive-simulation/04](docs/constructive-simulation/04-combat.md)),
    from **Simulate →** in planning. The header labels the stages Terrain, Setup, Planning, Sim
    and AAR. Going back to an earlier stage during a battle asks first, then discards it. The

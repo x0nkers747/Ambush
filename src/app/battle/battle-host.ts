@@ -1,4 +1,5 @@
 import type { BattleReplay, BattleSpec } from '#exercise/battle';
+import { motionMovers } from '#exercise';
 import type { SimCommand, SimSnapshot, TerrainDataset } from '#sim';
 import { CODES_PER_SOLDIER, NUMBERS_PER_SOLDIER, writeFrame } from './frame-log';
 import {
@@ -7,7 +8,7 @@ import {
   type BattleSession,
   type TimedEvent,
 } from './session';
-import { squadStatuses, type SquadStatus } from './status';
+import { squadStatuses, vehicleStatuses, type SquadStatus, type VehicleStatus } from './status';
 
 // The battle worker's side (docs/constructive-simulation/04): a battle
 // session stepped toward the tick the page asks for, as fast as it can, in
@@ -63,6 +64,8 @@ export interface HostBatch {
   readonly applied: readonly { readonly id: number; readonly tick: number }[];
   /** The squads at `headTick`. */
   readonly squads: readonly SquadStatus[];
+  /** The vehicles at `headTick`. */
+  readonly vehicles: readonly VehicleStatus[];
   readonly headTick: number;
   readonly cpu: { readonly mean: number; readonly p95: number };
   /** The recording, when asked for. */
@@ -97,7 +100,7 @@ export function createBattleHost(
   let frameFrom = 0;
   let frames: { numbers: Float64Array; codes: Uint8Array; count: number } | null = null;
 
-  const soldierCount = () => session?.battle.sim.state.soldiers.length ?? 0;
+  const soldierCount = () => (session ? motionMovers(session.battle.sim.state).length : 0);
   const newFrames = () => {
     const n = soldierCount();
     return {
@@ -126,7 +129,7 @@ export function createBattleHost(
     const batch: HostBatch = {
       type: 'batch',
       epoch,
-      soldierIds: sentIds ? null : s.battle.sim.state.soldiers.map((x) => x.id),
+      soldierIds: sentIds ? null : motionMovers(s.battle.sim.state).map((x) => x.id),
       firstTick: frameFrom,
       frameCount: f.count,
       numbers,
@@ -137,6 +140,7 @@ export function createBattleHost(
       keyframes,
       applied,
       squads: squadStatuses(s.battle, s.battle.sim.state),
+      vehicles: vehicleStatuses(s.battle.sim.state),
       headTick: s.tick,
       cpu: s.cpu(),
       recording: wantRecording ? s.recording() : null,

@@ -367,3 +367,49 @@ describe('a defend order', () => {
     );
   });
 });
+
+describe('vehicles (docs/vehicles.md)', () => {
+  it('places a vehicle in Scenario Setup, then gives it a route, one waypoint per click', () => {
+    const { p, saved } = planner('scenario');
+    p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
+    p.click({ x: -100, y: -300 });
+    expect(p.selection).toEqual({ squadId: null, orderIndex: null, vehicleId: 'V1' });
+    // Placed: the Move tool is armed, and each click adds a waypoint after the selected one.
+    expect(p.tool).toEqual({ kind: 'order', order: 'move' });
+    p.click({ x: -100, y: -100 });
+    p.click({ x: 100, y: -100 });
+    p.selectVehicle('V1', 0);
+    p.click({ x: 0, y: -200 });
+    expect(p.selectedVehicle?.route).toEqual([
+      { east: -100, north: -100 },
+      { east: 0, north: -200 },
+      { east: 100, north: -100 },
+    ]);
+    expect(p.selection.orderIndex).toBe(1);
+    expect(saved).toHaveLength(4);
+  });
+
+  it('refuses other orders for a vehicle, and edits its route in planning, not its place', () => {
+    const setup = planner('scenario');
+    setup.p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
+    setup.p.click({ x: -100, y: -300 });
+    setup.p.setTool({ kind: 'order', order: 'attack' });
+    setup.p.click({ x: 0, y: 0 });
+    expect(setup.notices.at(-1)).toMatch(/only takes Move orders/);
+    const { p } = planner('bluefor', setup.p.definition);
+    p.selectVehicle('V1');
+    expect(p.canRoute(p.selectedVehicle)).toBe(true);
+    expect(p.moveVehicleTo('V1', { x: 0, y: 0 }, true)).toBe(false);
+    p.setTool({ kind: 'order', order: 'move' });
+    p.click({ x: -100, y: -100 });
+    expect(p.selectedVehicle?.route).toHaveLength(1);
+    expect(p.moveVehicleWaypointTo('V1', 0, { x: -50, y: -100 }, true)).toBe(true);
+    p.removeVehicleWaypoint('V1', 0);
+    expect(p.selectedVehicle?.route).toEqual([]);
+    // The vehicle stands in the 3D view's start figures.
+    expect(p.figures().vehicles.map((v) => v.id)).toEqual(['V1']);
+    // Selecting a squad leaves the vehicle.
+    p.select('B1');
+    expect(p.selectedVehicle).toBeUndefined();
+  });
+});
