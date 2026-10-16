@@ -992,11 +992,19 @@ export interface ScenarioIssue {
   readonly message: string;
 }
 
+/** The rate at which a battle's movement is integrated (Hz). */
+export const BATTLE_SUBSTEP_HZ = 30;
+
 /** The battle a scenario makes (`createBattle`'s spec). */
 export function battleSpecOf(d: BattleScenarioDefinition, tickRateHz: number): BattleSpec {
   return {
     seed: d.seed,
     tickRateHz,
+    // Movement integrated at 30 Hz, as in the Force-on-Force Lab's large runs
+    // (docs/behavior-lab/force-on-force/04 §5.2: the same results in
+    // distribution, and a quarter of the movement engine's work). Set here, so
+    // battles recorded before keep their own rate (the default, 120 Hz).
+    substepHz: BATTLE_SUBSTEP_HZ,
     squads: d.squads.map((s) => ({
       id: s.id,
       name: s.name,

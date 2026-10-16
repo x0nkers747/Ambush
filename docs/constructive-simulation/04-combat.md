@@ -97,9 +97,16 @@ BLUEFOR Planning fights a new one.
 
 - every command, with its origin (setup or user);
 - a snapshot every 5 s (keyframes);
-- `hashSimState` every second;
+- `hashSimState` every second; in a battle of more than 100 soldiers, only
+  at each keyframe (the hash takes over 100 ms at 988 soldiers), the seconds
+  between recorded as `null` and not checked on replay;
 - every soldier's motion;
 - the events shown.
+
+A battle's movement is integrated at 30 Hz (`BATTLE_SUBSTEP_HZ`, in the spec
+`battleSpecOf` makes), as in the Force-on-Force Lab's large runs: the same
+results in distribution, a quarter of the movement engine's work. Battles
+recorded before it keep their own rate (120 Hz, the default) when replayed.
 
 `recording()` gives the spec, the commands and the hashes. The same spec,
 terrain and commands give the same battle tick for tick (tested: a battle

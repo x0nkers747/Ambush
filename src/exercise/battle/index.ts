@@ -37,6 +37,7 @@ export {
   type AmbushScenarioV1,
   type MapPoint,
   battleScenarioId,
+  BATTLE_SUBSTEP_HZ,
   battleSpecOf,
   clearPlan,
   deleteOrder,

@@ -12,7 +12,8 @@ End Combat hands the battle's recording to the review. The recording holds:
 
 - the spec: squads, plans, seed and tick rate;
 - every command, with its origin;
-- the state hash of every second.
+- the state hash of every second (of every keyframe, every 5 s, in a battle
+  of more than 100 soldiers).
 
 Nothing of the live run is taken on trust. The review steps the real
 simulation again, from tick 0, with the recorded commands (the replay). It
@@ -68,7 +69,7 @@ real time.
   squads at the end; the orders given, completed and failed.
 - **Export recording** downloads the recording (JSON). It reproduces the
   battle exactly: a test replays a recording after a JSON round trip, and
-  every second matches.
+  every hash matches.
 
 ## 4. The reference battle (3 v 3)
 
@@ -106,7 +107,7 @@ runs battles of 2, 6 and 12 rifle squads (half a side, 800 m apart, each
 attacking across) on the lab's open ground and in its urban district.
 
 Each battle is fought for 600 s through the battle session, as Combat
-fights it: keyframes, a hash every second, motion and events recorded.
+fights it: keyframes, state hashes, motion and events recorded.
 Then it is replayed from its recording and verified, as the review does.
 
 Results on the development machine (Node, one core, 2026-10-15):

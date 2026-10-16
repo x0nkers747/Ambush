@@ -3,6 +3,7 @@ import { labTerrain } from '#exercise/behavior-lab';
 import {
   addOrder,
   addSquad,
+  BATTLE_SUBSTEP_HZ,
   battleSpecOf,
   newBattleScenario,
   type BattleEdit,
@@ -10,7 +11,7 @@ import {
 } from '#exercise/battle';
 import { createCombat } from './combat';
 import { BATTLE_TICK_RATE_HZ } from './planner';
-import { createBattleSession } from './session';
+import { createBattleSession, HASH_EVERY_SECOND_MAX_SOLDIERS, KEYFRAME_SECONDS } from './session';
 
 // The Combat stage (docs/constructive-simulation/04) without the page: the
 // clock, live orders to either side, End Combat; and the session that
@@ -184,6 +185,30 @@ describe('the session', () => {
     expect(recording.origins.at(-1)).toBe('user');
     expect(live.motion.lastTick).toBe(600);
 
+    const again = createBattleSession(spec, terrain, recording);
+    again.advance(recording.endTick, Infinity);
+    expect(again.hashes).toEqual(live.hashes);
+  });
+});
+
+describe('a large battle', () => {
+  it('moves at 30 Hz; hashes its state at each keyframe only, and still replays exactly', () => {
+    // Eight squads: 104 soldiers, over HASH_EVERY_SECOND_MAX_SOLDIERS.
+    let d = newBattleScenario(terrain, 'bf');
+    for (let k = 0; k < 4; k += 1) {
+      d = done(addSquad(terrain, d, 'BLUEFOR', 'squad', { x: -300 + k * 150, y: -450 }));
+      d = done(addSquad(terrain, d, 'OPFOR', 'squad', { x: -300 + k * 150, y: 450 }));
+    }
+    const spec = battleSpecOf(d, BATTLE_TICK_RATE_HZ);
+    expect(spec.substepHz).toBe(BATTLE_SUBSTEP_HZ);
+    expect(BATTLE_SUBSTEP_HZ).toBe(30);
+    const live = createBattleSession(spec, terrain);
+    expect(live.battle.sim.state.soldiers.length).toBeGreaterThan(HASH_EVERY_SECOND_MAX_SOLDIERS);
+    live.advance(11 * BATTLE_TICK_RATE_HZ, Infinity);
+    const recording = live.recording();
+    expect(recording.hashes.map((h) => h !== null)).toEqual(
+      Array.from({ length: 12 }, (_, s) => s % KEYFRAME_SECONDS === 0),
+    );
     const again = createBattleSession(spec, terrain, recording);
     again.advance(recording.endTick, Infinity);
     expect(again.hashes).toEqual(live.hashes);

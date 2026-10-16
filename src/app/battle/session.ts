@@ -61,6 +61,8 @@ export const SHOWN_EVENTS: ReadonlySet<SimEvent['type']> = new Set([
 
 /** Seconds between keyframes. */
 export const KEYFRAME_SECONDS = 5;
+/** Battles of up to this many soldiers hash their state every second; larger ones at each keyframe. */
+export const HASH_EVERY_SECOND_MAX_SOLDIERS = 100;
 /** `advance` steps for at most this long (ms; at least one tick), so a frame keeps drawing. */
 export const ADVANCE_BUDGET_MS = 30;
 const CPU_SAMPLES = 300;
@@ -111,10 +113,17 @@ export function createBattleSession(
   const hashes: (string | null)[] = [];
   const cpu: number[] = [];
 
+  // A large battle's state hash (over 100 ms at 988 soldiers) is taken at each
+  // keyframe only; the seconds between hold `null` (not checked on replay).
+  const hashEvery =
+    battle.sim.state.soldiers.length > HASH_EVERY_SECOND_MAX_SOLDIERS ? KEYFRAME_SECONDS : 1;
   const atTick = () => {
     const sim = battle.sim;
     motion.record(sim.state);
-    if (sim.tick % rate === 0) hashes[sim.tick / rate] = hashSimState(sim.state);
+    if (sim.tick % rate === 0) {
+      const second = sim.tick / rate;
+      hashes[second] = second % hashEvery === 0 ? hashSimState(sim.state) : null;
+    }
     if (sim.tick % (KEYFRAME_SECONDS * rate) === 0) keyframes.set(sim.tick, sim.snapshot());
   };
   atTick();
