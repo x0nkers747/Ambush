@@ -129,6 +129,8 @@ export function shownPlan(c: BattleDisplay, s: SquadStatus): readonly PlannedOrd
 
 /** How long a burst stays drawn (s of simulation). */
 const BURST_SECONDS = 0.6;
+/** A route point this close behind a vehicle (m) is one it has just passed. */
+const PASSED_M = 4;
 /** How long a heavy shot's line stays drawn (s of simulation). */
 const HEAVY_SECONDS = 1.2;
 /** How long a grenade shows on the map (s), and its effect radius drawn (m; the M203's). */
@@ -278,6 +280,49 @@ export function createCombatMapEditor(
       return route.map((p, k) => (k === index ? { ...p, x: point.x, y: point.y } : p));
     }
     return route;
+  };
+
+  /**
+   * The line of a vehicle's route from where it is: the way it is actually
+   * driving to its next waypoint (its planned route, ahead of it only), then
+   * on to the later ones; planned afresh only where that is not known (the
+   * route being edited).
+   */
+  const vehicleLine = (
+    c: BattleDisplay,
+    v: VehicleStatus,
+    at: Vec2,
+    stops: readonly { readonly point: Vec2; readonly followRoads: boolean }[],
+  ): Vec2[] => {
+    const first = stops[0];
+    const end = v.path[v.path.length - 1];
+    const driving =
+      first !== undefined &&
+      end !== undefined &&
+      Math.hypot(end.x - first.point.x, end.y - first.point.y) < 0.5;
+    if (!driving)
+      return c.terrain ? routeLine(c.terrain, at, stops) : [at, ...stops.map((x) => x.point)];
+    // Points it has already passed (behind it, between ticks) are not drawn: only the way ahead.
+    const fx = Math.sin(v.heading);
+    const fy = Math.cos(v.heading);
+    let k = 0;
+    while (k < v.path.length - 1) {
+      const p = v.path[k];
+      if (
+        !p ||
+        Math.hypot(p.x - at.x, p.y - at.y) > PASSED_M ||
+        (p.x - at.x) * fx + (p.y - at.y) * fy > 0
+      )
+        break;
+      k += 1;
+    }
+    const head = [at, ...v.path.slice(k)];
+    const rest = stops.slice(1);
+    if (rest.length === 0) return head;
+    const tail = c.terrain
+      ? routeLine(c.terrain, first.point, rest)
+      : [first.point, ...rest.map((x) => x.point)];
+    return [...head, ...tail.slice(1)];
   };
 
   /** The live plan's handle or waypoint under `screen`: the selected order's handles first. */
@@ -731,9 +776,7 @@ export function createCombatMapEditor(
             point: { x: p.x, y: p.y },
             followRoads: p.followRoads === true,
           }));
-          const line = c.terrain
-            ? routeLine(c.terrain, at, stops)
-            : [at, ...stops.map((x) => x.point)];
+          const line = vehicleLine(c, v, at, stops);
           drawRoute(ctx, line.map(toScreen), color, isSelected, [12, 4, 2, 4]);
           route.forEach((d, k) => {
             const selected = isSelected && ui.selectedOrder === k;

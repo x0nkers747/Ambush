@@ -45,7 +45,7 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     <div class="speed" role="group" aria-label="Simulation speed">${speeds}</div>
     <h3>New orders</h3>
     <div class="tool-grid order-tools" role="group" aria-label="New orders">
-      ${(c.vehicle(ui.selected) ? (['move'] as const) : ORDER_KINDS)
+      ${(c.vehicle(ui.selected) ? (['move'] as const) : c.squad(ui.selected) ? ORDER_KINDS : [])
         .map((k) => tool(k, ORDER_LABELS[k]))
         .join('')}
       ${tool(null, 'Select')}

@@ -426,6 +426,9 @@ export function createPlanner(o: PlannerOptions): Planner {
     },
     setTool(next) {
       if ((next.kind === 'place' || next.kind === 'placeVehicle') && stage !== 'scenario') return;
+      // Placing something new: what was selected is let go.
+      if (next.kind === 'place' || next.kind === 'placeVehicle')
+        selection = { squadId: null, orderIndex: null };
       tool = next;
       changed();
     },

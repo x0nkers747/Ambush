@@ -9,6 +9,7 @@ import {
   parseBattleScenario,
   setOrderFollowRoads,
   setOrderKind,
+  withoutOrders,
   type BattleEdit,
   type BattleScenarioDefinition,
 } from '#exercise/battle';
@@ -173,6 +174,29 @@ describe('Planning', () => {
     p.removeOrder('B1', 1);
     expect(p.squad('B1')?.plan.map((o) => o.kind)).toEqual(['move']);
     expect(p.selection).toEqual({ squadId: 'B1', orderIndex: 0 });
+  });
+});
+
+describe('Setup selection', () => {
+  it('lets go of the selection when a Place tool is chosen', () => {
+    const { p } = planner('scenario');
+    p.select('B1');
+    expect(p.selection.squadId).toBe('B1');
+    p.setTool({ kind: 'place', side: 'OPFOR', organization: 'squad' });
+    expect(p.selection).toEqual({ squadId: null, orderIndex: null });
+    p.select('B1');
+    p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR', vehicle: 'm1a1' });
+    expect(p.selectedSquad).toBeUndefined();
+  });
+
+  it('back in Setup without orders: withoutOrders clears plans and routes, starts kept', () => {
+    const given = addOrder(terrain, twoSides(), 'B1', 'move', { x: 0, y: 0 });
+    if (!given.ok) throw new Error(given.problem);
+    const d = given.definition;
+    const cleared = withoutOrders(d);
+    expect(d.squads.some((s) => s.plan.length > 0)).toBe(true);
+    expect(cleared.squads.every((s) => s.plan.length === 0)).toBe(true);
+    expect(cleared.squads.map((s) => s.position)).toEqual(d.squads.map((s) => s.position));
   });
 });
 

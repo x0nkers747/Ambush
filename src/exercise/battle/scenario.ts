@@ -741,6 +741,20 @@ export function setSquadOrganization(
   return squadEdit(terrain, next, id);
 }
 
+/**
+ * The scenario without its orders: every squad's plan and every vehicle's
+ * route cleared (back to Scenario Setup, where none are given). Everything
+ * else (where each starts, its facing, organization, weapons) is kept.
+ */
+export function withoutOrders(d: BattleScenarioDefinition): BattleScenarioDefinition {
+  const vehicles = vehiclesOf(d);
+  return {
+    ...d,
+    squads: d.squads.map((s) => ({ ...s, plan: [] })),
+    ...(vehicles.length > 0 ? { vehicles: vehicles.map((v) => ({ ...v, route: [] })) } : {}),
+  };
+}
+
 /** Sets a squad's anti-tank weapons (`null`: back to the default). */
 export function setSquadAntiTank(
   d: BattleScenarioDefinition,

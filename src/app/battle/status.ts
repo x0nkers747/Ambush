@@ -333,6 +333,11 @@ export interface VehicleStatus {
   readonly route: readonly VehicleDestination[];
   /** Its platform (`m113`, `m1a1`, `bmp2`, `t72b`…). */
   readonly kind: string;
+  /**
+   * The rest of the way it is driving now: the points of its active order's
+   * planned route still ahead, its destination last (empty without one).
+   */
+  readonly path: readonly Vec2[];
   /** Its combat state (docs/combined-arms.md): condition, crew, mounts, weapons, targets, damage. */
   readonly condition: VehicleCondition;
   readonly crew: readonly { readonly role: string; readonly state: string }[];
@@ -384,6 +389,9 @@ export function vehicleStatuses(state: DeepReadonly<SimState>): VehicleStatus[] 
         ...(o.followRoads ? { followRoads: true } : {}),
       })),
     kind: v.kind,
+    path: v.orders.some((o) => o.status === 'active')
+      ? v.route.slice(v.routeIndex).map((p) => ({ x: p.x, y: p.y }))
+      : [],
     condition: conditionOf(v.combat as VehicleCombat),
     crew: v.combat.crew.map((c) => ({ role: c.role, state: c.state })),
     mounts: v.combat.mounts.map((m) => ({

@@ -79,6 +79,7 @@ export {
   setSquadFacing,
   setSquadFormation,
   setSquadAntiTank,
+  withoutOrders,
   setSquadOrganization,
   soldierStarts,
   squadPlacementProblem,

@@ -31,6 +31,7 @@ import {
   setSquadFacing,
   setSquadFormation,
   setSquadAntiTank,
+  withoutOrders,
   ANTI_TANK_LOADOUTS,
   DEFAULT_ANTI_TANK,
   SIDE_VEHICLE_KINDS,
@@ -960,6 +961,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       review = null;
     }
     if (target === 'aar') reviewToolsShown = false;
+    // Back to Scenario Setup: the orders and routes go, and every unit stands at its start.
+    if (target === 'scenario' && planner.stage !== 'scenario') {
+      planner.edit((d) => ({ ok: true, definition: withoutOrders(d) }));
+      planner.select(null);
+    }
     planner.setStage(target);
     if (target === 'scenario' || target === 'bluefor') o.setAddress(target);
     lastVersion = -1;
@@ -1058,7 +1064,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   const orderTools = () =>
     `<div class="tool-grid order-tools" role="group" aria-label="Orders">
-      ${(planner.selectedVehicle ? (['move'] as const) : ORDER_KINDS)
+      ${(planner.selectedVehicle ? (['move'] as const) : planner.selectedSquad ? ORDER_KINDS : [])
         .map((k) =>
           toolButton(
             { kind: 'order', order: k },
@@ -1126,8 +1132,18 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             )
             .join('')}`;
       case 'bluefor':
+        // Nothing selected: no order to give, so no order tool.
+        if (!planner.selectedSquad && !planner.selectedVehicle && planner.tool.kind === 'order')
+          planner.setTool({ kind: 'select' });
         return orderTools();
       case 'combat':
+        if (
+          combat &&
+          combatUi.tool !== null &&
+          !combat.squad(combatUi.selected) &&
+          !combat.vehicle(combatUi.selected)
+        )
+          combatUi.tool = null;
         return combat ? combatToolsHtml(combat, combatUi) : '';
       case 'aar':
         return review
