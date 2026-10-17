@@ -99,7 +99,7 @@ export async function seedBundledBattlefields(
   const seeded: string[] = [];
   for (const { key, name, file } of BUNDLED_BATTLEFIELDS) {
     if (memory.has(key)) continue;
-    const task = onTask?.(`Getting ${name} ready (first visit only)…`);
+    const task = onTask?.(`Getting ${name} ready…`);
     try {
       const response = await fetchFile(file);
       if (!response.ok) continue;
