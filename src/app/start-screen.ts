@@ -240,7 +240,7 @@ export function startBattlefieldSelection(
         <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </div>
       <section class="sec scn-entry">
-        <h2>Scenarios</h2>
+        <h2>Existing Scenarios</h2>
         <div class="bf-row">
           <button class="scn-load-btn grow" data-ui="scn-load" title="Open a saved scenario on its battlefield">Load scenario…</button>
           <button data-ui="scn-import" title="Load a scenario file (.ambush.json)">Import JSON…</button>
