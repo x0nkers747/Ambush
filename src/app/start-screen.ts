@@ -308,6 +308,12 @@ export function startBattlefieldSelection(
   let selection: Selection = { kind: 'none' };
   let saved: readonly BattlefieldSummary[] = [];
   let generating: AbortController | null = null;
+  /**
+   * The new place chosen had its generation cancelled: New scenario stays
+   * greyed out until a saved battlefield or another place is chosen (or a
+   * generation succeeds).
+   */
+  let cancelled = false;
   let opening = false;
   /** Set once the page has moved on: late answers (search, generation, storage) are ignored. */
   let disposed = false;
@@ -394,11 +400,13 @@ export function startBattlefieldSelection(
         ? 'Select a battlefield first: a saved one, or find a place or enter a position to generate a new one.'
         : selection.kind === 'location' && generating
           ? 'Generating the battlefield…'
-          : null;
+          : selection.kind === 'location' && cancelled
+            ? 'Generation cancelled.'
+            : null;
     button.textContent = label;
     button.setAttribute('aria-disabled', String(reason !== null));
-    // While generating, its progress (under the position) says so.
-    const shown = selection.kind === 'location' && generating ? null : reason;
+    // While generating, or cancelled, its progress (under the position) says so.
+    const shown = selection.kind === 'location' && (generating || cancelled) ? null : reason;
     ui('primary-reason').textContent = shown ?? '';
     ui('primary-reason').hidden = shown === null;
     ui('placeholder').textContent = placeholderText();
@@ -422,6 +430,7 @@ export function startBattlefieldSelection(
   };
 
   const select = (next: Selection) => {
+    cancelled = false;
     const id = next.kind === 'saved' ? next.summary.id : null;
     adopting = null;
     // A battlefield already shown (e.g. handed back by its workspace) is kept as it is.
@@ -647,6 +656,8 @@ export function startBattlefieldSelection(
         updatePrimary();
         show('message', null);
         if (isCancelled(error)) {
+          cancelled = true;
+          updatePrimary();
           ui('progress').hidden = true;
           show('error', '<p class="muted">Generation cancelled. Nothing was saved.</p>');
           return;
@@ -726,8 +737,9 @@ export function startBattlefieldSelection(
   });
 
   ui('primary').addEventListener('click', () => {
-    if (selection.kind === 'location') generate(false);
-    else if (selection.kind === 'none') notify(ui('primary-reason').textContent);
+    if (selection.kind === 'location') {
+      if (!cancelled) generate(false);
+    } else if (selection.kind === 'none') notify(ui('primary-reason').textContent);
     else openSelection();
   });
 
