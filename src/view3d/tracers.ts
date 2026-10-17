@@ -19,9 +19,9 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 // Tracers in the 3D view: every round of every burst fired (a battle's
 // `fofFire`, as the characters' shots) flies from the shooter's muzzle
 // toward his target as a glowing streak, and so do the vehicles' machine
-// guns, autocannon and main guns (their `heavyShot`s; rockets and missiles
-// are the heavy effects'). Purely visual: the battle resolves a burst as one
-// event, and nothing here changes it.
+// guns, autocannon and main guns (their `heavyShot`s), and anti-tank rockets
+// and missiles (their smoke trails are the heavy effects'). Purely visual:
+// the battle resolves a burst as one event, and nothing here changes it.
 //
 // A round flies at the same speed on screen whatever the battle's speed
 // (`timeScale`: simulated seconds per real second): its age is the time
@@ -32,7 +32,16 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 // as fast, its head four times the size. Each streak is a function of the
 // event, the clock and that speed (its scatter drawn from a hash of the
 // event), so the After-Action Review shows the same tracers at the same
-// moments, seeking or not. Red for BLUEFOR, green for OPFOR (as US and
+// moments, seeking or not.
+//
+// A rocket or a missile is drawn as a main gun's round is (its head four
+// times the size), but flies at its own speed in the battle's time: a
+// missile from launch until it arrives (`impactAt`: its range over its
+// flight speed, 170–208 m/s), a rocket at `ROCKET_SPEED_MPS`. At 1× it is
+// seen as fast as it is; faster, it keeps up with the battle, landing as its
+// hit does. Every one is drawn, whatever the speed (there are few).
+//
+// Red for BLUEFOR, green for OPFOR (as US and
 // Warsaw Pact tracer ammunition). Each streak is a glowing bar at least a
 // couple of pixels wide at any distance, with a bright head; one instanced
 // mesh and one point buffer, filled each frame: no objects per tracer.
@@ -50,6 +59,25 @@ const STREAK_M = 11;
 const CAPACITY = 2048;
 /** How long a round can still be in flight (real s): a main gun's, at its longest range. */
 const WINDOW_S = 10;
+/** How long a rocket or missile can still be in flight (battle s): a missile's, at its longest range. */
+const GUIDED_WINDOW_S = 30;
+
+/** An anti-tank rocket's speed (m/s of the battle; an AT4's 285, an RPG-7's sustained 295). */
+export const ROCKET_SPEED_MPS = 260;
+
+/**
+ * How long a rocket or missile flies (battle s): a missile until it arrives
+ * (`impactAt`), a rocket `lengthM` at `ROCKET_SPEED_MPS`.
+ */
+export function guidedFlightSeconds(
+  atSeconds: number,
+  impactAt: number | null,
+  lengthM: number,
+): number {
+  return impactAt !== null
+    ? Math.max(0.05, impactAt - atSeconds)
+    : Math.max(0.06, lengthM / ROCKET_SPEED_MPS);
+}
 
 /** The kind of a vehicle's weapon by id (`cannon`, `autocannon`, `machineGun`…). */
 export type TracerWeaponKind = (weapon: string) => string;
@@ -272,11 +300,35 @@ export function createTracerLayer(
         if (!e) continue;
         // Real seconds since it was fired.
         const since = (seconds - e.atSeconds) / scale;
-        if (since > WINDOW_S) break;
+        if (since > WINDOW_S && seconds - e.atSeconds > GUIDED_WINDOW_S) break;
         if (e.type === 'heavyShot') {
+          const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
+          if (kind === 'atgm' || kind === 'atRocket') {
+            // A rocket or missile: a main gun's round, at its own speed in the battle's time.
+            const length = Math.hypot(
+              e.impact.x - e.from.x,
+              e.impact.y - e.from.y,
+              e.impact.z - e.from.z,
+            );
+            const [r, g, b] = COLOURS[e.side];
+            streak(
+              e.from.x,
+              e.from.y,
+              e.from.z,
+              e.impact.x,
+              e.impact.y,
+              e.impact.z,
+              seconds - e.atSeconds,
+              guidedFlightSeconds(e.atSeconds, e.impactAt, length),
+              r,
+              g,
+              b,
+              true,
+            );
+            continue;
+          }
+          if (since > WINDOW_S) continue;
           // A vehicle's gun (or a soldier's): from its muzzle to where the round landed.
-          if (e.missileId !== null) continue;
-          const kind = kindOf(e.weapon);
           const burst = HEAVY_BURST[kind];
           if (!burst) continue;
           const tick = Math.round(e.atSeconds * rate);
@@ -312,7 +364,7 @@ export function createTracerLayer(
           }
           continue;
         }
-        if (e.type !== 'shotFired') continue;
+        if (e.type !== 'shotFired' || since > WINDOW_S) continue;
         const spacing = roundSpacing(e.weaponProfileRef);
         // Long past: every round landed (a miss flies on to half again its range, and more).
         if (since > tracerFlightSeconds(e.rangeM * 1.6 + 20) + e.rounds * spacing) continue;

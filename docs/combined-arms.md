@@ -242,7 +242,7 @@ angles, condition, immobilization and fire come from the motion log's
 articulation (per tick, interpolated), so a vehicle is posed the same live and
 in the review. Destroyed, it is charred, and a catastrophic kill of a
 vulnerable tank may throw its turret. Effects (`heavy-effects.ts`): muzzle
-flashes and blast smoke, rockets and missiles with smoke trails, impacts
+flashes and blast smoke, rockets' and missiles' smoke trails, impacts
 (dust, flashes, sparks off armour), burning wrecks (flames, a column of
 smoke) and smouldering ones: all a function of the combat log, the clock and
 the articulation, in two pools of points (no objects per effect).
@@ -261,6 +261,15 @@ the same number in the air on average. A gun's impact (dust, sparks off
 armour) comes when its tracer lands, or for a burst not drawn, when the
 round would. The review draws the same tracers at the same moment and
 speed, seeking or not.
+
+**Rockets and missiles** fly as a main gun's round is drawn: the streak, red or
+green, with the 20 px head; their smoke trails are the effects'. But they fly
+at their own speed in the battle's time, as the simulation has them: a
+missile from launch until it arrives (its range over its flight speed:
+9M113 208 m/s, 9K111 186 m/s, Javelin 170 m/s), a rocket at 260 m/s. At 1× a
+missile at 2 km is seen in flight for about 10 s, as it would be; faster, it
+keeps up with the battle, landing as its hit does. Every one is drawn,
+whatever the speed.
 
 **2D** (`src/app/battle/map-editor.ts`, `combat-editor.ts`): the APP-6 symbol
 of its role (armour: the oval of tracks; mechanized infantry: the cross over

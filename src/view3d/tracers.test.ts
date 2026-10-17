@@ -239,10 +239,60 @@ describe('tracers', () => {
       { px: 5, drawn: 0 },
       { px: 20, drawn: 1 },
     ]);
-    // A missile is not a tracer (the heavy effects draw it), nor is a weapon of no known kind.
-    layer.update(log, [{ ...heavy('m256'), missileId: 'M1', impactAt: 5 }], 2, flat, eye);
+    // A weapon of no known kind is not a tracer.
+    layer.update(log, [heavy('m240c-unknown')], 2, flat, eye);
     expect(layer.inFlight).toBe(0);
-    layer.update(log, [heavy('9k111')], 2, flat, eye);
+  });
+
+  it('a missile or rocket is drawn as a main gun’s round, at its own speed in the battle’s time', () => {
+    const missile: HeavyShotEvent = {
+      type: 'heavyShot',
+      tick: 30,
+      atSeconds: 1,
+      shooterId: 'V1',
+      shooter: 'vehicle',
+      side: 'OPFOR',
+      slot: 'atgm',
+      weapon: '9p135m',
+      ammo: '9m113',
+      rounds: 1,
+      targetId: 'V2',
+      target: 'vehicle',
+      from: { x: 0, y: 0, z: 12 },
+      impact: { x: 0, y: 2080, z: 12 },
+      hit: true,
+      // 2,080 m at 208 m/s: it arrives 10 s after launch.
+      missileId: 'M1',
+      impactAt: 11,
+    };
+    const layer = createTracerLayer(() => '');
+    const bigDrawn = () =>
+      layer.group.children
+        .filter((c): c is Points => c instanceof Points)
+        .find((p) => (p.material as PointsMaterial).size === 20)?.geometry.drawRange.count;
+    // Half way, 5 s after launch: 1,040 m out, with a main gun's head.
+    layer.update(log, [missile], 6, flat, eye);
+    expect(heads(layer)[0]?.y).toBeCloseTo(1040, 0);
+    expect(bigDrawn()).toBe(1);
+    // At 32× as at 1×: where the battle's clock puts it (it lands as its hit does).
+    layer.update(log, [missile], 6, flat, eye, 32);
+    expect(heads(layer)[0]?.y).toBeCloseTo(1040, 0);
+    expect(layer.inFlight).toBe(1);
+    // Arrived: gone.
+    layer.update(log, [missile], 11.5, flat, eye);
     expect(layer.inFlight).toBe(0);
+    // An AT4 (a rocket): at 260 m/s, 1 s after firing 260 m out.
+    const rocket: HeavyShotEvent = {
+      ...missile,
+      shooter: 'soldier',
+      side: 'BLUEFOR',
+      weapon: 'at4',
+      missileId: null,
+      impactAt: null,
+      impact: { x: 0, y: 300, z: 12 },
+    };
+    const rockets = createTracerLayer((w) => (w === 'at4' ? 'atRocket' : ''));
+    rockets.update(log, [rocket], 2, flat, eye);
+    expect(heads(rockets)[0]?.y).toBeCloseTo(260, 0);
   });
 });

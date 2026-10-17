@@ -9,11 +9,11 @@ import {
   type Blending,
 } from 'three';
 import type { CombatEvent, HeavyShotEvent } from '#exercise';
-import { firesTracers, tracerFlightSeconds, tracerShown } from './tracers';
+import { firesTracers, guidedFlightSeconds, tracerFlightSeconds, tracerShown } from './tracers';
 
 // The effects of combined arms in 3D (docs/combined-arms.md §11): muzzle
-// flashes and smoke, rounds and rockets in flight, missiles with their smoke
-// trails, impacts (dust, flashes, sparks on armour), and burning and smoking
+// flashes and smoke, the smoke trails of rockets and missiles in flight
+// (their heads are the tracers': tracers.ts), impacts (dust, flashes, sparks on armour), and burning and smoking
 // wrecks. Purely visual, and a function of the combat log, the clock, the
 // battle's speed and the vehicles' state in the motion log alone (every
 // scatter from a hash of its event), so the After-Action Review shows exactly
@@ -28,14 +28,13 @@ const WINDOW_S = 12;
 const CAPACITY = 6000;
 
 /**
- * Visual speeds of rounds (m/s of the battle): a rocket's; a gun's when its
- * burst is not drawn as tracers (tracers.ts: at speed, most are not).
+ * Visual speeds of a gun's rounds (m/s of the battle) when its burst is not
+ * drawn as tracers (tracers.ts: at speed, most are not).
  */
 const SPEED: Readonly<Record<string, number>> = {
   cannon: 1500,
   autocannon: 1000,
   machineGun: 700,
-  atRocket: 260,
 };
 
 /** The kind of a weapon by id, for its effects (the views have no catalog lookups per frame). */
@@ -163,8 +162,8 @@ function flightOf(e: HeavyShotEvent, kind: string): { flight: number; length: nu
   const dz = e.impact.z - e.from.z;
   const length = Math.hypot(dx, dy, dz);
   const flight =
-    e.missileId !== null && e.impactAt !== null
-      ? Math.max(0.05, e.impactAt - e.atSeconds)
+    kind === 'atgm' || kind === 'atRocket'
+      ? guidedFlightSeconds(e.atSeconds, e.impactAt, length)
       : Math.max(0.06, length / (SPEED[kind] ?? 900));
   return { flight, length };
 }
@@ -301,22 +300,10 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
             );
           }
         }
-        // In flight: a rocket or a missile, with its smoke trail back to the launcher
-        // (a gun's rounds are the tracers').
+        // In flight: a rocket's or a missile's smoke trail back to the launcher (its
+        // head, as a gun's rounds, is the tracers').
         if ((kind === 'atgm' || kind === 'atRocket') && age >= 0 && age <= flight) {
           const t = age;
-          const f = t / flight;
-          add(
-            glow,
-            e.from.x + (e.impact.x - e.from.x) * f,
-            e.from.y + (e.impact.y - e.from.y) * f,
-            e.from.z + (e.impact.z - e.from.z) * f,
-            1.4,
-            1,
-            0.75,
-            0.35,
-            1,
-          );
           for (let s = 1; s <= 30; s += 1) {
             const back = t - s * 0.08;
             if (back < 0) break;
