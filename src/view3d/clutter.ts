@@ -279,8 +279,20 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
 
   const fieldsAt = (x: number, y: number) => groundFieldsAt(surface, x, y);
 
+  /**
+   * Whether the last placing found ground not loaded yet (its finest tiles
+   * still on their way): then it is placed again once tiles have arrived,
+   * camera moved or not. And when, and what the surface held then.
+   */
+  let missing = false;
+  let placedAt = -Infinity;
+  let heldThen = -1;
+  /** Retried at most this often while ground is missing (s). */
+  const RETRY_S = 0.3;
   const rebuild = (cx: number, cy: number) => {
     const started = performance.now();
+    missing = false;
+    heldThen = surface.cachedCount() + surface.cachedBytes();
     for (const k of all) k.count = 0;
     const R = settings.radius;
     const dens = settings.density;
@@ -320,7 +332,10 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
           const x = (c + hash01(c * 131 + i, r, 1)) * CELL_M;
           const y = (r + hash01(c * 131 + i, r, 2)) * CELL_M;
           const f = fieldsAt(x, y);
-          if (!f) continue;
+          if (!f) {
+            missing = true;
+            continue;
+          }
           if (f.shore < 0.15 || f.building < 0.5) continue;
           // The carriageway and its shoulder, as wide as the ground's shader
           // draws them (and a little more).
@@ -482,9 +497,15 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
       }
       const dx = cx - lastX;
       const dy = cy - lastY;
-      if (!force && dx * dx + dy * dy < 9) return;
+      // Placed where the ground was not loaded yet: again once more of it has arrived.
+      const retry =
+        missing &&
+        time - placedAt >= RETRY_S &&
+        surface.cachedCount() + surface.cachedBytes() !== heldThen;
+      if (!force && !retry && dx * dx + dy * dy < 9) return;
       lastX = cx;
       lastY = cy;
+      placedAt = time;
       rebuild(cx, cy);
     },
     setSettings(s) {
