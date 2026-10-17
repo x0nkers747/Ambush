@@ -287,8 +287,19 @@ const SQUAD_KEYS = [
   'position',
   'facingDeg',
   'plan',
+  'antiTank',
 ];
-const ORDER_KEYS = ['kind', 'destination', 'actionsOn', 'killZone', 'sector', 'preparedMinutes'];
+const ORDER_KEYS = [
+  'kind',
+  'destination',
+  'actionsOn',
+  'killZone',
+  'sector',
+  'preparedMinutes',
+  'followRoads',
+];
+const VEHICLE_KEYS = ['id', 'name', 'side', 'kind', 'position', 'facingDeg', 'route'];
+const WAYPOINT_KEYS = ['east', 'north', 'followRoads'];
 const SECTOR_KEYS = ['facingDeg', 'arcDeg'];
 const KILL_ZONE_KEYS = ['centre', 'widthM', 'depthM', 'facingDeg'];
 const POINT_KEYS = ['east', 'north'];
@@ -301,6 +312,7 @@ const SCENARIO_KEYS = [
   'terrainModel',
   'seed',
   'squads',
+  'vehicles',
 ];
 
 /** The scenario part: refuses unknown fields, then reads it as the game does (`parseBattleScenario`). */
@@ -350,6 +362,18 @@ function readScenario(raw: unknown, fail: Fail): BattleScenarioDefinition {
       }
     });
   }
+  if (raw['schemaVersion'] === BATTLE_SCHEMA_VERSION && Array.isArray(raw['vehicles']))
+    (raw['vehicles'] as unknown[]).forEach((v, i) => {
+      if (!isObject(v)) return;
+      const where = `Vehicle ${String(i + 1)}`;
+      onlyKnown(v, VEHICLE_KEYS, where, fail);
+      if (isObject(v['position']))
+        onlyKnown(v['position'], POINT_KEYS, `${where}'s position`, fail);
+      if (Array.isArray(v['route']))
+        (v['route'] as unknown[]).forEach((p, k) => {
+          if (isObject(p)) onlyKnown(p, WAYPOINT_KEYS, `${where}, waypoint ${String(k + 1)}`, fail);
+        });
+    });
   try {
     return parseBattleScenario(raw);
   } catch (error) {

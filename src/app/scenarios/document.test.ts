@@ -85,6 +85,53 @@ describe('the saved-scenario document', () => {
     expect(parseScenarioDocument(serializeScenarioDocument(read))).toEqual(doc);
   });
 
+  it('round-trips vehicles, roads and anti-tank weapons (an import with vehicles is read)', () => {
+    const base = plannedScenario();
+    const [b1, ...rest] = base.squads;
+    if (!b1) throw new Error('no squad');
+    const scenario = {
+      ...base,
+      squads: [
+        {
+          ...b1,
+          antiTank: 'rocketsAndMissile' as const,
+          plan: [
+            {
+              kind: 'move' as const,
+              destination: { east: -150, north: -100 },
+              followRoads: true as const,
+            },
+          ],
+        },
+        ...rest,
+      ],
+      vehicles: [
+        {
+          id: 'V1',
+          name: 'Tank 1',
+          side: 'BLUEFOR' as const,
+          kind: 'm1a1',
+          position: { east: -100, north: -350 },
+          facingDeg: 10,
+          route: [
+            { east: -100, north: -200 },
+            { east: 0, north: -100, followRoads: true as const },
+          ],
+        },
+      ],
+    };
+    const doc = document({ scenario });
+    const read = parseScenarioDocument(serializeScenarioDocument(doc));
+    expect(read).toEqual(doc);
+    expect(read.scenario.vehicles?.[0]?.route[1]?.followRoads).toBe(true);
+    expect(read.scenario.squads[0]?.antiTank).toBe('rocketsAndMissile');
+    const raw = JSON.parse(serializeScenarioDocument(doc)) as {
+      scenario: { vehicles: Record<string, unknown>[] };
+    };
+    raw.scenario.vehicles = raw.scenario.vehicles.map((v) => ({ ...v, armour: 3 }));
+    refused(raw, /Vehicle 1 has a field.*"armour"/);
+  });
+
   it('becomes a battlefield’s working scenario with that battlefield’s ids', () => {
     const working = workingScenario(document(), 'other-field', 'model-x');
     expect(working).toMatchObject({
