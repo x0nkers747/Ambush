@@ -306,6 +306,23 @@ describe('viewsheds limited to a sector (a firing arc)', () => {
     expect(arc.sector).toEqual(sector);
   });
 
+  it('looks from the sector’s eye height (a vehicle’s sights) when it has one', () => {
+    // A 2.5 m wall 40 m ahead: a standing soldier (1.7 m) is shadowed behind
+    // it, sights 4 m up see over it, as the same height given for the whole viewshed.
+    const walled = terrain(flatElevation(100), {
+      buildings: [{ id: 'W-1', footprint: rectangle(0, -40, 60, 2), heightMeters: 2.5 }],
+    });
+    const g = viewshedGrid(walled, 4);
+    const all = { azimuth: 0, halfWidth: Math.PI, rangeM: 500 };
+    const standing = computeViewshed(walled, OBSERVER, g, {}, all);
+    const sights = computeViewshed(walled, OBSERVER, g, {}, { ...all, eyeHeightM: 4 });
+    expect(seen(standing, { x: 0, y: 40 })).toBe(false);
+    expect(seen(sights, { x: 0, y: 40 })).toBe(true);
+    expect(sights.visible).toEqual(
+      computeViewshed(walled, OBSERVER, g, { observerHeightMeters: 4 }, all).visible,
+    );
+  });
+
   it('tells the sector across north, and its range', () => {
     const north = { azimuth: 0, halfWidth: 0.2, rangeM: 50 };
     expect(inSector(north, { x: 0, y: 0 }, 1, 40)).toBe(true);

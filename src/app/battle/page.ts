@@ -32,6 +32,9 @@ import {
   setSquadFormation,
   setSquadAntiTank,
   withoutOrders,
+  squadRangeRings,
+  vehicleRangeRings,
+  type RangeRings,
   ANTI_TANK_LOADOUTS,
   DEFAULT_ANTI_TANK,
   SIDE_VEHICLE_KINDS,
@@ -120,22 +123,37 @@ import {
   createPlanner,
   SECOND_CLICK,
   type BattleStage,
+  type PinKind,
   type PlannerTool,
   type ViewshedPin,
 } from './planner';
 
-/** A viewshed shown: its pin, its side's colour, where it looks from, and its latest result shown. */
+/** A viewshed shown: its pin, its side's colour, what it looks from, and its latest result shown. */
 interface ViewshedLayer {
   readonly pin: ViewshedPin;
   readonly side: ViewshedSide;
-  readonly observers: readonly Vec2[] | null;
+  readonly look: ViewshedLook | null;
   shown: Viewshed | null;
 }
+
+/**
+ * A viewshed or waypoint's range rings turned on in a battle (Sim, the
+ * review): a unit's own (`orderIndex` null), where it is now; or a
+ * waypoint's, with the waypoint's place (`at`), so it follows its order.
+ */
+interface LivePin extends ViewshedPin {
+  readonly kind: PinKind;
+  readonly at: Vec2 | null;
+}
 import {
+  liveSquadWaypointObservers,
+  plannedVehicleLook,
   SQUAD_VIEWSHED_CELLS_M,
-  SQUAD_VIEWSHED_RANGE_M,
-  SQUAD_VIEWSHED_SECTOR,
+  squadLook,
+  vehicleLook,
+  vehicleRouteLook,
   viewshedObservers,
+  type ViewshedLook,
 } from './squad-viewshed';
 
 // Stages 2–5 of a battle on one battlefield (docs/constructive-simulation/03,
@@ -226,9 +244,14 @@ const roadsButton = (act: string, k: number, on: boolean, editable: boolean): st
 /** Three rings round a dot, in `currentColor`, for the range rings toggles. */
 const RINGS_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10" stroke-dasharray="2 2.5"/><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/></svg>`;
 
-/** A squad's or vehicle's range rings toggle (lit in its side's colour when on). */
-const ringsButton = (id: string, side: Side, on: boolean): string =>
-  `<button class="small vs-toggle rings-toggle ${side === 'BLUEFOR' ? 'blue' : 'red'}" data-act="range-rings" data-unit="${escapeHtml(id)}" aria-pressed="${String(on)}" title="Range rings: ${on ? 'on' : 'off'}. How far it sees (dotted), the furthest it fires (dashed), and its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all" aria-label="Range rings">${RINGS_ICON}</button>`;
+/**
+ * A squad's or vehicle's range rings toggle (lit in its side's colour when
+ * on): round it, or (`index`) round its waypoint `index`.
+ */
+const ringsButton = (id: string, side: Side, on: boolean, index: number | null = null): string => {
+  const where = index === null ? '' : ` at waypoint ${String(index + 1)}`;
+  return `<button class="small vs-toggle rings-toggle ${side === 'BLUEFOR' ? 'blue' : 'red'}" data-act="range-rings" data-unit="${escapeHtml(id)}"${index === null ? '' : ` data-index="${String(index)}"`} aria-pressed="${String(on)}" title="Range rings${where}: ${on ? 'on' : 'off'}. How far it sees (dotted), the furthest it fires (dashed), and its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all" aria-label="Range rings${where}">${RINGS_ICON}</button>`;
+};
 
 /** An eye, in `currentColor`, for the viewshed toggles. */
 const EYE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
@@ -239,8 +262,8 @@ const HELP_HTML = `<dl class="kv help">
   <dt>Drag</dt><dd>A waypoint to move its destination</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
   <dt>Esc</dt><dd>Back to the Select tool; again, clears the selection</dd>
-  <dt>Rings</dt><dd>Turns a squad's or vehicle's range rings on or off (the rings button in its panel): how far it sees (dotted), the furthest it fires (dashed), its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all</dd>
-  <dt>Eye</dt><dd>Turns the viewshed of a squad (from its start) or waypoint on or off: what its soldiers can see, all round to 1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple; any number can be on. The Viewsheds box on the map bar shows or hides them all</dd>
+  <dt>Rings</dt><dd>Turns a squad's or vehicle's range rings on or off, round it or round a waypoint (the rings button by its name, or by the waypoint): how far it sees (dotted), the furthest it fires (dashed), its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all</dd>
+  <dt>Eye</dt><dd>Turns the viewshed of a squad or vehicle (from its start; in Sim, where it is) or of a waypoint on or off: what its soldiers can see, all round to 1,200 m, or its crew from its turret, as far as its sights see. BLUEFOR's are light blue, OPFOR's light red, ground both see purple; any number can be on. The Viewsheds box on the map bar shows or hides them all</dd>
 </dl>
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
 <b>Attack</b> takes and clears the objective, assaulting with fire and movement; <b>Withdraw</b> falls back
@@ -376,6 +399,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     /** The 3D view the overlay was given to. */
     on3d: null as BattlefieldView3d | null,
   };
+  /** In a battle (Sim, the review): the viewsheds and waypoint rings turned on there (`LivePin`). */
+  let livePins: LivePin[] = [];
+  /** In a battle: each waypoint's look, by the waypoint, the one before it and its unit (`lookOf`). */
+  const liveWaypointLooks = new Map<string, ViewshedLook | null>();
 
   // --- Combat (docs/constructive-simulation/04) ------------------------------
 
@@ -763,43 +790,230 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     ui('attribution').title = lines.join('\n');
   };
   showAttribution();
-  // --- Viewshed (planning) --------------------------------------------------
+  // --- Viewsheds -------------------------------------------------------------
 
   /**
-   * The viewsheds turned on (squad-viewshed.ts, the planner's `viewsheds`):
-   * each the union of a squad's soldiers' viewsheds, from where they start or
-   * from one of its waypoints; BLUEFOR's light blue, OPFOR's light red, ground
-   * both see purple. Computed by the viewshed workers one at a time: the one
-   * selected (being dragged) first, then the latest turned on. Each shows a
-   * coarse look first, then full detail; until its first look is in, the last
-   * it showed (so a dragged waypoint's follows it).
+   * The viewsheds turned on (squad-viewshed.ts): each a squad's (the union of
+   * its soldiers' viewsheds) or a vehicle's (from its turret, at its sights'
+   * height), from where it starts or one of its waypoints; in a battle (Sim,
+   * the review), from where it is now, or a waypoint of its orders as they
+   * stand. BLUEFOR's light blue, OPFOR's light red, ground both see purple.
+   * Computed by the viewshed workers one at a time: the selected unit's first,
+   * then the latest turned on. Each shows a coarse look first, then full
+   * detail; until its first look is in, the last it showed (so a dragged
+   * waypoint's, or a moving unit's, follows it).
    */
   const showViewshed = ui('show-viewshed') as HTMLInputElement;
   showViewshed.addEventListener('change', () => {
     showViewshed.blur();
   });
   const fineGrid = viewshedGrid(o.terrain, SQUAD_VIEWSHED_CELLS_M.at(-1) ?? 4);
-  /** Where a pin looks from (its squad's start, or its waypoint), or `null`. */
-  function pinPoint(pin: ViewshedPin): Vec2 | null {
-    const s = planner.squad(pin.squadId);
-    const at = pin.orderIndex === null ? s?.position : s?.plan[pin.orderIndex]?.destination;
-    return at ? { x: at.east, y: at.north } : null;
-  }
+  const mapPoint = (p: { readonly east: number; readonly north: number }): Vec2 => ({
+    x: p.east,
+    y: p.north,
+  });
+  /** In a battle (Sim, the review): the battle drawn; in planning, `null`. */
+  const battleShown = (): { readonly c: Combat | null; readonly d: BattleDisplay } | null => {
+    const d = display();
+    return d ? { c: inCombat(), d } : null;
+  };
+  /** A unit's side (planned, or in the battle), or `null` when it is gone. */
+  const unitSide = (id: string): Side | null => {
+    const shown = battleShown();
+    if (shown)
+      return shown.d.squad(id)?.side ?? shown.d.vehicles().find((v) => v.id === id)?.side ?? null;
+    return planner.squad(id)?.side ?? planner.vehicle(id)?.side ?? null;
+  };
   /**
-   * The viewsheds to show now (in every stage: those turned on in Setup and
-   * Planning), if shown, and OPFOR's unless OPFOR is hidden.
+   * A battle's waypoints of unit `id` as its orders stand (live: its plan or
+   * route as edited; the review: none), or `null` for none.
    */
+  const liveWaypoints = (id: string): Vec2[] | null => {
+    const c = inCombat();
+    if (!c) return null;
+    if (c.squad(id)) return c.plan(id).map((order) => mapPoint(order.destination));
+    if (c.vehicle(id)) return c.vehicleRoute(id).map((p) => ({ x: p.x, y: p.y }));
+    return null;
+  };
+  /**
+   * Keeps the battle's pins on their waypoints: a waypoint's pin holds its
+   * place, so as orders are done (the plan moves up) or moved it follows its
+   * own; dragged (no waypoint there any more), it keeps its place in the
+   * order. Pins of waypoints gone, or of units gone, go.
+   */
+  const syncLivePins = () => {
+    const kept: LivePin[] = [];
+    for (const pin of livePins) {
+      if (unitSide(pin.unitId) === null) continue;
+      if (pin.orderIndex === null) {
+        kept.push(pin);
+        continue;
+      }
+      const points = liveWaypoints(pin.unitId);
+      // The review shows only where units are.
+      if (!points) continue;
+      const at = pin.at;
+      let k = at ? points.findIndex((p) => Math.hypot(p.x - at.x, p.y - at.y) < 0.5) : -1;
+      if (k < 0) k = pin.orderIndex < points.length ? pin.orderIndex : -1;
+      const point = points[k];
+      if (!point) continue;
+      kept.push(
+        k === pin.orderIndex && at?.x === point.x && at.y === point.y
+          ? pin
+          : { ...pin, orderIndex: k, at: point },
+      );
+    }
+    if (kept.length !== livePins.length || kept.some((p, i) => p !== livePins[i])) livePins = kept;
+  };
+  /** The pins of a kind shown now: the planner's in planning, the battle's in a battle. */
+  const pinsOf = (kind: PinKind): readonly ViewshedPin[] => {
+    if (!battleShown()) return kind === 'viewshed' ? planner.viewsheds() : planner.waypointRings();
+    return livePins.filter((p) => p.kind === kind);
+  };
+  const hasPin = (kind: PinKind, id: string, index: number | null): boolean =>
+    pinsOf(kind).some((p) => p.unitId === id && p.orderIndex === index);
+  /** Turns a unit's (or a waypoint's) viewshed or waypoint rings on or off, in planning or in the battle. */
+  const togglePin = (kind: PinKind, id: string, index: number | null) => {
+    if (!battleShown()) {
+      if (kind === 'viewshed') planner.toggleViewshed(id, index);
+      else if (index !== null) planner.toggleWaypointRings(id, index);
+    } else if (hasPin(kind, id, index)) {
+      livePins = livePins.filter(
+        (p) => p.kind !== kind || p.unitId !== id || p.orderIndex !== index,
+      );
+    } else {
+      const at = index === null ? null : (liveWaypoints(id)?.[index] ?? null);
+      if (index !== null && !at) return;
+      livePins = [...livePins, { kind, unitId: id, orderIndex: index, at }];
+    }
+    // Turning one on shows them all again.
+    if (kind === 'rings' && hasPin(kind, id, index) && !showRings.checked) {
+      showRings.checked = true;
+      show.rangeRings = true;
+    }
+    lastVersion = -1;
+    combatPanelsAt = -Infinity;
+    reviewPanelsAt = -Infinity;
+  };
+  /** A battle starts: its pins are those turned on in planning (a unit's own, where it is). */
+  const startLivePins = () => {
+    const at = (id: string, k: number | null) => {
+      if (k === null) return null;
+      const s = planner.squad(id);
+      const p = s ? s.plan[k]?.destination : planner.vehicle(id)?.route[k];
+      return p ? mapPoint(p) : null;
+    };
+    liveWaypointLooks.clear();
+    livePins = [
+      ...planner
+        .viewsheds()
+        .map((p) => ({ kind: 'viewshed' as const, ...p, at: at(p.unitId, p.orderIndex) })),
+      ...planner
+        .waypointRings()
+        .map((p) => ({ kind: 'rings' as const, ...p, at: at(p.unitId, p.orderIndex) })),
+    ];
+  };
+  /** Where a unit is now in the battle drawn: its active soldiers, or its hull (heading). */
+  const unitNow = (
+    d: BattleDisplay,
+    id: string,
+  ):
+    | { readonly soldiers: Vec2[]; readonly centre: Vec2 }
+    | { readonly vehicle: VehicleStatus }
+    | null => {
+    const v = d.vehicles().find((x) => x.id === id);
+    if (v) return v.condition === 'destroyed' ? null : { vehicle: v };
+    const squad = d.battle.squads.find((s) => s.spec.id === id);
+    if (!squad) return null;
+    const tick = Math.floor(d.renderSeconds * d.motion.tickRateHz);
+    const soldiers: Vec2[] = [];
+    for (const sid of squad.soldierIds) {
+      d.motion.read(d.motion.indexOf(sid), tick, figureSample);
+      if (figureSample.status === 'active') soldiers.push({ x: figureSample.x, y: figureSample.y });
+    }
+    if (soldiers.length === 0) return null;
+    const centre = {
+      x: soldiers.reduce((n, p) => n + p.x, 0) / soldiers.length,
+      y: soldiers.reduce((n, p) => n + p.y, 0) / soldiers.length,
+    };
+    return { soldiers, centre };
+  };
+  /** What a pin's viewshed is worked out from now, or `null` when there is nothing to look from. */
+  const lookOf = (pin: ViewshedPin): ViewshedLook | null => {
+    const shown = battleShown();
+    if (!shown) {
+      if (planner.vehicle(pin.unitId))
+        return plannedVehicleLook(planner.definition, pin.unitId, pin.orderIndex);
+      const observers = viewshedObservers(
+        o.terrain,
+        planner.definition,
+        pin.unitId,
+        pin.orderIndex,
+      );
+      return observers ? squadLook(observers) : null;
+    }
+    const now = unitNow(shown.d, pin.unitId);
+    if (!now) return null;
+    if (pin.orderIndex === null)
+      return 'vehicle' in now
+        ? vehicleLook(now.vehicle.kind, now.vehicle.position, now.vehicle.heading)
+        : squadLook(now.soldiers);
+    // A waypoint: the unit there, facing the way it will have come. Kept
+    // while the waypoint and the one before it stay where they are: coming
+    // from where the unit is (its first), the way it faces would change as it
+    // moves, and the viewshed be worked out again and again.
+    const points = liveWaypoints(pin.unitId);
+    const at = points?.[pin.orderIndex];
+    const c = shown.c;
+    if (!points || !at || !c) return null;
+    const before = pin.orderIndex > 0 ? points[pin.orderIndex - 1] : undefined;
+    const key = `${pin.unitId}|${String(pin.orderIndex)}|${String(at.x)},${String(at.y)}|${before ? `${String(before.x)},${String(before.y)}` : 'here'}`;
+    const kept = liveWaypointLooks.get(key);
+    if (kept !== undefined) return kept;
+    let look: ViewshedLook | null;
+    if ('vehicle' in now) {
+      const v = now.vehicle;
+      look = vehicleRouteLook(v.kind, v.position, v.heading, points, pin.orderIndex);
+    } else {
+      const observers = liveSquadWaypointObservers(
+        o.terrain,
+        planner.definition,
+        pin.unitId,
+        now.centre,
+        c.plan(pin.unitId),
+        pin.orderIndex,
+      );
+      look = observers ? squadLook(observers) : null;
+    }
+    liveWaypointLooks.set(key, look);
+    return look;
+  };
+  /** Where a pin is marked on the map (and its waypoint rings drawn): its unit now, its start or its waypoint. */
+  const pinPoint = (pin: ViewshedPin): Vec2 | null => {
+    const shown = battleShown();
+    if (!shown) {
+      const s = planner.squad(pin.unitId);
+      const v = planner.vehicle(pin.unitId);
+      const at =
+        pin.orderIndex === null
+          ? (s ?? v)?.position
+          : (s?.plan[pin.orderIndex]?.destination ?? v?.route[pin.orderIndex]);
+      return at ? mapPoint(at) : null;
+    }
+    if (pin.orderIndex !== null) return liveWaypoints(pin.unitId)?.[pin.orderIndex] ?? null;
+    const now = unitNow(shown.d, pin.unitId);
+    if (!now) return null;
+    return 'vehicle' in now ? now.vehicle.position : now.centre;
+  };
+  /** The viewsheds to show now, if shown, and OPFOR's unless OPFOR is hidden. */
   const shownPins = (): readonly ViewshedPin[] => {
     if (!showViewshed.checked) return [];
-    return planner
-      .viewsheds()
-      .filter((p) => showOpfor.checked || planner.squad(p.squadId)?.side !== 'OPFOR');
+    return pinsOf('viewshed').filter((p) => showOpfor.checked || unitSide(p.unitId) !== 'OPFOR');
   };
-  const pinKey = (p: ViewshedPin) => `${p.squadId}|${String(p.orderIndex)}`;
+  const pinKey = (p: ViewshedPin) => `${p.unitId}|${String(p.orderIndex)}`;
   /** As far as a layer's viewshed is ready (the first look, then each refinement), working on it if `work`. */
-  const layerResult = (layer: ViewshedLayer, service: ViewshedService, work: boolean) => {
-    const observers = layer.observers ?? [];
-    const sectors = observers.map(() => SQUAD_VIEWSHED_SECTOR);
+  const layerResult = (look: ViewshedLook, service: ViewshedService, work: boolean) => {
+    const { observers, sectors } = look;
     const [firstCell, ...finer] = SQUAD_VIEWSHED_CELLS_M;
     if (!work) {
       let best = service.cachedUnion(observers, firstCell, sectors);
@@ -823,21 +1037,31 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     }
     return best;
   };
+  /** In a battle, where units look from is worked out again this often (ms): they move. */
+  const LIVE_LOOK_MS = 1500;
+  let liveLookAt = -Infinity;
+  /** The unit selected (being dragged, its viewsheds first). */
+  const selectedUnit = (): { readonly id: string | null; readonly orderIndex: number | null } =>
+    battleShown()
+      ? { id: combatUi.selected, orderIndex: combatUi.selectedOrder }
+      : {
+          id: planner.selection.squadId ?? planner.selection.vehicleId ?? null,
+          orderIndex: planner.selection.orderIndex,
+        };
   const updateViewshed = () => {
+    if (battleShown()) syncLivePins();
     // Viewsheds shown: the workers start now, before any is turned on.
     if (showViewshed.checked && !viewshed.service) {
       viewshed.service = createViewshedService(o.terrain);
       viewshed.service.warmUp();
     }
-    // While a squad, a waypoint or a kill zone's corner is dragged nothing is
-    // worked out (it slowed the drag): the dragged squad's viewsheds are hidden,
+    const sel = selectedUnit();
+    // While a unit, a waypoint or a kill zone's corner is dragged nothing is
+    // worked out (it slowed the drag): the dragged unit's viewsheds are hidden,
     // the rest stay as they are; on release they are worked out again.
     if (viewshed.dragging) {
-      const squadId = planner.selection.squadId;
-      if ([...viewshed.layers.values()].some((l) => l.pin.squadId === squadId)) {
-        viewshed.layers = new Map(
-          [...viewshed.layers].filter(([, l]) => l.pin.squadId !== squadId),
-        );
+      if ([...viewshed.layers.values()].some((l) => l.pin.unitId === sel.id)) {
+        viewshed.layers = new Map([...viewshed.layers].filter(([, l]) => l.pin.unitId !== sel.id));
         showComposed();
       }
       viewshed.pending = false;
@@ -845,39 +1069,51 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       return;
     }
     const pins = shownPins();
-    const key = `${String(planner.version)}|${pins.map(pinKey).join(',')}`;
-    if (key !== viewshed.key) {
+    const live = battleShown() !== null;
+    const now = performance.now();
+    const due = live && now - liveLookAt >= LIVE_LOOK_MS;
+    const key = `${live ? 'live' : String(planner.version)}|${pins.map(pinKey).join(',')}`;
+    if (key !== viewshed.key || due) {
       viewshed.key = key;
+      if (live) liveLookAt = now;
       const layers = new Map<string, ViewshedLayer>();
       for (const pin of pins) {
         const k = pinKey(pin);
         const old = viewshed.layers.get(k);
         layers.set(k, {
           pin,
-          side: planner.squad(pin.squadId)?.side === 'OPFOR' ? 'red' : 'blue',
-          observers: viewshedObservers(o.terrain, planner.definition, pin.squadId, pin.orderIndex),
+          side: unitSide(pin.unitId) === 'OPFOR' ? 'red' : 'blue',
+          look: lookOf(pin),
           shown: old?.shown ?? null,
         });
       }
       viewshed.layers = layers;
     }
-    // One worked on at a time: the selected one first, then the latest turned on.
-    const sel = planner.selection;
+    // One worked on at a time: one showing nothing yet first (in a battle a
+    // moving unit's is worked out again and again, and would keep the workers
+    // from the rest), then the selected one, then the latest turned on.
     const isSelected = (l: ViewshedLayer) =>
-      l.pin.squadId === sel.squadId && l.pin.orderIndex === sel.orderIndex;
+      l.pin.unitId === sel.id && l.pin.orderIndex === sel.orderIndex;
+    const rank = (l: ViewshedLayer) => (l.shown ? 0 : 2) + (isSelected(l) ? 1 : 0);
     const order = [...viewshed.layers.values()].reverse();
-    order.sort((a, b) => Number(isSelected(b)) - Number(isSelected(a)));
+    order.sort((a, b) => rank(b) - rank(a));
     let working = false;
     viewshed.pending = false;
     const service = viewshed.service;
     for (const layer of order) {
-      if (!service || !layer.observers || layer.observers.length === 0) continue;
-      let best = layerResult(layer, service, false);
+      const look = layer.look;
+      if (!look || look.observers.length === 0) {
+        // Nothing to look from (a squad with nobody left, a destroyed vehicle): nothing shown.
+        layer.shown = null;
+        continue;
+      }
+      if (!service) continue;
+      let best = layerResult(look, service, false);
       if (best?.grid.cellSize !== fineGrid.cellSize) {
         viewshed.pending = true;
         if (!working) {
           working = true;
-          best = layerResult(layer, service, true) ?? best;
+          best = layerResult(look, service, true) ?? best;
         }
       }
       // Until its first look is in, what it showed last.
@@ -895,19 +1131,22 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       results.some((r, i) => r !== viewshed.composed[i]);
     if (changed) {
       viewshed.composed = results;
-      const layers = [...viewshed.layers.values()].flatMap((l) =>
-        l.shown ? [{ viewshed: l.shown, side: l.side }] : [],
-      );
-      const points = [...viewshed.layers.values()].flatMap((l) => l.observers ?? []);
-      const r = SQUAD_VIEWSHED_RANGE_M;
+      const layers: { viewshed: Viewshed; side: ViewshedSide }[] = [];
+      // Only the ground within each one's reach of its observers.
+      const reach: { p: Vec2; r: number }[] = [];
+      for (const l of viewshed.layers.values()) {
+        if (!l.shown || !l.look) continue;
+        layers.push({ viewshed: l.shown, side: l.side });
+        for (const p of l.look.observers) reach.push({ p, r: l.look.rangeM });
+      }
       viewshed.overlay =
-        layers.length === 0 || points.length === 0
+        layers.length === 0 || reach.length === 0
           ? null
           : composeViewsheds(fineGrid, layers, {
-              minX: Math.min(...points.map((p) => p.x)) - r,
-              minY: Math.min(...points.map((p) => p.y)) - r,
-              maxX: Math.max(...points.map((p) => p.x)) + r,
-              maxY: Math.max(...points.map((p) => p.y)) + r,
+              minX: Math.min(...reach.map(({ p, r }) => p.x - r)),
+              minY: Math.min(...reach.map(({ p, r }) => p.y - r)),
+              maxX: Math.max(...reach.map(({ p, r }) => p.x + r)),
+              maxY: Math.max(...reach.map(({ p, r }) => p.y + r)),
             });
     }
     if (changed || view3d !== viewshed.on3d) {
@@ -915,7 +1154,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       view3d?.setGroundOverlay(viewshed.overlay);
     }
   };
-  /** A dashed ring round each squad start or waypoint whose viewshed is shown, in its side's colour. */
+  /** A dashed ring round each unit, start or waypoint whose viewshed is shown, in its side's colour. */
   // (A declaration: the map draws before this point of the page is reached.)
   function drawViewshedMarks(ctx: CanvasRenderingContext2D, toScreen: (p: Vec2) => Vec2) {
     for (const layer of viewshed.layers.values()) {
@@ -932,6 +1171,32 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       ctx.restore();
     }
   }
+  /** A unit's range rings (as `MapShow.ringed` draws them round it). */
+  const unitRangeRings = (id: string): RangeRings | null => {
+    const shown = battleShown();
+    const kind = shown
+      ? shown.d.vehicles().find((v) => v.id === id)?.kind
+      : planner.vehicle(id)?.kind;
+    if (kind) return vehicleRangeRings(kind);
+    const s = planner.squad(id);
+    return s ? squadRangeRings(s.side, s.organization, s.antiTank) : null;
+  };
+  /**
+   * The waypoints whose range rings are on (`MapShow.waypointRings`, drawn
+   * under everything): in planning the planner's, in a battle its own;
+   * OPFOR's unless OPFOR is hidden.
+   */
+  const updateWaypointRings = () => {
+    const rings: { at: Vec2; rings: RangeRings; side: Side }[] = [];
+    for (const pin of pinsOf('rings')) {
+      const side = unitSide(pin.unitId);
+      const at = pinPoint(pin);
+      if (!side || !at || (side === 'OPFOR' && !showOpfor.checked)) continue;
+      const rr = unitRangeRings(pin.unitId);
+      if (rr) rings.push({ at, rings: rr, side });
+    }
+    show.waypointRings = rings;
+  };
 
   /** The map bar's boxes: they change what the map shows, and the panels with it. */
   const shownChanged = (box: HTMLInputElement) => {
@@ -1020,6 +1285,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         notify,
         driver: battleDriver(),
       });
+      // Its viewsheds and waypoint rings: those turned on in planning.
+      startLivePins();
       combatUi.selected = null;
       combatUi.tool = null;
       lastFrameMs = null;
@@ -1062,6 +1329,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
           driver: battleDriver(),
         });
         combat.setSpeed(speed);
+        startLivePins();
         if (wasPlaying) combat.play();
         combatUi.selectedOrder = null;
         combatUi.tool = null;
@@ -1301,12 +1569,23 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       .join('');
     return `<select class="prepared" data-act="order-prepared" data-index="${String(k)}" aria-label="Order ${String(k + 1)}: how long its position was prepared before the battle" title="How long the position was prepared before the battle: it starts that far dug in (30 minutes: fully)">${options}</select>`;
   };
-  /** The eye that turns a squad's viewshed from its start (`index` null), or from a waypoint, on or off. */
-  const viewshedButton = (s: ScenarioSquad, index: number | null): string => {
-    const on = planner.hasViewshed(s.id, index);
-    const what = index === null ? 'from where it starts' : `from waypoint ${String(index + 1)}`;
-    return `<button class="small vs-toggle ${sideClass(s.side)}" data-act="viewshed" data-index="${index === null ? 'start' : String(index)}" aria-pressed="${String(on)}" title="${on ? 'Hide' : 'Show'} the viewshed ${what}" aria-label="Viewshed ${what}">${EYE_ICON}</button>`;
+  /**
+   * The eye that turns a squad's or vehicle's viewshed on or off: from where
+   * it starts (`index` null; in a battle, where it is now), or from a waypoint.
+   */
+  const viewshedButton = (id: string, side: Side, index: number | null): string => {
+    const on = hasPin('viewshed', id, index);
+    const what =
+      index === null
+        ? battleShown()
+          ? 'from where it is'
+          : 'from where it starts'
+        : `from waypoint ${String(index + 1)}`;
+    return `<button class="small vs-toggle ${sideClass(side)}" data-act="viewshed" data-unit="${escapeHtml(id)}" data-index="${index === null ? 'start' : String(index)}" aria-pressed="${String(on)}" title="${on ? 'Hide' : 'Show'} the viewshed ${what}" aria-label="Viewshed ${what}">${EYE_ICON}</button>`;
   };
+  /** A unit's (or one of its waypoints') range rings and viewshed buttons, side by side. */
+  const unitButtons = (id: string, side: Side, index: number | null = null): string =>
+    `${ringsButton(id, side, index === null ? show.ringed.has(id) : hasPin('rings', id, index), index)}${viewshedButton(id, side, index)}`;
   const squadHtml = (s: ScenarioSquad | undefined): string => {
     if (!s) return '<p class="muted">No squad selected. Click one on the map or in the roster.</p>';
     const placing = planner.canPlace();
@@ -1334,7 +1613,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input class="squad-name" data-act="rename" value="${escapeHtml(s.name)}" aria-label="Squad name" maxlength="40">`
             : `<span class="squad-name">${escapeHtml(s.name)}</span>`
         }
-        ${ringsButton(s.id, s.side, show.ringed.has(s.id))}${viewshedButton(s, null)}
+        ${unitButtons(s.id, s.side)}
       </div>
       <dl class="kv">
         <dt>Organization</dt><dd>${
@@ -1370,7 +1649,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? planner.selection.orderIndex
             : null,
         issues,
-        eye: (k) => viewshedButton(s, k),
+        eye: (k) => unitButtons(s.id, s.side, k),
         empty: 'No orders: it holds where it starts.',
         // Orders are given in Planning: Setup shows none.
         planHidden: planner.stage === 'scenario',
@@ -1470,14 +1749,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         ) => `<li class="order-row${combatUi.selectedOrder === k ? ' selected' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
           <span>Move</span>
-          <span class="order-buttons">${roadsButton('waypoint-roads', k, route[k]?.followRoads === true, editable)}${editable ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
+          <span class="order-buttons">${roadsButton('waypoint-roads', k, route[k]?.followRoads === true, editable)}${unitButtons(v.id, v.side, k)}${editable ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
         </li>`,
       )
       .join('');
     return `<div class="squad-head ${sideClass(v.side)}">
         <span class="side-badge">${v.side}</span>
         <span class="squad-name">${escapeHtml(v.name)}</span>
-        ${ringsButton(v.id, v.side, show.ringed.has(v.id))}
+        ${unitButtons(v.id, v.side)}
       </div>
       ${vehicleDiagnosticsHtml(v, new Map(c.vehicles().map((x) => [x.id, x.name])))}
       <h3>Route${route.length > 0 ? ` (${String(route.length)} waypoint${route.length === 1 ? '' : 's'})` : ''}</h3>
@@ -1499,7 +1778,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     return `<div class="squad-head ${sideClass(s.side)}">
         <span class="side-badge">${s.side}</span>
         <span class="squad-name">${escapeHtml(s.name)}</span>
-        ${ringsButton(s.id, s.side, show.ringed.has(s.id))}
+        ${unitButtons(s.id, s.side)}
       </div>
       <dl class="kv">${combatStatusRowsHtml(s)}</dl>
       ${planSectionHtml({
@@ -1509,7 +1788,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         activeIndex: s.active !== null && !replaced ? 0 : null,
         armedIndex: second?.squadId === s.id ? second.index : null,
         issues: [],
-        eye: () => '',
+        eye: (k) => unitButtons(s.id, s.side, k),
         empty: 'No orders: it holds where it is.',
         extraButtons: '',
       })}`;
@@ -1527,7 +1806,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         return `<li class="order-row${selected ? ' selected' : ''}${issue ? ' has-issue' : ''}" data-index="${String(k)}">
           <button class="order-pick small" data-act="pick-waypoint" data-index="${String(k)}" title="Select this waypoint">${String(k + 1)}</button>
           <span>Move</span>
-          <span class="order-buttons">${roadsButton('waypoint-roads', k, v.route[k]?.followRoads === true, routing)}${routing ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
+          <span class="order-buttons">${roadsButton('waypoint-roads', k, v.route[k]?.followRoads === true, routing)}${unitButtons(v.id, v.side, k)}${routing ? `<button class="small" data-act="waypoint-delete" data-index="${String(k)}" title="Delete" aria-label="Delete waypoint ${String(k + 1)}">✕</button>` : ''}</span>
           ${issue ? `<span class="warn order-issue">${escapeHtml(issue.message)}</span>` : ''}
         </li>`;
       })
@@ -1539,7 +1818,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input class="squad-name" data-act="vehicle-rename" value="${escapeHtml(v.name)}" aria-label="Vehicle name" maxlength="40">`
             : `<span class="squad-name">${escapeHtml(v.name)}</span>`
         }
-        ${ringsButton(v.id, v.side, show.ringed.has(v.id))}
+        ${unitButtons(v.id, v.side)}
       </div>
       <dl class="kv">
         <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
@@ -1898,8 +2177,19 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   aside.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const rings = target.closest<HTMLElement>('[data-act="range-rings"]');
-    if (rings?.dataset['unit']) {
-      toggleRings(rings.dataset['unit']);
+    const ringsUnit = rings?.dataset['unit'];
+    if (rings && ringsUnit) {
+      const at = rings.dataset['index'];
+      if (at === undefined) toggleRings(ringsUnit);
+      else togglePin('rings', ringsUnit, Number(at));
+      return;
+    }
+    // A unit's viewshed (data-index "start": from where it starts, or is) or a waypoint's.
+    const eye = target.closest<HTMLElement>('[data-act="viewshed"]');
+    const eyeUnit = eye?.dataset['unit'];
+    if (eye && eyeUnit) {
+      const at = eye.dataset['index'];
+      togglePin('viewshed', eyeUnit, at === undefined || at === 'start' ? null : Number(at));
       return;
     }
     if (combatClick(target, event.detail)) return;
@@ -1984,10 +2274,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         return;
       case 'order-delete':
         if (s) planner.removeOrder(s.id, index);
-        return;
-      case 'viewshed':
-        // A squad's (data-index "start") or a waypoint's viewshed, on or off.
-        if (s) planner.toggleViewshed(s.id, el.dataset['index'] === 'start' ? null : index);
         return;
       case 'clear-plan':
         if (s && planner.canPlan(s))
@@ -2374,11 +2660,10 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         ? combatVehicleHtml(
             car,
             new Map(r.vehicles().map((x) => [x.id, x.name])),
-            ringsButton(car.id, car.side, show.ringed.has(car.id)),
+            unitButtons(car.id, car.side),
           )
-        : combatSquadHtml(r.squad(combatUi.selected), (s) =>
-            ringsButton(s.id, s.side, show.ringed.has(s.id)),
-          ) + phasesHtml(r, combatUi.selected),
+        : combatSquadHtml(r.squad(combatUi.selected), (s) => unitButtons(s.id, s.side)) +
+            phasesHtml(r, combatUi.selected),
     );
     setHtml(ui('roster'), combatRosterHtml(r, combatUi));
     setHtml(ui('events'), combatEventsHtml(reviewDisplay(r), 60, true));
@@ -2408,6 +2693,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     inReview()?.frame(dt, viewMode === '3d' && view3d ? 10 : 16);
     lastFrameMs = nowMs;
     updateViewshed();
+    updateWaypointRings();
     if (viewMode === '3d' && view3d) view3d.render();
     else map.render();
     updatePanels();
@@ -2441,10 +2727,12 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       viewsheds: {
         pending: viewshed.pending,
         layers: [...viewshed.layers.values()].map((l) => ({
-          squadId: l.pin.squadId,
+          unitId: l.pin.unitId,
           orderIndex: l.pin.orderIndex,
           side: l.side,
-          observers: l.observers?.length ?? 0,
+          observers: l.look?.observers.length ?? 0,
+          rangeM: l.look?.rangeM ?? null,
+          eyeHeightM: l.look?.sectors[0]?.eyeHeightM ?? null,
           cellSize: l.shown?.grid.cellSize ?? null,
           visible: l.shown ? l.shown.visible.reduce((n, v) => n + v, 0) : 0,
         })),

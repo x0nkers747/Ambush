@@ -338,7 +338,7 @@ describe('viewsheds turned on', () => {
     p.select('O1');
     p.setTool({ kind: 'order', order: 'move' });
     for (const y of [300, 200, 100]) p.click({ x: 0, y });
-    const pins = () => p.viewsheds().map((v) => `${v.squadId}:${String(v.orderIndex)}`);
+    const pins = () => p.viewsheds().map((v) => `${v.unitId}:${String(v.orderIndex)}`);
     expect(p.toggleViewshed('O1', 1)).toBe(true);
     expect(p.toggleViewshed('B1', null)).toBe(true);
     expect(p.toggleViewshed('O1', 2)).toBe(true);
@@ -365,6 +365,39 @@ describe('viewsheds turned on', () => {
     p.setStage('scenario');
     p.removeSquad('B1');
     expect(pins()).toEqual([]);
+  });
+
+  it('a vehicle’s too, from its start or a waypoint, following its route; waypoint rings likewise', () => {
+    const setup = planner('scenario');
+    setup.p.setTool({ kind: 'placeVehicle', side: 'BLUEFOR' });
+    setup.p.click({ x: -100, y: -300 });
+    const { p } = planner('bluefor', setup.p.definition);
+    p.selectVehicle('V1');
+    p.setTool({ kind: 'order', order: 'move' });
+    p.click({ x: -100, y: -100 });
+    p.click({ x: 100, y: -100 });
+    const pins = () => p.viewsheds().map((v) => `${v.unitId}:${String(v.orderIndex)}`);
+    const rings = () => p.waypointRings().map((v) => `${v.unitId}:${String(v.orderIndex)}`);
+    expect(p.toggleViewshed('V1', null)).toBe(true);
+    expect(p.toggleViewshed('V1', 1)).toBe(true);
+    expect(p.toggleWaypointRings('V1', 1)).toBe(true);
+    expect(p.hasWaypointRings('V1', 1)).toBe(true);
+    // Rings and viewsheds are kept apart.
+    expect(pins()).toEqual(['V1:null', 'V1:1']);
+    expect(rings()).toEqual(['V1:1']);
+    // A waypoint put in before: they move down with theirs.
+    p.selectVehicle('V1', 0);
+    p.click({ x: 0, y: -200 });
+    expect(pins()).toEqual(['V1:null', 'V1:2']);
+    expect(rings()).toEqual(['V1:2']);
+    // It deleted: they move up; their own deleted: they go.
+    p.removeVehicleWaypoint('V1', 1);
+    expect(pins()).toEqual(['V1:null', 'V1:1']);
+    p.removeVehicleWaypoint('V1', 1);
+    expect(pins()).toEqual(['V1:null']);
+    expect(rings()).toEqual([]);
+    // No such waypoint: nothing turned on.
+    expect(p.toggleWaypointRings('V1', 5)).toBe(false);
   });
 });
 

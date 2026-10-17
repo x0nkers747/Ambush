@@ -32,6 +32,7 @@ import {
   arcHandle,
   defenceSector,
   drawRangeRings,
+  drawWaypointRings,
   drawRoute,
   facingHandle,
   killZone,
@@ -544,7 +545,9 @@ export function createCombatMapEditor(
       const where = positions(c);
       const squads = c.squads().filter(shown);
       const vehicles = c.vehicles().filter(shown);
-      // Range rings under everything: round each squad still fighting, and each vehicle not destroyed.
+      // Range rings under everything: round each squad still fighting, each vehicle not
+      // destroyed, and the waypoints whose rings are on.
+      drawWaypointRings(ctx, toScreen, show);
       for (const s of squads) {
         if (s.up === 0 || !ringsShown(show, s.id)) continue;
         const spec = c.battle.squads.find((b) => b.spec.id === s.id)?.spec;

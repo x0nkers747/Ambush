@@ -207,10 +207,11 @@ interface Job {
   computeMs: number;
 }
 
-/** The cache key: the exact observer position, sector and cell size, never rounded. */
+/** The cache key: the exact observer position, sector (and eye height) and cell size, never rounded. */
 export function viewshedKey(observer: Vec2, cellSize: number, sector?: ViewSector | null): string {
+  const eye = sector?.eyeHeightM === undefined ? '' : `^${String(sector.eyeHeightM)}`;
   const arc = sector
-    ? `@${String(sector.azimuth)},${String(sector.halfWidth)},${String(sector.rangeM)}`
+    ? `@${String(sector.azimuth)},${String(sector.halfWidth)},${String(sector.rangeM)}${eye}`
     : '';
   return `${String(cellSize)}:${String(observer.x)},${String(observer.y)}${arc}`;
 }

@@ -97,10 +97,21 @@ export interface PlannedSoldier {
   readonly position: Vec2;
 }
 
-/** A viewshed turned on: squad `squadId`'s, from where it starts (`orderIndex` null) or from waypoint `orderIndex`. */
+/**
+ * A viewshed turned on: unit `unitId`'s (a squad's or a vehicle's), from
+ * where it starts (`orderIndex` null) or from its waypoint `orderIndex` (a
+ * squad's order, a vehicle's route point).
+ */
 export interface ViewshedPin {
-  readonly squadId: string;
+  readonly unitId: string;
   readonly orderIndex: number | null;
+}
+
+/** What a pin turns on at a unit's start or waypoint: its viewshed, or its range rings there. */
+export type PinKind = 'viewshed' | 'rings';
+
+interface Pin extends ViewshedPin {
+  readonly kind: PinKind;
 }
 
 export interface Planner {
@@ -169,14 +180,24 @@ export interface Planner {
   moveOrder(id: string, index: number, by: -1 | 1): boolean;
   removeSquad(id: string): void;
   /**
-   * The viewsheds turned on, in the order they were: each a squad's from
-   * where it starts, or from one of its waypoints. They follow their orders
-   * when orders are added, moved or deleted, and go with them.
+   * The viewsheds turned on, in the order they were: each a squad's or a
+   * vehicle's from where it starts, or from one of its waypoints. They follow
+   * their orders (waypoints) when these are added, moved or deleted, and go
+   * with them.
    */
   viewsheds(): readonly ViewshedPin[];
-  hasViewshed(squadId: string, orderIndex: number | null): boolean;
-  /** Turns a squad's (or a waypoint's) viewshed on or off; returns whether it is now on. */
-  toggleViewshed(squadId: string, orderIndex: number | null): boolean;
+  hasViewshed(unitId: string, orderIndex: number | null): boolean;
+  /** Turns a squad's or vehicle's (or a waypoint's) viewshed on or off; returns whether it is now on. */
+  toggleViewshed(unitId: string, orderIndex: number | null): boolean;
+  /**
+   * The waypoints whose range rings are turned on (a unit's own, round where
+   * it starts, are the page's `MapShow.ringed`): they follow their orders as
+   * the viewsheds do.
+   */
+  waypointRings(): readonly ViewshedPin[];
+  hasWaypointRings(unitId: string, orderIndex: number): boolean;
+  /** Turns a waypoint's range rings on or off; returns whether they are now on. */
+  toggleWaypointRings(unitId: string, orderIndex: number): boolean;
   /** What still stops the scenario from being played (memoized per scenario). */
   issues(): readonly ScenarioIssue[];
   /** Each squad's soldiers where they start (memoized per scenario). */
@@ -258,20 +279,49 @@ export function createPlanner(o: PlannerOptions): Planner {
     version += 1;
   };
   /** The viewsheds turned on (`viewsheds`). */
-  let pins: ViewshedPin[] = [];
-  /** Pins of squad `id`'s orders from `from` on, moved by `by` places. */
+  let pins: Pin[] = [];
+  /** Pins of unit `id`'s orders (waypoints) from `from` on, moved by `by` places. */
   const shiftPins = (id: string, from: number, by: number) => {
     pins = pins.map((p) =>
-      p.squadId !== id || p.orderIndex === null || p.orderIndex < from
+      p.unitId !== id || p.orderIndex === null || p.orderIndex < from
         ? p
-        : { squadId: id, orderIndex: p.orderIndex + by },
+        : { ...p, orderIndex: p.orderIndex + by },
     );
   };
-  /** Drops pins whose squad or order no longer exists. */
+  /** How many orders (waypoints) unit `id` has, or `null` when there is no such squad or vehicle. */
+  const waypointsOf = (id: string): number | null =>
+    definition.squads.find((x) => x.id === id)?.plan.length ??
+    definition.vehicles?.find((x) => x.id === id)?.route.length ??
+    null;
+  /** The pins of a kind, in the order turned on (a new array only when they change). */
+  let byKind: { from: Pin[]; viewshed: ViewshedPin[]; rings: ViewshedPin[] } | null = null;
+  const pinsOf = (kind: PinKind): readonly ViewshedPin[] => {
+    if (byKind?.from !== pins) {
+      const strip = (k: PinKind) =>
+        pins
+          .filter((p) => p.kind === k)
+          .map((p) => ({ unitId: p.unitId, orderIndex: p.orderIndex }));
+      byKind = { from: pins, viewshed: strip('viewshed'), rings: strip('rings') };
+    }
+    return byKind[kind];
+  };
+  const hasPin = (kind: PinKind, id: string, index: number | null) =>
+    pins.some((p) => p.kind === kind && p.unitId === id && p.orderIndex === index);
+  const togglePin = (kind: PinKind, id: string, index: number | null): boolean => {
+    const n = waypointsOf(id);
+    if (n === null || (index !== null && index >= n)) return false;
+    const on = !hasPin(kind, id, index);
+    pins = on
+      ? [...pins, { kind, unitId: id, orderIndex: index }]
+      : pins.filter((p) => p.kind !== kind || p.unitId !== id || p.orderIndex !== index);
+    changed();
+    return on;
+  };
+  /** Drops pins whose unit or order no longer exists. */
   const prunePins = () => {
     const next = pins.filter((p) => {
-      const s = definition.squads.find((x) => x.id === p.squadId);
-      return s !== undefined && (p.orderIndex === null || p.orderIndex < s.plan.length);
+      const n = waypointsOf(p.unitId);
+      return n !== null && (p.orderIndex === null || p.orderIndex < n);
     });
     if (next.length !== pins.length) pins = next;
   };
@@ -471,7 +521,12 @@ export function createPlanner(o: PlannerOptions): Planner {
     },
     removeVehicleWaypoint(id, index) {
       if (!canRoute(vehicle(id))) return;
-      if (apply((d) => deleteVehicleWaypoint(d, id, index), true)) {
+      // Its viewshed goes with it; later waypoints' move up a place.
+      const before = pins;
+      pins = pins.filter((p) => p.unitId !== id || p.orderIndex !== index);
+      shiftPins(id, index + 1, -1);
+      if (!apply((d) => deleteVehicleWaypoint(d, id, index), true)) pins = before;
+      else {
         o.notify(`Removed waypoint ${String(index + 1)}.`);
         planner.selectVehicle(id, index > 0 ? index - 1 : null);
       }
@@ -524,8 +579,12 @@ export function createPlanner(o: PlannerOptions): Planner {
           return;
         }
         const at = selection.orderIndex === null ? car.route.length : selection.orderIndex + 1;
+        // Viewsheds of later waypoints move down with it.
+        const before = pins;
+        shiftPins(car.id, at, 1);
         if (apply((d) => addVehicleWaypoint(terrain, d, car.id, point, at), true))
           planner.selectVehicle(car.id, at);
+        else pins = before;
         return;
       }
       if (tool.kind === 'place') {
@@ -650,7 +709,7 @@ export function createPlanner(o: PlannerOptions): Planner {
       const order = s?.plan[index];
       // Its viewshed goes with it; later orders' move up a place.
       const before = pins;
-      pins = pins.filter((p) => p.squadId !== id || p.orderIndex !== index);
+      pins = pins.filter((p) => p.unitId !== id || p.orderIndex !== index);
       shiftPins(id, index + 1, -1);
       if (!apply((d) => deleteOrder(d, id, index), true)) {
         pins = before;
@@ -668,12 +727,12 @@ export function createPlanner(o: PlannerOptions): Planner {
       const before = pins;
       // The two orders' viewsheds change places with them.
       pins = pins.map((p) =>
-        p.squadId !== id || p.orderIndex === null
+        p.unitId !== id || p.orderIndex === null
           ? p
           : p.orderIndex === index
-            ? { squadId: id, orderIndex: to }
+            ? { ...p, orderIndex: to }
             : p.orderIndex === to
-              ? { squadId: id, orderIndex: index }
+              ? { ...p, orderIndex: index }
               : p,
       );
       if (!apply((d) => reorderOrder(d, id, index, by), true)) {
@@ -683,18 +742,12 @@ export function createPlanner(o: PlannerOptions): Planner {
       planner.select(id, to);
       return true;
     },
-    viewsheds: () => pins,
-    hasViewshed: (id, index) => pins.some((p) => p.squadId === id && p.orderIndex === index),
-    toggleViewshed(id, index) {
-      const s = squad(id);
-      if (!s || (index !== null && !s.plan[index])) return false;
-      const on = !planner.hasViewshed(id, index);
-      pins = on
-        ? [...pins, { squadId: id, orderIndex: index }]
-        : pins.filter((p) => p.squadId !== id || p.orderIndex !== index);
-      changed();
-      return on;
-    },
+    viewsheds: () => pinsOf('viewshed'),
+    hasViewshed: (id, index) => hasPin('viewshed', id, index),
+    toggleViewshed: (id, index) => togglePin('viewshed', id, index),
+    waypointRings: () => pinsOf('rings'),
+    hasWaypointRings: (id, index) => hasPin('rings', id, index),
+    toggleWaypointRings: (id, index) => togglePin('rings', id, index),
     removeSquad(id) {
       const s = squad(id);
       if (!s || !canPlace()) return;

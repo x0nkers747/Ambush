@@ -3,8 +3,10 @@
 ## 1. Range rings
 
 Each squad's and vehicle's panel (Setup, Planning, Sim and the review) has a
-rings button by its name. On, three rings are drawn round it, in its side's
-colour, in 2D and draped on the ground in 3D, each labelled at its north:
+rings button by its name, and one by each of its waypoints (Planning and Sim),
+each beside the viewshed's eye. On, three rings are drawn round it (or round
+that waypoint), in its side's colour, in 2D and draped on the ground in 3D,
+each labelled at its north:
 
 | Ring      | Line   | What it is                                                                                          |
 | --------- | ------ | --------------------------------------------------------------------------------------------------- |
@@ -15,7 +17,9 @@ colour, in 2D and draped on the ground in 3D, each labelled at its north:
 Rings of the same range are drawn once, with one label (an Abrams' sights
 and its gun: "Detection · Effective 3,000 m"). In Setup and Planning they are
 round where it starts; in Sim and the review, round where it is now (a squad
-with nobody left, or a destroyed vehicle, has none).
+with nobody left, or a destroyed vehicle, has none). A waypoint's are round
+the waypoint; they follow it as orders are added, moved or deleted, and in Sim
+as they are done (those turned on in Planning carry on into Sim).
 
 | Unit                        | Detection | Effective | Max range                                                |
 | --------------------------- | --------- | --------- | -------------------------------------------------------- |
@@ -35,7 +39,9 @@ nothing in the simulation uses them; they are there to plan with.
 
 Code: `src/exercise/battle/range-rings.ts` (`squadRangeRings`,
 `vehicleRangeRings`), drawn by `drawRangeRings` (`src/app/battle/map-editor.ts`).
-Which units have their rings on is the page's (not saved with the scenario).
+Which units have their rings on is the page's, and which waypoints the
+planner's (`waypointRings`) and, in a battle, the page's; neither is saved
+with the scenario.
 
 ## 2. Why these three
 

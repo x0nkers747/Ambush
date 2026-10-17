@@ -33,7 +33,9 @@ export interface ViewshedGrid {
 /**
  * A sector the viewshed is limited to (a firing arc): ground within `rangeM`
  * of the observer, within `halfWidth` either side of `azimuth`. Cells outside
- * it are reported not visible without being decided.
+ * it are reported not visible without being decided. With `eyeHeightM`, the
+ * observer looks over it from that height above the ground (a vehicle's
+ * sights), not a standing soldier's eye.
  */
 export interface ViewSector {
   /** Radians clockwise from grid north (docs/adr/0002). */
@@ -41,6 +43,8 @@ export interface ViewSector {
   /** Half the sector's angular width, radians. */
   readonly halfWidth: number;
   readonly rangeM: number;
+  /** The observer's eye above the surface it stands on (m); absent: `LosOptions`' (standing). */
+  readonly eyeHeightM?: number;
 }
 
 /** Whether map point (x, y) lies in `sector` from `observer` (the observer's own point does). */
@@ -150,7 +154,7 @@ export function computeViewshedRows(
     // The observer on the surface stood on, as for line of sight (docs/adr/0043).
     z:
       surfaceHeightAt(terrain, observer.x, observer.y) +
-      (options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M),
+      (sector?.eyeHeightM ?? options.observerHeightMeters ?? STANDING_EYE_HEIGHT_M),
   };
   const aim = options.targetHeightMeters ?? STANDING_TARGET_HEIGHT_M;
   const out = new Uint8Array(Math.ceil((rowEnd - rowStart) / rowStep) * grid.columns);

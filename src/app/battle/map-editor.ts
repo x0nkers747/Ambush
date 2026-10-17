@@ -101,10 +101,36 @@ export interface MapShow {
   rangeRings: boolean;
   /** The squads and vehicles (by id) whose range rings are turned on. */
   readonly ringed: Set<string>;
+  /**
+   * Range rings round waypoints (turned on by each waypoint's rings button):
+   * where, whose rings, which side. The page keeps them; drawn when
+   * `rangeRings` is on.
+   */
+  waypointRings: readonly {
+    readonly at: Vec2;
+    readonly rings: RangeRings;
+    readonly side: Side;
+  }[];
 }
 
 export function createMapShow(): MapShow {
-  return { showOpfor: true, hideWaypoints: false, rangeRings: true, ringed: new Set() };
+  return {
+    showOpfor: true,
+    hideWaypoints: false,
+    rangeRings: true,
+    ringed: new Set(),
+    waypointRings: [],
+  };
+}
+
+/** The range rings turned on round waypoints, if range rings are shown (under everything). */
+export function drawWaypointRings(
+  ctx: CanvasRenderingContext2D,
+  toScreen: (p: Vec2) => Vec2,
+  show: MapShow,
+): void {
+  if (!show.rangeRings) return;
+  for (const w of show.waypointRings) drawRangeRings(ctx, toScreen, w.at, w.rings, w.side);
 }
 
 /** Whether a unit's range rings are drawn. */
@@ -286,7 +312,8 @@ export function createBattleMapEditor(planner: Planner, show: MapShow): BattleMa
     draw(ctx, toScreen, inPerspective = false) {
       project = toScreen;
       perspective = inPerspective;
-      // Range rings under everything: round each squad's and vehicle's start.
+      // Range rings under everything: round each squad's and vehicle's start, and waypoints'.
+      drawWaypointRings(ctx, toScreen, show);
       for (const s of squads())
         if (ringsShown(show, s.id))
           drawRangeRings(

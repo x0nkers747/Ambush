@@ -114,3 +114,33 @@ So each frame only one viewshed asks for work:
 dragged: following the pointer slowed the drag badly. The dragged squad's viewsheds are hidden and
 the others stay as they are. On release its viewsheds are worked out again from where it was
 dropped: a first look in a fraction of a second, full detail in about 2 s.
+
+## Amendment (2026-10-17): vehicles, Sim, and range rings at waypoints
+
+**Vehicles.** A vehicle's start and each of its route's waypoints have an eye too. Its viewshed is
+one observer: its turret's pivot on the hull (`MountSpec.pivot` of its first mount on the hull),
+at its sights' height (`sensors.eyeHeightM`), all round, as far as its sights see (its range
+rings' detection: 1,200 m × the optics factor, at most 3,000 m). At a waypoint it faces the way
+it came (`vehicleLook`, `plannedVehicleLook`). The eye height goes to the workers with the
+observer's sector (`ViewSector.eyeHeightM`) and is part of the cache key; without it an observer
+stands (1.7 m), as before.
+
+**In Sim.** The eyes are in Sim's panels as in planning, and the review's by the name:
+
+- **By the name:** from where the unit is now: a squad's active soldiers, a vehicle's turret. A
+  moving unit's is worked out again every 1.5 s, showing the last result until the new first look is
+  in. Nobody left, or destroyed: nothing.
+- **A waypoint's:** from that waypoint of its orders as they stand (`Combat.plan`,
+  `vehicleRoute`). The pin keeps the waypoint's place, so it follows it as orders are done (the
+  plan moves up), moved or dragged. Its look is kept while the waypoint and the one before it stay
+  where they are: from the unit's moving position (its first waypoint's way in) it would change
+  every time and never be finished.
+- **Carried on:** those turned on in planning are the battle's at its start (and again on
+  Restart). Waypoints in the review have none.
+- **Workers:** one showing nothing yet is worked on first; then the selected unit's; then the latest.
+  A moving unit's, worked out again and again, would otherwise keep the workers from the rest.
+
+**Range rings at waypoints.** Beside every eye is a rings button: by the name, the unit's range
+rings (`MapShow.ringed`, as before); by a waypoint, its rings round that waypoint. The planner keeps
+those (`waypointRings`), following their orders as its viewsheds do; in a battle the page keeps
+them with its viewsheds.

@@ -131,11 +131,14 @@ replayed is paused while it is open and resumes when it closes (Escape, × or a 
    scenario (with its seed) is kept as you edit; the **Scenario** menu saves it in the browser
    (**Save**, **Save as…**), loads or imports another, and exports it as a file. An older
    ambush scenario is converted on opening.
-   **Viewsheds:** the eye beside a squad's name, or beside any of its waypoints, in the squad
-   panel shows what its soldiers can see from there, all round to
-   1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple, on the map and on
+   **Viewsheds:** the eye beside a squad's or vehicle's name, or beside any of its waypoints, in
+   its panel shows what it can see from there: a squad's soldiers all round to 1,200 m, a
+   vehicle's crew from its turret at its sights' height, as far as its sights see (up to 3 km).
+   BLUEFOR's are light blue, OPFOR's light red, ground both see purple, on the map and on
    the 3D ground; any number can be on, and a dragged squad's or waypoint's is worked out again when it is dropped
-   ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). The **Viewsheds** box on the map
+   ([ADR 0055](docs/adr/0055-squad-viewsheds-for-planning.md)). In Sim the eyes are there too: by
+   the name, from where it is now (following it as it moves). The rings button beside each eye
+   turns the range rings on round it or round that waypoint. The **Viewsheds** box on the map
    bar shows or hides them all.
 3. **Planning.** Give both sides' squads, and the vehicles, their orders: select one, pick an
    order (**Move**, **Attack**, **Withdraw**, **Ambush**, **Defend**) and click the map once per

@@ -213,19 +213,29 @@ orders along the road; that is gone: every Move is one waypoint.
 
 ## Viewsheds
 
-Each squad's start, and each of its waypoints, has an eye in the squad panel that turns its
-viewshed on or off (the start's eye is beside the squad's name). Any number can be on,
-of either side, in Scenario Setup and Planning.
+Each squad's and vehicle's start, and each of its waypoints, has an eye in its panel that turns
+its viewshed on or off (the start's eye is beside its name), and beside the eye a rings button
+that turns its range rings on there ([range rings](../range-rings.md)). Any number can be on, of
+either side, in Scenario Setup, Planning and Sim, and in the review.
 
 - **What it shows:** what the squad's soldiers can see, all round, out to 1,200 m (the detection
   model's longest observation range). It is seen from where they start; for a waypoint, from where
   the formation will put them on arriving there, facing the way they came. At an ambush position it
   is the firing line, facing the kill zone.
+- **A vehicle's:** what its crew can see from its turret (the turret's pivot on the hull), at its
+  sights' height (2.6 m in an Abrams, 2.3–2.4 m in the others), all round as far as its sights
+  see (its detection ring: 1,200–3,000 m). From where it starts, facing as placed; for a waypoint,
+  from there, facing the way it came.
+- **In Sim:** the eye by its name shows what it sees from where it is now, worked out again every
+  1.5 s as it moves (with nobody left, or destroyed, nothing); a waypoint's, from that waypoint
+  of its orders as they stand, following it as orders are done, moved or dragged. Those turned on
+  in planning carry on into the battle. The review shows those where units are.
 - **Colours:** BLUEFOR's are light blue and OPFOR's light red; ground both sides see is purple. They
   are drawn over the 2D map and on the 3D ground. Each one that is on is ringed on the map.
 - **Speed:** a coarse look comes first and is refined to 4 m detail in about two seconds (ADR 0055).
   While a squad or waypoint is dragged its viewsheds are hidden; they are
   worked out again when it is dropped.
-- **Following orders:** they follow their orders when orders are added, moved or deleted.
+- **Following orders:** they follow their orders (a vehicle's waypoints) when orders are added,
+  moved or deleted.
 - **Show or hide:** the **Viewsheds** box on the map bar shows or hides them all. In BLUEFOR
   Planning, OPFOR's are hidden with OPFOR.
