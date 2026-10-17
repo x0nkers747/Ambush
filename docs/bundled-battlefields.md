@@ -19,7 +19,15 @@ cannot be fetched or read is tried again on the next visit.
 Terrain selection opens on the battlefield just seeded; on later visits, on
 the battlefield last looked at, else the newest saved.
 
-## 2. Prepared terrain is kept
+## 2. Reset
+
+Terrain selection's **Reset** (under the saved battlefields; two clicks, the
+first arms it) deletes every saved battlefield, with its working scenario and
+prepared terrain, and stores the bundled ones again as they come: Quantico is
+back as on a first visit, and is prepared again ("Preparing…") when it is
+next opened. Saved scenarios (the library) are kept.
+
+## 3. Prepared terrain is kept
 
 Before it is played, a battlefield's stored terrain is prepared: its DEM
 cleaned (docs/adr/0033) and the terrain field sampled (docs/adr/0049), about
@@ -32,7 +40,7 @@ another terrain model (after an update that changes the rules) is not used:
 the battlefield is prepared again once and saved. Deleting a battlefield
 deletes its prepared terrain.
 
-## 3. The file
+## 4. The file
 
 `public/battlefields/quantico.ambush-battlefield.gz` (about 1 MB): gzipped
 JSON (`#geo`'s bundle format, `src/geo/bundle.ts`) holding the battlefield
@@ -51,7 +59,7 @@ saved battlefields):
 and built by the current importer (`IMPORTER_VERSION`): after an importer
 change it fails until the battlefield is recorded and bundled again.
 
-## 4. Code and tests
+## 5. Code and tests
 
 - `src/geo/bundle.ts`: the file format.
 - `src/acquire/store.ts`: `getPrepared` / `putPrepared` (database version 4).

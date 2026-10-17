@@ -64,6 +64,8 @@ export async function readMaybeGzipped(
 export interface SeedMemory {
   has(key: string): boolean;
   add(key: string): void;
+  /** Forgets every bundled battlefield seeded (a reset seeds them again). */
+  clear(): void;
 }
 
 export function localSeedMemory(storage: Storage | null): SeedMemory {
@@ -76,6 +78,9 @@ export function localSeedMemory(storage: Storage | null): SeedMemory {
       } catch {
         // Private browsing without storage: seeded again next time (harmless).
       }
+    },
+    clear: () => {
+      for (const { key } of BUNDLED_BATTLEFIELDS) storage?.removeItem(name(key));
     },
   };
 }

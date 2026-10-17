@@ -1392,7 +1392,9 @@
         background: transparent;
       }
       .trash-btn[data-confirm='yes'],
-      .trash-btn[data-confirm='yes']:hover:not(:disabled) {
+      .trash-btn[data-confirm='yes']:hover:not(:disabled),
+      [data-ui='reset'][data-confirm='yes'],
+      [data-ui='reset'][data-confirm='yes']:hover:not(:disabled) {
         color: #fff;
         background: var(--red-strong);
         border-color: #ff8a80;

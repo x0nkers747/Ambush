@@ -54,6 +54,11 @@ export interface PreparedTerrainCache {
 /** A prepared terrain read back from storage, or `null` when it is not one (damaged: prepared again). */
 export const preparedFrom = (data: unknown): PreparedTerrain | null => preparedTerrainFrom(data);
 
+/** Forgets the terrain prepared on this page (a reset: battlefields are prepared again). */
+export function forgetPreparedTerrain(): void {
+  prepared.clear();
+}
+
 /**
  * The authoritative terrain of battlefield `id`, whose stored (raw) terrain is
  * `source` and import-time DEM corrections `corrections`. Cached by id and by

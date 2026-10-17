@@ -56,6 +56,12 @@ export interface SelectionOptions {
   readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
   /** Saved scenarios (docs/scenarios.md): the library, and importing a file. */
   readonly scenarios: { readonly load: () => void; readonly import: () => void };
+  /**
+   * Reset: deletes every saved battlefield (their working scenarios and
+   * prepared terrain) and stores the bundled ones again as they come; the
+   * battlefield to select after (Quantico), or `null`.
+   */
+  readonly reset?: () => Promise<string | null>;
 }
 
 export interface BattlefieldSelection {
@@ -271,7 +277,7 @@ export function startBattlefieldSelection(
         <ul class="bf-saved" data-ui="saved"><li class="muted">Loading…</li></ul>
         ${
           o.persistent
-            ? '<p class="hint">Saved in this browser: they open without a network connection.</p>'
+            ? `<p class="hint">Saved in this browser: they open without a network connection.</p>${o.reset ? '<div class="bf-row"><button class="small" data-ui="reset" title="Delete every saved battlefield and restore Quantico as it comes">Reset</button></div>' : ''}`
             : '<p class="hint warn">This browser cannot store battlefields (storage is unavailable): generated battlefields are lost when the page is closed.</p>'
         }
       </section>
@@ -734,6 +740,48 @@ export function startBattlefieldSelection(
   });
   ui('scn-import').addEventListener('click', () => {
     o.scenarios.import();
+  });
+
+  // Reset: two clicks, as a bin (the first arms it); then every saved battlefield
+  // is deleted and Quantico restored as it comes.
+  let resetArmed: ReturnType<typeof setTimeout> | null = null;
+  let resetting = false;
+  const resetButton = app.querySelector<HTMLButtonElement>('[data-ui="reset"]');
+  resetButton?.addEventListener('click', () => {
+    const reset = o.reset;
+    if (!reset || resetting) return;
+    if (resetArmed === null) {
+      resetButton.dataset['confirm'] = 'yes';
+      resetButton.textContent = 'Click again to reset';
+      notify(
+        'Click Reset again to delete every saved battlefield and their working scenarios, and restore Quantico as it comes. Saved scenarios are kept.',
+      );
+      resetArmed = setTimeout(() => {
+        resetArmed = null;
+        delete resetButton.dataset['confirm'];
+        resetButton.textContent = 'Reset';
+      }, 4000);
+      return;
+    }
+    clearTimeout(resetArmed);
+    resetArmed = null;
+    delete resetButton.dataset['confirm'];
+    resetButton.textContent = 'Reset';
+    resetting = true;
+    // A generation under way is stopped; whatever is shown is let go.
+    const previous = generating;
+    generating = null;
+    previous?.abort();
+    select({ kind: 'none' });
+    void reset()
+      .then((id) => (disposed ? undefined : refresh(id ?? undefined)))
+      .catch((error: unknown) => {
+        if (!disposed)
+          notify(`The reset failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        resetting = false;
+      });
   });
 
   ui('primary').addEventListener('click', () => {

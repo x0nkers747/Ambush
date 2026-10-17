@@ -13,7 +13,14 @@ import { testBattlefield } from './scenarios/test-fixtures';
 
 const memory = (): SeedMemory & { readonly keys: Set<string> } => {
   const keys = new Set<string>();
-  return { keys, has: (k) => keys.has(k), add: (k) => keys.add(k) };
+  return {
+    keys,
+    has: (k) => keys.has(k),
+    add: (k) => keys.add(k),
+    clear: () => {
+      keys.clear();
+    },
+  };
 };
 
 describe('the file format', () => {
@@ -55,6 +62,9 @@ describe('seeding on a first visit', () => {
     await store.delete(pkg.id);
     expect(await seedBundledBattlefields(store, seen, fetchFile)).toEqual([]);
     expect(await store.list()).toEqual([]);
+    // A reset forgets them: seeded again, as they come.
+    seen.clear();
+    expect(await seedBundledBattlefields(store, seen, fetchFile)).toEqual([pkg.id]);
   });
 
   it('leaves an already saved one as it is, and an unreadable file for next time', async () => {

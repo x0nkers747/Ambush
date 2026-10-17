@@ -1,4 +1,4 @@
-import { authoritativeTerrain } from './terrain-grading';
+import { authoritativeTerrain, forgetPreparedTerrain } from './terrain-grading';
 import { busy, whileBusy, type BusyTask } from './busy';
 import { localSeedMemory, seedBundledBattlefields } from './bundled-battlefields';
 import {
@@ -322,6 +322,7 @@ async function main(root: HTMLElement): Promise<void> {
       openBattlefield: (id, map, view) => {
         void showBattle(id, 'scenario', map, page, null, view);
       },
+      reset: resetBattlefields,
     });
     selection = page;
   };
@@ -487,13 +488,32 @@ async function main(root: HTMLElement): Promise<void> {
     },
   };
   // The battlefields that come with the game, on a first visit (docs/bundled-battlefields.md).
-  const seeded = await seedBundledBattlefields(
-    store,
-    // Without a lasting store nothing survives a reload: seeded on every visit.
-    persistent ? localSeedMemory(storageOrNull()) : { has: () => false, add: () => undefined },
-    (file) => window.fetch(new URL(file, document.baseURI)),
-    (label) => busy(label, 0),
-  );
+  // Without a lasting store nothing survives a reload: seeded on every visit.
+  const seedMemory = persistent
+    ? localSeedMemory(storageOrNull())
+    : { has: () => false, add: () => undefined, clear: () => undefined };
+  const seedBundled = () =>
+    seedBundledBattlefields(
+      store,
+      seedMemory,
+      (file) => window.fetch(new URL(file, document.baseURI)),
+      (label) => busy(label, 0),
+    );
+  const seeded = await seedBundled();
+  /**
+   * Reset (terrain selection): every saved battlefield deleted, with its working
+   * scenario and prepared terrain, and the bundled ones stored again as they
+   * come (Quantico is prepared again on its next opening). Saved scenarios are kept.
+   */
+  const resetBattlefields = () =>
+    whileBusy('Resetting the battlefields…', async () => {
+      for (const b of await store.list()) await store.delete(b.id);
+      loaded = null;
+      forgetPreparedTerrain();
+      seedMemory.clear();
+      const again = await seedBundled();
+      return again[0] ?? null;
+    });
   const stage = parseStage(window.location.hash);
   switch (stage.kind) {
     case 'select': {
