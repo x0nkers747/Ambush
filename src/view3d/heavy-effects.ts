@@ -9,7 +9,13 @@ import {
   type Blending,
 } from 'three';
 import type { CombatEvent, HeavyShotEvent } from '#exercise';
-import { firesTracers, guidedFlightSeconds, tracerFlightSeconds, tracerShown } from './tracers';
+import {
+  firesTracers,
+  guidedFlightSeconds,
+  inBattleTime,
+  tracerFlightSeconds,
+  tracerShown,
+} from './tracers';
 
 // The effects of combined arms in 3D (docs/combined-arms.md §11): muzzle
 // flashes and smoke, the smoke trails of rockets and missiles in flight
@@ -161,10 +167,9 @@ function flightOf(e: HeavyShotEvent, kind: string): { flight: number; length: nu
   const dy = e.impact.y - e.from.y;
   const dz = e.impact.z - e.from.z;
   const length = Math.hypot(dx, dy, dz);
-  const flight =
-    kind === 'atgm' || kind === 'atRocket'
-      ? guidedFlightSeconds(e.atSeconds, e.impactAt, length)
-      : Math.max(0.06, length / (SPEED[kind] ?? 900));
+  const flight = inBattleTime(kind, e.impactAt)
+    ? guidedFlightSeconds(e.atSeconds, e.impactAt, length)
+    : Math.max(0.06, length / (SPEED[kind] ?? 900));
   return { flight, length };
 }
 
@@ -265,7 +270,7 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
         const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
         // A gun's round drawn as a tracer (at speed, one burst in so many is).
         const tracer =
-          e.missileId === null &&
+          !inBattleTime(kind, e.impactAt) &&
           firesTracers(kind) &&
           tracerShown(e.shooterId, e.tick, e.slot, scale);
         const key = `${e.shooterId}:${String(e.tick)}:${e.slot}`;

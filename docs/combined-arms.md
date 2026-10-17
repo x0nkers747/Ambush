@@ -168,6 +168,15 @@ the vehicle stopped (it halts to fire, and drives on after). Changing
 ammunition costs a loading cycle. A guided missile flies for its range over
 its speed (`SimState.combat.missiles`); a wire-guided one keeps its vehicle
 halted and needs the gunner alive and the target in sight when it arrives.
+A main gun's round flies too, for its range over its muzzle velocity
+(`AmmoSpec.velocityMps`: M829A1 1,575 m/s, M830 1,140 m/s, 3BM42 1,700 m/s,
+3OF26 850 m/s; about 1.3 s at 2 km for a sabot round) in
+`SimState.combat.shells`: whether it hits a vehicle, or where a blast lands,
+is drawn when it is fired; what it does (a hit resolved against the armour,
+a blast striking and suppressing the soldiers round where it lands, the
+target's crew or force cued) when it arrives, at the first decision after
+(`arriveShells`, after the missiles'). A target destroyed meanwhile is not
+struck again. Machine guns and autocannon strike when fired.
 Anti-tank gunners choose among the vehicles their squad has confirmed, aim
 (an AT4 5 s, a Javelin's lock-on 12 s), fire when their squad is fighting
 and they see the target, and reload from what they carry.
@@ -247,10 +256,9 @@ flashes and blast smoke, rockets' and missiles' smoke trails, impacts
 smoke) and smouldering ones: all a function of the combat log, the clock and
 the articulation, in two pools of points (no objects per effect).
 
-**Tracers** (`tracers.ts`): a vehicle's machine guns, autocannon and main gun
-fire the soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and
-green for OPFOR, flying at 640 m/s on screen; a main gun's round as fast,
-its glowing head four times the size (20 px, not 5). Every round flies at
+**Tracers** (`tracers.ts`): a vehicle's machine guns and autocannon fire the
+soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and green for
+OPFOR, flying at 640 m/s on screen. Every round flies at
 that speed on screen whatever the battle's speed (½× to 32×): its age is
 counted in real seconds (the battle's seconds since it was fired over the
 speed the battle is drawn at), so at 32× a round crosses the screen as at
@@ -262,14 +270,17 @@ armour) comes when its tracer lands, or for a burst not drawn, when the
 round would. The review draws the same tracers at the same moment and
 speed, seeking or not.
 
-**Rockets and missiles** fly as a main gun's round is drawn: the streak, red or
-green, with the 20 px head; their smoke trails are the effects'. But they fly
-at their own speed in the battle's time, as the simulation has them: a
-missile from launch until it arrives (its range over its flight speed:
-9M113 208 m/s, 9K111 186 m/s, Javelin 170 m/s), a rocket at 260 m/s. At 1× a
-missile at 2 km is seen in flight for about 10 s, as it would be; faster, it
-keeps up with the battle, landing as its hit does. Every one is drawn,
-whatever the speed.
+**Main guns' rounds, rockets and missiles** are the streak, red or green,
+with a glowing head four times the size (20 px, not 5); rockets' and
+missiles' smoke trails are the effects'. They fly at their own speed in the
+battle's time, as the simulation has them: a main gun's round and a missile
+from firing until they arrive (§7: a sabot round at 2 km about 1.3 s; a
+missile, its range over its flight speed, 9M113 208 m/s, 9K111 186 m/s,
+Javelin 170 m/s, about 10 s at 2 km), a rocket at 260 m/s. At 1× each is seen
+in flight as long as it would be; faster, it keeps up with the battle, and
+its impact (dust, sparks off armour) comes when it lands, as its hit does.
+Every one is drawn, whatever the speed. The 2D map draws them as a dot
+along a dashed line until they arrive.
 
 **2D** (`src/app/battle/map-editor.ts`, `combat-editor.ts`): the APP-6 symbol
 of its role (armour: the oval of tracks; mechanized infantry: the cross over
@@ -290,7 +301,7 @@ All combat state is plain data in `SimState` (`vehicles[i].combat`,
 `combat`, the squads' `fof.tracks`), so it is hashed, snapshotted and replayed
 with the rest; all draws come from `SimState.rng` in a fixed order (soldiers'
 scan, `scanCombat`, the soldiers' bursts, then `fireCombat`: missiles
-arriving, vehicles in order, anti-tank gunners in order, the hits); nothing
+arriving, main guns' rounds arriving, vehicles in order, anti-tank gunners in order, the hits); nothing
 in the views decides anything. The review re-simulates the battle from its
 commands and checks every second's state hash. A battle without vehicles or
 anti-tank weapons makes no new draws and has no new state: it runs and hashes
@@ -374,9 +385,11 @@ A scenario may also carry platforms and weapons of its own
   stationary, vehicle-sized target. Explosive reactive armour, depleted
   uranium, the T-72B's Kontakt-1 and the Abrams' later packages are not
   modelled.
-- **Ballistics** are abstract: a shot hits or misses by its probability;
-  there is no time of flight for gun rounds, no superelevation or lead, no
-  ricochet; a miss lands just beyond its target for the views.
+- **Ballistics** are abstract: a shot hits or misses by its probability,
+  drawn when fired; a main gun's round flies at its muzzle velocity (no
+  drag), machine guns' and autocannon's rounds strike at once; there is no
+  superelevation or lead, no ricochet; a miss lands just beyond its target
+  for the views.
 - **Faces** are front, side, rear (by the attacker's bearing from the hull,
   ±45°, scattered ±15°) and top (top attack only); turret and hull are not
   distinguished, nor hull-down positions beyond what the sight line hides.

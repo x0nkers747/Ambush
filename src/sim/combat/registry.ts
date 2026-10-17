@@ -152,5 +152,7 @@ export function validateCombatWeapon(w: CombatWeaponSpec): void {
   for (const a of w.ammo) {
     if (a.penetrationByRange.length === 0) fail(`ammunition "${a.id}" has no penetration`);
     if (!(a.lethality >= 0 && a.lethality <= 1)) fail(`ammunition "${a.id}": lethality 0–1`);
+    if (a.velocityMps !== undefined && !(a.velocityMps > 0))
+      fail(`ammunition "${a.id}": its velocity must be positive`);
   }
 }

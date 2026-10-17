@@ -8,6 +8,7 @@ import {
   type ScenarioVehicle,
   type SimEvent,
   type VehicleFireEvent,
+  type VehicleHitEvent,
 } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
 import {
@@ -100,6 +101,26 @@ describe('vehicles in a battle', () => {
     expect(conditions).toContain(true);
     // The mounts were laid by the simulation: the turret and its fire event agree on the target.
     for (const e of atTanks) expect(e.from.z).toBeGreaterThan(0);
+  });
+
+  it('a main gun’s round flies at its velocity, and its hit lands when it arrives', () => {
+    const { events } = run(TANK_DUEL, 120);
+    const shots = fires(events).filter((e) => e.slot === 'main');
+    expect(shots.length).toBeGreaterThan(0);
+    for (const e of shots) {
+      // M829A1 1,575 m/s, 3BM42 1,700 m/s: range ÷ velocity.
+      const v = e.ammo === 'm829a1' ? 1575 : 1700;
+      expect(e.impactAt).toBeCloseTo(e.atSeconds + e.rangeM / v, 6);
+    }
+    const hit = shots.find((e) => e.hit && e.rangeM > 700);
+    if (!hit?.impactAt) throw new Error('no hit at range');
+    // Its damage: at the first decision once it has arrived (decisions every 0.1 s), not when fired.
+    const struck = events.find(
+      (e): e is VehicleHitEvent =>
+        e.type === 'vehicleHit' && e.byId === hit.shooterId && e.atSeconds > hit.atSeconds,
+    );
+    expect(struck?.atSeconds).toBeGreaterThanOrEqual(hit.impactAt - 1e-9);
+    expect(struck?.atSeconds).toBeLessThan(hit.impactAt + 0.1 + 1e-9);
   });
 
   it('tanks in plain view of each other engage within seconds (a plain target is found at once)', () => {

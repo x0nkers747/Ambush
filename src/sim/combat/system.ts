@@ -16,6 +16,7 @@ import {
 } from '../fof/detection';
 import { areaIncapacitation } from '../fof/fire';
 import { underFire } from '../fof/force';
+import type { AreaEffect } from '../fof/config';
 import type { FofContext } from '../fof/system';
 import { forceActive, glimpse, setLevel, soldierOf } from '../fof/system';
 import type { FofForce, FofSoldier, ObservationLevel } from '../fof/types';
@@ -31,6 +32,7 @@ import {
   type Engagement,
   type MissileState,
   type MountedWeaponState,
+  type ShellState,
   type VehicleCombat,
   type VehicleTrack,
 } from './state';
@@ -165,6 +167,7 @@ export function combatOf(context: FofContext): CombatState | undefined {
     antiTank,
     missiles: [],
     nextMissile: 1,
+    shells: [],
   };
   return context.state.combat;
 }
@@ -825,6 +828,7 @@ export function fireCombat(context: FofContext, volley: CombatVolley): void {
   const catalog = catalogOf(context.world);
   const pending: PendingHit[] = [];
   arriveMissiles(context, combat, catalog, pending);
+  arriveShells(context, combat, catalog, volley, pending);
   for (const v of context.state.vehicles ?? [])
     vehicleFire(context, combat, catalog, v, volley, pending);
   for (const at of combat.antiTank) antiTankFire(context, combat, catalog, at, pending);
@@ -1315,6 +1319,7 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
     );
     const hit = nextFloat(state.rng) < p;
     const impact = hit ? shot.aim : missPoint(context, shot);
+    const arriveAt = arrivalOf(t, shot);
     events.push({
       type: 'vehicleFire',
       tick,
@@ -1335,9 +1340,14 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
       hit,
       incapacitated: [],
       missileId: null,
-      impactAt: null,
+      impactAt: arriveAt,
       impact,
     });
+    // A main gun's round: it does what it does when it arrives (`arriveShells`).
+    if (arriveAt !== null) {
+      combat.shells.push(shellOf(shot, 'vehicle', impact, hit, t, arriveAt));
+      return;
+    }
     if (hit)
       shot.pending.push({
         target: target.vehicle,
@@ -1355,7 +1365,7 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
   const vs = ammo.vsInfantry;
   if (!soldier || !vs) return;
   const down: SoldierId[] = [];
-  let p = 0;
+  let p: number;
   let hit: boolean;
   let impact: Vec3 = shot.aim;
   if (vs.area) {
@@ -1368,34 +1378,38 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
     const iy = shot.aim.y + r * Math.cos(angle);
     const iz = surfaceHeightAt(context.world.terrain, ix, iy);
     impact = { x: ix, y: iy, z: iz };
-    const tracer = sightLineTracer(context.world.terrain);
-    for (const other of context.fof.soldiers) {
-      const s = soldierOf(context, other);
-      if (s.status !== 'active') continue;
-      const d = Math.hypot(s.position.x - ix, s.position.y - iy);
-      if (d >= area.maxEffectRadiusM) continue;
-      const covered =
-        d > 0.5 &&
-        tracer.blocked(
-          { x: ix, y: iy, z: iz + 0.5 },
-          { x: s.position.x, y: s.position.y, z: s.position.z + 0.5 },
-        );
-      if (covered) continue;
-      const force = context.fof.forces[other.force];
-      const pk =
-        areaIncapacitation(area, d) *
-        (s.posture === 'prone' ? area.proneFactor : 1) *
-        dugInFactor(
-          dugInFrom(force ?? null, s, { x: ix, y: iy }),
-          context.setup.config.force.dugInHitFactor,
-        );
-      if (s.id === soldier.id) p = pk;
-      if (nextFloat(state.rng) < pk && !shot.volley.down.has(s.id)) {
-        down.push(s.id);
-        other.stats.timesHit += 1;
-        shot.volley.down.set(s.id, { victim: s, by: { id: shot.shooter.id }, force: -1 });
-      }
+    const arriveAt = arrivalOf(t, shot);
+    if (arriveAt !== null) {
+      // A main gun's round: where it lands is drawn now; whom it strikes, when it lands.
+      events.push({
+        type: 'vehicleFire',
+        tick,
+        atSeconds: t,
+        shooterId: shot.shooter.id,
+        shooter: shot.shooter.kind,
+        side: shot.side,
+        slot: shot.slot,
+        weapon: weapon.id,
+        ammo: ammo.id,
+        rounds: shot.rounds,
+        targetId: target.id,
+        target: 'soldier',
+        from: shot.from,
+        aimPoint: shot.aim,
+        rangeM: shot.rangeM,
+        hitProbability: 0,
+        hit: false,
+        incapacitated: [],
+        missileId: null,
+        impactAt: arriveAt,
+        impact,
+      });
+      combat.shells.push(shellOf(shot, 'soldier', impact, false, t, arriveAt));
+      return;
     }
+    const struck = blastAt(context, area, impact, soldier.id, shot.shooter.id, shot.volley);
+    down.push(...struck.down);
+    p = struck.p;
     hit = down.length > 0;
   } else {
     const fire = context.setup.config.fire;
@@ -1456,6 +1470,151 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
   }
 }
 
+/** When a shot's round arrives (a main gun's: range ÷ its velocity), or `null`: it strikes when fired. */
+function arrivalOf(t: number, shot: Shot): number | null {
+  const v = shot.ammo.velocityMps;
+  return v === undefined || shot.weapon.guided ? null : t + shot.rangeM / v;
+}
+
+/** A main gun's round in flight, as fired. */
+function shellOf(
+  shot: Shot,
+  target: 'vehicle' | 'soldier',
+  impact: Vec3,
+  hit: boolean,
+  t: number,
+  arriveAt: number,
+): ShellState {
+  return {
+    shooterId: shot.shooter.id,
+    shooter: shot.shooter.kind,
+    side: shot.side,
+    weapon: shot.weapon.id,
+    ammo: shot.ammo.id,
+    targetId: shot.target.id,
+    target,
+    from: { x: shot.from.x, y: shot.from.y, z: shot.from.z },
+    shooterAt: { x: shot.shooter.position.x, y: shot.shooter.position.y },
+    impact: { x: impact.x, y: impact.y, z: impact.z },
+    rangeM: shot.rangeM,
+    hit,
+    firedAt: t,
+    arriveAt,
+  };
+}
+
+/**
+ * A blast at `impact`: each active soldier within its reach and not behind
+ * cover from it is struck down by his draw (by distance, prone, dug in toward
+ * it), in soldier order. The soldiers struck, and the chance of the one aimed at.
+ */
+function blastAt(
+  context: FofContext,
+  area: AreaEffect,
+  impact: Vec3,
+  aimedAt: string,
+  shooterId: string,
+  volley: CombatVolley,
+): { readonly down: SoldierId[]; readonly p: number } {
+  const { x: ix, y: iy, z: iz } = impact;
+  const down: SoldierId[] = [];
+  let p = 0;
+  const tracer = sightLineTracer(context.world.terrain);
+  for (const other of context.fof.soldiers) {
+    const s = soldierOf(context, other);
+    if (s.status !== 'active') continue;
+    const d = Math.hypot(s.position.x - ix, s.position.y - iy);
+    if (d >= area.maxEffectRadiusM) continue;
+    const covered =
+      d > 0.5 &&
+      tracer.blocked(
+        { x: ix, y: iy, z: iz + 0.5 },
+        { x: s.position.x, y: s.position.y, z: s.position.z + 0.5 },
+      );
+    if (covered) continue;
+    const force = context.fof.forces[other.force];
+    const pk =
+      areaIncapacitation(area, d) *
+      (s.posture === 'prone' ? area.proneFactor : 1) *
+      dugInFactor(
+        dugInFrom(force ?? null, s, { x: ix, y: iy }),
+        context.setup.config.force.dugInHitFactor,
+      );
+    if (s.id === aimedAt) p = pk;
+    if (nextFloat(context.state.rng) < pk && !volley.down.has(s.id)) {
+      down.push(s.id);
+      other.stats.timesHit += 1;
+      volley.down.set(s.id, { victim: s, by: { id: shooterId }, force: -1 });
+    }
+  }
+  return { down, p };
+}
+
+/**
+ * Main guns' rounds arriving by now, in the order fired: a hit on a vehicle
+ * is resolved against its armour (unless it is a wreck by now), a miss cues
+ * its crew; a blast strikes and suppresses the soldiers round where it lands,
+ * and the soldiers' force aimed at comes under fire.
+ */
+function arriveShells(
+  context: FofContext,
+  combat: CombatState,
+  catalog: CombatCatalog,
+  volley: CombatVolley,
+  pending: PendingHit[],
+): void {
+  const t = context.t;
+  const due = combat.shells.filter((s) => s.arriveAt <= t + 1e-9);
+  if (due.length === 0) return;
+  combat.shells = combat.shells.filter((s) => s.arriveAt > t + 1e-9);
+  for (const s of due) {
+    const weapon = combatWeaponOf(catalog, s.weapon);
+    const ammo = weapon.ammo.find((a) => a.id === s.ammo);
+    if (!ammo) continue;
+    const shooterVehicle = vehicleById(context, s.shooterId);
+    const shooterSoldier = shooterVehicle ? undefined : soldierById(context, s.shooterId);
+    const shooter: Target = {
+      kind: s.shooter,
+      id: s.shooterId,
+      position: shooterVehicle?.position ??
+        shooterSoldier?.position ?? { x: s.shooterAt.x, y: s.shooterAt.y, z: s.from.z },
+      soldier: shooterSoldier ?? null,
+      vehicle: shooterVehicle ?? null,
+    };
+    if (s.target === 'vehicle') {
+      const v = vehicleById(context, s.targetId);
+      if (!v || v.combat.damage.destroyed) continue;
+      if (s.hit)
+        pending.push({
+          target: v,
+          shooterId: s.shooterId,
+          from: s.shooterAt,
+          weapon,
+          ammo,
+          rangeM: s.rangeM,
+        });
+      else vehicleUnderFire(context, v, shooter);
+      continue;
+    }
+    const vs = ammo.vsInfantry;
+    if (!vs?.area) continue;
+    blastAt(context, vs.area, s.impact, s.targetId, s.shooterId, volley);
+    suppressNear(
+      context,
+      { side: s.side, from: s.from, volley },
+      s.impact,
+      s.targetId,
+      vs.suppressionPerBurst,
+      vs.suppressionRadiusM,
+    );
+    const member = memberOf(context, s.targetId);
+    if (member) {
+      member.stats.timesTargeted += 1;
+      underFire(context, member.force, shooter);
+    }
+  }
+}
+
 /** Where a miss lands: beyond or short of the aim point, a little to the side (no draw: by the shot's numbers). */
 function missPoint(context: FofContext, shot: Shot): Vec3 {
   const dx = shot.aim.x - shot.from.x;
@@ -1471,7 +1630,7 @@ function missPoint(context: FofContext, shot: Shot): Vec3 {
 /** Suppression of the enemies of the shooter near an impact: full for the one aimed at, fading to `radiusM`. */
 function suppressNear(
   context: FofContext,
-  shot: Shot,
+  shot: Pick<Shot, 'side' | 'from' | 'volley'>,
   impact: Vec2,
   aimedAt: string,
   perShot: number,

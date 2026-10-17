@@ -137,6 +137,32 @@ export interface MissileState {
   readonly rangeM: number;
 }
 
+/**
+ * A main gun's round in flight (`AmmoSpec.velocityMps`): where it was drawn to
+ * go when fired, and what it does when it arrives (`arriveAt`): a hit on a
+ * vehicle is resolved against its armour then; a blast strikes the soldiers
+ * round where it lands then.
+ */
+export interface ShellState {
+  readonly shooterId: string;
+  readonly shooter: 'vehicle' | 'soldier';
+  readonly side: 'BLUEFOR' | 'OPFOR';
+  readonly weapon: string;
+  readonly ammo: string;
+  readonly targetId: string;
+  readonly target: 'vehicle' | 'soldier';
+  /** The muzzle, and where the shooter stood (the face a hit strikes is from there). */
+  readonly from: { readonly x: number; readonly y: number; readonly z: number };
+  readonly shooterAt: { readonly x: number; readonly y: number };
+  /** Where it lands. */
+  readonly impact: { readonly x: number; readonly y: number; readonly z: number };
+  readonly rangeM: number;
+  /** At a vehicle: whether it hits (drawn when fired). */
+  readonly hit: boolean;
+  readonly firedAt: number;
+  readonly arriveAt: number;
+}
+
 /** Combat state that belongs to no one vehicle. Absent until a battle has vehicles or anti-tank weapons. */
 export interface CombatState {
   /**
@@ -148,6 +174,8 @@ export interface CombatState {
   antiTank: AntiTankState[];
   missiles: MissileState[];
   nextMissile: number;
+  /** Main guns' rounds in flight (`ShellState`), in the order fired. */
+  shells: ShellState[];
 }
 
 /** A vehicle's combat state at the start: its crew able, its mounts forward, its weapons loaded. */

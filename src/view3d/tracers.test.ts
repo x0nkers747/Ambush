@@ -294,5 +294,21 @@ describe('tracers', () => {
     const rockets = createTracerLayer((w) => (w === 'at4' ? 'atRocket' : ''));
     rockets.update(log, [rocket], 2, flat, eye);
     expect(heads(rockets)[0]?.y).toBeCloseTo(260, 0);
+    // A main gun's round the battle flies (M829A1, 1,575 m/s: 2,080 m in 1.32 s): likewise,
+    // in the battle's time, at 32× too, landing when the battle says.
+    const sabot: HeavyShotEvent = {
+      ...missile,
+      side: 'BLUEFOR',
+      slot: 'main',
+      weapon: 'm256',
+      ammo: 'm829a1',
+      missileId: null,
+      impactAt: 1 + 2080 / 1575,
+    };
+    const guns = createTracerLayer((w) => (w === 'm256' ? 'cannon' : ''));
+    guns.update(log, [sabot], 1.5, flat, eye, 32);
+    expect(heads(guns)[0]?.y).toBeCloseTo(787.5, 0);
+    guns.update(log, [sabot], 2.4, flat, eye);
+    expect(guns.inFlight).toBe(0);
   });
 });

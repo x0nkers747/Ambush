@@ -139,6 +139,8 @@ const BURST_SECONDS = 0.6;
 const PASSED_M = 4;
 /** How long a heavy shot's line stays drawn (s of simulation). */
 const HEAVY_SECONDS = 1.2;
+/** The longest a missile or round flies (s): a missile at 4 km, at 170 m/s, about 24 s. */
+const MAX_FLIGHT_SECONDS = 30;
 /** How long a grenade shows on the map (s), and its effect radius drawn (m; the M203's). */
 const GRENADE_SECONDS = 2;
 const GRENADE_EFFECT_M = 10;
@@ -687,17 +689,20 @@ export function createCombatMapEditor(
       ctx.globalAlpha = 1;
 
       // Heavy fire of the last moments (vehicles' guns, anti-tank weapons): muzzle to where it
-      // landed, a missile as a dot along its flight until it arrives, a burst where it struck.
+      // landed, a missile or a main gun's round as a dot along its flight until it arrives, a
+      // burst where it struck.
       for (let i = log.length - 1; i >= 0; i -= 1) {
         const e = log[i];
         if (!e) continue;
-        if (e.seconds < now - HEAVY_SECONDS) break;
+        // Back as far as a missile flies (a main gun's round lands within 5 s).
+        if (e.seconds < now - HEAVY_SECONDS - MAX_FLIGHT_SECONDS) break;
         if (e.seconds > now || e.event.type !== 'vehicleFire') continue;
         const ev = e.event;
         const a = toScreen(ev.from);
         const b = toScreen(ev.impact);
         const color = ev.side === 'BLUEFOR' ? '#9fd8ff' : '#ffb0a0';
-        if (ev.missileId !== null && ev.impactAt !== null) {
+        // A missile in flight (once arrived, its impact is drawn elsewhere), or a main gun's round.
+        if (ev.impactAt !== null && (ev.missileId !== null || now < ev.impactAt)) {
           const flight = Math.max(0.05, ev.impactAt - ev.atSeconds);
           const f = (now - ev.atSeconds) / flight;
           if (f <= 1) {
@@ -717,7 +722,8 @@ export function createCombatMapEditor(
           }
           continue;
         }
-        const age = now - e.seconds;
+        // Fading from when it landed (a main gun's round flies first).
+        const age = now - (ev.impactAt ?? e.seconds);
         if (age > HEAVY_SECONDS) continue;
         ctx.globalAlpha = 1 - age / HEAVY_SECONDS;
         ctx.strokeStyle = color;

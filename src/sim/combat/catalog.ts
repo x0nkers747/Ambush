@@ -131,6 +131,7 @@ const M829A1 = ammo({
   lethality: 0.9,
   nonPenetratingDamage: 0.2,
   vsInfantry: null,
+  velocityMps: 1575,
 });
 
 const M830 = ammo({
@@ -142,6 +143,7 @@ const M830 = ammo({
   lethality: 0.7,
   nonPenetratingDamage: 0.35,
   vsInfantry: blast(0.9, 8, 0.5, 20, 0.6),
+  velocityMps: 1140,
 });
 
 const BM42 = ammo({
@@ -157,6 +159,7 @@ const BM42 = ammo({
   lethality: 0.88,
   nonPenetratingDamage: 0.2,
   vsInfantry: null,
+  velocityMps: 1700,
 });
 
 const OF26 = ammo({
@@ -168,6 +171,7 @@ const OF26 = ammo({
   lethality: 0.5,
   nonPenetratingDamage: 0.4,
   vsInfantry: blast(0.95, 10, 0.5, 25, 0.7),
+  velocityMps: 850,
 });
 
 const UBR6 = ammo({

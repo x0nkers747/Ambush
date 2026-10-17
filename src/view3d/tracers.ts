@@ -34,12 +34,14 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 // event), so the After-Action Review shows the same tracers at the same
 // moments, seeking or not.
 //
-// A rocket or a missile is drawn as a main gun's round is (its head four
-// times the size), but flies at its own speed in the battle's time: a
-// missile from launch until it arrives (`impactAt`: its range over its
-// flight speed, 170–208 m/s), a rocket at `ROCKET_SPEED_MPS`. At 1× it is
-// seen as fast as it is; faster, it keeps up with the battle, landing as its
-// hit does. Every one is drawn, whatever the speed (there are few).
+// A main gun's round, a rocket and a missile (their heads four times the
+// size) fly at their own speed in the battle's time, as the simulation has
+// them: a main gun's round and a missile from firing until they arrive
+// (`impactAt`: the range over the round's velocity, 850–1,700 m/s, or the
+// missile's flight speed, 170–208 m/s), a rocket at `ROCKET_SPEED_MPS`. At 1×
+// each is seen as long as it flies; faster, it keeps up with the battle,
+// landing as its hit does. Every one is drawn, whatever the speed (there are
+// few).
 //
 // Red for BLUEFOR, green for OPFOR (as US and
 // Warsaw Pact tracer ammunition). Each streak is a glowing bar at least a
@@ -66,8 +68,9 @@ const GUIDED_WINDOW_S = 30;
 export const ROCKET_SPEED_MPS = 260;
 
 /**
- * How long a rocket or missile flies (battle s): a missile until it arrives
- * (`impactAt`), a rocket `lengthM` at `ROCKET_SPEED_MPS`.
+ * How long a main gun's round, rocket or missile flies (battle s): until it
+ * arrives (`impactAt`: a round's or a missile's), or a rocket `lengthM` at
+ * `ROCKET_SPEED_MPS`.
  */
 export function guidedFlightSeconds(
   atSeconds: number,
@@ -103,6 +106,14 @@ export function tracerShown(
 ): boolean {
   if (timeScale <= 1) return true;
   return scatter(`${shooterId}:${slot}`, tick, 0, 9) < 1 / timeScale;
+}
+
+/**
+ * Whether a shot of a weapon of `kind` flies in the battle's time: a rocket,
+ * a missile, or a round the battle flies (`impactAt`: a main gun's).
+ */
+export function inBattleTime(kind: string, impactAt: number | null): boolean {
+  return kind === 'atgm' || kind === 'atRocket' || (kind === 'cannon' && impactAt !== null);
 }
 
 /** Whether a weapon of `kind` fires tracers drawn here. */
@@ -303,8 +314,8 @@ export function createTracerLayer(
         if (since > WINDOW_S && seconds - e.atSeconds > GUIDED_WINDOW_S) break;
         if (e.type === 'heavyShot') {
           const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
-          if (kind === 'atgm' || kind === 'atRocket') {
-            // A rocket or missile: a main gun's round, at its own speed in the battle's time.
+          if (inBattleTime(kind, e.impactAt)) {
+            // A main gun's round, a rocket or a missile: at its own speed in the battle's time.
             const length = Math.hypot(
               e.impact.x - e.from.x,
               e.impact.y - e.from.y,
