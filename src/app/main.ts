@@ -241,9 +241,12 @@ async function main(root: HTMLElement): Promise<void> {
     dialogs: browserDialogs(windowToast()),
     terrain: terrainSources,
     // A scenario loaded opens at Setup, whatever stage it was saved at.
-    open: (battlefieldId, _stage, notice) =>
-      showBattle(battlefieldId, 'scenario', null, selection, notice),
+    // A scenario loaded opens at Setup; the demo, at Planning.
+    open: (battlefieldId, stage, notice) =>
+      showBattle(battlefieldId, openingDemo ? stage : 'scenario', null, selection, notice),
   });
+  /** Loading the demo now (it opens at Planning). */
+  let openingDemo = false;
   /** The terrain-selection page while it is shown (a scenario loaded from it replaces it). */
   let selection: BattlefieldSelection | null = null;
 
@@ -282,6 +285,17 @@ async function main(root: HTMLElement): Promise<void> {
     await scenarios.importDocument(doc, decision);
   };
 
+  /** The demo scenario (Quantico, squads and vehicles), straight into Planning. */
+  const loadDemo = async () => {
+    const { default: text } = await import('./scenarios/demo-quantico.ambush.json?raw');
+    openingDemo = true;
+    try {
+      await scenarios.loadDemo(text);
+    } finally {
+      openingDemo = false;
+    }
+  };
+
   /**
    * The battlefield last loaded for the preview or left on its battle page,
    * with its battle scenario. Opening it again reuses it, so the preview's
@@ -307,6 +321,9 @@ async function main(root: HTMLElement): Promise<void> {
         },
         import: () => {
           void importScenario();
+        },
+        demo: () => {
+          void loadDemo();
         },
       },
       loadPreview: async (id) => {

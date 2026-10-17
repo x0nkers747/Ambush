@@ -55,7 +55,12 @@ export interface SelectionOptions {
   /** A map handed back by battlefield `id`'s workspace: the preview keeps showing it. */
   readonly adopt?: { readonly id: string; readonly map: TacticalMap; readonly data: PreviewData };
   /** Saved scenarios (docs/scenarios.md): the library, and importing a file. */
-  readonly scenarios: { readonly load: () => void; readonly import: () => void };
+  readonly scenarios: {
+    readonly load: () => void;
+    readonly import: () => void;
+    /** The demo scenario, straight into Planning. */
+    readonly demo: () => void;
+  };
   /**
    * Reset: deletes every saved battlefield (their working scenarios and
    * prepared terrain) and stores the bundled ones again as they come; the
@@ -243,6 +248,9 @@ export function startBattlefieldSelection(
         <div class="bf-row">
           <button class="scn-load-btn grow" data-ui="scn-load" title="Open a saved scenario on its battlefield">Load scenario…</button>
           <button data-ui="scn-import" title="Load a scenario file (.ambush.json)">Import JSON…</button>
+        </div>
+        <div class="bf-row scn-demo-row">
+          <button class="grow" data-ui="scn-demo" title="Open the Quantico combined-arms demo (squads and vehicles), straight into Planning">Load demo</button>
         </div>
         <p class="hint">A saved scenario opens on its own battlefield, generated again if it is not saved here.</p>
       </section>
@@ -740,6 +748,9 @@ export function startBattlefieldSelection(
   });
   ui('scn-import').addEventListener('click', () => {
     o.scenarios.import();
+  });
+  ui('scn-demo').addEventListener('click', () => {
+    o.scenarios.demo();
   });
 
   // Reset: two clicks, as a bin (the first arms it); then every saved battlefield

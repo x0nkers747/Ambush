@@ -102,6 +102,11 @@ export interface ScenarioManager {
   read(text: string): Promise<ScenarioDocument | null>;
   /** Imports a scenario read from a file into the library and loads it. */
   importDocument(doc: ScenarioDocument, decision?: LeaveDecision): Promise<boolean>;
+  /**
+   * Loads a demo scenario (its file's text) at Planning, as it comes: not
+   * put in the library (saving it asks for a name, so the demo stays as it is).
+   */
+  loadDemo(text: string, decision?: LeaveDecision): Promise<boolean>;
 }
 
 const NO_DECISION: LeaveDecision = { discard: null, decided: null };
@@ -449,6 +454,11 @@ export function createScenarioManager(o: ScenarioManagerOptions): ScenarioManage
     },
     importDocument(doc, decision = NO_DECISION) {
       return loadDocument(doc, false, decision);
+    },
+    async loadDemo(text, decision = NO_DECISION) {
+      const doc = await this.read(text);
+      if (!doc) return false;
+      return loadDocument({ ...doc, stage: 'bluefor' }, true, decision);
     },
   };
 }

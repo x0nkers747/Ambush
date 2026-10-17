@@ -1,0 +1,1122 @@
+{
+  "schema": "ambush.saved-scenario",
+  "schemaVersion": 1,
+  "id": "c0mb1ned-arms-quantico-0001",
+  "name": "Quantico Combined Arms",
+  "createdAt": "2026-10-17T02:50:22.702Z",
+  "modifiedAt": "2026-10-17T02:50:22.702Z",
+  "application": {
+    "name": "Ambush!",
+    "scenarioSchemaVersion": 2,
+    "importerVersion": "1.10.0"
+  },
+  "stage": "bluefor",
+  "terrain": {
+    "battlefieldId": "8933a3690d8a6178",
+    "name": "Quantico, Prince William County, Virginia",
+    "request": {
+      "centre": {
+        "lat": 38.5218802,
+        "lon": -77.29110230000003
+      },
+      "widthM": 5000,
+      "heightM": 5000,
+      "cellSizeM": 10,
+      "name": "Quantico, Prince William County, Virginia"
+    },
+    "crs": {
+      "epsg": 32618,
+      "zone": 18,
+      "hemisphere": "N"
+    },
+    "geographicBounds": [
+      {
+        "south": 38.49880261082068,
+        "west": -77.32048300728127,
+        "north": 38.54494889398693,
+        "east": -77.26174265828388
+      }
+    ],
+    "terrainModel": "dem-clean-v1+field-v7",
+    "generation": {
+      "importerVersion": "1.10.0",
+      "createdAt": "2026-10-14T14:22:36.584Z",
+      "buildingSource": "overture",
+      "overtureRelease": "2026-09-23.1",
+      "treeCover": "canopy",
+      "osmAvailable": true,
+      "osmTimestamp": "2026-10-14T14:20:48Z",
+      "elevation": {
+        "provider": "aws-terrain-tiles-terrarium",
+        "zoom": 15,
+        "finestResolutionM": 3
+      }
+    }
+  },
+  "scenario": {
+    "schema": "ambush.scenario",
+    "schemaVersion": 2,
+    "id": "8933a3690d8a6178/battle",
+    "battlefieldId": "8933a3690d8a6178",
+    "name": "Quantico Combined Arms",
+    "terrainModel": "dem-clean-v1+field-v7",
+    "seed": 1977,
+    "squads": [
+      {
+        "id": "O1",
+        "name": "Hill 62 \u00b7 1st MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": -830,
+          "north": 1520
+        },
+        "facingDeg": 135,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -830,
+              "north": 1520
+            },
+            "sector": {
+              "facingDeg": 150,
+              "arcDeg": 160
+            },
+            "preparedMinutes": 15
+          }
+        ],
+        "antiTank": "rockets"
+      },
+      {
+        "id": "B1",
+        "name": "1st Plt \u00b7 1st Sqd (support by fire)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "position": {
+          "east": -300,
+          "north": 1000
+        },
+        "facingDeg": 315,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -510,
+              "north": 1300
+            }
+          },
+          {
+            "kind": "move",
+            "destination": {
+              "east": -700,
+              "north": 1390
+            }
+          },
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -700,
+              "north": 1390
+            },
+            "actionsOn": "hold",
+            "sector": {
+              "facingDeg": 317,
+              "arcDeg": 90
+            }
+          }
+        ],
+        "antiTank": "rocketsAndMissile"
+      },
+      {
+        "id": "B2",
+        "name": "1st Plt \u00b7 2nd Sqd (assault, SE)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.wedge",
+        "position": {
+          "east": -350,
+          "north": 950
+        },
+        "facingDeg": 315,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -700,
+              "north": 1300
+            }
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -830,
+              "north": 1520
+            }
+          }
+        ]
+      },
+      {
+        "id": "B3",
+        "name": "1st Plt \u00b7 3rd Sqd (assault, SW)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.wedge",
+        "position": {
+          "east": -700,
+          "north": 1000
+        },
+        "facingDeg": 330,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -1000,
+              "north": 1330
+            }
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -830,
+              "north": 1520
+            }
+          }
+        ]
+      },
+      {
+        "id": "B4",
+        "name": "1st Plt \u00b7 Reserve Sqd",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -200,
+          "north": 850
+        },
+        "facingDeg": 315,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -650,
+              "north": 1250
+            }
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -830,
+              "north": 1520
+            }
+          }
+        ]
+      },
+      {
+        "id": "O4",
+        "name": "North Road Ambush \u00b7 Assault Element",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": -1240,
+          "north": 965
+        },
+        "facingDeg": 180,
+        "plan": [
+          {
+            "kind": "ambush",
+            "destination": {
+              "east": -1240,
+              "north": 965
+            },
+            "killZone": {
+              "centre": {
+                "east": -1231,
+                "north": 876
+              },
+              "widthM": 240,
+              "depthM": 60,
+              "facingDeg": 174
+            }
+          }
+        ],
+        "antiTank": "rocketsAndMissile"
+      },
+      {
+        "id": "O5",
+        "name": "North Road Ambush \u00b7 Support Element",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": -1040,
+          "north": 885
+        },
+        "facingDeg": 260,
+        "plan": [
+          {
+            "kind": "ambush",
+            "destination": {
+              "east": -1040,
+              "north": 885
+            },
+            "killZone": {
+              "centre": {
+                "east": -1170,
+                "north": 860
+              },
+              "widthM": 60,
+              "depthM": 200,
+              "facingDeg": 259
+            }
+          }
+        ],
+        "antiTank": "rocketsAndMissile"
+      },
+      {
+        "id": "O6",
+        "name": "North Road Ambush \u00b7 Security",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": -1300,
+          "north": 1060
+        },
+        "facingDeg": 0,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -1300,
+              "north": 1060
+            },
+            "sector": {
+              "facingDeg": 0,
+              "arcDeg": 180
+            },
+            "preparedMinutes": 10
+          }
+        ]
+      },
+      {
+        "id": "B5",
+        "name": "Patrol \u00b7 Dismounted Sqd",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -2050,
+          "north": 1110
+        },
+        "facingDeg": 95,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -1000,
+              "north": 840
+            },
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "O7",
+        "name": "South Road \u00b7 1st MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1700,
+          "north": -1220
+        },
+        "facingDeg": 60,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -860,
+              "north": -520
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -470,
+              "north": -170
+            }
+          }
+        ]
+      },
+      {
+        "id": "O8",
+        "name": "South Road \u00b7 2nd MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1560,
+          "north": -1080
+        },
+        "facingDeg": 60,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -800,
+              "north": -430
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -380,
+              "north": -240
+            }
+          }
+        ]
+      },
+      {
+        "id": "O9",
+        "name": "South Road \u00b7 3rd MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1450,
+          "north": -1030
+        },
+        "facingDeg": 60,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -758,
+              "north": -382
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -560,
+              "north": -80
+            }
+          }
+        ]
+      },
+      {
+        "id": "O2",
+        "name": "South Road \u00b7 4th MR Squad (2nd wave)",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1340,
+          "north": -950
+        },
+        "facingDeg": 45,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -900,
+              "north": -470
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -440,
+              "north": -320
+            }
+          }
+        ]
+      },
+      {
+        "id": "O3",
+        "name": "South Road \u00b7 5th MR Squad (2nd wave)",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1250,
+          "north": -880
+        },
+        "facingDeg": 45,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -840,
+              "north": -400
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -500,
+              "north": -60
+            }
+          }
+        ]
+      },
+      {
+        "id": "O12",
+        "name": "South Road \u00b7 6th MR Squad (2nd wave)",
+        "side": "OPFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.column",
+        "position": {
+          "east": -1150,
+          "north": -790
+        },
+        "facingDeg": 45,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -780,
+              "north": -340
+            },
+            "followRoads": true
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -369,
+              "north": -118
+            }
+          }
+        ]
+      },
+      {
+        "id": "B6",
+        "name": "2nd Plt \u00b7 1st Sqd (SW edge)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "position": {
+          "east": -480,
+          "north": -150
+        },
+        "facingDeg": 225,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -480,
+              "north": -150
+            },
+            "sector": {
+              "facingDeg": 225,
+              "arcDeg": 120
+            },
+            "preparedMinutes": 20
+          }
+        ],
+        "antiTank": "rocketsAndMissile"
+      },
+      {
+        "id": "B7",
+        "name": "2nd Plt \u00b7 2nd Sqd (SW edge)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "position": {
+          "east": -440,
+          "north": -320
+        },
+        "facingDeg": 225,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -440,
+              "north": -320
+            },
+            "sector": {
+              "facingDeg": 225,
+              "arcDeg": 120
+            },
+            "preparedMinutes": 20
+          }
+        ],
+        "antiTank": "rocketsAndMissile"
+      },
+      {
+        "id": "B8",
+        "name": "2nd Plt \u00b7 3rd Sqd (SW edge)",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "position": {
+          "east": -560,
+          "north": -60
+        },
+        "facingDeg": 225,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -560,
+              "north": -60
+            },
+            "sector": {
+              "facingDeg": 225,
+              "arcDeg": 120
+            },
+            "preparedMinutes": 20
+          }
+        ],
+        "antiTank": "rockets"
+      },
+      {
+        "id": "O10",
+        "name": "Town \u00b7 1st MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": 146,
+          "north": -148
+        },
+        "facingDeg": 270,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": 146,
+              "north": -148
+            },
+            "sector": {
+              "facingDeg": 270,
+              "arcDeg": 140
+            },
+            "preparedMinutes": 15
+          }
+        ],
+        "antiTank": "rockets"
+      },
+      {
+        "id": "O11",
+        "name": "Town \u00b7 2nd MR Squad",
+        "side": "OPFOR",
+        "organization": "squad",
+        "position": {
+          "east": 200,
+          "north": 0
+        },
+        "facingDeg": 270,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": 200,
+              "north": 0
+            },
+            "sector": {
+              "facingDeg": 280,
+              "arcDeg": 140
+            },
+            "preparedMinutes": 15
+          }
+        ],
+        "antiTank": "rockets"
+      },
+      {
+        "id": "B9",
+        "name": "3rd Plt \u00b7 1st Sqd",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.wedge",
+        "position": {
+          "east": -250,
+          "north": 250
+        },
+        "facingDeg": 120,
+        "plan": [
+          {
+            "kind": "attack",
+            "destination": {
+              "east": 150,
+              "north": -50
+            }
+          }
+        ]
+      },
+      {
+        "id": "B10",
+        "name": "3rd Plt \u00b7 2nd Sqd",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.wedge",
+        "position": {
+          "east": -200,
+          "north": 150
+        },
+        "facingDeg": 120,
+        "plan": [
+          {
+            "kind": "attack",
+            "destination": {
+              "east": 146,
+              "north": -148
+            }
+          }
+        ]
+      },
+      {
+        "id": "B11",
+        "name": "3rd Plt \u00b7 3rd Sqd",
+        "side": "BLUEFOR",
+        "organization": "squad",
+        "formation": "usmc.squad.wedge",
+        "position": {
+          "east": -300,
+          "north": 180
+        },
+        "facingDeg": 120,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -99,
+              "north": 11
+            }
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": 100,
+              "north": -330
+            }
+          }
+        ]
+      },
+      {
+        "id": "B12",
+        "name": "Scouts \u00b7 Team 1 (Hill 60)",
+        "side": "BLUEFOR",
+        "organization": "fireTeam",
+        "position": {
+          "east": -1700,
+          "north": 400
+        },
+        "facingDeg": 180,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -1700,
+              "north": 400
+            },
+            "sector": {
+              "facingDeg": 200,
+              "arcDeg": 180
+            },
+            "preparedMinutes": 10
+          }
+        ]
+      },
+      {
+        "id": "B13",
+        "name": "Scouts \u00b7 Team 2 (road watch)",
+        "side": "BLUEFOR",
+        "organization": "fireTeam",
+        "position": {
+          "east": -1500,
+          "north": 760
+        },
+        "facingDeg": 0,
+        "plan": [
+          {
+            "kind": "defend",
+            "destination": {
+              "east": -1500,
+              "north": 760
+            },
+            "sector": {
+              "facingDeg": 20,
+              "arcDeg": 180
+            },
+            "preparedMinutes": 10
+          }
+        ]
+      },
+      {
+        "id": "O13",
+        "name": "Recon Patrol 1",
+        "side": "OPFOR",
+        "organization": "element3",
+        "position": {
+          "east": -2300,
+          "north": 200
+        },
+        "facingDeg": 60,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -1880,
+              "north": 260
+            }
+          },
+          {
+            "kind": "attack",
+            "destination": {
+              "east": -1700,
+              "north": 400
+            }
+          }
+        ]
+      },
+      {
+        "id": "O14",
+        "name": "Recon Patrol 2",
+        "side": "OPFOR",
+        "organization": "element3",
+        "position": {
+          "east": -2200,
+          "north": -500
+        },
+        "facingDeg": 80,
+        "plan": [
+          {
+            "kind": "move",
+            "destination": {
+              "east": -1300,
+              "north": -300
+            }
+          },
+          {
+            "kind": "move",
+            "destination": {
+              "east": -900,
+              "north": -200
+            }
+          }
+        ]
+      }
+    ],
+    "vehicles": [
+      {
+        "id": "V1",
+        "name": "Hill 62 \u00b7 BMP-2",
+        "side": "OPFOR",
+        "kind": "bmp2",
+        "position": {
+          "east": -880,
+          "north": 1590
+        },
+        "facingDeg": 135,
+        "route": []
+      },
+      {
+        "id": "V2",
+        "name": "Hill 62 \u00b7 Abrams 1 (with the assault)",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -300,
+          "north": 820
+        },
+        "facingDeg": 315,
+        "route": [
+          {
+            "east": -460,
+            "north": 1230
+          },
+          {
+            "east": -680,
+            "north": 1330
+          },
+          {
+            "east": -770,
+            "north": 1440
+          }
+        ]
+      },
+      {
+        "id": "V3",
+        "name": "Hill 62 \u00b7 Abrams 2 (with the assault)",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -240,
+          "north": 800
+        },
+        "facingDeg": 315,
+        "route": [
+          {
+            "east": -400,
+            "north": 1260
+          },
+          {
+            "east": -620,
+            "north": 1380
+          },
+          {
+            "east": -720,
+            "north": 1490
+          }
+        ]
+      },
+      {
+        "id": "V4",
+        "name": "North Road \u00b7 T-72 (block)",
+        "side": "OPFOR",
+        "kind": "t72b",
+        "position": {
+          "east": -960,
+          "north": 860
+        },
+        "facingDeg": 265,
+        "route": []
+      },
+      {
+        "id": "V5",
+        "name": "Patrol \u00b7 Abrams (lead)",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -2130,
+          "north": 1068
+        },
+        "facingDeg": 95,
+        "route": [
+          {
+            "east": -470,
+            "north": 572,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V6",
+        "name": "Patrol \u00b7 M113 1",
+        "side": "BLUEFOR",
+        "kind": "m113",
+        "position": {
+          "east": -2200,
+          "north": 1060
+        },
+        "facingDeg": 95,
+        "route": [
+          {
+            "east": -497,
+            "north": 584,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V7",
+        "name": "Patrol \u00b7 M113 2",
+        "side": "BLUEFOR",
+        "kind": "m113",
+        "position": {
+          "east": -2270,
+          "north": 1056
+        },
+        "facingDeg": 95,
+        "route": [
+          {
+            "east": -525,
+            "north": 596,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V8",
+        "name": "Patrol \u00b7 M113 3",
+        "side": "BLUEFOR",
+        "kind": "m113",
+        "position": {
+          "east": -2340,
+          "north": 1057
+        },
+        "facingDeg": 95,
+        "route": [
+          {
+            "east": -552,
+            "north": 609,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V9",
+        "name": "South Road \u00b7 T-72 1",
+        "side": "OPFOR",
+        "kind": "t72b",
+        "position": {
+          "east": -1990,
+          "north": -1163
+        },
+        "facingDeg": 75,
+        "route": [
+          {
+            "east": -760,
+            "north": -400,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V10",
+        "name": "South Road \u00b7 T-72 2",
+        "side": "OPFOR",
+        "kind": "t72b",
+        "position": {
+          "east": -2060,
+          "north": -1155
+        },
+        "facingDeg": 75,
+        "route": [
+          {
+            "east": -700,
+            "north": -330,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V11",
+        "name": "South Road \u00b7 BMP-2 1",
+        "side": "OPFOR",
+        "kind": "bmp2",
+        "position": {
+          "east": -2130,
+          "north": -1128
+        },
+        "facingDeg": 75,
+        "route": [
+          {
+            "east": -640,
+            "north": -290,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V12",
+        "name": "South Road \u00b7 BMP-2 2",
+        "side": "OPFOR",
+        "kind": "bmp2",
+        "position": {
+          "east": -2200,
+          "north": -1103
+        },
+        "facingDeg": 75,
+        "route": [
+          {
+            "east": -600,
+            "north": -240,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V13",
+        "name": "South Road \u00b7 BMP-2 3",
+        "side": "OPFOR",
+        "kind": "bmp2",
+        "position": {
+          "east": -2280,
+          "north": -1086
+        },
+        "facingDeg": 75,
+        "route": [
+          {
+            "east": -820,
+            "north": -470,
+            "followRoads": true
+          }
+        ]
+      },
+      {
+        "id": "V14",
+        "name": "SW Edge \u00b7 Abrams 1",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -420,
+          "north": -120
+        },
+        "facingDeg": 225,
+        "route": []
+      },
+      {
+        "id": "V15",
+        "name": "SW Edge \u00b7 Abrams 2",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -450,
+          "north": -40
+        },
+        "facingDeg": 225,
+        "route": []
+      },
+      {
+        "id": "V16",
+        "name": "SW Edge \u00b7 M113",
+        "side": "BLUEFOR",
+        "kind": "m113",
+        "position": {
+          "east": -300,
+          "north": -60
+        },
+        "facingDeg": 225,
+        "route": []
+      },
+      {
+        "id": "V17",
+        "name": "Town \u00b7 BMP-2",
+        "side": "OPFOR",
+        "kind": "bmp2",
+        "position": {
+          "east": 180,
+          "north": -250
+        },
+        "facingDeg": 270,
+        "route": []
+      },
+      {
+        "id": "V19",
+        "name": "Town \u00b7 Abrams",
+        "side": "BLUEFOR",
+        "kind": "m1a1",
+        "position": {
+          "east": -330,
+          "north": 330
+        },
+        "facingDeg": 120,
+        "route": [
+          {
+            "east": -150,
+            "north": 170
+          }
+        ]
+      },
+      {
+        "id": "V18",
+        "name": "Town \u00b7 M113",
+        "side": "BLUEFOR",
+        "kind": "m113",
+        "position": {
+          "east": -280,
+          "north": 300
+        },
+        "facingDeg": 120,
+        "route": [
+          {
+            "east": -120,
+            "north": 120
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import demoText from './demo-quantico.ambush.json?raw';
 import { createMemoryStore, DEFAULT_SERVICES, ServiceError, type BattlefieldStore } from '#acquire';
 import {
   battleScenarioId,
@@ -456,6 +457,21 @@ describe('importing', () => {
     expect(w.opened).toEqual([{ battlefieldId: fieldB.id, stage: 'bluefor', notice: null }]);
     const loaded = await working(w, fieldB);
     expect(loaded && m.status(fieldB.id, loaded)).toEqual({ savedName: 'Imported', dirty: false });
+  });
+
+  it('the demo: loaded at Planning whatever its stage, and not added to the library', async () => {
+    const w = await world();
+    const m = managerOf(w, scripted());
+    expect(await m.loadDemo(await fileOf(fieldB, 'Demo', 'scenario'))).toBe(true);
+    expect((await w.library.list()).entries).toEqual([]);
+    expect(w.opened).toEqual([{ battlefieldId: fieldB.id, stage: 'bluefor', notice: null }]);
+  });
+
+  it('the bundled demo file reads: squads and vehicles on Quantico', () => {
+    const doc = parseScenarioDocument(demoText, { now: () => new Date(0), newId: () => 'x' });
+    expect(doc.terrain.name).toMatch(/Quantico/);
+    expect(doc.scenario.squads.length).toBeGreaterThan(0);
+    expect(doc.scenario.vehicles?.length ?? 0).toBeGreaterThan(0);
   });
 
   it('an invalid file: refused with the reason, nothing changed', async () => {
