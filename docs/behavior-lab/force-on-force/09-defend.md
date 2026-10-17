@@ -92,8 +92,11 @@ the squad's dig-in (`FofForce.earthworks`). The 3D view draws it on the ground
 | 100%   | A stretch of trench about 3 m long, a parapet in front and a lower parados behind | Standing in it, sunk 1.15 m: head and shoulders show |
 
 **Hard ground.** Nothing can be dug on the carriageway of a paved or major road
-(or a paved path), on mapped paved ground (a car park, a square), or inside a
-building (`hardGround`, decided where each soldier lies). A soldier there builds
+(or a paved path), on mapped paved ground (a car park, a square), inside a
+building, or wherever the ground is drawn paved: a town's pavements,
+forecourts, yards and patios (the terrain field's paved flag, docs/adr/0048,
+read from the same field the 3D view draws; `hardGround`, decided where each
+soldier lies). A soldier there builds
 a wall of sandbags in front of him instead, with the same protection as his
 squad's dig-in. Dirt tracks, unpaved roads and trails can be dug.
 

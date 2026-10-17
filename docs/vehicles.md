@@ -126,8 +126,25 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
 
 ## 4. Limits
 
-- **No passengers.** No crew or infantry mount or dismount. It blocks nobody.
+- **No passengers.** No crew or infantry mount or dismount. It blocks no soldier (vehicles: Traffic, above).
   Its combat: combined-arms.md §16.
+- **Steering.** It steers for a point a little way along its route (its
+  speed × 0.7 s, 3–12 m ahead), not for the next turn itself: a road's jogs
+  through a junction are driven smoothly, and a turn just missed is passed
+  (it is passed once beyond it along the leg to it), not driven back to.
+  (Steering for each turn, a T-72 cut inside one 6 m from the last, missed
+  it, turned about and pivoted twice: ten seconds stopped in a junction.)
+- **Traffic.** A vehicle keeps a 25 m interval (rear to front) behind the
+  vehicle ahead in its lane that is moving or under orders, closing up to
+  it and then going at its speed; it waits behind one that has stopped on
+  its way (pivoting, firing). Two coming head on do not wait; two each with
+  the other ahead (crossing at a junction) let the lower id go first. One
+  stopped for good in its way (a wreck, one immobilized, one parked) it
+  drives round at 4 m/s, 2 m clear, on the side away from it, from the leg
+  of its route it is on: of a pass to either side, then wider (off the
+  road), the first clear of every stopped vehicle and of buildings and
+  water; with none, it stops short. One beyond its destination is not in
+  its way. (Without this a column bunched up, and drove through wrecks.)
 - **Routes.** The routes are soldiers' routes, widened by 3 m at each corner
   and checked clear for the hull's width (combined-arms.md §10), so a vehicle
   clears buildings but may brush small obstacles. A road's gentle bends (a

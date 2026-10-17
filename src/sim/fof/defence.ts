@@ -3,7 +3,9 @@ import type { FormationNode, FormationSpec, FormationSlot } from '../behavior/ty
 import { azimuthOf, type Vec2 } from '../geometry';
 import type { Soldier } from '../state';
 import { pointInPolygon } from '../polygon';
+import { groundField } from '../ground';
 import { roadNetwork, roadPointAt } from '../road-network';
+import { emptySample, type FieldSample, type TerrainField } from '../terrain-field';
 import { isOnTerrain, type TerrainDataset } from '../terrain';
 import { centreOf, enter, forceArea, issue, runningTask } from './force';
 import { activeOrder } from './orders';
@@ -220,7 +222,24 @@ export function hardGround(terrain: TerrainDataset, x: number, y: number): boole
   for (const area of landUse) {
     if (area.kind === 'paved' && pointInPolygon(p, area.boundary)) return true;
   }
-  return buildings.some((b) => pointInPolygon(p, b.footprint));
+  if (buildings.some((b) => pointInPolygon(p, b.footprint))) return true;
+  // Paved as the ground is drawn: towns' pavements, forecourts, yards and
+  // patios (the terrain field's paved flag, docs/adr/0048).
+  return pavedGround(terrain, x, y);
+}
+
+/** Each terrain's field, compiled once (about a quarter of a second for 5 km), to read paving from. */
+const fields = new WeakMap<TerrainDataset, { field: TerrainField; sample: FieldSample }>();
+
+/** Whether the ground at (x, y) is paved as the 3D view draws it (the field's paved flag). */
+function pavedGround(terrain: TerrainDataset, x: number, y: number): boolean {
+  let known = fields.get(terrain);
+  if (!known) {
+    known = { field: groundField(terrain), sample: emptySample() };
+    fields.set(terrain, known);
+  }
+  known.field.sample(x, y, known.sample);
+  return known.sample.paved === 1;
 }
 
 /**

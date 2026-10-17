@@ -155,6 +155,15 @@ export interface OrderVehicleCommand {
 const ARRIVED_M = 1.5;
 /** Passing a turn of its route within this (m), it steers for the next. */
 const TURN_REACHED_M = 2.5;
+/**
+ * It steers for a point this far along its route ahead of it (m): its speed
+ * (m/s) times `LOOK_AHEAD_S`, within these bounds. So the route's little
+ * jogs are driven through smoothly, and a turn just missed is not driven
+ * back to; slow, round a sharp corner, it follows the route closely.
+ */
+const LOOK_AHEAD_S = 0.7;
+const LOOK_AHEAD_MIN_M = 3;
+const LOOK_AHEAD_MAX_M = 12;
 /** A soldier's route turns close round a corner: a vehicle's is pushed this much further out (m). */
 const CORNER_OFFSET_M = 3;
 /**
@@ -263,11 +272,156 @@ export function updateVehicles(state: SimState, world: SimWorld, time: TickTime)
   const vehicles = state.vehicles;
   if (!vehicles) return;
   const catalog = catalogOf(world);
-  for (const v of vehicles) {
+  const types = vehicles.map((v) => typeOf(platformOf(catalog, v.kind)));
+  vehicles.forEach((v, i) => {
     const platform = platformOf(catalog, v.kind);
+    const type = types[i] ?? typeOf(platform);
     slewMounts(platform, v.combat, time.dtSeconds);
-    drive(v, world.terrain, typeOf(platform), time.dtSeconds, time.startSeconds);
+    drive(v, world.terrain, type, time.dtSeconds, time.startSeconds, {
+      speed: (wanted) => keepInterval(v, type, wanted, vehicles, types),
+      steer: (target, toEnd, leg) =>
+        bypass(v, type, world.terrain, target, toEnd, leg, vehicles, types),
+    });
+  });
+}
+
+/** Vehicles in column keep this gap (m, from one's rear to the next one's front) at least. */
+const INTERVAL_M = 25;
+/** Closing on the vehicle ahead, it may go this much faster than it per metre of gap beyond the interval (1/s). */
+const CLOSING_PER_M = 1 / 3;
+/** A vehicle is looked at as ahead within this far (m) of the front. */
+const LOOK_AHEAD_M = 80;
+/** It is in the way within this of the line ahead (m) beyond the two half-widths. */
+const LANE_MARGIN_M = 1.5;
+
+/** A vehicle stopped for good this far ahead (m, front to its rear) is driven round. */
+const BYPASS_AHEAD_M = 30;
+/** Passing one, it keeps this clear of it (m, beyond the two half-widths), at most this fast (m/s). */
+const BYPASS_CLEAR_M = 2;
+const BYPASS_SPEED = 4;
+/** It steers for a point beside it and this far beyond it (m, past the two half-lengths). */
+const BYPASS_BEYOND_M = 4;
+
+/**
+ * Where it steers (`target`) to drive round a vehicle stopped for good in
+ * its way (a wreck, one immobilized, one parked: those `keepInterval` does
+ * not wait for), and how fast it may pass; the target as it was, and no
+ * limit, when none is in its way. It passes the nearest beside it, away from
+ * it if it can: of a pass to either side, then wider ones (off the road), the first clear
+ * of every vehicle stopped there and of what cannot be crossed (buildings,
+ * water). With none clear, it stops.
+ */
+function bypass(
+  v: VehicleState,
+  type: VehicleType,
+  terrain: TerrainDataset,
+  target: Vec2,
+  /** How far it has yet to drive (m): one beyond that is not in its way. */
+  toEnd: number,
+  /** The leg of its route it is on. */
+  leg: { readonly from: Vec2; readonly to: Vec2 },
+  vehicles: readonly VehicleState[],
+  types: readonly VehicleType[],
+): { readonly target: Vec2; readonly speed: number } {
+  // The way on (the route's leg it is on, which does not turn as it does), and its right.
+  const wx = leg.to.x - leg.from.x;
+  const wy = leg.to.y - leg.from.y;
+  const wl = Math.hypot(wx, wy);
+  const fx = wl > 0.5 ? wx / wl : Math.sin(v.heading);
+  const fy = wl > 0.5 ? wy / wl : Math.cos(v.heading);
+  const rx = fy;
+  const ry = -fx;
+  const stopped: { readonly at: Vec2; readonly type: VehicleType }[] = [];
+  let nearest: { along: number; lateral: number; at: Vec2; clear: number; half: number } | null =
+    null;
+  vehicles.forEach((o, j) => {
+    if (o === v || (canDrive(o) && activeVehicleOrder(o))) return;
+    const other = types[j];
+    if (!other) return;
+    stopped.push({ at: o.position, type: other });
+    const dx = o.position.x - v.position.x;
+    const dy = o.position.y - v.position.y;
+    const along = dx * fx + dy * fy;
+    const half = (type.length + other.length) / 2;
+    // Ahead, or alongside until passed.
+    if (along < -half || along - half > Math.min(BYPASS_AHEAD_M, toEnd)) return;
+    const lateral = dx * rx + dy * ry;
+    // Which side of the leg it stands (a fixed line: the side passed does not change as it passes).
+    const side = (o.position.x - leg.from.x) * rx + (o.position.y - leg.from.y) * ry;
+    const clear = (type.width + other.width) / 2 + BYPASS_CLEAR_M;
+    // (Alongside, a little more: it does not turn back into it as it passes.)
+    if (Math.abs(lateral) >= clear + 0.5) return;
+    if (nearest && along >= nearest.along) return;
+    nearest = { along, lateral: side, at: o.position, clear, half };
+  });
+  const found = nearest as {
+    along: number;
+    lateral: number;
+    at: Vec2;
+    clear: number;
+    half: number;
+  } | null;
+  if (!found) return { target, speed: Infinity };
+  // Away from it first: to its left if it is to the right of the line ahead.
+  const away = found.lateral >= 0 ? -1 : 1;
+  for (const offset of [away, -away, 2 * away, -2 * away, 3 * away, -3 * away]) {
+    const aim = {
+      x: found.at.x + rx * offset * found.clear + fx * (found.half + BYPASS_BEYOND_M),
+      y: found.at.y + ry * offset * found.clear + fy * (found.half + BYPASS_BEYOND_M),
+    };
+    const blocked = stopped.some(
+      (o) =>
+        Math.hypot(o.at.x - aim.x, o.at.y - aim.y) <
+        (type.width + o.type.width) / 2 + BYPASS_CLEAR_M / 2,
+    );
+    if (!blocked && isSegmentWalkable(terrain, v.position, aim))
+      return { target: aim, speed: BYPASS_SPEED };
   }
+  // No way round: it stops short.
+  return { target, speed: 0 };
+}
+
+/**
+ * The speed `wanted` limited to keep its interval behind the vehicle ahead
+ * of it in its lane (docs/vehicles.md): a column closes up to `INTERVAL_M`,
+ * then goes at its leader's speed; one stopped (pivoting, waiting) holds it
+ * there. A vehicle that is stopped for good (a wreck, one immobilized, one
+ * that has arrived) does not: the follower drives on. Two coming head on
+ * do not wait for each other. Two that each have the other ahead (crossing
+ * at a junction): the lower id goes first.
+ */
+function keepInterval(
+  v: VehicleState,
+  type: VehicleType,
+  wanted: number,
+  vehicles: readonly VehicleState[],
+  types: readonly VehicleType[],
+): number {
+  const fx = Math.sin(v.heading);
+  const fy = Math.cos(v.heading);
+  let allowed = wanted;
+  vehicles.forEach((o, j) => {
+    if (o === v || !canDrive(o) || !activeVehicleOrder(o)) return;
+    const other = types[j];
+    if (!other) return;
+    const dx = o.position.x - v.position.x;
+    const dy = o.position.y - v.position.y;
+    const along = dx * fx + dy * fy;
+    const gap = along - (type.length + other.length) / 2;
+    if (along <= 0 || gap > LOOK_AHEAD_M) return;
+    if (Math.abs(dx * fy - dy * fx) > (type.width + other.width) / 2 + LANE_MARGIN_M) return;
+    const ox = Math.sin(o.heading);
+    const oy = Math.cos(o.heading);
+    // Head on: neither waits.
+    if (fx * ox + fy * oy < -0.5) return;
+    // Each ahead of the other (crossing): the lower id goes on.
+    const back = -dx * ox - dy * oy;
+    const mutual =
+      back > 0 && Math.abs(-dx * oy + dy * ox) <= (type.width + other.width) / 2 + LANE_MARGIN_M;
+    if (mutual && v.id < o.id) return;
+    allowed = Math.min(allowed, Math.max(0, o.speed + (gap - INTERVAL_M) * CLOSING_PER_M));
+  });
+  return allowed;
 }
 
 /** Whether a vehicle can drive: not destroyed or immobilized, its driver able. */
@@ -436,6 +590,43 @@ function smoothKinks(
   return out;
 }
 
+/** How far along the leg from `a` to `b` the point `p` is (0 at `a`, 1 at `b`, beyond: more). */
+function alongLeg(a: Vec2, b: Vec2, p: Vec2): number {
+  const lx = b.x - a.x;
+  const ly = b.y - a.y;
+  const l2 = lx * lx + ly * ly;
+  return l2 < 1e-9 ? 1 : ((p.x - a.x) * lx + (p.y - a.y) * ly) / l2;
+}
+
+/**
+ * The point `distance` metres along the route ahead of `here`: from where
+ * `here` is along the leg to turn `index` (the point of that leg nearest it),
+ * on through the later turns; the route's end at most.
+ */
+function lookAhead(route: readonly Vec2[], index: number, here: Vec2, distance: number): Vec2 {
+  const to = route[index];
+  if (!to) return here;
+  const from = route[index - 1];
+  let at: Vec2 = here;
+  if (from) {
+    const t = Math.min(1, Math.max(0, alongLeg(from, to, here)));
+    at = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  }
+  let left = distance;
+  for (let i = index; i < route.length; i += 1) {
+    const next = route[i];
+    if (!next) break;
+    const d = Math.hypot(next.x - at.x, next.y - at.y);
+    if (d >= left) {
+      const f = left / d;
+      return { x: at.x + (next.x - at.x) * f, y: at.y + (next.y - at.y) * f };
+    }
+    left -= d;
+    at = next;
+  }
+  return at;
+}
+
 /** The angle (rad, 0–π) the route bends by at its point `i`. */
 function bendAt(route: readonly Vec2[], i: number, from: Vec2): number {
   const a = route[i - 1] ?? from;
@@ -453,6 +644,15 @@ function drive(
   type: VehicleType,
   dt: number,
   now: number,
+  /** The traffic: the speed it may drive at (`keepInterval`), and its way round what is stopped in its way (`bypass`). */
+  traffic: {
+    readonly speed: (wanted: number) => number;
+    readonly steer: (
+      target: Vec2,
+      toEnd: number,
+      leg: { readonly from: Vec2; readonly to: Vec2 },
+    ) => { readonly target: Vec2; readonly speed: number };
+  } = { speed: (wanted) => wanted, steer: (target) => ({ target, speed: Infinity }) },
 ): void {
   if (!canDrive(v)) {
     // Immobilized, destroyed or without its driver: it stops where it is.
@@ -471,11 +671,17 @@ function drive(
   const here = { x: v.position.x, y: v.position.y };
   let wanted = 0;
   let turn = 0;
+  /** At most this fast, passing a vehicle stopped in its way. */
+  let passingSpeed = Infinity;
   if (order) {
-    // Passing a turn of the route, it steers for the next.
+    // Passing a turn of the route (near it, or beyond it along the leg to
+    // it), it steers for the next.
     while (v.routeIndex < v.route.length - 1) {
       const p = v.route[v.routeIndex];
-      if (!p || Math.hypot(p.x - here.x, p.y - here.y) > TURN_REACHED_M) break;
+      if (!p) break;
+      const from = v.route[v.routeIndex - 1];
+      const near = Math.hypot(p.x - here.x, p.y - here.y) <= TURN_REACHED_M;
+      if (!near && !(from && alongLeg(from, p, here) >= 1)) break;
       v.routeIndex += 1;
     }
     // Passing its destination with another order to follow, it drives on to that one.
@@ -500,18 +706,35 @@ function drive(
       ...v.route,
       ...v.orders.filter((o) => o.status === 'pending').map((o) => o.destination),
     ];
-    const target = v.route[v.routeIndex] ?? current.destination;
+    const turnAt = v.route[v.routeIndex] ?? current.destination;
     const last = v.routeIndex >= ahead.length - 1;
-    const dx = target.x - here.x;
-    const dy = target.y - here.y;
-    const toTarget = Math.hypot(dx, dy);
-    let toEnd = toTarget;
+    // Steering for a point a little way along the route (on the last leg, its end).
+    const along = last
+      ? turnAt
+      : lookAhead(
+          v.route,
+          v.routeIndex,
+          here,
+          Math.min(LOOK_AHEAD_MAX_M, Math.max(LOOK_AHEAD_MIN_M, v.speed * LOOK_AHEAD_S)),
+        );
+    // How far to the next turn, and to the end.
+    const toTurn = Math.hypot(turnAt.x - here.x, turnAt.y - here.y);
+    let toEnd = toTurn;
     for (let i = v.routeIndex; i < ahead.length - 1; i += 1) {
       const a = ahead[i];
       const b = ahead[i + 1];
       if (a && b) toEnd += Math.hypot(b.x - a.x, b.y - a.y);
     }
-    if (last && toTarget < ARRIVED_M && v.speed < 0.6) {
+    // Round a vehicle stopped in its way.
+    const { target, speed: passing } = traffic.steer(along, toEnd, {
+      from: v.route[v.routeIndex - 1] ?? here,
+      to: turnAt,
+    });
+    passingSpeed = passing;
+    const dx = target.x - here.x;
+    const dy = target.y - here.y;
+    const toTarget = Math.hypot(dx, dy);
+    if (last && toTurn < ARRIVED_M && v.speed < 0.6) {
       current.status = 'completed';
       current.reason = 'arrived';
       v.route = [];
@@ -556,7 +779,7 @@ function drive(
         if (bend > 0.2) {
           const share = Math.min(1, bend / SHARP_BEND_RAD);
           const at = Math.max(BEND_SPEED, wanted * (1 - share) + BEND_SPEED * share);
-          wanted = Math.min(wanted, Math.sqrt(at * at + 2 * type.decel * 0.8 * toTarget));
+          wanted = Math.min(wanted, Math.sqrt(at * at + 2 * type.decel * 0.8 * toTurn));
         }
         wanted = Math.min(wanted, Math.sqrt(2 * type.decel * 0.8 * Math.max(0, toEnd - 0.5)));
       }
@@ -572,6 +795,8 @@ function drive(
     }
   }
   wanted *= driverFactor;
+  // Its interval behind the vehicle ahead (not while pivoting on the spot); slowly round one stopped.
+  if (wanted > 0) wanted = Math.min(traffic.speed(wanted), passingSpeed);
   if (halted) {
     wanted = 0;
     turn = 0;

@@ -256,6 +256,42 @@ describe('hard ground', () => {
     // The protection is the same: it is fully dug in.
     expect(battle.sim.state.fof?.forces[0]?.dugIn).toBe(1);
   });
+
+  it('in a town, the ground is hard where it is drawn paved: its pavements and forecourts, not its gardens', () => {
+    const ground = labTerrain({
+      ...NO_FEATURES,
+      roads: [
+        {
+          id: 'street',
+          roadClass: 'paved',
+          widthMeters: 8,
+          centerline: [
+            { x: 0, y: -500 },
+            { x: 0, y: 500 },
+          ],
+        },
+      ],
+      landUse: [
+        {
+          id: 'town',
+          kind: 'residential',
+          boundary: [
+            { x: -300, y: -300 },
+            { x: 300, y: -300 },
+            { x: 300, y: 300 },
+            { x: -300, y: 300 },
+          ],
+        },
+      ],
+    });
+    // The street's frontage, beyond its carriageway (half its width, 4 m): paved.
+    expect(hardGround(ground, 8, 0)).toBe(true);
+    expect(hardGround(ground, -10, 50)).toBe(true);
+    // Back from the street, the gardens: soft.
+    expect(hardGround(ground, 60, 0)).toBe(false);
+    // Out of town, the verge is soft as before.
+    expect(hardGround(ground, 8, 450)).toBe(false);
+  });
 });
 
 describe('a defence in the scenario', () => {

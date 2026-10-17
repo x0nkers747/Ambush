@@ -252,6 +252,104 @@ describe('vehicles', () => {
     expect(v.orders[0]?.status).toBe('completed');
   });
 
+  it('keeps its interval behind the vehicle ahead on the road, and goes at its speed', () => {
+    // A T-72 and, behind it, a faster Abrams, both down the road along y = 500.
+    const base = scenario({});
+    const sim = createSimulation(
+      { seed: 1, tickRateHz: RATE },
+      {
+        ...base,
+        vehicles: [
+          {
+            id: 'V1',
+            name: 'T-72',
+            side: 'OPFOR',
+            kind: 't72b',
+            position: { x: 300, y: 500 },
+            headingDeg: 90,
+            destinations: [{ x: 1800, y: 500 }],
+          },
+          {
+            id: 'V2',
+            name: 'Abrams',
+            side: 'BLUEFOR',
+            kind: 'm1a1',
+            position: { x: 230, y: 500 },
+            headingDeg: 90,
+            destinations: [{ x: 1740, y: 500 }],
+          },
+        ],
+      },
+    );
+    let closest = Infinity;
+    let together = 0;
+    for (let k = 0; k < 120 * RATE; k += 1) {
+      sim.step();
+      const [lead, follow] = sim.state.vehicles ?? [];
+      if (!lead || !follow) throw new Error('no vehicles');
+      if (lead.orders[0]?.status === 'active') {
+        closest = Math.min(closest, lead.position.x - follow.position.x);
+        // Closed up, at the leader's speed (the T-72's, slower than its own).
+        if (lead.position.x > 900 && lead.position.x < 1600)
+          together = Math.max(together, Math.abs(follow.speed - lead.speed));
+      }
+    }
+    expect(together).toBeLessThan(0.5);
+    // Centre to centre: the two half-lengths (about 7.8 m) and at least most of the 25 m interval.
+    expect(closest).toBeGreaterThan(28);
+    const [lead, follow] = sim.state.vehicles ?? [];
+    // Both arrived, the follower behind.
+    expect(lead?.orders[0]?.status).toBe('completed');
+    expect(follow?.orders[0]?.status).toBe('completed');
+  });
+
+  it('drives round a vehicle stopped in its way, and on', () => {
+    const base = scenario({});
+    const sim = createSimulation(
+      { seed: 1, tickRateHz: RATE },
+      {
+        ...base,
+        vehicles: [
+          {
+            id: 'V1',
+            name: 'Parked',
+            side: 'OPFOR',
+            kind: 't72b',
+            position: { x: 1000, y: 500 },
+            headingDeg: 90,
+            destinations: [],
+          },
+          {
+            id: 'V2',
+            name: 'Abrams',
+            side: 'BLUEFOR',
+            kind: 'm1a1',
+            position: { x: 300, y: 500 },
+            headingDeg: 90,
+            destinations: [{ x: 1700, y: 500 }],
+          },
+        ],
+      },
+    );
+    let closest = Infinity;
+    for (let k = 0; k < 150 * RATE; k += 1) {
+      sim.step();
+      const [parked, passing] = sim.state.vehicles ?? [];
+      if (!parked || !passing) throw new Error('no vehicles');
+      closest = Math.min(
+        closest,
+        Math.hypot(parked.position.x - passing.position.x, parked.position.y - passing.position.y),
+      );
+    }
+    // Side by side at the closest: the two half-widths (about 3.4 m) and clear of it.
+    expect(closest).toBeGreaterThan(4);
+    const passing = sim.state.vehicles?.[1];
+    expect(passing?.orders[0]?.status).toBe('completed');
+    expect(
+      Math.hypot((passing?.position.x ?? 0) - 1700, (passing?.position.y ?? 0) - 500),
+    ).toBeLessThan(1.5);
+  });
+
   it('replaces or appends to its orders by command', () => {
     const sim = createSimulation(
       { seed: 1, tickRateHz: RATE },

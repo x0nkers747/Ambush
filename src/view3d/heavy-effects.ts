@@ -9,7 +9,7 @@ import {
   type Blending,
 } from 'three';
 import type { CombatEvent, HeavyShotEvent } from '#exercise';
-import { firesTracers, tracerFlightSeconds } from './tracers';
+import { firesTracers, tracerFlightSeconds, tracerShown } from './tracers';
 
 // The effects of combined arms in 3D (docs/combined-arms.md §11): muzzle
 // flashes and smoke, rounds and rockets in flight, missiles with their smoke
@@ -27,8 +27,14 @@ import { firesTracers, tracerFlightSeconds } from './tracers';
 const WINDOW_S = 12;
 const CAPACITY = 6000;
 
-/** Visual speed of a rocket (m/s of the battle); a gun's rounds fly as tracers (tracers.ts). */
+/**
+ * Visual speeds of rounds (m/s of the battle): a rocket's; a gun's when its
+ * burst is not drawn as tracers (tracers.ts: at speed, most are not).
+ */
 const SPEED: Readonly<Record<string, number>> = {
+  cannon: 1500,
+  autocannon: 1000,
+  machineGun: 700,
   atRocket: 260,
 };
 
@@ -231,8 +237,8 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
     },
     update(combatLog, seconds, wrecks, surfaceAt, timeScale = 1) {
       const scale = Math.max(1e-6, timeScale);
-      // A gun's round lands when its tracer does (up to 30 real seconds: a main gun's, far off).
-      const window = Math.max(WINDOW_S, 30 * scale + WINDOW_S);
+      // A gun's round lands when its tracer does (up to 10 real seconds: a main gun's, far off).
+      const window = Math.max(WINDOW_S, 10 * scale + WINDOW_S);
       glow.n = 0;
       smoke.n = 0;
       // The last event at or before now (the log is in time order), then back.
@@ -258,11 +264,15 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
         if (age > window) break;
         if (e.type !== 'heavyShot') continue;
         const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
-        const tracer = e.missileId === null && firesTracers(kind);
+        // A gun's round drawn as a tracer (at speed, one burst in so many is).
+        const tracer =
+          e.missileId === null &&
+          firesTracers(kind) &&
+          tracerShown(e.shooterId, e.tick, e.slot, scale);
         const key = `${e.shooterId}:${String(e.tick)}:${e.slot}`;
         const { flight: own, length } = flightOf(e, kind);
         // A gun's round: as long as its tracer flies (simulated seconds).
-        const flight = tracer ? tracerFlightSeconds(length, kind) * scale : own;
+        const flight = tracer ? tracerFlightSeconds(length) * scale : own;
         if (age > flight + WINDOW_S) continue;
         const big = kind === 'cannon' || kind === 'atgm' || kind === 'atRocket';
         // The muzzle: a flash, and (a gun, a launcher) its blast's smoke.

@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
+import type { PointsMaterial } from 'three';
+import { InstancedMesh, Matrix4, Points, Quaternion, Vector3 } from 'three';
 import { createMotionRecorder, type CombatEvent, type HeavyShotEvent } from '#exercise';
 import type { SimState } from '#sim';
-import { createTracerLayer } from './tracers';
+import { createTracerLayer, tracerShown } from './tracers';
 
 // Tracers in the 3D view: one streak per round of each burst, staggered as
 // the weapon fires them, gone once landed; nothing for grenades; the same
 // picture for the same moment (the review's), and a hit's round ending in
-// its target; one speed on screen whatever the battle's; the vehicles' guns
-// alike, a main gun's round slower.
+// its target; one speed on screen, and as many in the air, whatever the
+// battle's speed; the vehicles' guns alike, a main gun's head bigger.
 
-/** Two soldiers 200 m apart (north), standing still, for 10 s at 30 Hz. */
+/** Two soldiers 200 m apart (north), standing still, for 60 s at 30 Hz. */
 function motion() {
   const log = createMotionRecorder(30);
-  for (let tick = 0; tick <= 300; tick += 1) {
+  for (let tick = 0; tick <= 1800; tick += 1) {
     log.record({
       tick,
       soldiers: [
@@ -137,12 +138,15 @@ describe('tracers', () => {
   });
 
   it('flies at one speed on screen whatever the battle’s speed', () => {
-    const events = [shot(1, 9, 'automaticRifle', false)];
+    // A burst drawn at 32× (one in 32 is).
+    let at = 1;
+    while (!tracerShown('B1-01', Math.round(at * 30), 'automaticRifle', 32)) at += 1 / 30;
+    const events = [shot(at, 9, 'automaticRifle', false)];
     const slow = createTracerLayer();
     const fast = createTracerLayer();
     // 0.2 real seconds after the burst: at 1×, 0.2 s of the battle; at 32×, 6.4 s.
-    slow.update(log, events, 1.2, flat, eye, 1);
-    fast.update(log, events, 1 + 0.2 * 32, flat, eye, 32);
+    slow.update(log, events, at + 0.2, flat, eye, 1);
+    fast.update(log, events, at + 0.2 * 32, flat, eye, 32);
     expect(fast.inFlight).toBe(slow.inFlight);
     expect(fast.inFlight).toBeGreaterThan(0);
     const a = heads(slow);
@@ -156,6 +160,32 @@ describe('tracers', () => {
     expect(Math.max(...a.map((h) => h.y))).toBeLessThan(130);
   });
 
+  it('as many in the air whatever the battle’s speed: at 32×, one burst in 32 is drawn', () => {
+    // A rifle shot every tenth of a second for a minute.
+    const events = Array.from({ length: 590 }, (_, i) => shot(i / 10, 1, 'rifle', false));
+    const inAir = (speed: number) => {
+      const layer = createTracerLayer();
+      let total = 0;
+      const moments = 120;
+      for (let k = 0; k < moments; k += 1) {
+        layer.update(log, events, 20 + (k * 38) / moments, flat, eye, speed);
+        total += layer.inFlight;
+      }
+      return total / moments;
+    };
+    const at1 = inAir(1);
+    const at32 = inAir(32);
+    // About four at once at 1× (a round flies 0.36–0.47 s, one fired each 0.1 s).
+    expect(at1).toBeGreaterThan(3);
+    expect(at1).toBeLessThan(5);
+    // At 32× each burst flies 32 times as long in the battle's time: still about four.
+    expect(at32).toBeGreaterThan(at1 * 0.6);
+    expect(at32).toBeLessThan(at1 * 1.4);
+    // Up to 1×, every burst.
+    expect(tracerShown('B1-01', 30, 'rifle', 1)).toBe(true);
+    expect(tracerShown('B1-01', 30, 'rifle', 0.5)).toBe(true);
+  });
+
   it('a streak is 11 m long', () => {
     const layer = createTracerLayer();
     layer.update(log, [shot(1, 1, 'rifle', false)], 1.15, flat, eye);
@@ -167,7 +197,7 @@ describe('tracers', () => {
     expect(scale.z).toBeCloseTo(11, 3);
   });
 
-  it('a vehicle’s guns fire tracers too; a main gun’s round flies a quarter as fast', () => {
+  it('a vehicle’s guns fire tracers too, as fast; a main gun’s head is four times the size', () => {
     const heavy = (weapon: string): HeavyShotEvent => ({
       type: 'heavyShot',
       tick: 30,
@@ -189,11 +219,26 @@ describe('tracers', () => {
     });
     const kinds: Record<string, string> = { m256: 'cannon', m240c: 'machineGun' };
     const layer = createTracerLayer((w) => kinds[w] ?? '');
-    // A second after firing: the machine gun's round 640 m out, the main gun's 160 m.
+    const points = () =>
+      layer.group.children
+        .filter((c): c is Points => c instanceof Points)
+        .map((p) => ({
+          px: (p.material as PointsMaterial).size,
+          drawn: p.geometry.drawRange.count,
+        }));
+    // A second after firing: either round 640 m out.
     layer.update(log, [heavy('m240c')], 2, flat, eye);
     expect(heads(layer)[0]?.y).toBeCloseTo(640, 0);
+    expect(points()).toEqual([
+      { px: 5, drawn: 1 },
+      { px: 20, drawn: 0 },
+    ]);
     layer.update(log, [heavy('m256')], 2, flat, eye);
-    expect(heads(layer)[0]?.y).toBeCloseTo(160, 0);
+    expect(heads(layer)[0]?.y).toBeCloseTo(640, 0);
+    expect(points()).toEqual([
+      { px: 5, drawn: 0 },
+      { px: 20, drawn: 1 },
+    ]);
     // A missile is not a tracer (the heavy effects draw it), nor is a weapon of no known kind.
     layer.update(log, [{ ...heavy('m256'), missileId: 'M1', impactAt: 5 }], 2, flat, eye);
     expect(layer.inFlight).toBe(0);

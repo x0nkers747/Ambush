@@ -26,8 +26,11 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 // A round flies at the same speed on screen whatever the battle's speed
 // (`timeScale`: simulated seconds per real second): its age is the time
 // since it was fired, in real seconds. So at 32× a round crosses the screen
-// as it does at 1×, while the battle runs on. Each streak is a function of
-// the event, the clock and that speed (its scatter drawn from a hash of the
+// as it does at 1×, while the battle runs on. And as many are in the air: at
+// 32× the battle fires 32 times as many bursts a second, so one burst in 32
+// is drawn (`tracerShown`, by a hash of the burst). A main gun's round flies
+// as fast, its head four times the size. Each streak is a function of the
+// event, the clock and that speed (its scatter drawn from a hash of the
 // event), so the After-Action Review shows the same tracers at the same
 // moments, seeking or not. Red for BLUEFOR, green for OPFOR (as US and
 // Warsaw Pact tracer ammunition). Each streak is a glowing bar at least a
@@ -36,8 +39,9 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 
 /** Visual speed of a round (m/s of real time; slower than a real one, to be seen). */
 export const TRACER_SPEED_MPS = 640;
-/** A main gun's round: slower still, to be followed (a quarter of the others'). */
-export const MAIN_GUN_TRACER_SPEED_MPS = TRACER_SPEED_MPS / 4;
+/** A round's glowing head on screen (px); a main gun's is four times the size. */
+const HEAD_PX = 5;
+const BIG_HEAD_PX = HEAD_PX * 4;
 /** Shortest flight shown (real s), so close shots are seen too. */
 const MIN_FLIGHT_S = 0.12;
 /** Length of a streak (m). */
@@ -45,7 +49,7 @@ const STREAK_M = 11;
 /** Rounds in flight at once, at most. */
 const CAPACITY = 2048;
 /** How long a round can still be in flight (real s): a main gun's, at its longest range. */
-const WINDOW_S = 30;
+const WINDOW_S = 10;
 
 /** The kind of a vehicle's weapon by id (`cannon`, `autocannon`, `machineGun`…). */
 export type TracerWeaponKind = (weapon: string) => string;
@@ -53,10 +57,24 @@ export type TracerWeaponKind = (weapon: string) => string;
 /** The weapons whose rounds are tracers (rockets and missiles fly as the heavy effects). */
 const TRACER_KINDS = new Set(['machineGun', 'autocannon', 'cannon']);
 
-/** How long a round of a weapon of `kind` flies `lengthM` (real s), as drawn. */
-export function tracerFlightSeconds(lengthM: number, kind: string): number {
-  const speed = kind === 'cannon' ? MAIN_GUN_TRACER_SPEED_MPS : TRACER_SPEED_MPS;
-  return Math.max(MIN_FLIGHT_S, lengthM / speed);
+/** How long a round flies `lengthM` (real s), as drawn. */
+export function tracerFlightSeconds(lengthM: number): number {
+  return Math.max(MIN_FLIGHT_S, lengthM / TRACER_SPEED_MPS);
+}
+
+/**
+ * Whether a burst's tracers are drawn at `timeScale`: all of them up to 1×;
+ * faster, one burst in `timeScale` (by a hash of the burst), so as many are
+ * in the air as at 1×. The same burst at the same speed, always.
+ */
+export function tracerShown(
+  shooterId: string,
+  tick: number,
+  slot: string,
+  timeScale: number,
+): boolean {
+  if (timeScale <= 1) return true;
+  return scatter(`${shooterId}:${slot}`, tick, 0, 9) < 1 / timeScale;
 }
 
 /** Whether a weapon of `kind` fires tracers drawn here. */
@@ -132,25 +150,31 @@ export function createTracerLayer(
   const zAxis = new Vector3(0, 0, 1);
   // Radians a pixel spans, roughly (the views' 45° field over about 900 pixels).
   const PIXEL_RAD = 0.00087;
-  const headPositions = new Float32Array(CAPACITY * 3);
-  const headColours = new Float32Array(CAPACITY * 3);
-  const headGeometry = new BufferGeometry();
-  headGeometry.setAttribute('position', new BufferAttribute(headPositions, 3));
-  headGeometry.setAttribute('color', new BufferAttribute(headColours, 3));
-  const headMaterial = new PointsMaterial({
-    size: 5,
-    sizeAttenuation: false,
-    vertexColors: true,
-    transparent: true,
-    blending: AdditiveBlending,
-    depthWrite: false,
-  });
-  const heads = new Points(headGeometry, headMaterial);
-  for (const o of [bars, heads]) {
+  /** The rounds' glowing heads, `px` across: a pool of points. */
+  const headPool = (px: number) => {
+    const positions = new Float32Array(CAPACITY * 3);
+    const colours = new Float32Array(CAPACITY * 3);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new BufferAttribute(colours, 3));
+    const material = new PointsMaterial({
+      size: px,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    return { positions, colours, geometry, material, points: new Points(geometry, material), n: 0 };
+  };
+  const heads = headPool(HEAD_PX);
+  // A main gun's.
+  const bigHeads = headPool(BIG_HEAD_PX);
+  for (const o of [bars, heads.points, bigHeads.points]) {
     o.frustumCulled = false;
     o.renderOrder = 3;
   }
-  group.add(bars, heads);
+  group.add(bars, heads.points, bigHeads.points);
   const shooter = emptyMotionSample();
   const target = emptyMotionSample();
 
@@ -160,9 +184,11 @@ export function createTracerLayer(
     bars.count = n;
     bars.instanceMatrix.needsUpdate = true;
     if (bars.instanceColor) bars.instanceColor.needsUpdate = true;
-    headGeometry.setDrawRange(0, n);
-    (headGeometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
-    (headGeometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
+    for (const pool of [heads, bigHeads]) {
+      pool.geometry.setDrawRange(0, pool.n);
+      (pool.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
+      (pool.geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
+    }
   };
 
   return {
@@ -181,6 +207,8 @@ export function createTracerLayer(
         else hi = mid;
       }
       let n = 0;
+      heads.n = 0;
+      bigHeads.n = 0;
       /**
        * A round from (sx, sy, sz) to (ex, ey, ez) (map metres), `age` real
        * seconds after it left the muzzle, flying `flight` real seconds: its
@@ -198,6 +226,8 @@ export function createTracerLayer(
         r: number,
         g: number,
         b: number,
+        /** A main gun's round: its head four times the size. */
+        big = false,
       ) => {
         if (age < 0 || age > flight || n >= CAPACITY) return;
         const dx = ex - sx;
@@ -225,13 +255,15 @@ export function createTracerLayer(
         matrix.compose(mid, turn, size);
         bars.setMatrixAt(n, matrix);
         bars.setColorAt(n, colour.setRGB(r, g, b));
-        const p = n * 3;
-        headPositions[p] = hx;
-        headPositions[p + 1] = hy;
-        headPositions[p + 2] = hz;
-        headColours[p] = Math.min(1, r + 0.4);
-        headColours[p + 1] = Math.min(1, g + 0.4);
-        headColours[p + 2] = Math.min(1, b + 0.3);
+        const pool = big ? bigHeads : heads;
+        const p = pool.n * 3;
+        pool.positions[p] = hx;
+        pool.positions[p + 1] = hy;
+        pool.positions[p + 2] = hz;
+        pool.colours[p] = Math.min(1, r + 0.4);
+        pool.colours[p + 1] = Math.min(1, g + 0.4);
+        pool.colours[p + 2] = Math.min(1, b + 0.3);
+        pool.n += 1;
         n += 1;
       };
       const rate = log.tickRateHz;
@@ -247,16 +279,17 @@ export function createTracerLayer(
           const kind = kindOf(e.weapon);
           const burst = HEAVY_BURST[kind];
           if (!burst) continue;
+          const tick = Math.round(e.atSeconds * rate);
+          if (!tracerShown(e.shooterId, e.tick, e.slot, scale)) continue;
           const length = Math.hypot(
             e.impact.x - e.from.x,
             e.impact.y - e.from.y,
             e.impact.z - e.from.z,
           );
-          const flight = tracerFlightSeconds(length, kind);
+          const flight = tracerFlightSeconds(length);
           const rounds = Math.min(e.rounds, burst.rounds);
           if (since > flight + rounds * burst.spacing) continue;
           const [r, g, b] = COLOURS[e.side];
-          const tick = Math.round(e.atSeconds * rate);
           for (let k = 0; k < rounds; k += 1) {
             // A machine gun's misses spread a little round where the burst landed.
             const spread = kind === 'machineGun' && !(e.hit && k === 0) ? 4 : 0;
@@ -274,6 +307,7 @@ export function createTracerLayer(
               r,
               g,
               b,
+              kind === 'cannon',
             );
           }
           continue;
@@ -281,10 +315,11 @@ export function createTracerLayer(
         if (e.type !== 'shotFired') continue;
         const spacing = roundSpacing(e.weaponProfileRef);
         // Long past: every round landed (a miss flies on to half again its range, and more).
-        if (since > tracerFlightSeconds(e.rangeM * 1.6 + 20, '') + e.rounds * spacing) continue;
+        if (since > tracerFlightSeconds(e.rangeM * 1.6 + 20) + e.rounds * spacing) continue;
+        const tick = Math.round(e.atSeconds * rate);
+        if (!tracerShown(e.shooterId, e.tick, e.weaponProfileRef, scale)) continue;
         const from = log.indexOf(e.shooterId);
         if (from < 0) continue;
-        const tick = Math.round(e.atSeconds * rate);
         log.read(from, tick, shooter);
         const to = log.indexOf(e.targetId);
         if (to >= 0) log.read(to, tick, target);
@@ -319,7 +354,7 @@ export function createTracerLayer(
           const ey = sy + dy0 * past + ux * side;
           const ez = sz + (az - sz) * past + up;
           const length = Math.hypot(ex - sx, ey - sy, ez - sz);
-          streak(sx, sy, sz, ex, ey, ez, age, tracerFlightSeconds(length, ''), r, g, b);
+          streak(sx, sy, sz, ex, ey, ez, age, tracerFlightSeconds(length), r, g, b);
         }
       }
       draw(n);
@@ -328,8 +363,10 @@ export function createTracerLayer(
       barGeometry.dispose();
       barMaterial.dispose();
       bars.dispose();
-      headGeometry.dispose();
-      headMaterial.dispose();
+      for (const pool of [heads, bigHeads]) {
+        pool.geometry.dispose();
+        pool.material.dispose();
+      }
     },
   };
 }

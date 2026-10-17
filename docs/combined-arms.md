@@ -231,13 +231,17 @@ the articulation, in two pools of points (no objects per effect).
 
 **Tracers** (`tracers.ts`): a vehicle's machine guns, autocannon and main gun
 fire the soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and
-green for OPFOR, flying at 640 m/s on screen; a main gun's round at a
-quarter of that (160 m/s), to be followed. Every round flies at that speed
-on screen whatever the battle's speed (½× to 32×): its age is counted in
-real seconds (the battle's seconds since it was fired over the speed the
-battle is drawn at), so at 32× a round crosses the screen as at 1×, while
-the battle runs on. A gun's impact (dust, sparks off armour) comes when its
-tracer lands. The review draws the same tracers at the same moment and
+green for OPFOR, flying at 640 m/s on screen; a main gun's round as fast,
+its glowing head four times the size (20 px, not 5). Every round flies at
+that speed on screen whatever the battle's speed (½× to 32×): its age is
+counted in real seconds (the battle's seconds since it was fired over the
+speed the battle is drawn at), so at 32× a round crosses the screen as at
+1×, while the battle runs on. And as many are in the air: at 32× the battle
+fires 32 times as many bursts a second, so one burst in 32 is drawn
+(`tracerShown`: a hash of the burst under 1/speed; every one up to 1×),
+the same number in the air on average. A gun's impact (dust, sparks off
+armour) comes when its tracer lands, or for a burst not drawn, when the
+round would. The review draws the same tracers at the same moment and
 speed, seeking or not.
 
 **2D** (`src/app/battle/map-editor.ts`, `combat-editor.ts`): the APP-6 symbol
