@@ -175,7 +175,14 @@
         font-weight: 800;
         letter-spacing: 0.06em;
       }
-      .wf-nav {
+      /* The workflow bar, and INFO just to its right. */
+      .wf-centre {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .wf-nav,
+      .wf-info-box {
         display: flex;
         align-items: stretch;
         height: 56px;
@@ -294,6 +301,10 @@
         right: 3px;
         border-right: 1px solid var(--blue);
         border-top-right-radius: 5px;
+      }
+      .wf-info-box .wf-step-btn {
+        min-width: 64px;
+        padding: 0 10px;
       }
       .wf-context {
         justify-self: end;
@@ -429,6 +440,74 @@
         display: flex;
         gap: 8px;
         margin-top: 10px;
+      }
+
+      /* The Info window (src/app/info.ts): two thirds of the window, over everything. */
+      .info-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.6);
+        /* Above the Feedback button (1000), below the busy overlay (2000). */
+        z-index: 1500;
+      }
+      .info-window {
+        display: flex;
+        flex-direction: column;
+        width: 66.7vw;
+        height: 66.7vh;
+        min-width: min(560px, 94vw);
+        min-height: min(420px, 90vh);
+        border-radius: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+      }
+      .info-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      .info-head h2 {
+        margin: 0;
+        font-size: 17px;
+        letter-spacing: 0.04em;
+      }
+      .info-close {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        font-size: 20px;
+        line-height: 1;
+      }
+      .info-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 6px 22px 18px;
+        line-height: 1.5;
+      }
+      .info-body h3 {
+        margin: 18px 0 6px;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--blue);
+      }
+      .info-body ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .info-body li {
+        margin: 0 0 6px;
+      }
+      .info-lead {
+        margin: 12px 0 4px;
+        color: var(--text);
       }
 
       /* Scenario dialogs (docs/scenarios.md): modal panels over the page. */
@@ -1461,7 +1540,7 @@
         .wf-header {
           grid-template-columns: auto 1fr;
         }
-        .wf-nav {
+        .wf-centre {
           justify-self: center;
         }
         .wf-step-btn {
@@ -1487,6 +1566,9 @@
         }
         .wf-step-btn:not([aria-current='step']) .wf-label {
           display: none;
+        }
+        .wf-step-btn.wf-info .wf-label {
+          display: inline;
         }
         .wf-arrow {
           margin: 0 4px;

@@ -991,6 +991,24 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       if (wasPlaying) notify('Paused. Discard the battle, or Cancel to go on.');
     },
     blocked: notify,
+    // The Info window pauses a battle running, or its replay, until it closes.
+    pause: () => {
+      const c = inCombat();
+      if (c?.playing) {
+        c.pause();
+        return () => {
+          if (inCombat() === c && !c.ended && !c.playing) c.play();
+        };
+      }
+      const r = inReview();
+      if (r?.playing) {
+        r.pause();
+        return () => {
+          if (inReview() === r && !r.playing) r.play();
+        };
+      }
+      return null;
+    },
   });
   const enter = (target: BattleStage) => {
     if (target === 'combat' && (!combat || combat.ended)) {

@@ -1,3 +1,4 @@
+import { openInfo } from './info';
 import {
   nextStage,
   previousBlocker,
@@ -12,8 +13,9 @@ import {
 } from './workflow';
 
 // The application shell shared by every stage (docs/adr/0025): the workflow
-// header with Previous, the five stage segments and Next, short messages over
-// the map, and a narrowly scoped confirmation for actions that discard work.
+// header with Previous, the five stage segments and Next, and beside them
+// INFO (the Info window, `info.ts`); short messages over the map, and a
+// narrowly scoped confirmation for actions that discard work.
 
 export const escapeHtml = (text: string): string =>
   text.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`);
@@ -32,6 +34,9 @@ const STAGE_ICONS: Readonly<Record<WorkflowStage, string>> = {
   aar: `<path d="M4 3v17h17" fill="none" stroke="currentColor" stroke-width="1.6"/><g fill="currentColor"><rect x="7" y="13" width="2.4" height="6"/><rect x="11" y="9" width="2.4" height="10"/><rect x="15" y="5" width="2.4" height="14"/><rect x="19" y="10" width="1.6" height="9"/></g>`,
 };
 
+/** INFO's icon: a question mark in a circle. */
+const INFO_ICON = `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.4 9.4a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.3 1-1.3 1.9v.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.3" r="1.1" fill="currentColor"/>`;
+
 /** The header's markup; `context` is a short label such as the battlefield's name. */
 export function headerHtml(context = ''): string {
   const steps = WORKFLOW_STAGES.map(
@@ -45,6 +50,7 @@ export function headerHtml(context = ''): string {
   ).join('');
   return `<header class="wf-header">
     <span class="wf-brand">AMBUSH!</span>
+    <div class="wf-centre">
     <nav class="wf-nav" aria-label="Workflow">
       <button class="wf-arrow" data-ui="wf-prev" aria-describedby="wf-prev-reason">‹</button>
       <ol class="wf-steps">${steps}</ol>
@@ -53,6 +59,13 @@ export function headerHtml(context = ''): string {
       <span class="sr-only" id="wf-next-reason" data-ui="wf-next-reason"></span>
       <span class="sr-only" aria-live="polite" data-ui="wf-announce"></span>
     </nav>
+    <div class="wf-info-box">
+      <button class="wf-step-btn wf-info" data-ui="wf-info" title="About Ambush!" aria-label="About Ambush!">
+        <svg class="wf-icon" viewBox="0 0 24 24" aria-hidden="true">${INFO_ICON}</svg>
+        <span class="wf-label">Info</span>
+      </button>
+    </div>
+    </div>
     <span class="wf-context" data-ui="wf-context" title="${escapeHtml(context)}">${escapeHtml(context)}</span>
   </header>`;
 }
@@ -73,6 +86,11 @@ export function wireHeader(
   o: {
     readonly go: (stage: WorkflowStage) => void;
     readonly blocked: (reason: string) => void;
+    /**
+     * Pauses a battle being fought or replayed while the Info window is open;
+     * returns how to resume it when it closes (`null`: nothing was running).
+     */
+    readonly pause?: () => (() => void) | null;
   },
 ): WorkflowHeader {
   const el = (name: string) => {
@@ -89,6 +107,10 @@ export function wireHeader(
     }
     o.go(target);
   };
+  el('wf-info').addEventListener('click', () => {
+    const resume = o.pause?.() ?? null;
+    openInfo(() => resume?.());
+  });
   el('wf-prev').addEventListener('click', () => {
     goTo(previousStage(current), facts ? previousBlocker(current, facts) : null);
   });

@@ -103,6 +103,9 @@ one five-stage workflow ([ADR 0025](docs/adr/0025-five-stage-workflow.md),
 [docs/constructive-simulation](docs/constructive-simulation/README.md)). The header always shows
 the current stage, its number out of five, and **‹ Previous** and **Next ›** arrows. A blocked
 Next says what is missing, and the side panel says the same next to the stage's primary button.
+**INFO**, to the right of Next on every stage, opens a window about Ambush!: its key features,
+how combat is simulated and its known limitations (`src/app/info.ts`). A battle being fought or
+replayed is paused while it is open and resumes when it closes (Escape, × or a click outside).
 
 1. **Terrain.** Search for a place, enter a latitude and longitude in decimal degrees (e.g.
    `38.5223`, `-77.2934`; pasting "lat, lon" into the first field works), or use your current
