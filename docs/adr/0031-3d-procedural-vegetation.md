@@ -160,6 +160,17 @@ change only how much is drawn, never where anything is.
 | Medium | 150 / 600 / 4,500 m      | 12 %       | 2048² map, ≤ 700 m round the focus     | 1.5             |
 | High   | 240 / 950 / 7,000 m      | 12 %       | 4096² map, ≤ 1.1 km, trees receive too | 2               |
 
+**Adaptive resolution** (2026-10-17, `resolution.ts`). On top of the preset, the drawing buffer is
+scaled down when frames are slow and back up when there is room: through 100, 85, 72, 60 and 50 %
+of the preset's pixel ratio. A second of frames averaging over 18.5 ms (under about 54 fps) is one
+step down; frames steady at the display's own rate for 4 s, one step up (one that is slow again
+within 3 s waits twice as long next time, up to 64 s). Two steps down that gain nothing (the frames
+are slow for another reason: the simulation, the CPU) go back to where they were, and none is tried
+for 20 s. Frames while the view loads are not measured. On a Radeon 880M (integrated, detected
+high) at 1920 × 1080 and 1.5× scaling, the combined-arms demo: still 48 fps to 63, orbiting 43 to
+60, settling at half resolution (pixel ratio 0.75): at high, the shadow pass and some 1,300 draw
+calls cost what resolution cannot save.
+
 ### Light and atmosphere
 
 - **Shadows.** The sun casts shadows only in a square round the camera's focus, sized to the view

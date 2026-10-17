@@ -57,6 +57,7 @@ import { SUN_DEPTH_BIAS_M, SUN_NORMAL_BIAS } from './characters/shadow';
 import { createEarthworksLayer, type ViewEarthwork } from './earthworks';
 import { createVehicleLayer, type ViewVehicle } from './vehicles';
 import { createImpactLayer } from './impacts';
+import { createResolutionGovernor } from './resolution';
 import { createTracerLayer } from './tracers';
 import { createHeavyEffectsLayer } from './heavy-effects';
 import { createMarkerLayer } from './markers';
@@ -627,6 +628,11 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     entry.camera.dispose();
   };
 
+  /** The quality's pixel ratio, before the governor scales it. */
+  const basePixelRatio = () => Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio);
+  // Adaptive resolution (resolution.ts): the drawing buffer is scaled down when frames are slow.
+  const governor = createResolutionGovernor();
+  let appliedScale = 1;
   const resize = () => {
     const rect = canvas.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width));
@@ -670,7 +676,10 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   };
   const applyQuality = (next: QualityPreset) => {
     quality = next;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
+    // A new quality: full resolution again, the governor measuring afresh.
+    governor.reset();
+    appliedScale = 1;
+    renderer.setPixelRatio(basePixelRatio());
     width = 0; // re-fit the drawing buffer
     renderer.shadowMap.enabled = quality.shadows !== null;
     sun.castShadow = quality.shadows !== null;
@@ -844,6 +853,14 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
     },
     render() {
       if (disposed) return;
+      // Frames while the view loads (layers revealed one per frame) are not measured.
+      const scale =
+        reveal.length > 0 ? (governor.pause(), governor.scale) : governor.frame(performance.now());
+      if (scale !== appliedScale) {
+        appliedScale = scale;
+        renderer.setPixelRatio(basePixelRatio() * scale);
+        width = 0; // re-fit the drawing buffer
+      }
       resize();
       const terrain = o.terrain;
       const entry = terrainEntry(terrain);
@@ -1146,6 +1163,8 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         vegetation: current?.vegetation?.stats() ?? null,
         generation: current?.generation ?? null,
         quality: quality.level,
+        resolutionScale: appliedScale,
+        pixelRatio: renderer.getPixelRatio(),
         gpu,
         // Vertex and index buffers in the scene, in bytes.
         geometryBytes: (() => {
