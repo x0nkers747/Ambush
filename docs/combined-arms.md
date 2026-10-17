@@ -101,6 +101,14 @@ platform's class. Detection is the force-on-force model's (`src/sim/combat/syste
   and dug-in soldiers are as hard to see as in the infantry model. What a
   crew finds goes into its **vehicle's tracks** (`VehicleCombat.tracks`).
 
+Search is faster the more plainly a target stands out (`conspicuity`): its
+resolvable cycles over 2 (at most × 10), so a tank in the open at a few
+hundred metres is found in a look or two, and a glimpse that plain adds more
+confidence (up to × 2.5: it is confirmed at once), while a target barely
+detectable (a prone soldier far off, a tank at 2 km in haze) is searched for
+as before. Infantry looking at infantry is the force-on-force model's own,
+unchanged.
+
 A pair's detectability threshold is drawn from `SimState.rng` the first time
 the pair is looked at (`SimState.combat.thresholds`). No one engages what it
 has not detected; a crew keeps following a confirmed target while it stays in

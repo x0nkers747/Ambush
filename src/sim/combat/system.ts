@@ -84,6 +84,14 @@ export const COMBAT_TUNING = {
   soldierThreat: 0.01,
   /** A hit on a moving target: × this when it moves faster than 3 m/s. */
   movingTargetHitFactor: 0.8,
+  /**
+   * Conspicuity (`conspicuity`): resolvable cycles of a target at which its
+   * search is no faster than the eye's model (more: proportionally faster),
+   * the most it speeds it, and the most a glimpse's confidence is multiplied.
+   */
+  conspicuityCycles: 2,
+  maxConspicuity: 10,
+  maxGlimpseGain: 2.5,
   /** Thermal sights: vegetation's transmission is raised to this power (sees through more). */
   thermalTransmissionPower: 0.5,
 } as const;
@@ -318,6 +326,25 @@ function thresholdOf(
   return th;
 }
 
+/**
+ * How plainly a target stands out: its resolvable cycles over
+ * `COMBAT_TUNING.conspicuityCycles` (1 at or below, at most
+ * `maxConspicuity`). Search is that much faster: a tank in the open at a
+ * few hundred metres is found in a look or two, while a target barely
+ * detectable is searched for as before.
+ */
+function conspicuity(cycles: number): number {
+  return Math.min(
+    COMBAT_TUNING.maxConspicuity,
+    Math.max(1, cycles / COMBAT_TUNING.conspicuityCycles),
+  );
+}
+
+/** A glimpse's confidence: more for a plain target (a very plain one is confirmed at once). */
+function glimpseGain(gain: number, plain: number): number {
+  return Math.min(1, gain * Math.min(COMBAT_TUNING.maxGlimpseGain, Math.max(1, plain / 2)));
+}
+
 /** Whether a force is alert (searching, not merely moving). */
 function alerted(force: FofForce): boolean {
   return force.phase !== 'moving' && force.phase !== 'atObjective';
@@ -400,7 +427,8 @@ function soldiersLook(
       if (pInf <= threshold) continue;
       const existing = fof.tracks.find((tr) => tr.force === member.force && tr.targetId === v.id);
       const tracking = existing?.confirmed === true ? detection.trackingFactor : 1;
-      const rate = (pInf / detection.searchSeconds) * search * attention * tracking;
+      const plain = conspicuity(cycles);
+      const rate = (pInf / detection.searchSeconds) * search * attention * tracking * plain;
       if (!draw(context.state.rng, chanceIn(rate, lookSeconds))) continue;
       const from: ObservationLevel = existing?.level ?? 'unaware';
       const track = glimpse(
@@ -408,12 +436,13 @@ function soldiersLook(
         member.force,
         v,
         existing,
-        detection.confidenceGain,
+        glimpseGain(detection.confidenceGain, plain),
         observer.id,
       );
       if (track.confirmed && !track.identified) {
         const pId = ttpf(cycles, detection.identificationCycles50);
-        const idRate = pId <= threshold ? 0 : (pId / detection.searchSeconds) * search * attention;
+        const idRate =
+          pId <= threshold ? 0 : (pId / detection.searchSeconds) * search * attention * plain;
         if (draw(context.state.rng, chanceIn(idRate, lookSeconds))) track.identified = true;
       }
       setLevel(context, track, from, observer.id, rangeM);
@@ -484,9 +513,11 @@ function vehiclesLook(
       if (pInf <= threshold) return;
       const existing = v.combat.tracks.find((tr) => tr.targetId === target.id);
       const tracking = existing?.confirmed === true ? detection.trackingFactor : 1;
-      const rate = (pInf / detection.searchSeconds) * detection.alertedSearchFactor * tracking;
+      const plain = conspicuity(cycles);
+      const rate =
+        (pInf / detection.searchSeconds) * detection.alertedSearchFactor * tracking * plain;
       if (!draw(context.state.rng, chanceIn(rate, lookSeconds))) return;
-      vehicleGlimpse(context, v.combat, target, detection.confidenceGain);
+      vehicleGlimpse(context, v.combat, target, glimpseGain(detection.confidenceGain, plain));
     };
     // Enemy soldiers, in soldier order.
     for (const member of fof.soldiers) {

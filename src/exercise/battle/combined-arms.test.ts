@@ -101,6 +101,25 @@ describe('vehicles in a battle', () => {
     for (const e of atTanks) expect(e.from.z).toBeGreaterThan(0);
   });
 
+  it('tanks in plain view of each other engage within seconds (a plain target is found at once)', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const { events } = run(
+        {
+          seed,
+          tickRateHz: 30,
+          squads: BYSTANDERS,
+          vehicles: [
+            vehicle('A1', 'm1a1', 'BLUEFOR', 0, -200, 0),
+            vehicle('T1', 't72b', 'OPFOR', 0, 200, 180),
+          ],
+        },
+        10,
+      );
+      const first = fires(events).find((e) => e.target === 'vehicle');
+      expect(first?.atSeconds).toBeLessThan(7);
+    }
+  });
+
   it('Abrams against infantry: machine guns, not the main gun; soldiers fall', () => {
     const { events } = run(
       {
@@ -210,7 +229,14 @@ describe('vehicles in a battle', () => {
       const carried = a.weapon === 'javelin' ? 2 : 2;
       expect(a.loaded + a.reserve + a.fired).toBe(carried);
     }
-    expect(events.some((e) => e.type === 'vehicleCondition' && e.to === 'destroyed')).toBe(true);
+    // Their hits tell on the armour (the vehicles may still win the fight).
+    const struck = events.filter(
+      (e) => e.type === 'vehicleHit' && carriers.has(e.byId) && e.perforated,
+    );
+    expect(struck.length).toBeGreaterThan(0);
+    expect(events.some((e) => e.type === 'vehicleCondition' && e.from === 'operational')).toBe(
+      true,
+    );
   });
 
   it('carries rockets by default, and only in a battle with vehicles', () => {
@@ -233,12 +259,11 @@ describe('vehicles in a battle', () => {
       {
         seed: 6,
         tickRateHz: 30,
-        squads: BYSTANDERS,
+        // Facing north, an enemy squad off to the east; an M113 driving north past it.
+        squads: [BX, squad('OE', 'OPFOR', 600, 0, 270, { antiTank: 'none', posture: 'prone' })],
         vehicles: [
-          // Facing north, a T-72 off to the east; an M113 driving north past it.
           vehicle('A1', 'm1a1', 'BLUEFOR', 0, 0, 0),
           vehicle('M1', 'm113', 'BLUEFOR', -200, -300, 0, [{ x: -200, y: 300 }]),
-          vehicle('T1', 't72b', 'OPFOR', 1100, 0, 270),
         ],
       },
       TERRAIN,
@@ -248,7 +273,7 @@ describe('vehicles in a battle', () => {
     const m1 = battle.sim.state.vehicles?.find((v) => v.id === 'M1');
     if (!a1 || !m1) throw new Error('no vehicles');
     const deg = (rad: number) => (rad * 180) / Math.PI;
-    expect(a1.combat.tracks.some((t) => t.targetId === 'T1' && t.confirmed)).toBe(true);
+    expect(a1.combat.tracks.some((t) => t.targetId.startsWith('OE-') && t.confirmed)).toBe(true);
     expect(Math.abs(deg(a1.heading) - 90)).toBeLessThan(10);
     // The M113 on its way keeps its heading for its waypoint.
     expect(Math.min(deg(m1.heading), 360 - deg(m1.heading))).toBeLessThan(10);
@@ -320,8 +345,12 @@ describe('determinism of combined arms', () => {
     expect(b.out).toEqual(a.out);
     expect(b.events).toEqual(a.events);
     // Several vehicles and soldiers fought at once.
-    const shooters = new Set(fires(a.events).map((e) => e.shooterId));
+    const shooters = new Set([
+      ...fires(a.events).map((e) => e.shooterId),
+      ...a.events.flatMap((e) => (e.type === 'fofFire' ? [e.shooterId as string] : [])),
+    ]);
     expect(shooters.size).toBeGreaterThanOrEqual(3);
+    expect(fires(a.events).filter((e) => e.shooter === 'vehicle').length).toBeGreaterThan(1);
   });
 
   it('continues from a snapshot exactly as without one (the review can seek)', () => {
