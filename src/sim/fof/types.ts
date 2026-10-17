@@ -372,6 +372,8 @@ export interface FofForce {
   lastAimedFireAt: number | null;
   /** Pressing on through contact (actions on contact `continue`) until then: it does not halt for contact. */
   pressOnUntil: number | null;
+  /** Pressing on under fire: its soldiers crawl on, prone, at the crawl's pace. */
+  crawling: boolean;
   /** In ambush: the enemy soldiers in its kill zone at the last decision, in soldier order. */
   /**
    * A defence (`defending`): how far dug in (0–1; full after `digInSeconds`

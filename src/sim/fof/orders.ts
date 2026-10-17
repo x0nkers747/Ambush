@@ -334,6 +334,7 @@ function startNext(context: FofContext, force: FofForce, fallback: ActionsOn): v
   force.objectiveQuietSince = null;
   force.actionsOn = next.actionsOn;
   force.pressOnUntil = null;
+  force.crawling = false;
   force.ambushSprungAt = null;
   force.killZoneInside = [];
   // A new order: its dig-in is lost (its fighting positions stay where they were dug).

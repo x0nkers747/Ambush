@@ -11,7 +11,7 @@ twenty minutes with almost no fire (§3).
 
 | Choice (UI)  | `ActionsOn` | On contact the squad…                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Continue** | `continue`  | halts and fights from where it is. When it has had nothing to engage for `pressOnSeconds` (45 s: no aimed fire since contact, and it is not suppressed), and no fire has come at it for 15 s, it presses on toward its waypoint for 45 s, firing on the move at anything it sees, and does not halt again for the same contact; fired upon, it halts at once and takes cover (prone, kneeling to see). Under fire it cannot return it stays down: it does not walk on upright under it. |
+| **Continue** | `continue`  | halts and fights from where it is. When it has had nothing to engage for `pressOnSeconds` (45 s: no aimed fire since contact, and it is not suppressed), it presses on toward its waypoint for 45 s, firing on the move at anything it sees, and does not halt again for the same contact. Under fire (fired upon within 15 s, when it presses on or while it does) it crawls on: every soldier prone, the squad at the crawl's pace (0.35 m/s), each burst at it keeping it pressing on, crawling, for 45 s more. Once 45 s pass without fire it gets up and goes on at its own pace. It never walks on upright under fire. |
 | **Attack**   | `attack`    | shifts into its extended line (the squad's `line`, the fire team's `skirmishers`) and assaults the enemy by bounding elements; afterwards it carries on with its plan, or withdraws when spent.                                                                                                                                                                                                                                                                                         |
 | **Hold**     | `hold`      | halts, fights whatever it can see from there and waits indefinitely. Its order stays active; it moves only on a new order (or breaks contact if it becomes spent).                                                                                                                                                                                                                                                                                                                      |
 | **Avoid**    | `withdraw`  | falls back a short way from where it is at once, at any range it sees the enemy, then holds. It does not fire unless it has been fired upon in the last 60 s.                                                                                                                                                                                                                                                                                                                           |
@@ -29,7 +29,7 @@ older scenarios without it read their kind's default.
 ## 2. Where it lives
 
 - `src/sim/fof/types.ts`: `ActionsOn`, plus the force state `contactAt`, `lastAimedFireAt`
-  and `pressOnUntil`, and the soldier's `postureAt`.
+  `pressOnUntil` and `crawling`, and the soldier's `postureAt`.
 - `src/sim/fof/force.ts`: the phase decisions; `pressingOn`, `nothingToEngage` and `postureToSee`.
 - `src/sim/fof/fire.ts`: fire on the move while pressing on, and the avoid force's hold-fire rule.
 - `src/sim/fof/lifecycle.ts`: the spent-withdrawal check that no longer flip-flops.
@@ -84,10 +84,10 @@ BLUEFOR's actions on contact varied and OPFOR on Continue.
   - **Hold** never moves on or assaults after contact, and its order stays active;
   - **Avoid** first withdraws, fires only after being fired upon, and never moves forward again;
   - **Attack** assaults, in at least two seeds, with a line formation;
-  - **Continue** presses on and does not halt again within 45 s, unless
-    fired upon (2026-10-17: a squad pressing on walked upright down a road
-    under an Abrams' fire; now it halts and goes to ground, and presses on
-    only after 15 s without fire);
+  - **Continue** presses on and does not halt again within 45 s; fired upon
+    within 15 s, it crawls on (2026-10-17: a squad pressing on walked
+    upright down a road under an Abrams' fire; now it crawls, prone, the
+    whole way under fire: `combined-arms.test.ts`);
   - no squad makes five phase changes within 2 s.
 
   They also check the scenario edits (defaults, kind changes, saving, older

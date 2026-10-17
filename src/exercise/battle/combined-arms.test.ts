@@ -421,7 +421,7 @@ describe('a fifth vehicle, with no change to the combat code', () => {
 });
 
 describe('under fire it cannot return', () => {
-  it('a squad pressing on is stopped by fire: it takes cover, not walking on upright', () => {
+  it('a squad pressing on under fire crawls on: prone the whole way, at a crawl, not walking upright', () => {
     // An OPFOR squad moving on (actions on contact: continue) toward an M113
     // whose machine gun outranges every weapon it has.
     const spec: BattleSpec = {
@@ -437,17 +437,33 @@ describe('under fire it cannot return', () => {
       vehicles: [vehicle('V1', 'm113', 'BLUEFOR', 0, 700, 180)],
     };
     const battle = createBattle(spec, TERRAIN);
+    const fof = () => battle.sim.state.fof?.forces.find((f) => f.unitId.startsWith('O1'));
+    const ahead = () => {
+      const up = battle.sim.state.soldiers.filter(
+        (s) => s.id.startsWith('O1-') && s.status === 'active',
+      );
+      return up.reduce((m, s) => m + s.position.y, 0) / Math.max(1, up.length);
+    };
     /** When the M113 last fired at the squad. */
     let firedAt = -Infinity;
     let fired = 0;
     let upright = 0;
-    for (let i = 0; i < 240 * 30; i += 1) {
+    let crawled = 0;
+    let crawlFrom: number | null = null;
+    let crawlTo = 0;
+    for (let i = 0; i < 300 * 30; i += 1) {
       const t = i / 30;
       for (const e of battle.step())
         if (e.type === 'vehicleFire' && e.targetId.startsWith('O1-')) {
           firedAt = t;
           fired += 1;
         }
+      const force = fof();
+      if (force?.phase === 'moving' && force.crawling) {
+        crawled += 1;
+        crawlFrom ??= ahead();
+        crawlTo = ahead();
+      }
       // From 3 s after a burst (time to react) to 10 s: everyone down.
       if (t - firedAt < 3 || t - firedAt > 10) continue;
       for (const s of battle.sim.state.soldiers)
@@ -456,6 +472,11 @@ describe('under fire it cannot return', () => {
     }
     expect(fired).toBeGreaterThanOrEqual(5);
     expect(upright).toBe(0);
+    // Fired on as it pressed on, it crawled on (45 s from the last burst), at a crawl's pace.
+    expect(crawled / 30).toBeGreaterThan(45);
+    const gained = crawlTo - (crawlFrom ?? 0);
+    expect(gained).toBeGreaterThan(0.15 * (crawled / 30));
+    expect(gained).toBeLessThan(0.45 * (crawled / 30));
   });
 });
 

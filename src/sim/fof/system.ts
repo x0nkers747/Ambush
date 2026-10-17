@@ -180,6 +180,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
       contactAt: null,
       lastAimedFireAt: null,
       pressOnUntil: null,
+      crawling: false,
       killZoneInside: [],
       dugIn: 0,
       diggingSince: null,

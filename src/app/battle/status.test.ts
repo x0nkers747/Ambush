@@ -60,6 +60,7 @@ describe('the activity word', () => {
   const as = (change: Partial<DeepReadonly<FofForce>>) => activityOf({ ...force, ...change });
   it('says what it is doing and why', () => {
     expect(as({ pressOnUntil: 100 }).word).toBe('Pressing on');
+    expect(as({ pressOnUntil: 100, crawling: true }).word).toBe('Crawling on');
     expect(as({ phase: 'possibleContact' }).word).toBe('Observing');
     expect(as({ phase: 'engaged' }).word).toBe('Engaging');
     expect(as({ phase: 'assaulting' }).word).toBe('Attacking');

@@ -117,6 +117,11 @@ function phaseActivity(force: DeepReadonly<FofForce>, config: FofConfig): SquadA
     `suppressed (${percent(force.meanSuppression)}): it waits for that to wear off to ${percent(config.force.resumeSuppression)}`;
   switch (force.phase) {
     case 'moving':
+      if (force.pressOnUntil !== null && force.crawling)
+        return {
+          word: 'Crawling on',
+          why: 'under fire with nothing to engage: pressing on, prone, at a crawl, firing as it goes',
+        };
       if (force.pressOnUntil !== null)
         return {
           word: 'Pressing on',

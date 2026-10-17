@@ -118,11 +118,21 @@ export function updateForces(context: FofContext): void {
         : picture.nearestConfirmed <= behavior.engageRangeM;
     switch (force.phase) {
       case 'moving':
-      case 'atObjective':
-        if (pressingOn(context, force)) break;
-        if (force.phase === 'moving') force.pressOnUntil = null;
-        if (close) onContact(context, force, 'contact within engagement range');
+      case 'atObjective': {
+        // Pressing on, it does not halt for contact; its route goes on.
+        const pressing = pressingOn(context, force);
+        if (!pressing) {
+          if (force.phase === 'moving') force.pressOnUntil = null;
+          if (force.crawling) {
+            // Its press on over: up, and on at its pace (unless halting now).
+            force.crawling = false;
+            if (!close && force.phase === 'moving' && force.mission && runningTask(context, force))
+              issue(context, force, force.mission);
+          }
+        }
+        if (!pressing && close) onContact(context, force, 'contact within engagement range');
         else if (
+          !pressing &&
           picture.newSince(force.observedUntil) &&
           (force.observedUntil === 0 || t - force.observedUntil >= behavior.reobserveSeconds - 1e-9)
         ) {
@@ -144,7 +154,8 @@ export function updateForces(context: FofContext): void {
             force.mission = leg.order;
             // Its last leg, off the road: a plain move from here on.
             if (road.legs.length === 0 && !leg.onRoad) delete force.roadMove;
-            if (!issue(context, force, leg.order)) delete force.roadMove;
+            if (!issue(context, force, force.crawling ? atCrawl(leg.order) : leg.order))
+              delete force.roadMove;
           } else if (
             order?.kind === 'ambush' &&
             order.destination &&
@@ -161,6 +172,7 @@ export function updateForces(context: FofContext): void {
           } else enter(context, force, 'atObjective', 'arrived');
         }
         break;
+      }
       case 'inAmbush':
         updateAmbush(context, force);
         break;
@@ -192,11 +204,22 @@ export function updateForces(context: FofContext): void {
         } else if (force.actionsOn === 'attack') {
           beginAssault(context, force, picture.enemy);
         } else if (force.actionsOn === 'continue' && nothingToEngage(context, force)) {
-          // Nothing it can engage from here: it presses on, firing on the move.
+          // Nothing it can engage from here: it presses on, firing on the
+          // move; under fire, crawling.
           force.pressOnUntil = t + behavior.pressOnSeconds;
           force.observedUntil = t;
-          resume(context, force, 'nothing to engage: pressing on');
-          if ((force.phase as ForcePhase) !== 'moving') force.pressOnUntil = null;
+          force.crawling = firedUponLately(context, force);
+          resume(
+            context,
+            force,
+            force.crawling
+              ? 'nothing to engage: crawling on under fire'
+              : 'nothing to engage: pressing on',
+          );
+          if ((force.phase as ForcePhase) !== 'moving') {
+            force.pressOnUntil = null;
+            force.crawling = false;
+          }
         } else if (
           force.actionsOn === 'withdraw' &&
           (force.withdrawRetryAt === null || t >= force.withdrawRetryAt - 1e-9) &&
@@ -365,6 +388,7 @@ export function halt(
     force.contactAt = t;
   }
   force.pressOnUntil = null;
+  force.crawling = false;
   enter(context, force, phase, reason);
   // Reaction delays, drawn in soldier order (after the surprise of being caught in an ambush).
   const delay = context.setup.config.force.reactionDelay;
@@ -868,7 +892,7 @@ export function resume(context: FofContext, force: FofForce, reason: string): vo
   standUp(context, force);
   // Driven by a plan, it resumes its active order; with none, it holds where it is.
   const mission = force.planned && activeOrder(force) === null ? null : force.mission;
-  if (mission && issue(context, force, mission)) {
+  if (mission && issue(context, force, force.crawling ? atCrawl(mission) : mission)) {
     enter(context, force, 'moving', reason);
   } else {
     enter(context, force, 'atObjective', reason);
@@ -987,7 +1011,9 @@ function carryOut(
       ) {
         member.nextFireAt = t + MOVING_FIRE_DELAY_S;
       }
-      if (member.level === 'pinned') soldier.posture = 'prone';
+      // Crawling on under fire, he is prone the whole way.
+      if (member.level === 'pinned' || (force.crawling && pressingOn(context, force)))
+        soldier.posture = 'prone';
       else if (soldier.posture !== 'standing' && member.level === 'none')
         soldier.posture = 'standing';
       continue;
@@ -1062,21 +1088,31 @@ export function postureToSee(
   return lowest;
 }
 
-/** A force presses on only once no fire has come at it for this long (s). */
-const PRESS_ON_QUIET_S = 15;
+/** Fire at it within this (s), a force pressing on is under fire: it crawls. */
+const UNDER_FIRE_S = 15;
+/** Crawling (m/s): the crawl's own pace, as drawn. */
+const CRAWL_PACE = 0.35;
+
+/** Whether fire has come at the force within `UNDER_FIRE_S`. */
+function firedUponLately(context: FofContext, force: FofForce): boolean {
+  return force.lastFiredUponAt !== null && context.t - force.lastFiredUponAt < UNDER_FIRE_S - 1e-9;
+}
+
+/** A movement order at a crawl. */
+function atCrawl(order: UnitOrder): UnitOrder {
+  return { ...order, pace: Math.min(order.pace ?? CRAWL_PACE, CRAWL_PACE) };
+}
 
 /**
  * Whether a force halted in contact has nothing it can engage: none of its
  * soldiers has fired at an enemy he could see for `pressOnSeconds` since it
- * halted, it is not pinned down, and no fire has come at it for
- * `PRESS_ON_QUIET_S` (under fire it cannot return, it stays down).
+ * halted, and it is not pinned down. (Under fire it cannot return, it
+ * presses on all the same, crawling.)
  */
 function nothingToEngage(context: FofContext, force: FofForce): boolean {
   const { t, setup } = context;
   const since = Math.max(force.contactAt ?? -Infinity, force.lastAimedFireAt ?? -Infinity);
   if (t - since < setup.config.force.pressOnSeconds - 1e-9) return false;
-  if (force.lastFiredUponAt !== null && t - force.lastFiredUponAt < PRESS_ON_QUIET_S - 1e-9)
-    return false;
   return force.meanSuppression < setup.config.suppression.suppressedAt;
 }
 
@@ -1174,11 +1210,17 @@ export function underFire(
     );
     setLevel(context, track, from, null, null);
   }
-  // Pressing on, it is stopped by fire: it halts and takes cover (prone,
-  // kneeling to see), not walking on upright under it.
+  // Pressing on, it presses on under fire as long, crawling: down, and on
+  // at a crawl (not walking on upright under it).
   if (pressingOn(context, own)) {
-    own.pressOnUntil = null;
-    onContact(context, own, 'under fire');
+    own.pressOnUntil = Math.max(
+      own.pressOnUntil ?? context.t,
+      context.t + context.setup.config.force.pressOnSeconds,
+    );
+    if (!own.crawling) {
+      own.crawling = true;
+      if (own.mission) issue(context, own, atCrawl(own.mission));
+    }
     return;
   }
   if (own.phase === 'inAmbush') {
