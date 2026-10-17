@@ -67,6 +67,15 @@ export const COMBAT_TUNING = {
   sampleShares: [0.85, 0.55, 0.2] as const,
   /** A moving vehicle is more conspicuous (sound, dust, movement): cycles × this. */
   engineCue: 1.6,
+  /**
+   * A vehicle stands out from its background more than a soldier: a large,
+   * dark mass with straight edges and a shadow. The conditions' background
+   * contrast (0.25 on a clear day) is a camouflaged soldier's; a vehicle's,
+   * seen by anyone, is this many times it. (At 1, a stationary T-72 could
+   * detect a stationary M113 in the open at 1.5 km in only 27% of pairs, an
+   * Abrams a T-72 at 2 km in 46%: most such duels were never fought.)
+   */
+  vehicleContrastFactor: 2,
   /** Within this range a moving vehicle is heard all round (m). */
   heardWithinM: 350,
   /** A vehicle above this speed is moving (m/s). */
@@ -556,6 +565,7 @@ function soldiersLook(
       const platform = platformFor(catalog, v);
       const dimension = Math.sqrt(platform.dimensions.heightM * platform.dimensions.widthM);
       const cue =
+        COMBAT_TUNING.vehicleContrastFactor *
         (moving ? COMBAT_TUNING.engineCue : 1) *
         (vehicleFiredLately(context, v) ? detection.firingSignatureFactor : 1);
       const cyclesInView = (visibleFraction: number) =>
@@ -713,6 +723,7 @@ function vehiclesLook(
       if (other.side === v.side || other.combat.damage.destroyed) continue;
       const op = platformFor(catalog, other);
       const cue =
+        COMBAT_TUNING.vehicleContrastFactor *
         (other.combat.speed > COMBAT_TUNING.movingSpeedMps ? COMBAT_TUNING.engineCue : 1) *
         (vehicleFiredLately(context, other) ? detection.firingSignatureFactor : 1);
       look(

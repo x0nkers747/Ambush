@@ -101,6 +101,16 @@ platform's class. Detection is the force-on-force model's (`src/sim/combat/syste
   and dug-in soldiers are as hard to see as in the infantry model. What a
   crew finds goes into its **vehicle's tracks** (`VehicleCombat.tracks`).
 
+A vehicle, seen by anyone, stands out from its background twice as much as a
+soldier (`COMBAT_TUNING.vehicleContrastFactor`, 2): a large, dark mass with
+straight edges and a shadow, where the conditions' background contrast (0.25
+on a clear day) is a camouflaged soldier's. A pair's threshold is drawn once,
+so a target whose P∞ in full view is below it is never detected while
+neither moves nor fires: at contrast 1 a stationary T-72 could ever detect a
+stationary M113 in the open at 1.5 km in only 27% of pairs, an Abrams a T-72
+at 2 km in 46%, and most such duels were never fought (the scenario battery,
+2026-10-17: 12 to 17 of 20 drawn). At 2, about 81% and 93%.
+
 Search is faster the more plainly a target stands out (`conspicuity`): its
 resolvable cycles over 2 (at most × 10), so a tank in the open at a few
 hundred metres is found in a look or two, and a glimpse that plain adds more

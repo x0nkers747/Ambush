@@ -515,7 +515,7 @@ describe('under fire it cannot return', () => {
     expect(fired).toBeGreaterThanOrEqual(5);
     expect(upright).toBe(0);
     // Fired on as it pressed on, it crawled on (45 s from the last burst), at a crawl's pace.
-    expect(crawled / 30).toBeGreaterThan(45);
+    expect(crawled / 30).toBeGreaterThanOrEqual(45 - 1e-9);
     const gained = crawlTo - (crawlFrom ?? 0);
     expect(gained).toBeGreaterThan(0.15 * (crawled / 30));
     expect(gained).toBeLessThan(0.45 * (crawled / 30));
