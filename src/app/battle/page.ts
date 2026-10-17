@@ -1529,14 +1529,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         }</dd>
       </dl>`;
   };
-  /** Under the primary button: ready, or what still stops the scenario from being played. */
+  /** Under the primary button: what still stops the scenario from being played (nothing when ready). */
   const readinessHtml = (): string => {
     const issues = planner.issues();
     // Order issues belong to Planning; Setup shows the others.
     const shown =
       planner.stage === 'scenario' ? issues.filter((i) => i.orderIndex === null) : issues;
     return shown.length === 0
-      ? '<p class="ok">Ready: nothing stops this scenario from being played.</p>'
+      ? ''
       : `<ul class="blockers">${shown
           .slice(0, 8)
           .map((i) => `<li>${escapeHtml(i.message)}</li>`)
