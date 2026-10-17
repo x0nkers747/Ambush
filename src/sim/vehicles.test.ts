@@ -51,6 +51,28 @@ const FEATURES: EnvironmentFeatures = {
   ],
 };
 
+/** Whether two vehicles' hulls overlap (separating axes). */
+function overlapping(a: DeepReadonly<VehicleState>, b: DeepReadonly<VehicleState>): boolean {
+  const dims = (v: DeepReadonly<VehicleState>) => {
+    const t = VEHICLE_TYPES[v.kind as keyof typeof VEHICLE_TYPES];
+    return { l: t.length, w: t.width };
+  };
+  const da = dims(a);
+  const db = dims(b);
+  const dx = b.position.x - a.position.x;
+  const dy = b.position.y - a.position.y;
+  for (const axis of [a.heading, a.heading + Math.PI / 2, b.heading, b.heading + Math.PI / 2]) {
+    const ux = Math.sin(axis);
+    const uy = Math.cos(axis);
+    const extent = (h: number, l: number, w: number) =>
+      Math.abs(((Math.sin(h) * ux + Math.cos(h) * uy) * l) / 2) +
+      Math.abs(((Math.cos(h) * ux - Math.sin(h) * uy) * w) / 2);
+    if (Math.abs(dx * ux + dy * uy) > extent(a.heading, da.l, da.w) + extent(b.heading, db.l, db.w))
+      return false;
+  }
+  return true;
+}
+
 function scenario(vehicle: Partial<ScenarioVehicle>, elevation = flatElevation(10)): Scenario {
   return {
     id: 'vehicles',
@@ -348,6 +370,140 @@ describe('vehicles', () => {
     expect(
       Math.hypot((passing?.position.x ?? 0) - 1700, (passing?.position.y ?? 0) - 500),
     ).toBeLessThan(1.5);
+  });
+
+  it('passes a vehicle coming the other way on the road, each keeping to its right', () => {
+    const base = scenario({});
+    const sim = createSimulation(
+      { seed: 1, tickRateHz: RATE },
+      {
+        ...base,
+        vehicles: [
+          {
+            id: 'V1',
+            name: 'Abrams',
+            side: 'BLUEFOR',
+            kind: 'm1a1',
+            position: { x: 300, y: 500 },
+            headingDeg: 90,
+            destinations: [{ x: 1700, y: 500, followRoads: true }],
+          },
+          {
+            id: 'V2',
+            name: 'T-72',
+            side: 'OPFOR',
+            kind: 't72b',
+            position: { x: 1700, y: 500 },
+            headingDeg: 270,
+            destinations: [{ x: 300, y: 500, followRoads: true }],
+          },
+        ],
+      },
+    );
+    let overlaps = 0;
+    let passed: { east: number; west: number } | null = null;
+    for (let k = 0; k < 200 * RATE; k += 1) {
+      sim.step();
+      const [east, west] = sim.state.vehicles ?? [];
+      if (!east || !west) throw new Error('no vehicles');
+      if (overlapping(east, west)) overlaps += 1;
+      if (!passed && Math.abs(east.position.x - west.position.x) < 2)
+        passed = { east: east.position.y, west: west.position.y };
+    }
+    // They drove through each other (head on, neither gave way); now each
+    // eases to its right, and they pass side by side.
+    expect(overlaps).toBe(0);
+    expect(passed?.east).toBeLessThan(500);
+    expect(passed?.west).toBeGreaterThan(500);
+    expect((passed?.west ?? 0) - (passed?.east ?? 0)).toBeGreaterThan(3.7);
+    for (const v of sim.state.vehicles ?? []) expect(v.orders[0]?.status).toBe('completed');
+  });
+
+  it('does not drive into a vehicle crossing its way: one goes first, the other waits', () => {
+    // An M113 east along the road, a BMP-2 south across it, timed (one start
+    // after another) to meet where their ways cross (from 910 m and 920 m
+    // they drove into each other).
+    let collided = 0;
+    let arrived = 0;
+    for (const start of [880, 890, 900, 910, 920, 930, 940]) {
+      const base = scenario({});
+      const sim = createSimulation(
+        { seed: 1, tickRateHz: RATE },
+        {
+          ...base,
+          vehicles: [
+            {
+              id: 'V1',
+              name: 'M113',
+              side: 'BLUEFOR',
+              kind: 'm113',
+              position: { x: 300, y: 500 },
+              headingDeg: 90,
+              destinations: [{ x: 1500, y: 500 }],
+            },
+            {
+              id: 'V2',
+              name: 'BMP-2',
+              side: 'BLUEFOR',
+              kind: 'bmp2',
+              position: { x: 800, y: start },
+              headingDeg: 180,
+              destinations: [{ x: 800, y: 150 }],
+            },
+          ],
+        },
+      );
+      for (let k = 0; k < 150 * RATE; k += 1) {
+        sim.step();
+        const [a, b] = sim.state.vehicles ?? [];
+        if (a && b && overlapping(a, b)) collided += 1;
+      }
+      arrived += (sim.state.vehicles ?? []).filter(
+        (v) => v.orders[0]?.status === 'completed',
+      ).length;
+    }
+    expect(collided).toBe(0);
+    expect(arrived).toBe(14);
+  });
+
+  it('finds a way its hull fits through: round two buildings, not through the gap a soldier could take', () => {
+    // Two buildings end to end, a 3.5 m gap between them on the line to its
+    // waypoint: a soldier fits through it, a tank does not. It goes round.
+    const wall = (id: string, y0: number, y1: number) => ({
+      id,
+      footprint: [
+        { x: 900, y: y0 },
+        { x: 920, y: y0 },
+        { x: 920, y: y1 },
+        { x: 900, y: y1 },
+      ],
+      heightMeters: 8,
+    });
+    const terrain = createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 50, columns: 41, rows: 41 },
+      flatElevation(10),
+      {
+        roads: [],
+        buildings: [wall('south', 600, 1000), wall('north', 1003.5, 1400)],
+        vegetation: [],
+      },
+    );
+    const base = scenario({
+      kind: 'm1a1',
+      position: { x: 700, y: 1001.75 },
+      headingDeg: 90,
+      destinations: [{ x: 1100, y: 1001.75 }],
+    });
+    const sim = createSimulation({ seed: 1, tickRateHz: RATE }, { ...base, terrain });
+    let inGap = 0;
+    const v = run(sim, 200, (s) => {
+      if (s.position.x > 895 && s.position.x < 925 && s.position.y > 990 && s.position.y < 1015)
+        inGap += 1;
+    });
+    // It was refused ("no way there wide enough for the vehicle").
+    expect(v.orders[0]?.status).toBe('completed');
+    expect(inGap).toBe(0);
+    expect(Math.hypot(v.position.x - 1100, v.position.y - 1001.75)).toBeLessThan(1.5);
   });
 
   it('replaces or appends to its orders by command', () => {

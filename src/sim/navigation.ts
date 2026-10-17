@@ -215,6 +215,50 @@ export function isSegmentWalkable(terrain: TerrainDataset, a: Vec2, b: Vec2): bo
   });
 }
 
+/**
+ * The most clearance a query may keep (m): a vehicle's half-width and its
+ * margin. The obstacle index registers each obstacle this far round it, so
+ * every query up to it finds what is near.
+ */
+export const MAX_CLEARANCE_M = 3;
+
+/** What a body keeps clear of (m): buildings, and impassable water. */
+export interface Clearance {
+  readonly buildings: number;
+  readonly water: number;
+}
+
+/**
+ * Whether a body keeping `clearance` (at most `MAX_CLEARANCE_M`) can go
+ * straight from `a` to `b` (or stand at `a`, `b` = `a`): `isSegmentWalkable`
+ * for a body wider than a soldier, a vehicle's hull.
+ */
+export function isSegmentClear(
+  terrain: TerrainDataset,
+  a: Vec2,
+  b: Vec2,
+  clearance: Clearance,
+): boolean {
+  if (!isOnTerrain(terrain, a.x, a.y) || !isOnTerrain(terrain, b.x, b.y)) return false;
+  const segmentBox = boundsOf([a, b]);
+  const index = obstacleIndex(terrain);
+  return everyObstacleAlong(index, a, b, (i) => {
+    const building = index.buildings[i];
+    if (building) {
+      return (
+        !overlaps(building.box, segmentBox, clearance.buildings) ||
+        segmentClearOfPolygon(a, b, building.building.footprint, building.box, clearance.buildings)
+      );
+    }
+    const water = index.water[i - index.buildings.length];
+    return (
+      !water ||
+      !overlaps(water.box, segmentBox, clearance.water) ||
+      segmentClearOfPolygon(a, b, water.water.boundary, water.box, clearance.water)
+    );
+  });
+}
+
 /** How a path is planned. */
 export interface PathOptions {
   /**
@@ -466,18 +510,17 @@ function obstacleIndex(terrain: TerrainDataset): ObstacleIndex {
   }));
   const columns = Math.max(1, Math.ceil(((samplesX - 1) * cellSize) / INDEX_BUCKET_M));
   const rows = Math.max(1, Math.ceil(((samplesY - 1) * cellSize) / INDEX_BUCKET_M));
-  const ranges = [...buildings.map(({ box }) => box), ...water.map(({ box }) => box)].map(
-    (box, i) => {
-      const m = (i < buildings.length ? OBSTACLE_CLEARANCE_M : 0) + INDEX_SLACK_M;
-      const clamp = (v: number, n: number) => Math.min(n - 1, Math.max(0, v));
-      return {
-        c0: clamp(Math.floor((box.minX - m - originX) / INDEX_BUCKET_M), columns),
-        c1: clamp(Math.floor((box.maxX + m - originX) / INDEX_BUCKET_M), columns),
-        r0: clamp(Math.floor((box.minY - m - originY) / INDEX_BUCKET_M), rows),
-        r1: clamp(Math.floor((box.maxY + m - originY) / INDEX_BUCKET_M), rows),
-      };
-    },
-  );
+  const ranges = [...buildings.map(({ box }) => box), ...water.map(({ box }) => box)].map((box) => {
+    // Registered as far round as any query reaches (a vehicle's clearance, `isSegmentClear`).
+    const m = MAX_CLEARANCE_M + INDEX_SLACK_M;
+    const clamp = (v: number, n: number) => Math.min(n - 1, Math.max(0, v));
+    return {
+      c0: clamp(Math.floor((box.minX - m - originX) / INDEX_BUCKET_M), columns),
+      c1: clamp(Math.floor((box.maxX + m - originX) / INDEX_BUCKET_M), columns),
+      r0: clamp(Math.floor((box.minY - m - originY) / INDEX_BUCKET_M), rows),
+      r1: clamp(Math.floor((box.maxY + m - originY) / INDEX_BUCKET_M), rows),
+    };
+  });
   const counts = new Int32Array(columns * rows + 1);
   for (const { c0, c1, r0, r1 } of ranges) {
     for (let r = r0; r <= r1; r += 1) {
@@ -1281,6 +1324,104 @@ function connect(terrain: TerrainDataset, grid: NavGrid, p: Vec2): number | unde
   }
   candidates.sort((a, b) => a.distance - b.distance || a.cell - b.cell);
   return candidates.find(({ cell }) => isSegmentWalkable(terrain, p, cellCentre(grid, cell)))?.cell;
+}
+
+// --- Paths for a wider body (a vehicle's hull) ----------------------------------
+
+const hullGrids = new WeakMap<TerrainDataset, Map<string, NavGrid>>();
+
+/**
+ * The navigation grid for a body keeping `clearance`: as `navGrid`, a cell
+ * blocked whose centre is within the clearance (plus half a cell diagonal)
+ * of a building or of impassable water. Built once per terrain and clearance.
+ */
+function hullGrid(terrain: TerrainDataset, clearance: Clearance): NavGrid {
+  let grids = hullGrids.get(terrain);
+  if (!grids) {
+    grids = new Map();
+    hullGrids.set(terrain, grids);
+  }
+  const key = `${String(clearance.buildings)},${String(clearance.water)}`;
+  const known = grids.get(key);
+  if (known) return known;
+  const { originX, originY, cellSize, columns, rows } = terrain.heightfield;
+  const c = Math.floor(((columns - 1) * cellSize) / NAV_CELL_M);
+  const r = Math.floor(((rows - 1) * cellSize) / NAV_CELL_M);
+  const grid: NavGrid = { originX, originY, columns: c, rows: r, blocked: new Uint8Array(c * r) };
+  const { buildings, water } = obstacleIndex(terrain);
+  const half = (NAV_CELL_M * Math.SQRT2) / 2;
+  for (const { building, box } of buildings)
+    blockPolygon(grid, building.footprint, box, clearance.buildings + half);
+  for (const { water: w, box } of water)
+    blockPolygon(grid, w.boundary, box, clearance.water + half);
+  grids.set(key, grid);
+  return grid;
+}
+
+/** How far (cells) a point is joined to the hull grid. */
+const HULL_CONNECT_CELLS = 6;
+
+/**
+ * A path for a body keeping `clearance` (a vehicle's hull) from `from` to
+ * `to`, both places it fits: its turns, string-pulled so every leg keeps the
+ * clearance (`isSegmentClear`). `from` may be where it is though it does not
+ * fit (it leaves by a line a soldier could walk). No bridges: it fails where
+ * only a bridge over water would join them.
+ */
+export function planHullPath(
+  terrain: TerrainDataset,
+  from: Vec2,
+  to: Vec2,
+  clearance: Clearance,
+): PathResult {
+  if (!isSegmentClear(terrain, to, to, clearance))
+    return { ok: false, problem: { kind: 'unreachable' } };
+  if (isSegmentClear(terrain, from, to, clearance)) return { ok: true, turns: [] };
+  const grid = hullGrid(terrain, clearance);
+  const join = (p: Vec2, clear: (a: Vec2, b: Vec2) => boolean): number | undefined => {
+    const c0 = Math.floor((p.x - grid.originX) / NAV_CELL_M);
+    const r0 = Math.floor((p.y - grid.originY) / NAV_CELL_M);
+    const candidates: { cell: number; distance: number }[] = [];
+    for (let r = r0 - HULL_CONNECT_CELLS; r <= r0 + HULL_CONNECT_CELLS; r += 1)
+      for (let c = c0 - HULL_CONNECT_CELLS; c <= c0 + HULL_CONNECT_CELLS; c += 1) {
+        if (r < 0 || c < 0 || r >= grid.rows || c >= grid.columns) continue;
+        const cell = r * grid.columns + c;
+        if (grid.blocked[cell]) continue;
+        const centre = cellCentre(grid, cell);
+        candidates.push({ cell, distance: Math.hypot(centre.x - p.x, centre.y - p.y) });
+      }
+    candidates.sort((a, b) => a.distance - b.distance || a.cell - b.cell);
+    return candidates.find(({ cell }) => clear(p, cellCentre(grid, cell)))?.cell;
+  };
+  const hull = (a: Vec2, b: Vec2) => isSegmentClear(terrain, a, b, clearance);
+  const start = join(from, hull) ?? join(from, (a, b) => isSegmentWalkable(terrain, a, b));
+  const goal = join(to, hull);
+  if (start === undefined || goal === undefined)
+    return { ok: false, problem: { kind: 'unreachable' } };
+  grid.areas ??= labelAreas(grid);
+  if (grid.areas[start] !== grid.areas[goal])
+    return { ok: false, problem: { kind: 'unreachable' } };
+  const cells = aStar(grid, start, goal, new Map());
+  if (!cells) return { ok: false, problem: { kind: 'unreachable' } };
+  const nodes: Vec2[] = [from, ...cells.map((cell) => cellCentre(grid, cell)), to];
+  // String-pulled with the hull's clearance (the first leg as it was joined).
+  const pulled: Vec2[] = [from];
+  let i = 0;
+  while (i < nodes.length - 1) {
+    let next = i + 1;
+    for (let j = nodes.length - 1; j > i + 1; j -= 1) {
+      const a = nodes[i];
+      const b = nodes[j];
+      if (a && b && hull(a, b)) {
+        next = j;
+        break;
+      }
+    }
+    const node = nodes[next];
+    if (node) pulled.push(node);
+    i = next;
+  }
+  return { ok: true, turns: pulled.slice(1, -1) };
 }
 
 // The eight grid steps (column, row, length), as parallel arrays for the hot loops below.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createSimulation,
   hashSimState,
+  NO_FEATURES,
   VEHICLE_PLATFORMS,
   type PlatformSpec,
   type ScenarioVehicle,
@@ -571,5 +572,53 @@ describe('vehicles and soldiers', () => {
     expect(closest).toBeLessThan(8);
     expect(under).toBe(0);
     expect(battle.sim.state.vehicles?.[0]?.orders[0]?.status).toBe('completed');
+  });
+
+  it('a squad of its side halted in a narrow street makes way for it', () => {
+    // A street 9 m wide between two long blocks, a squad standing in column
+    // down the middle of it (no orders), and an M113 to drive through: there
+    // is no way past them; they step aside, and it goes on.
+    const block = (id: string, x0: number, x1: number) => ({
+      id,
+      footprint: [
+        { x: x0, y: -150 },
+        { x: x1, y: -150 },
+        { x: x1, y: 150 },
+        { x: x0, y: 150 },
+      ],
+      heightMeters: 10,
+    });
+    const street = labTerrain({
+      ...NO_FEATURES,
+      buildings: [block('west', -60, -4.5), block('east', 4.5, 60)],
+    });
+    const spec: BattleSpec = {
+      seed: 4,
+      tickRateHz: 30,
+      squads: [
+        squad('B1', 'BLUEFOR', 0, 0, 0, { antiTank: 'none', formation: 'usmc.squad.column' }),
+        OX,
+      ],
+      vehicles: [vehicle('V1', 'm113', 'BLUEFOR', 0, -250, 0, [{ x: 0, y: 250 }])],
+    };
+    const battle = createBattle(spec, street);
+    const m113 = VEHICLE_PLATFORMS.find((p) => p.id === 'm113');
+    const length = m113?.dimensions.lengthM ?? 5;
+    const width = m113?.dimensions.widthM ?? 3;
+    let under = 0;
+    for (let i = 0; i < 180 * 30; i += 1) {
+      battle.step();
+      const v = battle.sim.state.vehicles?.[0];
+      if (!v) throw new Error('no vehicle');
+      for (const s of battle.sim.state.soldiers) {
+        if (!s.id.startsWith('B1-') || s.status !== 'active') continue;
+        const dx = s.position.x - v.position.x;
+        const dy = s.position.y - v.position.y;
+        if (Math.abs(dy) < length / 2 && Math.abs(dx) < width / 2) under += 1;
+      }
+    }
+    // It waited for good behind them.
+    expect(battle.sim.state.vehicles?.[0]?.orders[0]?.status).toBe('completed');
+    expect(under).toBe(0);
   });
 });

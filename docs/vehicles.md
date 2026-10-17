@@ -61,9 +61,10 @@ are unchanged.
 
 ## 2. How it drives
 
-Each order's route is planned like a soldier's. It goes round buildings and
-water, and through woods. With Prefer roads, by the roads when they help. The vehicle steers along
-the route (`src/sim/vehicles.ts`):
+Each order's route is planned like a soldier's, then fitted to the hull
+(Routes, below). It goes round buildings and water, and through woods. With
+Prefer roads, by the roads when they help. The vehicle steers along the
+route (`src/sim/vehicles.ts`):
 
 - **Pivoting.** Nearly stopped and facing more than 50° away from where it must
   go, it turns on the spot at 35°/s.
@@ -71,8 +72,12 @@ the route (`src/sim/vehicles.ts`):
   to 2.5 m/s² of sideways acceleration, and to 40°/s.
 - **Speed.** It speeds up to the speed the ground allows under it, and slows
   uphill. Accelerating is 1.2 m/s²; braking is 2.5 m/s².
-- **Bends.** It brakes in time for the next bend. A bend of 60° or more is
-  taken at 3 m/s (11 km/h); gentler ones faster.
+- **Bends.** It brakes in time for every bend ahead within its braking
+  distance, not only the next: a hairpin just beyond a gentle turn is
+  braked for before the gentle one. A bend of 60° or more is taken at 3 m/s
+  (11 km/h); gentler ones faster. (Braking only for the next, an Abrams
+  reached a hairpin 13 m beyond a gentle turn at 17 m/s and ran wide into
+  the river.)
 - **Waypoints.** It drives through a waypoint that has another after it,
   slowing only for the bend. It brakes in time to stop on its last waypoint.
 
@@ -145,6 +150,20 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
   road), the first clear of every stopped vehicle and of buildings and
   water; with none, it stops short. One beyond its destination is not in
   its way. (Without this a column bunched up, and drove through wrecks.)
+  Two coming head on along its way (heading more than 120° apart, within
+  40 m, or 4 s at their closing speed) each ease to their right, keeping
+  1 m between them, and pass (the path shift of Soldiers, below, to the
+  right first). Two whose ways cross take the crossing in turn: each works
+  out when it and the other would be where the ways cross (straight on as
+  they head); the one there first, or already in it, goes on (equal: the
+  lower id), and the other, if they would be in it together, stops short
+  of it. Whatever else, it brakes to stop 2 m short of another vehicle in
+  its way before it could stop. Two stopped nose to side, each in the
+  other's way, are untangled: the one to give way (the higher id) drives
+  round the other as round a wreck. (Before, head on they drove through
+  each other, and crossing they met side on: in 1,000 vehicles over 15
+  minutes on Quantico, 1,250 pairs overlapped; now about a tenth as many,
+  mostly brushing for a second.)
 - **Soldiers.** A vehicle does not drive over soldiers (either side's).
   The strip its hull sweeps along its way, up to 35 m ahead, is kept 1.5 m
   clear of every soldier up: with one in it, its path is shifted sideways
@@ -153,19 +172,38 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
   and comes back once past), steered through a point 12 m ahead on the
   shifted line, so it eases over smoothly; never across a building or
   water. Near soldiers it goes at most 5 m/s; with no clear path it stops
-  short and waits. And whatever its path, it brakes to stop a metre short
+  short and waits, and soldiers of its side standing in its way (not
+  walking with their unit) make way: they step aside, out of its path, at
+  1.2 m/s (never into a building or water), as do those it has stopped for
+  close in front. (An Abrams waited for good behind a squad halted across a
+  street.) And whatever its path, it brakes to stop a metre short
   of a soldier in the ground it would cover before it could stop, where he
   is or where he is walking to within 1.5 s (turning, it sweeps ground off
   its path). The soldiers step aside too (`behavior/system.ts`): one in a
   vehicle's way, or about to be within 1.5 s, steps out of it, away from
   its centreline, at up to 2.5 m/s.
-- **Routes.** The routes are soldiers' routes, widened by 3 m at each corner
-  and checked clear for the hull's width (combined-arms.md §10), so a vehicle
-  clears buildings but may brush small obstacles. A road's gentle bends (a
+- **Routes.** A route is a soldier's route, widened by 3 m at each corner,
+  then fitted to the hull: every leg must keep its centre half its width
+  and 0.25 m from buildings and half its width from water
+  (`isSegmentClear`). A leg that does not, from the last turn the hull
+  fits at to the next, is planned again for the hull (`planHullPath`: the
+  navigation grid with the obstacles grown by that clearance, cached per
+  terrain and width, string-pulled with it). A destination the hull does
+  not fit at (against a wall, between two) is moved to the nearest place
+  it does within 15 m. With Prefer roads it goes by the roads, else not;
+  failing that, the other way. (Soldiers' routes hug buildings 0.75 m off:
+  a fifth of the orders in a stress test of 1,000 vehicles on Quantico
+  were refused, "no way there wide enough for the vehicle"; now 2.5 %, where
+  there is none.) Steering off its route (round a wreck, past soldiers),
+  it keeps the hull's clearance too. A vehicle clears buildings but may
+  brush small obstacles. A road's gentle bends (a
   turn on its centreline bending less than 25°) are not corners: they are
   driven as they are. (Each was pushed out 3 m, to alternate sides, and a
   vehicle on a road zig-zagged along it.) Fences and
   single trees are not obstacles. Roads are followed only with Prefer roads.
+- **Parked.** Another vehicle parked where it is going: it stops beside it,
+  clear of it, and has arrived. One parked in a street too narrow to pass it
+  stops those behind for good: they do not plan another way round it.
 - **Speed.** Only the ground directly under the vehicle sets its speed.
 
 ## 5. Code and tests
@@ -182,7 +220,8 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
   - `page.ts`: the tools, panel and roster.
 - `src/view3d/vehicles.ts`: the model, its pose, suspension and tracks.
 - Tests:
-  - `src/sim/vehicles.test.ts`: acceleration and braking, speeds by ground, uphill, pivoting, round a building, through a waypoint, orders, determinism;
+  - `src/sim/vehicles.test.ts`: acceleration and braking, speeds by ground, uphill, pivoting, round a building, through a waypoint, the interval, round a wreck, passing head on, a crossing, a gap too narrow for the hull, orders, determinism;
+  - `src/exercise/battle/combined-arms.test.ts`: soldiers in its way, a squad making way in a narrow street;
   - `src/exercise/battle/vehicles.test.ts`: edits, saving, driving in a battle, orders in combat;
   - `src/app/battle/planner.test.ts`: placing and routing;
   - `src/view3d/vehicles.test.ts`: the track path, the hull's fit, the tracks' travel.

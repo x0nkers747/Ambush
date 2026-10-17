@@ -1,7 +1,13 @@
 import { surfaceHeightAt } from './bridge-navigation';
 import type { SimEvent } from './events';
 import { azimuthOf, normalizeAzimuth, type Vec2 } from './geometry';
-import { isSegmentWalkable, OBSTACLE_CLEARANCE_M, planPath } from './navigation';
+import {
+  isSegmentClear,
+  isSegmentWalkable,
+  planHullPath,
+  planPath,
+  type Clearance,
+} from './navigation';
 import { pointInPolygon } from './polygon';
 import { roadNetwork, roadPointAt } from './road-network';
 import type { Side, SimState, Soldier } from './state';
@@ -277,6 +283,8 @@ export function updateVehicles(state: SimState, world: SimWorld, time: TickTime)
   const walking = new Map<string, { readonly x: number; readonly y: number }>();
   for (const a of state.behavior?.agents ?? [])
     if (a.vx !== 0 || a.vy !== 0) walking.set(a.soldierId, { x: a.vx, y: a.vy });
+  // Soldiers of its side in the way of a vehicle that cannot pass them.
+  const blockers: Blocker[] = [];
   vehicles.forEach((v, i) => {
     const platform = platformOf(catalog, v.kind);
     const type = types[i] ?? typeOf(platform);
@@ -296,11 +304,27 @@ export function updateVehicles(state: SimState, world: SimWorld, time: TickTime)
           line,
           state.soldiers,
           walking,
+          oncoming(v, type, line, vehicles, types),
         );
-        return { target: clear.target, speed: Math.min(round.speed, clear.speed) };
+        const guard = guardVehicles(v, type, vehicles, types);
+        if (clear.blockers) blockers.push(...clear.blockers);
+        return { target: clear.target, speed: Math.min(round.speed, clear.speed, guard) };
+      },
+      taken: (p) => {
+        let room = 0;
+        vehicles.forEach((o, j) => {
+          const other = types[j];
+          if (o === v || !other || (canDrive(o) && activeVehicleOrder(o))) return;
+          // It stops that far short of the place, clear of the vehicle wherever it stands there.
+          const need = (type.length + other.length) / 2 + 1;
+          const d = Math.hypot(o.position.x - p.x, o.position.y - p.y);
+          if (d < need) room = Math.max(room, need + d);
+        });
+        return room;
       },
     });
   });
+  makeWay(world.terrain, blockers, walking, time.dtSeconds);
 }
 
 /** Vehicles in column keep this gap (m, from one's rear to the next one's front) at least. */
@@ -353,9 +377,9 @@ function bypass(
   let nearest: { along: number; lateral: number; at: Vec2; clear: number; half: number } | null =
     null;
   vehicles.forEach((o, j) => {
-    if (o === v || (canDrive(o) && activeVehicleOrder(o))) return;
     const other = types[j];
     if (!other) return;
+    if (o === v || (canDrive(o) && activeVehicleOrder(o) && !gridlocked(v, type, o, other))) return;
     stopped.push({ at: o.position, type: other });
     const dx = o.position.x - v.position.x;
     const dy = o.position.y - v.position.y;
@@ -392,7 +416,7 @@ function bypass(
         Math.hypot(o.at.x - aim.x, o.at.y - aim.y) <
         (type.width + o.type.width) / 2 + BYPASS_CLEAR_M / 2,
     );
-    if (!blocked && isSegmentWalkable(terrain, v.position, aim))
+    if (!blocked && clearWay(terrain, v.position, aim, type.width))
       return { target: aim, speed: BYPASS_SPEED };
   }
   // No way round: it stops short.
@@ -437,7 +461,9 @@ function avoidSoldiers(
   soldiers: readonly Soldier[],
   /** Soldiers' velocities by id (m/s; absent: standing). */
   walking: ReadonlyMap<string, { readonly x: number; readonly y: number }> = new Map(),
-): { readonly target: Vec2; readonly speed: number } {
+  /** Vehicles coming the other way to pass (`oncoming`). */
+  coming: readonly Oncoming[] = [],
+): { readonly target: Vec2; readonly speed: number; readonly blockers?: readonly Blocker[] } {
   const wx = leg.to.x - leg.from.x;
   const wy = leg.to.y - leg.from.y;
   const wl = Math.hypot(wx, wy);
@@ -448,7 +474,8 @@ function avoidSoldiers(
   const halfLength = type.length / 2;
   const reach = Math.min(SOLDIERS_AHEAD_M, toEnd + halfLength);
   // The soldiers by it or ahead: how far ahead of its centre, and where across the leg.
-  const near: { along: number; across: number }[] = [];
+  const soldierHalf = type.width / 2 + SOLDIER_CLEAR_M;
+  const near: { along: number; across: number; half: number; soldier?: Soldier }[] = [];
   for (const s of soldiers) {
     if (s.status !== 'active') continue;
     const dx = s.position.x - v.position.x;
@@ -459,8 +486,11 @@ function avoidSoldiers(
     near.push({
       along,
       across: (s.position.x - leg.from.x) * rx + (s.position.y - leg.from.y) * ry,
+      half: soldierHalf,
+      soldier: s,
     });
   }
+  for (const c of coming) near.push(c);
   // Whatever its path, never onto a soldier: one in the ground it would
   // cover, as it is heading now, before it could stop (where he is, or where
   // he is walking to within `GUARD_LOOK_S`), and it brakes to stop short of
@@ -469,6 +499,8 @@ function avoidSoldiers(
   const hy = Math.cos(v.heading);
   const stopping = (v.speed * v.speed) / (2 * type.decel);
   let guard = Infinity;
+  // Soldiers of its side it has stopped for, close in front: they make way.
+  const blockers: Blocker[] = [];
   for (const s of soldiers) {
     if (s.status !== 'active') continue;
     const step = walking.get(s.id);
@@ -480,15 +512,22 @@ function avoidSoldiers(
       if (Math.abs(dx * hy - dy * hx) > type.width / 2 + GUARD_MARGIN_M) continue;
       const room = ahead - halfLength - GUARD_MARGIN_M;
       guard = Math.min(guard, Math.sqrt(2 * type.decel * Math.max(0, room)));
+      if (look === 0 && room < SOLDIER_STOP_M && s.side === v.side) {
+        const side = dx * hy - dy * hx >= 0 ? 1 : -1;
+        blockers.push({ soldier: s, x: hy * side, y: -hx * side });
+      }
     }
   }
-  if (near.length === 0) return { target, speed: guard };
-  const half = type.width / 2 + SOLDIER_CLEAR_M;
+  if (near.length === 0) return { target, speed: guard, blockers };
   const here = (v.position.x - leg.from.x) * rx + (v.position.y - leg.from.y) * ry;
-  const clearAt = (shift: number) => near.every((n) => Math.abs(n.across - shift) >= half);
-  // Shifts that clear them all, the nearest to where it is first (then the smaller).
+  const clearAt = (shift: number) => near.every((n) => Math.abs(n.across - shift) >= n.half);
+  // Shifts that clear them all, the nearest to where it is first (then the
+  // smaller); passing a vehicle coming the other way, to its right first (as
+  // that one does, so they pass).
   const shifts = PATH_SHIFTS_M.flatMap((m) => (m === 0 ? [0] : [m, -m])).sort(
-    (a, b) => Math.abs(a - here) - Math.abs(b - here) || Math.abs(a) - Math.abs(b),
+    coming.length > 0
+      ? (a, b) => Number(a < 0) - Number(b < 0) || Math.abs(a) - Math.abs(b)
+      : (a, b) => Math.abs(a - here) - Math.abs(b - here) || Math.abs(a) - Math.abs(b),
   );
   for (const shift of shifts) {
     if (!clearAt(shift)) continue;
@@ -502,19 +541,295 @@ function avoidSoldiers(
       y: v.position.y + fy * ahead + ry * (shift - here),
     };
     // Its own line, unshifted, needs no check; a shifted one must not cross a building or water.
-    if (shift !== 0 && !isSegmentWalkable(terrain, v.position, moved)) continue;
-    const passing = shift !== 0 || near.some((n) => Math.abs(n.across - shift) < half + 3);
+    if (shift !== 0 && !clearWay(terrain, v.position, moved, type.width)) continue;
+    // Slowly past soldiers (not for a vehicle passed).
+    const passing = near.some(
+      (n) => n.half === soldierHalf && (shift !== 0 || Math.abs(n.across - shift) < n.half + 3),
+    );
     return {
+      blockers,
       target: shift === 0 && Math.abs(here) < 0.5 ? target : moved,
       speed: Math.min(guard, passing ? PASSING_SOLDIERS_SPEED : Infinity),
     };
   }
-  // No way past: it stops short of the nearest in its path.
-  const blocking = near
-    .filter((n) => Math.abs(n.across - here) < half && n.along > 0)
-    .reduce((m, n) => Math.min(m, n.along), Infinity);
+  // No way past: it stops short of the nearest in its path, and those of
+  // its own side in its path make way (`makeWay`), out to the side they are on.
+  const inPath = near.filter((n) => Math.abs(n.across - here) < n.half && n.along > 0);
+  const blocking = inPath.reduce((m, n) => Math.min(m, n.along), Infinity);
   const gap = blocking - halfLength - SOLDIER_STOP_M;
-  return { target, speed: Math.min(guard, Math.max(0, Math.min(PASSING_SOLDIERS_SPEED, gap / 2))) };
+  for (const n of inPath) {
+    if (n.soldier?.side !== v.side) continue;
+    const side = n.across >= here ? 1 : -1;
+    blockers.push({ soldier: n.soldier, x: rx * side, y: ry * side });
+  }
+  return {
+    target,
+    speed: Math.min(guard, Math.max(0, Math.min(PASSING_SOLDIERS_SPEED, gap / 2))),
+    blockers,
+  };
+}
+
+/** A soldier in a stopped vehicle's way, and the way out of it (a unit vector). */
+interface Blocker {
+  readonly soldier: Soldier;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Making way for a vehicle, a soldier steps aside this fast (m/s). */
+const MAKE_WAY_SPEED = 1.2;
+
+/**
+ * Soldiers of its side standing in the way of a vehicle that cannot pass
+ * them step out of it, sideways, at `MAKE_WAY_SPEED` (the other way if that
+ * side is a building or water); those walking (with their unit) go on
+ * walking. Without this a vehicle waited for good behind a squad halted
+ * across a street.
+ */
+function makeWay(
+  terrain: TerrainDataset,
+  blockers: readonly Blocker[],
+  walking: ReadonlyMap<string, unknown>,
+  dt: number,
+): void {
+  const step = MAKE_WAY_SPEED * dt;
+  const moved = new Set<string>();
+  for (const b of blockers) {
+    const s = b.soldier;
+    if (walking.has(s.id) || s.status !== 'active' || moved.has(s.id)) continue;
+    moved.add(s.id);
+    for (const side of [1, -1]) {
+      const to = { x: s.position.x + b.x * side * step, y: s.position.y + b.y * side * step };
+      if (!isSegmentWalkable(terrain, s.position, to)) continue;
+      s.position.x = to.x;
+      s.position.y = to.y;
+      s.position.z = surfaceHeightAt(terrain, to.x, to.y);
+      break;
+    }
+  }
+}
+
+/** A vehicle coming the other way, as `avoidSoldiers` keeps clear of it: ahead, across the leg, and how far clear. */
+interface Oncoming {
+  readonly along: number;
+  readonly across: number;
+  readonly half: number;
+}
+
+/** Vehicles coming the other way within this (m, centre to centre; at least 4 s at their closing speed) are passed. */
+const ONCOMING_AHEAD_M = 40;
+const ONCOMING_LOOK_S = 4;
+/** Passing one, it keeps this clear of it (m, beyond the two half-widths). */
+const ONCOMING_CLEAR_M = 1;
+
+/**
+ * The vehicles coming the other way along its leg (heading more than 120
+ * degrees from its way on), ahead within `ONCOMING_AHEAD_M` (more when
+ * closing fast) and near its line: each is passed, keeping right.
+ */
+function oncoming(
+  v: VehicleState,
+  type: VehicleType,
+  leg: { readonly from: Vec2; readonly to: Vec2 },
+  vehicles: readonly VehicleState[],
+  types: readonly VehicleType[],
+): Oncoming[] {
+  const wx = leg.to.x - leg.from.x;
+  const wy = leg.to.y - leg.from.y;
+  const wl = Math.hypot(wx, wy);
+  const fx = wl > 0.5 ? wx / wl : Math.sin(v.heading);
+  const fy = wl > 0.5 ? wy / wl : Math.cos(v.heading);
+  const out: Oncoming[] = [];
+  vehicles.forEach((o, j) => {
+    if (o === v || !canDrive(o) || !activeVehicleOrder(o)) return;
+    const other = types[j];
+    if (!other) return;
+    const ox = Math.sin(o.heading);
+    const oy = Math.cos(o.heading);
+    if (fx * ox + fy * oy > -0.5) return;
+    const dx = o.position.x - v.position.x;
+    const dy = o.position.y - v.position.y;
+    const along = dx * fx + dy * fy;
+    const reach = Math.max(ONCOMING_AHEAD_M, (v.speed + o.speed) * ONCOMING_LOOK_S);
+    if (along < -(type.length + other.length) / 2 || along > reach) return;
+    if (Math.abs(dx * fy - dy * fx) > 15) return;
+    out.push({
+      along,
+      across: (o.position.x - leg.from.x) * fy - (o.position.y - leg.from.y) * fx,
+      half: (type.width + other.width) / 2 + ONCOMING_CLEAR_M,
+    });
+  });
+  return out;
+}
+
+/** It stops this short of another vehicle in its way (m). */
+const VEHICLE_GUARD_M = 2;
+/** Its hull and another's are in each other's way within this of touching side to side (m). */
+const VEHICLE_GUARD_SIDE_M = 0.25;
+/** Ways crossing at more than this sine of the angle between them are taken in turn where they cross. */
+const CROSSING_SIN = 0.3;
+/** It looks this far ahead (s) for a vehicle whose way crosses its own. */
+const CROSSING_HORIZON_S = 8;
+/** Through a crossing, each keeps this clear of the other (m). */
+const CROSSING_CLEAR_M = 1.5;
+
+/**
+ * How far ahead of `a`'s front the hull of `b`, where it is, lies in its way
+ * (as `a` heads now), within `limit`; `null`: not in it.
+ */
+function inWay(
+  a: VehicleState,
+  at: VehicleType,
+  b: VehicleState,
+  bt: VehicleType,
+  limit: number,
+): number | null {
+  const hx = Math.sin(a.heading);
+  const hy = Math.cos(a.heading);
+  const bx = Math.sin(b.heading);
+  const by = Math.cos(b.heading);
+  const dx = b.position.x - a.position.x;
+  const dy = b.position.y - a.position.y;
+  const ahead = dx * hx + dy * hy;
+  const cos = Math.abs(hx * bx + hy * by);
+  const sin = Math.abs(hx * by - hy * bx);
+  const extAlong = (cos * bt.length + sin * bt.width) / 2;
+  const extAcross = (sin * bt.length + cos * bt.width) / 2;
+  const front = ahead - extAlong - at.length / 2;
+  if (ahead <= 0 || front > limit) return null;
+  if (Math.abs(dx * hy - dy * hx) > at.width / 2 + extAcross + VEHICLE_GUARD_SIDE_M) return null;
+  return front;
+}
+
+/**
+ * Whether `o` has stopped in `v`'s way with `v` in its own (nose to side
+ * where their ways met): then `v`, if it is the one to give way (the higher
+ * id), drives round `o` as round a vehicle stopped for good (`bypass`).
+ */
+function gridlocked(
+  v: VehicleState,
+  type: VehicleType,
+  o: VehicleState,
+  other: VehicleType,
+): boolean {
+  return (
+    o.speed < 0.3 &&
+    v.id > o.id &&
+    inWay(v, type, o, other, VEHICLE_GUARD_M + 2) !== null &&
+    inWay(o, other, v, type, VEHICLE_GUARD_M + 2) !== null
+  );
+}
+
+/** When a vehicle is in the place two ways cross (s, from now): `Infinity` for one not coming. */
+interface Occupancy {
+  /** How far along its heading to the near edge of that place (m; 0 or less: in it). */
+  readonly toEntry: number;
+  readonly enter: number;
+  readonly leave: number;
+}
+
+/**
+ * Where the ways of `a` and `b` (straight on as each heads) cross, and when
+ * each is in that place (`a`'s first); `null` when their ways do not cross
+ * (near parallel, or crossed behind one of them).
+ */
+function crossingOf(
+  a: VehicleState,
+  at: VehicleType,
+  b: VehicleState,
+  bt: VehicleType,
+): readonly [Occupancy, Occupancy] | null {
+  const ax = Math.sin(a.heading);
+  const ay = Math.cos(a.heading);
+  const bx = Math.sin(b.heading);
+  const by = Math.cos(b.heading);
+  const cross = ax * by - ay * bx;
+  if (Math.abs(cross) < CROSSING_SIN) return null;
+  const sin = Math.abs(cross);
+  const cos = Math.abs(ax * bx + ay * by);
+  const dx = b.position.x - a.position.x;
+  const dy = b.position.y - a.position.y;
+  // a + sa·(ax, ay) = b + sb·(bx, by).
+  const sa = (dx * by - dy * bx) / cross;
+  const sb = (dx * ay - dy * ax) / cross;
+  const occupancy = (
+    s: number,
+    speed: number,
+    own: VehicleType,
+    other: VehicleType,
+  ): Occupancy | null => {
+    // Along its way, it is in the other's lane while its hull overlaps it.
+    const half =
+      own.length / 2 + (other.width / 2 + (own.width / 2) * cos + CROSSING_CLEAR_M) / sin;
+    if (s + half < 0) return null;
+    const toEntry = s - half;
+    if (speed < 0.3)
+      return toEntry <= 0
+        ? { toEntry, enter: 0, leave: Infinity }
+        : { toEntry, enter: Infinity, leave: Infinity };
+    return {
+      toEntry,
+      enter: Math.max(0, toEntry / speed),
+      leave: (s + half) / speed,
+    };
+  };
+  const oa = occupancy(sa, a.speed, at, bt);
+  const ob = occupancy(sb, b.speed, bt, at);
+  return oa && ob ? [oa, ob] : null;
+}
+
+/**
+ * How fast it may go so as never to drive into another vehicle:
+ *
+ * - one in its way where it is (ahead, as it heads now), before it could
+ *   stop, it brakes to stop `VEHICLE_GUARD_M` short of (two in each
+ *   other's way: the lower id goes on);
+ * - one whose way crosses its own, the two take the crossing in turn: the
+ *   one there first (in it, or the sooner to it; equal, the lower id) goes
+ *   on, and the other, if they would be in it together, stops short of it.
+ *
+ * Vehicles stopped for good are driven round (`bypass`); those in a column
+ * keep their interval (`keepInterval`); coming the other way, they pass
+ * (`oncoming`).
+ */
+function guardVehicles(
+  v: VehicleState,
+  type: VehicleType,
+  vehicles: readonly VehicleState[],
+  types: readonly VehicleType[],
+): number {
+  if (v.speed <= 0) return Infinity;
+  const stopping = (v.speed * v.speed) / (2 * type.decel);
+  const reach = stopping + VEHICLE_GUARD_M + 2;
+  let allowed = Infinity;
+  vehicles.forEach((o, j) => {
+    // One stopped for good is driven round (`bypass`, which stops if it cannot).
+    if (o === v || !canDrive(o) || !activeVehicleOrder(o)) return;
+    const other = types[j];
+    if (!other) return;
+    // Gridlocked with it: it drives round it (`bypass`).
+    if (gridlocked(v, type, o, other)) return;
+    const far = reach + type.length + other.length + o.speed * CROSSING_HORIZON_S;
+    if (Math.abs(o.position.x - v.position.x) > far || Math.abs(o.position.y - v.position.y) > far)
+      return;
+    // In its way now.
+    const front = inWay(v, type, o, other, reach);
+    if (front !== null && !(v.id < o.id && inWay(o, other, v, type, Infinity) !== null))
+      allowed = Math.min(allowed, Math.sqrt(2 * type.decel * Math.max(0, front - VEHICLE_GUARD_M)));
+    // Crossing its way.
+    const crossing = crossingOf(v, type, o, other);
+    if (!crossing) return;
+    const [mine, theirs] = crossing;
+    if (mine.toEntry <= 0 || mine.enter > CROSSING_HORIZON_S) return;
+    const together = mine.enter < theirs.leave && theirs.enter < mine.leave;
+    if (!together) return;
+    const first =
+      theirs.toEntry > 0 &&
+      (mine.enter < theirs.enter || (mine.enter === theirs.enter && v.id < o.id));
+    if (first) return;
+    allowed = Math.min(allowed, Math.sqrt(2 * type.decel * Math.max(0, mine.toEntry)));
+  });
+  return allowed;
 }
 
 /**
@@ -580,24 +895,88 @@ function failOrders(v: VehicleState, reason: string): void {
   v.routeIndex = 0;
 }
 
+/** A hull keeps this clear of buildings beyond its half-width (m). */
+const HULL_MARGIN_M = 0.25;
+
+/** What a hull `width` wide keeps clear of: buildings by `HULL_MARGIN_M`, water by none. */
+function hullClearance(width: number): Clearance {
+  return { buildings: width / 2 + HULL_MARGIN_M, water: width / 2 };
+}
+
 /**
- * Whether a hull `width` wide can drive straight from `a` to `b`: its centre
- * line and both its sides clear of buildings and water (`isSegmentWalkable`
- * keeps `OBSTACLE_CLEARANCE_M` itself).
+ * Whether a hull `width` wide can drive straight from `a` to `b` (or stand
+ * at `a`, `b` = `a`): its sides clear of buildings and water.
  */
 export function hullClear(terrain: TerrainDataset, a: Vec2, b: Vec2, width: number): boolean {
-  if (!isSegmentWalkable(terrain, a, b)) return false;
-  const offset = width / 2 - OBSTACLE_CLEARANCE_M;
-  if (offset <= 0) return true;
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  if (len < 1e-6) return true;
-  // Right of the leg's direction, and left.
-  const rx = ((b.y - a.y) / len) * offset;
-  const ry = (-(b.x - a.x) / len) * offset;
-  return (
-    isSegmentWalkable(terrain, { x: a.x + rx, y: a.y + ry }, { x: b.x + rx, y: b.y + ry }) &&
-    isSegmentWalkable(terrain, { x: a.x - rx, y: a.y - ry }, { x: b.x - rx, y: b.y - ry })
-  );
+  return isSegmentClear(terrain, a, b, hullClearance(width));
+}
+
+/**
+ * Whether it can steer from where it is to `to` off its route (round a
+ * wreck, past soldiers): a line a soldier could walk, and from halfway along
+ * it on, clear for the hull (where it is may be closer to a wall than that).
+ */
+function clearWay(terrain: TerrainDataset, from: Vec2, to: Vec2, width: number): boolean {
+  const half = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  return isSegmentWalkable(terrain, from, to) && hullClear(terrain, half, to, width);
+}
+
+/** A destination the hull does not fit at is moved to the nearest place it does, within this (m). */
+const DESTINATION_ROOM_M = 15;
+
+/** Where a hull `width` wide fits nearest `p` (rings 1 m apart), within `DESTINATION_ROOM_M`; `null`: nowhere. */
+function roomFor(terrain: TerrainDataset, p: Vec2, width: number): Vec2 | null {
+  if (hullClear(terrain, p, p, width)) return p;
+  for (let r = 1; r <= DESTINATION_ROOM_M; r += 1) {
+    const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 1.5));
+    for (let k = 0; k < steps; k += 1) {
+      const a = (2 * Math.PI * k) / steps;
+      const q = { x: p.x + r * Math.sin(a), y: p.y + r * Math.cos(a) };
+      if (hullClear(terrain, q, q, width)) return q;
+    }
+  }
+  return null;
+}
+
+/**
+ * The route's legs the hull does not fit along replanned for it
+ * (`planHullPath`): each such leg, widened to the nearest turns either side
+ * where it fits, is replaced by a path that keeps the hull's clearance. `null`
+ * when one cannot be.
+ */
+function fitRoute(
+  terrain: TerrainDataset,
+  from: Vec2,
+  route: readonly Vec2[],
+  width: number,
+): Vec2[] | null {
+  const points = [from, ...route];
+  const fits = (i: number) => {
+    const p = points[i];
+    return p !== undefined && (i === 0 || hullClear(terrain, p, p, width));
+  };
+  const out: Vec2[] = [];
+  let i = 0;
+  while (i < points.length - 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (!a || !b) break;
+    if (hullClear(terrain, a, b, width)) {
+      out.push(b);
+      i += 1;
+      continue;
+    }
+    // From the last turn kept (it fits, or is the start) to the next turn that fits.
+    let e = i + 1;
+    while (e < points.length - 1 && !fits(e)) e += 1;
+    const to = points[e];
+    if (!to || !fits(e)) return null;
+    const path = planHullPath(terrain, a, to, hullClearance(width));
+    if (!path.ok) return null;
+    out.push(...path.turns.map((p) => ({ x: p.x, y: p.y })), { ...to });
+    i = e;
+  }
+  return out;
 }
 
 /** Whether every leg of a route is clear for the hull. */
@@ -624,24 +1003,30 @@ function startNext(v: VehicleState, terrain: TerrainDataset, type: VehicleType):
       return;
     }
     const from = { x: v.position.x, y: v.position.y };
-    // As ordered; and if that is too narrow for the hull somewhere, by the roads.
-    const tries = next.followRoads === true ? [true] : [false, true];
+    // Where it fits at its destination (not against a wall, between two).
+    const end = roomFor(terrain, next.destination, type.width);
+    // As ordered, the legs too narrow for the hull replanned for it; then the
+    // other way (by the roads, or not).
+    const tries = next.followRoads === true ? [true, false] : [false, true];
     let route: Vec2[] | null = null;
-    let reason = 'no way there';
-    for (const followRoads of tries) {
-      const path = planPath(terrain, from, next.destination, { followRoads });
+    let reason = end ? 'no way there' : 'no room for the vehicle there';
+    for (const followRoads of end ? tries : []) {
+      const path = planPath(terrain, from, end ?? next.destination, { followRoads });
       if (!path.ok) continue;
       const planned = smoothKinks(
         terrain,
         from,
         widenTurns(terrain, from, [
           ...path.turns.map((p) => ({ x: p.x, y: p.y })),
-          { ...next.destination },
+          { ...(end ?? next.destination) },
         ]),
         type.width,
       );
-      if (routeClear(terrain, from, planned, type.width)) {
-        route = planned;
+      const fitted = routeClear(terrain, from, planned, type.width)
+        ? planned
+        : fitRoute(terrain, from, planned, type.width);
+      if (fitted) {
+        route = fitted;
         break;
       }
       reason = 'no way there wide enough for the vehicle';
@@ -788,6 +1173,8 @@ function drive(
       toEnd: number,
       leg: { readonly from: Vec2; readonly to: Vec2 },
     ) => { readonly target: Vec2; readonly speed: number };
+    /** How far round `p` (m) a vehicle stopped for good there takes the place up; 0: free. */
+    readonly taken?: (p: Vec2) => number;
   } = { speed: (wanted) => wanted, steer: (target) => ({ target, speed: Infinity }) },
 ): void {
   if (!canDrive(v)) {
@@ -861,6 +1248,10 @@ function drive(
       const b = ahead[i + 1];
       if (a && b) toEnd += Math.hypot(b.x - a.x, b.y - a.y);
     }
+    // Another vehicle parked where it is going: it stops beside it, short of the place.
+    const end = ahead[ahead.length - 1];
+    const taken = end && traffic.taken ? traffic.taken(end) : 0;
+    toEnd = Math.max(0, toEnd - taken);
     // Round a vehicle stopped in its way.
     const { target, speed: passing } = traffic.steer(along, toEnd, {
       from: v.route[v.routeIndex - 1] ?? here,
@@ -870,7 +1261,7 @@ function drive(
     const dx = target.x - here.x;
     const dy = target.y - here.y;
     const toTarget = Math.hypot(dx, dy);
-    if (last && toTurn < ARRIVED_M && v.speed < 0.6) {
+    if (last && toTurn < (taken > 0 ? taken + 3 : ARRIVED_M) && v.speed < 0.6) {
       current.status = 'completed';
       current.reason = 'arrived';
       v.route = [];
@@ -910,12 +1301,20 @@ function drive(
         }
         // Tracked, facing well away: it brakes, turning, and pivots once stopped.
         if (type.pivotRate > 0 && absError > PIVOT_FROM_RAD) wanted = 0;
-        // Slow enough to take the next bend, and to stop at the end.
-        const bend = last ? 0 : bendAt(ahead, v.routeIndex, here);
-        if (bend > 0.2) {
-          const share = Math.min(1, bend / SHARP_BEND_RAD);
-          const at = Math.max(BEND_SPEED, wanted * (1 - share) + BEND_SPEED * share);
-          wanted = Math.min(wanted, Math.sqrt(at * at + 2 * type.decel * 0.8 * toTurn));
+        // Slow enough to take each bend ahead it could not brake for later (a
+        // sharp one just beyond a gentle one too), and to stop at the end.
+        const reach = (wanted * wanted) / (2 * type.decel * 0.8);
+        let toBend = toTurn;
+        for (let i = v.routeIndex; i < ahead.length - 1 && toBend <= reach; i += 1) {
+          const bend = bendAt(ahead, i, here);
+          if (bend > 0.2) {
+            const share = Math.min(1, bend / SHARP_BEND_RAD);
+            const at = Math.max(BEND_SPEED, wanted * (1 - share) + BEND_SPEED * share);
+            wanted = Math.min(wanted, Math.sqrt(at * at + 2 * type.decel * 0.8 * toBend));
+          }
+          const a = ahead[i];
+          const b = ahead[i + 1];
+          if (a && b) toBend += Math.hypot(b.x - a.x, b.y - a.y);
         }
         wanted = Math.min(wanted, Math.sqrt(2 * type.decel * 0.8 * Math.max(0, toEnd - 0.5)));
       }
