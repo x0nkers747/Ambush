@@ -381,13 +381,13 @@ export function startBattlefieldSelection(
       : 'Select a saved battlefield to preview it here.';
 
   /**
-   * The one primary action, always Open battlefield: a new location is
+   * The one primary action, always New scenario (open the battlefield to set one up): a new location is
    * generated as soon as it is chosen, and opened once it is (pressed before
    * then, after a failed or cancelled generation, it generates it again).
    */
   const updatePrimary = () => {
     const button = ui('primary');
-    const label = 'Open battlefield →';
+    const label = 'New scenario →';
     const reason =
       selection.kind === 'none'
         ? 'Select a battlefield first: a saved one, or find a place or enter a position to generate a new one.'
@@ -624,12 +624,12 @@ export function startBattlefieldSelection(
       .then(async (pkg) => {
         if (disposed) return;
         // Stay here: the new battlefield is selected and previewed, so the
-        // trainee can check the terrain before choosing Open battlefield.
+        // trainee can check the terrain before choosing New scenario.
         // Generate stays blocked until it is selected.
         show('message', null);
         ui('progress').hidden = true;
         ui('cancel').hidden = true;
-        notify(`${pkg.name} is ready. Check it on the map, then choose Open battlefield.`);
+        notify(`${pkg.name} is ready. Check it on the map, then choose New scenario.`);
         // Replaced by a newer choice: that one goes on.
         if (generating !== controller) return;
         await refresh(pkg.id);
