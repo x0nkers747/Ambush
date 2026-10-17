@@ -273,7 +273,7 @@ smoke) and smouldering ones: all a function of the combat log, the clock and
 the articulation, in two pools of points (no objects per effect).
 
 **Tracers** (`tracers.ts`): a vehicle's machine guns and autocannon fire the
-soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and green for
+soldiers' tracers, a glowing streak 11 m long, light blue for BLUEFOR and green for
 OPFOR. Every round flies at its speed in the battle's time, as the battle has
 it, from firing until it arrives (§7): at 1× a burst at 300 m is seen for a
 third of a second; faster, for as much less. As many are in the air whatever

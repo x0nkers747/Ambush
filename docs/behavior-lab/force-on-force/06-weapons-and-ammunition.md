@@ -169,8 +169,8 @@ all weapon state), so it shows the same bursts, reloads and grenades; nothing
 is re-drawn differently. **The 2D map** draws each burst as a line from the shooter to his aim point
 (solid aimed, dashed area fire), each grenade as a dashed arc to where it will
 land with a dot flying along it, then its effect circle when it bursts. **The 3D view** shows the fight as it might look: every round
-of every burst flies as a tracer from the shooter's muzzle (red BLUEFOR,
-green OPFOR, as US and Warsaw Pact tracer ammunition), at 900 m/s in the
+of every burst flies as a tracer from the shooter's muzzle (light blue
+BLUEFOR, green OPFOR), at 900 m/s in the
 battle's time, into its target when the burst hit (arriving as he falls),
 otherwise scattered round the aim point and on past it;
 grenades are not traced, their bursts show as a fireball, a ring of dust and a

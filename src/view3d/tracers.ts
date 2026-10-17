@@ -48,7 +48,8 @@ import { SMALL_ARMS_VELOCITY_MPS } from '#sim';
 // landing as its hit does. Every one is drawn, whatever the speed (there are
 // few).
 //
-// Red for BLUEFOR, green for OPFOR (as US and
+// Light blue for BLUEFOR (the side's colour on the map; US tracers burn red,
+// changed so the sides are told apart at a glance), green for OPFOR (as
 // Warsaw Pact tracer ammunition). Each streak is a glowing bar at least a
 // couple of pixels wide at any distance, with a bright head; one instanced
 // mesh and one point buffer, filled each frame: no objects per tracer.
@@ -145,7 +146,7 @@ const MUZZLE_M = { standing: 1.45, kneeling: 0.95, prone: 0.3 } as const;
 const BODY_M = { standing: 1.1, kneeling: 0.7, prone: 0.2 } as const;
 
 const COLOURS = {
-  BLUEFOR: [1, 0.18, 0.08],
+  BLUEFOR: [0.35, 0.75, 1],
   OPFOR: [0.2, 1, 0.25],
 } as const;
 
