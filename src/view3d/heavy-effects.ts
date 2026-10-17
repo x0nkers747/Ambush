@@ -154,11 +154,21 @@ function add(
   p.n += 1;
 }
 
+/** Draws a pool's points, uploading only those (none: nothing, not the whole buffers every frame). */
 function commit(p: Pool): void {
   const g = p.points.geometry;
   g.setDrawRange(0, p.n);
-  for (const name of ['position', 'size', 'rgba'])
-    (g.getAttribute(name) as BufferAttribute).needsUpdate = true;
+  if (p.n <= 0) return;
+  for (const [name, size] of [
+    ['position', 3],
+    ['size', 1],
+    ['rgba', 4],
+  ] as const) {
+    const a = g.getAttribute(name) as BufferAttribute;
+    a.clearUpdateRanges();
+    a.addUpdateRange(0, p.n * size);
+    a.needsUpdate = true;
+  }
 }
 
 /** Where a shot's round is `age` seconds after it was fired, and how far along (0–1). */

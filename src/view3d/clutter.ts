@@ -210,7 +210,13 @@ export function groundFieldsAt(surface: TerrainSurface, x: number, y: number) {
 }
 
 export interface Clutter {
-  update(cameraX: number, cameraY: number, time: number, force?: boolean): void;
+  /**
+   * Places the clutter round the camera's ground point (`cameraX`, `cameraY`)
+   * when it has moved 3 m; `clearance`: the camera's height above the ground
+   * there. Higher than the clutter's radius, none of it can show (it shrinks
+   * to nothing that far from the eye): it is emptied once and not placed.
+   */
+  update(cameraX: number, cameraY: number, time: number, force?: boolean, clearance?: number): void;
   setSettings(s: ClutterSettings): void;
   /** Where something low covers the ground at (x, y), ground height z (bridge decks): nothing grows. */
   setCovered(test: ((x: number, y: number, z: number) => boolean) | null): void;
@@ -412,8 +418,12 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
     let triangles = 0;
     for (const k of all) {
       k.mesh.count = k.count;
-      k.mesh.instanceMatrix.needsUpdate = true;
-      if (k.count > 0) k.mesh.instanceMatrix.addUpdateRange(0, k.count * 16);
+      // Only what is drawn is uploaded (none: nothing; with no range, the whole buffer would be).
+      if (k.count > 0) {
+        k.mesh.instanceMatrix.clearUpdateRanges();
+        k.mesh.instanceMatrix.addUpdateRange(0, k.count * 16);
+        k.mesh.instanceMatrix.needsUpdate = true;
+      }
       instances += k.count;
       const pos = k.mesh.geometry.getAttribute('position');
       const tris = k.mesh.geometry.index ? k.mesh.geometry.index.count / 3 : pos.count / 3;
@@ -451,10 +461,24 @@ export function createClutter(surface: TerrainSurface, group: Group): Clutter {
 
   return {
     stats,
-    update(cx, cy, time, force = false) {
+    update(cx, cy, time, force = false, clearance = 0) {
       for (const m of [grassMat, weedMat, pebbleMat, leafMat]) {
         m.uniforms.clutterTime.value = time;
         m.uniforms.clutterFar.value = settings.radius;
+      }
+      // Too high for any of it to show: emptied once, then nothing to do until the camera comes down.
+      if (clearance > settings.radius) {
+        if (lastX !== Infinity || stats.instances > 0) {
+          for (const k of all) {
+            k.count = 0;
+            k.mesh.count = 0;
+          }
+          stats.instances = 0;
+          stats.triangles = 0;
+          lastX = Infinity;
+          lastY = Infinity;
+        }
+        return;
       }
       const dx = cx - lastX;
       const dy = cy - lastY;

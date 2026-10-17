@@ -69,6 +69,8 @@ interface Entry {
   travel: Travel;
   epoch: number;
   charred: boolean;
+  /** What its track shoes were last laid for (its wheels and how far each track has run). */
+  shoesFor: string;
 }
 
 export function createVehicleLayer(catalog: CombatCatalog = builtInCatalog()): VehicleLayer {
@@ -203,6 +205,7 @@ export function createVehicleLayer(catalog: CombatCatalog = builtInCatalog()): V
             travel: { tick: log.firstTick, left: 0, right: 0 },
             epoch: log.epoch,
             charred: false,
+            shoesFor: '',
           };
           models.set(v.id, entry);
         }
@@ -289,8 +292,12 @@ export function createVehicleLayer(catalog: CombatCatalog = builtInCatalog()): V
           if (idl) idl.rotation.x = -run / gear.idler.radius;
         }
 
-        // The shoes, laid round each track's path, moved back along it as far as it has run.
-        for (const s of [0, 1]) {
+        // The shoes, laid round each track's path, moved back along it as far as it has run
+        // (only when that has changed: a vehicle standing still is not laid again every frame).
+        const shoesFor = `${String(left)},${String(right)},${wheelUp.flat().join(',')}`;
+        const relay = shoesFor !== entry.shoesFor;
+        entry.shoesFor = shoesFor;
+        for (const s of relay ? [0, 1] : []) {
           const across = (s === 0 ? -1 : 1) * (gear.trackGauge / 2);
           const path = trackPath(wheelUp[s] ?? [], gear);
           const lengths = loopLengths(path);
@@ -307,7 +314,7 @@ export function createVehicleLayer(catalog: CombatCatalog = builtInCatalog()): V
             model.shoes.setMatrixAt(s * n + k, shoeMatrix);
           }
         }
-        model.shoes.instanceMatrix.needsUpdate = true;
+        if (relay) model.shoes.instanceMatrix.needsUpdate = true;
       }
     },
     muzzleOf(vehicleId, slot, out) {

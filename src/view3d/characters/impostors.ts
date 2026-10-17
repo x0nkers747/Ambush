@@ -115,8 +115,16 @@ class Instances {
   }
   finish(): void {
     this.mesh.count = this.count;
+    // Only the instances drawn are uploaded (none: nothing), not the whole buffers.
+    if (this.count <= 0) return;
+    this.mesh.instanceMatrix.clearUpdateRanges();
+    this.mesh.instanceMatrix.addUpdateRange(0, this.count * 16);
     this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    if (this.mesh.instanceColor) {
+      this.mesh.instanceColor.clearUpdateRanges();
+      this.mesh.instanceColor.addUpdateRange(0, this.count * 3);
+      this.mesh.instanceColor.needsUpdate = true;
+    }
   }
   dispose(): void {
     this.group.remove(this.mesh);

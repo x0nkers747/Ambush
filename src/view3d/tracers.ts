@@ -229,15 +229,23 @@ export function createTracerLayer(
   const target = emptyMotionSample();
 
   let inFlight = 0;
+  /** Marks `count` items of `size` floats of an attribute to upload (none: nothing is). */
+  const upload = (a: BufferAttribute, count: number, size: number) => {
+    if (count <= 0) return;
+    a.clearUpdateRanges();
+    a.addUpdateRange(0, count * size);
+    a.needsUpdate = true;
+  };
   const draw = (n: number) => {
     inFlight = n;
     bars.count = n;
-    bars.instanceMatrix.needsUpdate = true;
-    if (bars.instanceColor) bars.instanceColor.needsUpdate = true;
+    // Only what is drawn is uploaded: nothing in flight, nothing (not the whole buffers every frame).
+    upload(bars.instanceMatrix, n, 16);
+    if (bars.instanceColor) upload(bars.instanceColor, n, 3);
     for (const pool of [heads, bigHeads]) {
       pool.geometry.setDrawRange(0, pool.n);
-      (pool.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
-      (pool.geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
+      upload(pool.geometry.getAttribute('position') as BufferAttribute, pool.n, 3);
+      upload(pool.geometry.getAttribute('color') as BufferAttribute, pool.n, 3);
     }
   };
 

@@ -860,7 +860,14 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
         const force =
           now - entry.clutterForcedAt > CLUTTER_PATIENCE_MS && entry.ground.stats.waiting > 0;
         if (force) entry.clutterForcedAt = now;
-        entry.clutter.update(eye.position.x, -eye.position.z, now / 1000, force);
+        const below = entry.groundAt(eye.position.x, eye.position.z) ?? entry.apronZ;
+        entry.clutter.update(
+          eye.position.x,
+          -eye.position.z,
+          now / 1000,
+          force,
+          eye.position.y - below,
+        );
       }
       entry.vegetation?.update(eye);
       followWithShadows(entry);
