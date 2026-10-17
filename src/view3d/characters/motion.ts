@@ -178,7 +178,7 @@ export class SoldierMotion {
       // A grenade or an anti-tank weapon fired is a shot too: he aims and fires.
       if (
         (e?.type === 'shotFired' ||
-          e?.type === 'grenadeImpact' ||
+          e?.type === 'grenadeFired' ||
           (e?.type === 'heavyShot' && e.shooter === 'soldier')) &&
         e.shooterId === this.id
       )

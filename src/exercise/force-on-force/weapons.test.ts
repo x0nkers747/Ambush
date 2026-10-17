@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   areaIncapacitation,
+  grenadeFlightSeconds,
   hashSimState,
   roundsLeft,
   type FofConfig,
   type FofFireEvent,
   type FofGrenadeEvent,
+  type FofGrenadeFiredEvent,
   type FofReloadEvent,
   type SimEvent,
 } from '#sim';
@@ -219,7 +221,7 @@ describe('reloads', () => {
           open.delete(e.soldierId);
         }
       }
-      if ((e.type === 'fofFire' || e.type === 'fofGrenade') && open.has(e.shooterId))
+      if ((e.type === 'fofFire' || e.type === 'fofGrenadeFired') && open.has(e.shooterId))
         throw new Error(`${e.shooterId} fired while reloading`);
       if (e.type === 'fofFire' && !open.has(e.shooterId)) resumed.add(e.shooterId);
     }
@@ -324,7 +326,8 @@ describe('conservation of ammunition', () => {
           `${f.shooterId}/${f.weapon}`,
           (fired.get(`${f.shooterId}/${f.weapon}`) ?? 0) + f.rounds,
         );
-      for (const g of of(events, 'fofGrenade'))
+      // Fired (one still in flight at the end, not yet burst, counts).
+      for (const g of of(events, 'fofGrenadeFired'))
         fired.set(`${g.shooterId}/${g.weapon}`, (fired.get(`${g.shooterId}/${g.weapon}`) ?? 0) + 1);
       for (const m of run.sim.state.fof?.soldiers ?? []) {
         for (const a of m.arms) {
@@ -381,6 +384,26 @@ describe('the grenade launcher', () => {
     };
   })();
 
+  it('a grenade flies its low arc at 76 m/s (about 4 s at 300 m), and bursts when it lands', () => {
+    expect(grenadeFlightSeconds(300)).toBeGreaterThan(4);
+    expect(grenadeFlightSeconds(300)).toBeLessThan(4.3);
+    expect(grenadeFlightSeconds(50)).toBeCloseTo(50 / 76, 2);
+    const { events } = grenadeRuns();
+    const fired = events.filter((e): e is FofGrenadeFiredEvent => e.type === 'fofGrenadeFired');
+    const burst = of(events, 'fofGrenade');
+    expect(burst.length).toBeGreaterThan(3);
+    for (const g of burst) {
+      const shot = fired.find((f) => f.shooterId === g.shooterId && f.atSeconds === g.firedAt);
+      expect(shot).toBeDefined();
+      if (!shot) continue;
+      // Where it was drawn to land when fired; bursting at the first decision once there.
+      expect(g.impact).toEqual(shot.impact);
+      expect(shot.burstAt - shot.atSeconds).toBeGreaterThan(0.3);
+      expect(g.atSeconds).toBeGreaterThanOrEqual(shot.burstAt - 1e-9);
+      expect(g.atSeconds).toBeLessThan(shot.burstAt + 0.1 + 1e-9);
+    }
+  }, 180_000);
+
   it('only fire team leaders fire grenades, one at a time, within 31–350 m', () => {
     const { grenades, events } = grenadeRuns();
     expect(grenades.length).toBeGreaterThan(3);
@@ -403,12 +426,13 @@ describe('the grenade launcher', () => {
     const lastAt = new Map<string, number>();
     for (const { e, seed } of grenades) {
       const key = `${String(seed)}:${e.shooterId}`;
+      // (When each was fired: its burst is a flight later.)
       const before = lastAt.get(key);
-      if (before !== undefined && before < e.atSeconds)
-        expect(e.atSeconds - before).toBeGreaterThanOrEqual(
+      if (before !== undefined && before < e.firedAt)
+        expect(e.firedAt - before).toBeGreaterThanOrEqual(
           (area?.minSecondsBetweenShots ?? 0) - 1e-6,
         );
-      lastAt.set(key, e.atSeconds);
+      lastAt.set(key, e.firedAt);
     }
   }, 180_000);
 

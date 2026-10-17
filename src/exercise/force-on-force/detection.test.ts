@@ -56,8 +56,8 @@ describe('the experimental configuration', () => {
 
 describe('detection in the open', () => {
   // A seed in which both sides identify the other within the run (they do in
-  // most; in seed 1 BLUEFOR does not, by chance, before 700 s).
-  const run = createFofRun(headOn('open', 2));
+  // most: in 17 of seeds 1–20).
+  const run = createFofRun(headOn('open', 3));
   const events = runFor(run, 700);
   const contacts = observed(events);
 
@@ -104,12 +104,15 @@ describe('detection in the open', () => {
     }
   });
 
-  it('first glimpses name the observer and the range', () => {
+  it('first glimpses name the observer and the range (cued by fire instead: neither)', () => {
     const glimpsed = contacts.filter((e) => e.to === 'possible' && e.from === 'unaware');
-    expect(glimpsed.length).toBeGreaterThan(0);
+    const seen = glimpsed.filter((e) => e.observerId !== null);
+    expect(seen.length).toBeGreaterThan(0);
     for (const e of glimpsed) {
-      expect(e.observerId).not.toBeNull();
-      expect(e.rangeM).toBeGreaterThan(0);
+      // A force fired upon before it sees anyone (a grenade from out of its sight) gets a
+      // possible contact on the shooter, cued by his fire: no observer, no range.
+      if (e.observerId === null) expect(e.rangeM).toBeNull();
+      else expect(e.rangeM).toBeGreaterThan(0);
     }
   });
 });

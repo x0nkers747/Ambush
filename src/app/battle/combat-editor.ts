@@ -741,37 +741,56 @@ export function createCombatMapEditor(
       }
       ctx.globalAlpha = 1;
 
-      // Grenades of the last moments: an arc from the grenadier to the burst, and its effect radius.
+      // Grenades: in flight, a dashed arc from where it was fired to where it will land,
+      // the grenade a dot along it; burst, the arc and its effect radius, fading.
       for (let i = log.length - 1; i >= 0; i -= 1) {
         const e = log[i];
         if (!e) continue;
-        if (e.seconds < now - GRENADE_SECONDS) break;
-        if (e.seconds > now || e.event.type !== 'fofGrenade') continue;
-        const from = where.get(e.event.shooterId);
+        // Back as far as a grenade flies (about 5 s at its longest), and its fading.
+        if (e.seconds < now - GRENADE_SECONDS - 6) break;
+        if (e.seconds > now) continue;
+        const ev = e.event;
+        if (ev.type !== 'fofGrenadeFired' && ev.type !== 'fofGrenade') continue;
+        const flying = ev.type === 'fofGrenadeFired';
+        if (flying && now >= ev.burstAt) continue;
+        if (!flying && now - e.seconds > GRENADE_SECONDS) continue;
+        const from = where.get(ev.shooterId);
         if (!from) continue;
         const a = toScreen(from);
-        const b = toScreen(e.event.impact);
-        const edge = toScreen({ x: e.event.impact.x + GRENADE_EFFECT_M, y: e.event.impact.y });
-        const radius = Math.max(3, Math.hypot(edge.x - b.x, edge.y - b.y));
-        const fade = 1 - (now - e.seconds) / GRENADE_SECONDS;
+        const b = toScreen(ev.impact);
+        const fade = flying ? 1 : 1 - (now - e.seconds) / GRENADE_SECONDS;
         ctx.globalAlpha = fade;
-        ctx.strokeStyle = e.event.side === 'BLUEFOR' ? '#9fd8ff' : '#ffb0a0';
+        ctx.strokeStyle = ev.side === 'BLUEFOR' ? '#9fd8ff' : '#ffb0a0';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 3]);
         // A shallow arc: the grenade's high trajectory, seen from above.
         const mx = (a.x + b.x) / 2;
         const my = (a.y + b.y) / 2;
         const len = Math.hypot(b.x - a.x, b.y - a.y);
+        const cx = mx - ((b.y - a.y) / Math.max(1, len)) * len * 0.15;
+        const cy = my + ((b.x - a.x) / Math.max(1, len)) * len * 0.15;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
-        ctx.quadraticCurveTo(
-          mx - ((b.y - a.y) / Math.max(1, len)) * len * 0.15,
-          my + ((b.x - a.x) / Math.max(1, len)) * len * 0.15,
-          b.x,
-          b.y,
-        );
+        ctx.quadraticCurveTo(cx, cy, b.x, b.y);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (flying) {
+          const f = Math.min(1, (now - e.seconds) / Math.max(0.05, ev.burstAt - e.seconds));
+          const g = 1 - f;
+          ctx.fillStyle = '#ffd36b';
+          ctx.beginPath();
+          ctx.arc(
+            g * g * a.x + 2 * g * f * cx + f * f * b.x,
+            g * g * a.y + 2 * g * f * cy + f * f * b.y,
+            3,
+            0,
+            2 * Math.PI,
+          );
+          ctx.fill();
+          continue;
+        }
+        const edge = toScreen({ x: ev.impact.x + GRENADE_EFFECT_M, y: ev.impact.y });
+        const radius = Math.max(3, Math.hypot(edge.x - b.x, edge.y - b.y));
         ctx.fillStyle = 'rgba(255, 196, 90, 0.35)';
         ctx.strokeStyle = '#ffc45a';
         ctx.beginPath();

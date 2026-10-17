@@ -111,7 +111,7 @@ target; then his weapon and its fire mode decide what he fires:
   bursts): the suppression round where it lands, the soldier struck down
   (`soldierIncapacitated` then; unless he is down already), and the force
   it lands on coming under fire. A burst from a soldier struck down meanwhile
-  still arrives. Grenades still burst when fired.
+  still arrives. Grenades fly too (§4).
 
 **Conservation.** For every weapon, at every moment:
 `loaded + reserve + fired = basic load`, `0 ≤ loaded ≤ capacity`; checked by
@@ -140,27 +140,35 @@ for his rifle, he fires a grenade instead when all of these hold:
   (aimed 0.15; area 0.35: grenades are the better answer to an enemy out of
   sight). Never automatic merely because an enemy is in range.
 
-**Resolution.** The round lands at the aim point displaced by a random error
-(radius drawn up to `dispersionM.atZeroM + range/100 × dispersionM.per100M`,
-direction uniform; 1 m + 2.5 m per 100 m). Every active soldier, of either side,
-within `maxEffectRadiusM` of the burst draws incapacitation with the falloff of
-§2 (× `proneFactor` when prone); everyone within the suppression radius is
-suppressed (`suppressionPerBurst`, fading with distance). Casualties join the
-decision's volley (simultaneous with other fire). One `fofGrenade` event
-records the shooter, aim and impact points, and every soldier struck down or
-incapacitated. Then the launcher reloads (`reloadSeconds`) if he has rounds.
-Flight time is not modelled (the burst is at the moment of firing).
+**Resolution.** Where the round lands is drawn when it is fired: the aim point
+displaced by a random error (radius drawn up to `dispersionM.atZeroM +
+range/100 × dispersionM.per100M`, direction uniform; 1 m + 2.5 m per 100 m).
+It flies there on the low arc that reaches it at `GRENADE_VELOCITY_MPS`
+(76 m/s, the M203's and GP-25's), no drag: `grenadeFlightSeconds`, its range
+over its speed along the ground, about 0.7 s at 50 m, 2.1 s at 150 m, 4.1 s
+at 300 m (`fofGrenadeFired`, with `burstAt`; `FofState.grenades`). It bursts
+at the first decision once there (`arriveGrenades`, before that decision's
+bursts): every active soldier, of either side, within `maxEffectRadiusM` of
+it, where they are then, draws incapacitation with the falloff of §2
+(× `proneFactor` when prone); everyone within the suppression radius is
+suppressed (`suppressionPerBurst`, fading with distance); the force it was
+fired at comes under fire. Casualties join that decision's volley. One
+`fofGrenade` event, at the burst, records the shooter, when it was fired
+(`firedAt`), the aim and impact points, and every soldier struck down. The
+launcher reloads (`reloadSeconds`) if he has rounds, from when it was fired.
+A grenade from a grenadier struck down in its flight still bursts.
 
 ## 5. Events, review and views
 
-New events: `fofReload` (`started`/`completed`, weapon, rounds), `fofGrenade`,
+New events: `fofReload` (`started`/`completed`, weapon, rounds),
+`fofGrenadeFired` and `fofGrenade` (its burst),
 `ammunitionExhausted`. `fofFire` gains the fire mode. They are kept in battle
 and lab logs; a battle's review re-simulates from tick 0 with the same seed and
 inputs, verified tick-second by second against the battle fought (hashes cover
 all weapon state), so it shows the same bursts, reloads and grenades; nothing
 is re-drawn differently. **The 2D map** draws each burst as a line from the shooter to his aim point
-(solid aimed, dashed area fire), each grenade as an arc to its burst with its
-effect circle. **The 3D view** shows the fight as it might look: every round
+(solid aimed, dashed area fire), each grenade as a dashed arc to where it will
+land with a dot flying along it, then its effect circle when it bursts. **The 3D view** shows the fight as it might look: every round
 of every burst flies as a tracer from the shooter's muzzle (red BLUEFOR,
 green OPFOR, as US and Warsaw Pact tracer ammunition), at 900 m/s in the
 battle's time, into its target when the burst hit (arriving as he falls),

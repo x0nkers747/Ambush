@@ -542,6 +542,24 @@ export interface FofRoundsInFlight {
   readonly arriveAt: number;
 }
 
+/**
+ * A grenade in flight (docs/behavior-lab/force-on-force/06 §4): fired at its
+ * aim point, landing at `impact` (drawn when fired) at `burstAt`, when it
+ * bursts (`arriveGrenades`).
+ */
+export interface FofGrenadeInFlight {
+  readonly shooterId: SoldierId;
+  /** The launcher's weapon (`FofWeapon.id`). */
+  readonly weapon: string;
+  readonly kind: 'aimed' | 'area';
+  readonly targetId: SoldierId;
+  readonly aimPoint: Vec2;
+  readonly impact: Vec2;
+  readonly rangeM: number;
+  readonly firedAt: number;
+  readonly burstAt: number;
+}
+
 export interface FofState {
   /** The next decision to take (decisions are at `n / decisionHz` seconds). */
   nextDecision: number;
@@ -558,6 +576,8 @@ export interface FofState {
   thresholds: number[];
   /** Soldiers' bursts in flight, in the order fired (`FofRoundsInFlight`). */
   inFlight: FofRoundsInFlight[];
+  /** Grenades in flight, in the order fired (`FofGrenadeInFlight`). */
+  grenades: FofGrenadeInFlight[];
   stalemate: FofWindow | null;
   outcome: FofOutcome | null;
 }

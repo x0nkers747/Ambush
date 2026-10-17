@@ -18,6 +18,7 @@ export type {
   OrderChangedEvent,
   FofFireEvent,
   FofGrenadeEvent,
+  FofGrenadeFiredEvent,
   VehicleFireEvent,
   MissileImpactEvent,
   VehicleHitEvent,

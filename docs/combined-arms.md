@@ -179,7 +179,10 @@ target's crew or force cued) when it arrives, at the first decision after
 struck again. Machine guns' and autocannon's bursts fly likewise (12.7 mm
 890 m/s, 7.62 mm 840 m/s, 30 mm 960–970 m/s): a burst at a soldier strikes
 him down (if drawn) and suppresses round him when it arrives, as the
-soldiers' own bursts do (force-on-force 06 §3). Rockets strike when fired.
+soldiers' own bursts do (force-on-force 06 §3). Anti-tank rockets fly
+likewise: an AT4's at 285 m/s, an RPG-7's PG-7VL at 250 (launched at about
+112 m/s, its motor takes it to about 295), striking when they arrive (about
+1.1–1.2 s at 300 m).
 Anti-tank gunners choose among the vehicles their squad has confirmed, aim
 (an AT4 5 s, a Javelin's lock-on 12 s), fire when their squad is fighting
 and they see the target, and reload from what they carry.
@@ -388,8 +391,8 @@ A scenario may also carry platforms and weapons of its own
   modelled.
 - **Ballistics** are abstract: a shot hits or misses by its probability,
   drawn when fired; a main gun's round flies at its muzzle velocity (no
-  drag), as do machine guns', autocannon's and soldiers' rounds; rockets and
-  grenades strike at once; there is no
+  drag), as do machine guns', autocannon's, soldiers' and anti-tank rockets'
+  (each at one mean speed), and grenades on their low arc; there is no
   superelevation or lead, no ricochet; a miss lands just beyond its target
   for the views.
 - **Faces** are front, side, rear (by the attacker's bearing from the hull,

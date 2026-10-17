@@ -237,7 +237,8 @@ describe('an order’s actions on contact in a scenario', () => {
 describe('a broken squad', { timeout: 300_000 }, () => {
   it('falls back 500 m and holds, spent; ordered on, it goes at once', () => {
     let found = 0;
-    for (const seed of [1, 2, 3, 4, 5, 6]) {
+    // (A squad breaks in about one seed in four, and holds by 900 s in about one in seven.)
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
       const battle = createBattle(spec(seed, 'continue'), ground(seed));
       const blue = () => battle.sim.state.fof?.forces[0];
       const events: SimEvent[] = [];

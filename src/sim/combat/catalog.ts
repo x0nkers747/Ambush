@@ -226,6 +226,7 @@ const AT4_HEAT = ammo({
   lethality: 0.6,
   nonPenetratingDamage: 0.15,
   vsInfantry: null,
+  velocityMps: 285,
 });
 
 const PG7VL = ammo({
@@ -237,6 +238,8 @@ const PG7VL = ammo({
   lethality: 0.6,
   nonPenetratingDamage: 0.15,
   vsInfantry: null,
+  // Launched at about 112 m/s, its motor takes it to about 295: on average about 250.
+  velocityMps: 250,
 });
 
 const JAVELIN_HEAT = ammo({

@@ -67,7 +67,8 @@ the whole battle afterwards.</p>
     posture and exposure, and whether the shooter is moving or suppressed. Fire at a last
     known position suppresses but rarely hits. Rounds fly at their real speed (about
     900 m/s): a soldier hit falls, and those near are suppressed, when the burst arrives.
-    Fire team leaders fire M203 grenades.</li>
+    Fire team leaders fire M203 grenades, which burst when they land (about 4 s at
+    300 m).</li>
   <li><b>Suppression.</b> Rounds hitting or passing close build up suppression, which fades
     by half every 6 s. Suppressed soldiers fire less and less accurately; pinned soldiers
     go prone and stop firing.</li>
@@ -92,8 +93,8 @@ the whole battle afterwards.</p>
   <li>Weapon, armour and detection values are representative approximations from open
     sources, not validated combat data.</li>
   <li>Ballistics are abstract: whether a shot hits is decided by its probability when it
-    is fired (rounds fly at a constant speed, without drop or drag), there are no
-    ricochets, and grenades and anti-tank rockets strike the moment they are fired.</li>
+    is fired (rounds, rockets and grenades then fly at a constant speed or on a simple arc,
+    without drag or wind), and there are no ricochets.</li>
   <li>Soldiers do not seek cover, flank on their own or choose firing positions. Infantry
     does not mount or dismount vehicles.</li>
   <li>Rifles and machine guns never engage vehicles. Vehicles neither block sight lines nor

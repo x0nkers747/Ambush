@@ -315,8 +315,10 @@ export function describeEvent(e: TimedEvent, names: ReadonlyMap<string, string>)
       return `${name(ev.unitId)}: ${PHASE_LABELS[ev.to]}${ev.reason ? ` (${ev.reason})` : ''}`;
     case 'soldierIncapacitated':
       return `${ev.soldierId} hit by ${ev.byId}`;
+    case 'fofGrenadeFired':
+      return `${ev.shooterId} fired a grenade (${String(Math.round(ev.rangeM))} m)`;
     case 'fofGrenade':
-      return `${ev.shooterId} fired a grenade (${String(Math.round(ev.rangeM))} m)${ev.incapacitated.length > 0 ? `: ${ev.incapacitated.join(', ')} down` : ''}`;
+      return `${ev.shooterId}'s grenade burst${ev.incapacitated.length > 0 ? `: ${ev.incapacitated.join(', ')} down` : ''}`;
     case 'ammunitionExhausted':
       return `${ev.soldierId} is out of ${WEAPON_LABELS[ev.weapon]?.toLowerCase() ?? ev.weapon} ammunition`;
     case 'commandRejected':

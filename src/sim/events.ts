@@ -203,13 +203,36 @@ export interface FofFireEvent {
 
 /**
  * A grenade fired (docs/behavior-lab/force-on-force/06 §4): aimed at
- * `aimPoint`, it burst at `impact`; `exposed` soldiers were within its
- * effect and not behind cover, and these were incapacitated.
+ * `aimPoint`, it will burst at `impact` at `burstAt` (its flight: the
+ * launcher's low arc). Its burst is `fofGrenade`.
+ */
+export interface FofGrenadeFiredEvent {
+  readonly type: 'fofGrenadeFired';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly shooterId: SoldierId;
+  readonly unitId: string;
+  readonly side: Side;
+  readonly kind: 'aimed' | 'area';
+  readonly targetId: SoldierId;
+  readonly aimPoint: Vec2;
+  readonly impact: Vec2;
+  readonly weapon: string;
+  readonly rangeM: number;
+  readonly burstAt: number;
+}
+
+/**
+ * A grenade burst (docs/behavior-lab/force-on-force/06 §4), fired at
+ * `firedAt` (`fofGrenadeFired`): aimed at `aimPoint`, it burst at `impact`;
+ * `exposed` soldiers were within its effect and not behind cover, and these
+ * were incapacitated.
  */
 export interface FofGrenadeEvent {
   readonly type: 'fofGrenade';
   readonly tick: number;
   readonly atSeconds: number;
+  readonly firedAt: number;
   readonly shooterId: SoldierId;
   readonly unitId: string;
   readonly side: Side;
@@ -359,6 +382,7 @@ export type SimEvent =
   | ForcePhaseChangedEvent
   | OrderChangedEvent
   | FofFireEvent
+  | FofGrenadeFiredEvent
   | FofGrenadeEvent
   | FofReloadEvent
   | AmmunitionExhaustedEvent

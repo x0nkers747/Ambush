@@ -271,6 +271,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
     tracks: [],
     thresholds,
     inFlight: [],
+    grenades: [],
     stalemate: null,
     outcome: null,
   };

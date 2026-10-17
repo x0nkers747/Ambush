@@ -4,7 +4,7 @@ import { azimuthOf, type Vec2 } from '../geometry';
 import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
-import type { AreaEffect, FofWeapon } from './config';
+import { fofWeapon, type AreaEffect, type FofWeapon } from './config';
 import { ambushSectors } from './ambush';
 import { dugInFactor, dugInFrom } from './defence';
 import { enter, firingOnTheMove, pressingOn, underFire } from './force';
@@ -160,6 +160,7 @@ export function resolveFire(context: FofContext): void {
   const { fof, t, tick, events } = context;
   const volley: Volley = { suppression: new Map(), down: new Map() };
   arriveRounds(context, volley);
+  arriveGrenades(context, volley);
   fof.soldiers.forEach((member) => {
     if (member.nextFireAt === null || member.nextFireAt > t + 1e-9) return;
     const shooter = soldierOf(context, member);
@@ -228,7 +229,7 @@ export function resolveFire(context: FofContext): void {
       return;
     }
     if (launcher && considerGrenade(context, member, launcher, aim)) {
-      grenade(context, volley, member, shooter, launcher, aim);
+      grenade(context, member, shooter, launcher, aim);
       return;
     }
     // His rifle's cadence holds across pauses (a burst is never early, whatever reset his turn).
@@ -649,16 +650,37 @@ export function areaIncapacitation(area: AreaEffect, d: number): number {
   );
 }
 
-/** Fires one grenade at `aim`: where it lands, whom it strikes down, whom it suppresses. */
+/**
+ * A 40 mm grenade's muzzle velocity (m/s): the M203's and the GP-25's, about
+ * 76. It flies the low arc that reaches its range (`grenadeFlightSeconds`).
+ */
+export const GRENADE_VELOCITY_MPS = 76;
+const GRAVITY_MPS2 = 9.81;
+
+/**
+ * How long a grenade flies `rangeM` (s): on the low arc that reaches it at
+ * `GRENADE_VELOCITY_MPS` (no drag), its range over the speed along the
+ * ground (about 4 s at 300 m); beyond the arc's longest reach, at 45°.
+ */
+export function grenadeFlightSeconds(rangeM: number): number {
+  const v = GRENADE_VELOCITY_MPS;
+  const reach = Math.min(1, (GRAVITY_MPS2 * rangeM) / (v * v));
+  const elevation = Math.asin(reach) / 2;
+  return rangeM / (v * Math.cos(elevation));
+}
+
+/**
+ * Fires one grenade at `aim`: where it lands is drawn now; it bursts when
+ * it gets there (`arriveGrenades`).
+ */
 function grenade(
   context: FofContext,
-  volley: Volley,
   member: FofSoldier,
   shooter: Soldier,
   arm: FofWeaponState,
   aim: Aim,
 ): void {
-  const { state, fof, t, events, tick, world } = context;
+  const { state, fof, t, events, tick } = context;
   const weapon = weaponOf(context, arm);
   const area = weapon.area;
   if (!area) return;
@@ -678,36 +700,10 @@ function grenade(
   const dx = aim.point.x - shooter.position.x;
   const dy = aim.point.y - shooter.position.y;
   if (dx !== 0 || dy !== 0) shooter.azimuth = azimuthOf(dx, dy);
-  // Everyone near the burst, of either side, unless cover stands between (a wall, a bank).
-  const tracer = sightLineTracer(world.terrain);
-  const burstZ = surfaceHeightAt(world.terrain, impact.x, impact.y) + 0.5;
-  const casualties: SoldierId[] = [];
-  let exposed = 0;
-  for (const other of fof.soldiers) {
-    const s = soldierOf(context, other);
-    if (s.status !== 'active') continue;
-    const d = Math.hypot(s.position.x - impact.x, s.position.y - impact.y);
-    if (d >= area.maxEffectRadiusM) continue;
-    const covered =
-      d > 0.5 &&
-      tracer.blocked(
-        { x: impact.x, y: impact.y, z: burstZ },
-        { x: s.position.x, y: s.position.y, z: s.position.z + 0.5 },
-      );
-    if (covered) continue;
-    exposed += 1;
-    const p =
-      areaIncapacitation(area, d) *
-      (s.posture === 'prone' ? area.proneFactor : 1) *
-      dugInHit(context, s, impact);
-    if (nextFloat(state.rng) < p && !volley.down.has(s.id)) {
-      casualties.push(s.id);
-      other.stats.timesHit += 1;
-      volley.down.set(s.id, { victim: s, by: shooter, force: member.force });
-    }
-  }
+  const flightRangeM = Math.hypot(impact.x - shooter.position.x, impact.y - shooter.position.y);
+  const burstAt = t + grenadeFlightSeconds(flightRangeM);
   events.push({
-    type: 'fofGrenade',
+    type: 'fofGrenadeFired',
     tick,
     atSeconds: t,
     shooterId: shooter.id,
@@ -719,19 +715,19 @@ function grenade(
     impact,
     weapon: weapon.id,
     rangeM: aim.rangeM,
-    exposed,
-    incapacitated: casualties,
+    burstAt,
   });
-  suppressAround(
-    context,
-    volley,
-    member,
+  fof.grenades.push({
+    shooterId: shooter.id,
+    weapon: weapon.id,
+    kind: aim.kind,
+    targetId: aim.target.id,
+    aimPoint: { x: aim.point.x, y: aim.point.y },
     impact,
-    null,
-    weapon.suppressionPerBurst,
-    weapon.suppressionRadiusM,
-  );
-  onTarget(context, shooter, { kind: aim.kind, targetId: aim.target.id });
+    rangeM: aim.rangeM,
+    firedAt: t,
+    burstAt,
+  });
   const index = member.arms.indexOf(arm);
   if (arm.loaded === 0 && !startReload(context, member, index))
     noteExhausted(context, member, index);
@@ -739,6 +735,86 @@ function grenade(
   const rifle = primary ? weaponOf(context, primary) : weapon;
   member.nextFireAt =
     t + nextInterval(context, member, rifle, fireMode(context, member, aim.rangeM), aim.kind);
+}
+
+/**
+ * Grenades bursting by now, in the order fired: each strikes down, by its
+ * draw, the soldiers of either side near where it lands and not behind
+ * cover from it (as they are now), suppresses the enemies round it, and the
+ * force it was fired at comes under fire. One from a grenadier struck down
+ * since still bursts.
+ */
+function arriveGrenades(context: FofContext, volley: Volley): void {
+  const { state, fof, t, events, tick, world } = context;
+  if (fof.grenades.length === 0) return;
+  const due = fof.grenades.filter((g) => g.burstAt <= t + 1e-9);
+  if (due.length === 0) return;
+  fof.grenades = fof.grenades.filter((g) => g.burstAt > t + 1e-9);
+  for (const g of due) {
+    const member = fof.soldiers[context.memberIndex.get(g.shooterId) ?? -1];
+    if (!member) continue;
+    const shooter = soldierOf(context, member);
+    const weapon = fofWeapon(context.setup.config, g.weapon);
+    const area = weapon?.area;
+    if (!weapon || !area) continue;
+    const { impact } = g;
+    // Everyone near the burst, of either side, unless cover stands between (a wall, a bank).
+    const tracer = sightLineTracer(world.terrain);
+    const burstZ = surfaceHeightAt(world.terrain, impact.x, impact.y) + 0.5;
+    const casualties: SoldierId[] = [];
+    let exposed = 0;
+    for (const other of fof.soldiers) {
+      const s = soldierOf(context, other);
+      if (s.status !== 'active') continue;
+      const d = Math.hypot(s.position.x - impact.x, s.position.y - impact.y);
+      if (d >= area.maxEffectRadiusM) continue;
+      const covered =
+        d > 0.5 &&
+        tracer.blocked(
+          { x: impact.x, y: impact.y, z: burstZ },
+          { x: s.position.x, y: s.position.y, z: s.position.z + 0.5 },
+        );
+      if (covered) continue;
+      exposed += 1;
+      const p =
+        areaIncapacitation(area, d) *
+        (s.posture === 'prone' ? area.proneFactor : 1) *
+        dugInHit(context, s, impact);
+      if (nextFloat(state.rng) < p && !volley.down.has(s.id)) {
+        casualties.push(s.id);
+        other.stats.timesHit += 1;
+        volley.down.set(s.id, { victim: s, by: shooter, force: member.force });
+      }
+    }
+    const force = fof.forces[member.force];
+    events.push({
+      type: 'fofGrenade',
+      tick,
+      atSeconds: t,
+      firedAt: g.firedAt,
+      shooterId: shooter.id,
+      unitId: force?.unitId ?? '',
+      side: shooter.side,
+      kind: g.kind,
+      targetId: g.targetId,
+      aimPoint: g.aimPoint,
+      impact,
+      weapon: weapon.id,
+      rangeM: g.rangeM,
+      exposed,
+      incapacitated: casualties,
+    });
+    suppressAround(
+      context,
+      volley,
+      member,
+      impact,
+      null,
+      weapon.suppressionPerBurst,
+      weapon.suppressionRadiusM,
+    );
+    onTarget(context, shooter, { kind: g.kind, targetId: g.targetId });
+  }
 }
 
 /**

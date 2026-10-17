@@ -36,7 +36,8 @@ import { SMALL_ARMS_VELOCITY_MPS } from '#sim';
 // function of the event and the clock (its scatter drawn from a hash of the
 // event), so the After-Action Review shows the same tracers at the same
 // moments, seeking or not. (Recordings from before rounds had a time of
-// flight, without one, fly at `TRACER_SPEED_MPS` on screen.)
+// flight, without one, fly at `TRACER_SPEED_MPS` on screen.) A grenade, which
+// carries no tracer, is a dull streak along its arc until it bursts.
 //
 // A main gun's round, a rocket and a missile (their heads four times the
 // size) fly at their own speed in the battle's time, as the simulation has
@@ -133,6 +134,11 @@ const HEAVY_BURST: Readonly<Record<string, { rounds: number; spacing: number }>>
   autocannon: { rounds: 6, spacing: 0.2 },
   cannon: { rounds: 1, spacing: 0 },
 };
+
+/** A grenade in flight: a dull streak (40 mm grenades carry no tracer), this long behind it (s). */
+const GRENADE_COLOUR = [0.45, 0.45, 0.4] as const;
+const GRENADE_STREAK_S = 0.08;
+const GRAVITY_MPS2 = 9.81;
 
 /** Muzzle height, and the height aimed at, by posture (m). */
 const MUZZLE_M = { standing: 1.45, kneeling: 0.95, prone: 0.3 } as const;
@@ -380,6 +386,32 @@ export function createTracerLayer(
               b,
             );
           }
+          continue;
+        }
+        if (e.type === 'grenadeFired') {
+          // A grenade: no tracer, a dull streak along its low arc from the grenadier's
+          // muzzle to where it lands, in the battle's time, bursting as it lands.
+          const flight = e.burstAt - e.atSeconds;
+          const age = seconds - e.atSeconds;
+          if (age < 0 || age >= flight || flight <= 0) continue;
+          const from = log.indexOf(e.shooterId);
+          if (from < 0) continue;
+          log.read(from, Math.round(e.atSeconds * rate), shooter);
+          const sz = shooter.z + MUZZLE_M[shooter.posture];
+          const ground = surfaceAt(e.impact.x, e.impact.y);
+          const ez = Number.isFinite(ground) ? ground : sz;
+          // The arc: straight from muzzle to landing, raised by the drop it overcomes.
+          const at = (t: number) => {
+            const f = Math.min(1, Math.max(0, t / flight));
+            return {
+              x: shooter.x + (e.impact.x - shooter.x) * f,
+              y: shooter.y + (e.impact.y - shooter.y) * f,
+              z: sz + (ez - sz) * f + (GRAVITY_MPS2 / 2) * t * (flight - t),
+            };
+          };
+          const tail = at(Math.max(0, age - GRENADE_STREAK_S));
+          const head = at(age);
+          streak(tail.x, tail.y, tail.z, head.x, head.y, head.z, 1, 1, ...GRENADE_COLOUR);
           continue;
         }
         if (e.type !== 'shotFired') continue;

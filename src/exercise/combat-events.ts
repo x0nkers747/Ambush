@@ -27,6 +27,17 @@ export interface ShotFiredEvent {
   readonly arriveAt: number;
 }
 
+/** A grenade fired: from the grenadier to where it will land, bursting at `burstAt` (the 3D view flies it). */
+export interface GrenadeFiredEvent {
+  readonly type: 'grenadeFired';
+  readonly tick: number;
+  readonly atSeconds: number;
+  readonly shooterId: SoldierId;
+  readonly side: Side;
+  readonly impact: { readonly x: number; readonly y: number };
+  readonly burstAt: number;
+}
+
 /** A grenade's burst, where it landed (the 3D view shows it). */
 export interface GrenadeImpactEvent {
   readonly type: 'grenadeImpact';
@@ -85,6 +96,7 @@ export interface VehicleStruckEvent {
 export type CombatEvent =
   | ShotFiredEvent
   | SoldierIncapacitatedEvent
+  | GrenadeFiredEvent
   | GrenadeImpactEvent
   | HeavyShotEvent
   | MissileArrivedEvent
@@ -93,6 +105,16 @@ export type CombatEvent =
 /** A burst or a casualty as the character layer's combat event (it reads the shooter and the time). */
 export function combatEventOf(event: SimEvent): CombatEvent | null {
   if (event.type === 'soldierIncapacitated') return event;
+  if (event.type === 'fofGrenadeFired')
+    return {
+      type: 'grenadeFired',
+      tick: event.tick,
+      atSeconds: event.atSeconds,
+      shooterId: event.shooterId,
+      side: event.side,
+      impact: event.impact,
+      burstAt: event.burstAt,
+    };
   if (event.type === 'fofGrenade')
     return {
       type: 'grenadeImpact',

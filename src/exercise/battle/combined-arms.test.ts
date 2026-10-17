@@ -245,6 +245,8 @@ describe('vehicles in a battle', () => {
     for (const e of shots) {
       expect(carriers.has(e.shooterId)).toBe(true);
       expect(['at4', 'javelin']).toContain(e.weapon);
+      // An AT4's rocket flies at 285 m/s: it strikes when it arrives.
+      if (e.weapon === 'at4') expect(e.impactAt).toBeCloseTo(e.atSeconds + e.rangeM / 285, 6);
     }
     // Rounds spent: what they fired is gone from what they carry.
     for (const a of battle.sim.state.combat?.antiTank ?? []) {

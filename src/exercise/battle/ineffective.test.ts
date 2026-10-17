@@ -48,8 +48,8 @@ const centre = (b: Battle) => {
 };
 
 describe('a combat-ineffective squad in a battle', { timeout: 300_000 }, () => {
-  // Seed 2: ambushed, OPFOR breaks, and is made ineffective while it falls back.
-  const battle = createBattle(spec(2), TERRAIN);
+  // Seed 6: ambushed, OPFOR breaks, and is made ineffective while it falls back.
+  const battle = createBattle(spec(6), TERRAIN);
   const events: SimEvent[] = [];
   let brokeAt: { x: number; y: number } | null = null;
   let ineffectiveWhile: string | null = null;
