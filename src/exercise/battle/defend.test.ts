@@ -179,6 +179,42 @@ describe('the defend order', { timeout: 300_000 }, () => {
     expect(fire.dug.p / fire.dug.n).toBeLessThan(0.85 * (fire.open.p / fire.open.n));
   });
 
+  it('holds on longer than an attacker: below half effectiveness it fights on, falling back only under 0.35', () => {
+    const holds = FOF_DEFAULT_CONFIG.force.defendWithdrawEffectiveness;
+    expect(holds).toBeLessThan(FOF_DEFAULT_CONFIG.force.withdrawEffectiveness);
+    let heldBelowHalf = 0;
+    let broke = 0;
+    for (const seed of [1, 2, 3, 4]) {
+      const battle = createBattle(spec(seed, { attack: true, gameDigIn: true }), TERRAIN);
+      for (let tick = 1; tick <= 700 * 30; tick += 1) {
+        const before = battle.sim.state.fof?.forces[0];
+        const wasDefending = before?.phase !== 'withdrawing';
+        for (const e of battle.step()) {
+          if (
+            e.type === 'forcePhaseChanged' &&
+            e.unitId === 'B1-SQD' &&
+            e.to === 'withdrawing' &&
+            e.reason.startsWith('effectiveness below')
+          ) {
+            broke += 1;
+            expect(battle.sim.state.fof?.forces[0]?.effectiveness).toBeLessThan(holds + 1e-9);
+          }
+        }
+        const f = battle.sim.state.fof?.forces[0];
+        if (
+          wasDefending &&
+          f?.phase !== 'withdrawing' &&
+          f !== undefined &&
+          f.effectiveness < FOF_DEFAULT_CONFIG.force.withdrawEffectiveness - 0.02
+        )
+          heldBelowHalf += 1;
+      }
+    }
+    // It fought on below half (where an attacker would have broken), and some broke at last.
+    expect(heldBelowHalf).toBeGreaterThan(0);
+    expect(broke).toBeGreaterThan(0);
+  });
+
   it('given another order, loses its dig-in', () => {
     const { battle } = run(spec(1, { prepared: 300 }), 140, (b) => {
       if (b.sim.tick === 130 * 30) {

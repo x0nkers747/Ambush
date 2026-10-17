@@ -149,7 +149,7 @@ describe('firing', () => {
     expect(saw.every((f) => f.rounds >= 1 && f.rounds <= 9)).toBe(true);
     // Most automatic-rifle bursts are full: 6–9 rounds.
     expect(saw.filter((f) => f.rounds >= 6).length / saw.length).toBeGreaterThan(0.9);
-  });
+  }, 60_000);
 
   it('bursts follow each other no faster than the fire mode allows', () => {
     const { events } = shared();

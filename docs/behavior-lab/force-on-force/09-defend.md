@@ -65,15 +65,26 @@ fighting pits, fully dug in).
 While a squad holds its defence (deploying, digging, or fighting from it), its
 dig-in `d` (0–1) scales four things for its soldiers, linearly from 1 in the open:
 
-| Effect                                                         | Fully dug in                     |
-| -------------------------------------------------------------- | -------------------------------- |
-| Chance of being hit by aimed fire                              | × `dugInHitFactor` (0.35)        |
-| Chance of being hit by area fire, and of a grenade's fragments | × 0.35                           |
-| Detail an observer sees of him (detection)                     | × `dugInDetectionFactor` (0.5)   |
-| Suppression fire puts on him                                   | × `dugInSuppressionFactor` (0.5) |
+| Effect                                                         | Fully dug in                      |
+| -------------------------------------------------------------- | --------------------------------- |
+| Chance of being hit by aimed fire                              | × `dugInHitFactor` (0.2)          |
+| Chance of being hit by area fire, and of a grenade's fragments | × 0.2                             |
+| Detail an observer sees of him (detection)                     | × `dugInDetectionFactor` (0.5)    |
+| Suppression fire puts on him                                   | × `dugInSuppressionFactor` (0.35) |
 
-These come on top of posture. A prone soldier fully dug in is about a tenth as
-likely to be hit as one standing in the open (0.3 × 0.35).
+These come on top of posture. A prone soldier fully dug in is about a
+sixteenth as likely to be hit as one standing in the open (0.3 × 0.2): in a
+fighting position only his head and shoulders show, and only while he fires.
+(Until 2026-10-17 the factors were 0.35 and 0.5: a dug-in squad attacked
+from the front by an equal one won only 12 of 20 seeds.)
+
+**Holding on.** A squad defending a position (its order a defence) falls back
+only when its effectiveness falls below `defendWithdrawEffectiveness` (0.35),
+not `withdrawEffectiveness` (0.5) as a squad moving or attacking does: it
+fights from its position until it is nearly combat ineffective (0.3). The
+other reasons to break contact (suppressed too long, ammunition low) are the
+same. (Before, a defence gave up at the same point as its attacker, at about
+5 of 13 down.)
 
 **From behind.** A position protects toward its front: its parapet, its
 sandbags face his share of the sector (the way his position faces, recorded
@@ -122,14 +133,15 @@ lower, so the ground hides his legs. The positions stay after the squad leaves.
 
 ## 5. Configuration
 
-These are in `force` of `src/exercise/forces/fof-v2.json` (version 2.6.0):
+These are in `force` of `src/exercise/forces/fof-v2.json` (version 2.7.0):
 
-| Key                      | Value | Meaning                                                                            |
-| ------------------------ | ----- | ---------------------------------------------------------------------------------- |
-| `digInSeconds`           | 1800  | Undisturbed in its position this long, a squad is fully dug in.                    |
-| `dugInHitFactor`         | 0.35  | Fully dug in, the chance of being hit (aimed and area fire) is multiplied by this. |
-| `dugInDetectionFactor`   | 0.5   | Fully dug in, the detail an observer sees is multiplied by this.                   |
-| `dugInSuppressionFactor` | 0.5   | Fully dug in, the suppression put on a soldier is multiplied by this.              |
+| Key                           | Value | Meaning                                                                                            |
+| ----------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
+| `digInSeconds`                | 1800  | Undisturbed in its position this long, a squad is fully dug in.                                    |
+| `dugInHitFactor`              | 0.2   | Fully dug in, the chance of being hit (aimed and area fire) is multiplied by this.                 |
+| `dugInDetectionFactor`        | 0.5   | Fully dug in, the detail an observer sees is multiplied by this.                                   |
+| `dugInSuppressionFactor`      | 0.35  | Fully dug in, the suppression put on a soldier is multiplied by this.                              |
+| `defendWithdrawEffectiveness` | 0.35  | Defending, the force falls back only below this effectiveness (else `withdrawEffectiveness`, 0.5). |
 
 ## 6. Results
 
@@ -145,7 +157,21 @@ attacks it from 900 m away, arriving about 7 minutes later. Over 8 seeds, after
 
 Dug in, a defence loses about half as many soldiers and costs the attacker
 nearly twice as many. With 8 seeds, the difference between half and fully dug in
-is within the noise.
+is within the noise. (Measured with the factors before 2026-10-17.)
+
+**Who wins** (the scenario battery, 2026-10-17: open ground, a squad attacking
+from 700 m, 20 seeds; a side is beaten when it is down, combat ineffective or
+falling back; before and after the defence holds on and digging in protects
+more):
+
+| Attack                                    | Defence won, before | Defence won, after |
+| ----------------------------------------- | ------------------: | -----------------: |
+| A squad on a dug-in squad, from the front |                  12 |                 19 |
+| A squad on a squad defending, not dug in  |                   4 |                  9 |
+| A platoon (3 squads) on a dug-in squad    |                   0 |                  0 |
+| A squad on a dug-in squad, from behind    |                   0 |                  0 |
+
+From behind, the defence does not turn to meet it (a known gap).
 
 ## 7. Code and tests
 

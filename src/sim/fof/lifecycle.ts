@@ -96,8 +96,13 @@ export function updateLifecycle(context: FofContext): void {
       return;
     }
     const ammunition = ammunitionShare(context, force);
+    // Defending a position, it holds on longer (never less long).
+    const threshold =
+      activeOrder(force)?.kind === 'defend'
+        ? Math.min(behavior.defendWithdrawEffectiveness, behavior.withdrawEffectiveness)
+        : behavior.withdrawEffectiveness;
     const reason =
-      force.effectiveness < behavior.withdrawEffectiveness
+      force.effectiveness < threshold
         ? 'effectiveness below the withdrawal threshold'
         : force.suppressedSince !== null &&
             t - force.suppressedSince >= behavior.withdrawSuppressedSeconds - 1e-9

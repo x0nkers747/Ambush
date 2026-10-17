@@ -250,6 +250,12 @@ export interface ForceBehaviorConfig {
   readonly resumeSuppression: number;
   /** Withdraw when effectiveness falls below this, ... */
   readonly withdrawEffectiveness: number;
+  /**
+   * ... a force defending a position (its order a defence) only below this,
+   * or `withdrawEffectiveness` if that is lower: it holds on longer than one
+   * moving or attacking.
+   */
+  readonly defendWithdrawEffectiveness: number;
   /** ... or mean suppression stays above `withdrawSuppression` for `withdrawSuppressedSeconds`, ... */
   readonly withdrawSuppression: number;
   readonly withdrawSuppressedSeconds: number;
@@ -775,6 +781,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     'resumeAfterSeconds',
     'resumeSuppression',
     'withdrawEffectiveness',
+    'defendWithdrawEffectiveness',
     'pressOnSeconds',
     'concealmentRangeM',
     'concealedDetectionFactor',
@@ -814,6 +821,7 @@ export function validateFofConfig(data: unknown): FofConfig {
     resumeAfterSeconds: [0],
     resumeSuppression: [0, 1],
     withdrawEffectiveness: [0, 1],
+    defendWithdrawEffectiveness: [0, 1],
     pressOnSeconds: [1, 3600],
     concealmentRangeM: [0],
     concealedDetectionFactor: [0.01, 1],
