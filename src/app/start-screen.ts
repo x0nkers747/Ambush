@@ -231,13 +231,6 @@ export function startBattlefieldSelection(
       <div class="primary-action">
         <button class="primary-btn" data-ui="primary" aria-describedby="primary-reason"></button>
         <p class="reason warn" id="primary-reason" data-ui="primary-reason"></p>
-        <!-- Generation's progress and outcome, under its button so they stay in view. -->
-        <div data-ui="progress" hidden>
-          <ol class="bf-steps" data-ui="steps"></ol>
-          <div class="hint" data-ui="message" hidden></div>
-          <div class="bf-row"><button class="small" data-ui="cancel">Cancel</button></div>
-        </div>
-        <div class="bf-error" data-ui="error" role="alert" hidden></div>
       </div>
       <section class="sec scn-entry">
         <h2>Existing Scenarios</h2>
@@ -264,6 +257,14 @@ export function startBattlefieldSelection(
         </form>
         <p><button class="link" data-ui="here">Use my current position</button></p>
         <p class="hint" data-ui="position-message" hidden></p>
+        <!-- Generation's progress and outcome, under the place chosen, a space apart. -->
+        <div class="bf-generation" data-ui="progress" hidden>
+          <p class="bf-generating">Generating the battlefield…</p>
+          <ol class="bf-steps" data-ui="steps"></ol>
+          <div class="hint" data-ui="message" hidden></div>
+          <div class="bf-row"><button class="small" data-ui="cancel">Cancel</button></div>
+        </div>
+        <div class="bf-error bf-generation" data-ui="error" role="alert" hidden></div>
       </section>
       <section class="sec">
         <h2>Saved battlefields</h2>
@@ -396,8 +397,10 @@ export function startBattlefieldSelection(
           : null;
     button.textContent = label;
     button.setAttribute('aria-disabled', String(reason !== null));
-    ui('primary-reason').textContent = reason ?? '';
-    ui('primary-reason').hidden = reason === null;
+    // While generating, its progress (under the position) says so.
+    const shown = selection.kind === 'location' && generating ? null : reason;
+    ui('primary-reason').textContent = shown ?? '';
+    ui('primary-reason').hidden = shown === null;
     ui('placeholder').textContent = placeholderText();
   };
 
