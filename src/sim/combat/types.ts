@@ -191,9 +191,9 @@ export interface AmmoSpec {
   /** What it does to soldiers; `null`: not used against them. */
   readonly vsInfantry: InfantryEffect | null;
   /**
-   * A main gun's round: its speed (m/s, the muzzle velocity), so it flies
-   * (range ÷ speed) and does what it does when it arrives. Absent: it strikes
-   * when fired (machine guns, autocannon; missiles fly by `guided`).
+   * Its speed (m/s, the muzzle velocity): it flies (range ÷ speed) and does
+   * what it does when it arrives. Absent: it strikes when fired (missiles fly
+   * by `guided`).
    */
   readonly velocityMps?: number;
 }

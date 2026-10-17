@@ -176,7 +176,10 @@ is drawn when it is fired; what it does (a hit resolved against the armour,
 a blast striking and suppressing the soldiers round where it lands, the
 target's crew or force cued) when it arrives, at the first decision after
 (`arriveShells`, after the missiles'). A target destroyed meanwhile is not
-struck again. Machine guns and autocannon strike when fired.
+struck again. Machine guns' and autocannon's bursts fly likewise (12.7 mm
+890 m/s, 7.62 mm 840 m/s, 30 mm 960–970 m/s): a burst at a soldier strikes
+him down (if drawn) and suppresses round him when it arrives, as the
+soldiers' own bursts do (force-on-force 06 §3). Rockets strike when fired.
 Anti-tank gunners choose among the vehicles their squad has confirmed, aim
 (an AT4 5 s, a Javelin's lock-on 12 s), fire when their squad is fighting
 and they see the target, and reload from what they carry.
@@ -258,17 +261,15 @@ the articulation, in two pools of points (no objects per effect).
 
 **Tracers** (`tracers.ts`): a vehicle's machine guns and autocannon fire the
 soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and green for
-OPFOR, flying at 640 m/s on screen. Every round flies at
-that speed on screen whatever the battle's speed (½× to 32×): its age is
-counted in real seconds (the battle's seconds since it was fired over the
-speed the battle is drawn at), so at 32× a round crosses the screen as at
-1×, while the battle runs on. And as many are in the air: at 32× the battle
-fires 32 times as many bursts a second, so one burst in 32 is drawn
-(`tracerShown`: a hash of the burst under 1/speed; every one up to 1×),
-the same number in the air on average. A gun's impact (dust, sparks off
-armour) comes when its tracer lands, or for a burst not drawn, when the
-round would. The review draws the same tracers at the same moment and
-speed, seeking or not.
+OPFOR. Every round flies at its speed in the battle's time, as the battle has
+it, from firing until it arrives (§7): at 1× a burst at 300 m is seen for a
+third of a second; faster, for as much less. As many are in the air whatever
+the speed: at 32× the battle fires 32 times as many bursts a second, so one
+burst in 32 is drawn (`tracerShown`: a hash of the burst under 1/speed;
+every one up to 1×). A gun's impact (dust, sparks off armour) comes when its
+rounds arrive. The review draws the same tracers at the same moments,
+seeking or not. (A recording from before rounds had a time of flight flies
+its tracers at 640 m/s on screen, whatever the speed, as they used to.)
 
 **Main guns' rounds, rockets and missiles** are the streak, red or green,
 with a glowing head four times the size (20 px, not 5); rockets' and
@@ -387,7 +388,8 @@ A scenario may also carry platforms and weapons of its own
   modelled.
 - **Ballistics** are abstract: a shot hits or misses by its probability,
   drawn when fired; a main gun's round flies at its muzzle velocity (no
-  drag), machine guns' and autocannon's rounds strike at once; there is no
+  drag), as do machine guns', autocannon's and soldiers' rounds; rockets and
+  grenades strike at once; there is no
   superelevation or lead, no ricochet; a miss lands just beyond its target
   for the views.
 - **Faces** are front, side, rear (by the attacker's bearing from the hull,

@@ -102,6 +102,16 @@ target; then his weapon and its fire mode decide what he fires:
   single-round launchers have no tactical reload.
 - **Out of ammunition.** No rounds loaded or in reserve: he stops firing (an
   `ammunitionExhausted` event, once per weapon), keeps moving and observing.
+- **Time of flight.** A burst's rounds fly at `SMALL_ARMS_VELOCITY_MPS`
+  (900 m/s: 5.56 and 7.62 mm leave the muzzle at 825–915 m/s), arriving its
+  range over that later (`fofFire.arriveAt`; a third of a second at 300 m).
+  Whether it hits, and whether it strikes its target down, are drawn when it
+  is fired; what it does happens when it arrives (`FofState.inFlight`,
+  `arriveRounds`, at the first decision after, before that decision's
+  bursts): the suppression round where it lands, the soldier struck down
+  (`soldierIncapacitated` then; unless he is down already), and the force
+  it lands on coming under fire. A burst from a soldier struck down meanwhile
+  still arrives. Grenades still burst when fired.
 
 **Conservation.** For every weapon, at every moment:
 `loaded + reserve + fired = basic load`, `0 ≤ loaded ≤ capacity`; checked by
@@ -152,8 +162,9 @@ is re-drawn differently. **The 2D map** draws each burst as a line from the shoo
 (solid aimed, dashed area fire), each grenade as an arc to its burst with its
 effect circle. **The 3D view** shows the fight as it might look: every round
 of every burst flies as a tracer from the shooter's muzzle (red BLUEFOR,
-green OPFOR, as US and Warsaw Pact tracer ammunition), into its target when
-the burst hit, otherwise scattered round the aim point and on past it;
+green OPFOR, as US and Warsaw Pact tracer ammunition), at 900 m/s in the
+battle's time, into its target when the burst hit (arriving as he falls),
+otherwise scattered round the aim point and on past it;
 grenades are not traced, their bursts show as a fireball, a ring of dust and a
 cloud of smoke. Tracers and explosions are purely visual, derived from the
 events and the battle's clock (`src/view3d/tracers.ts`, `impacts.ts`), so the

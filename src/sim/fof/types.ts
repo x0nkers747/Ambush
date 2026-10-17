@@ -522,6 +522,26 @@ export interface FofWindow {
   contactCycles: number;
 }
 
+/**
+ * A burst's rounds in flight (docs/behavior-lab/force-on-force/06 §3): fired
+ * at `SMALL_ARMS_VELOCITY_MPS`, they do what they do when they arrive. Where
+ * they land and whom they strike down were drawn when fired.
+ */
+export interface FofRoundsInFlight {
+  readonly shooterId: SoldierId;
+  readonly kind: 'aimed' | 'area';
+  /** The soldier aimed at (area fire: the contact whose last known position is the aim point). */
+  readonly targetId: SoldierId;
+  /** Where they land: the target where he stood, or the aim point. */
+  readonly impact: Vec2;
+  /** The soldier they strike down when they arrive (drawn when fired), if any. */
+  readonly downId: SoldierId | null;
+  /** Their weapon's suppression, and its radius (m). */
+  readonly suppression: number;
+  readonly radiusM: number;
+  readonly arriveAt: number;
+}
+
 export interface FofState {
   /** The next decision to take (decisions are at `n / decisionHz` seconds). */
   nextDecision: number;
@@ -536,6 +556,8 @@ export interface FofState {
    * detectable to the observer while the asymptotic probability P∞ exceeds it.
    */
   thresholds: number[];
+  /** Soldiers' bursts in flight, in the order fired (`FofRoundsInFlight`). */
+  inFlight: FofRoundsInFlight[];
   stalemate: FofWindow | null;
   outcome: FofOutcome | null;
 }

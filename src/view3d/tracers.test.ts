@@ -40,7 +40,17 @@ function motion() {
   return log;
 }
 
-const shot = (atSeconds: number, rounds: number, weapon: string, hit: boolean): CombatEvent => ({
+/**
+ * A burst as recorded before rounds had a time of flight (`arriveAt` NaN):
+ * its tracers fly on screen. `flies`: as recorded now, at 900 m/s.
+ */
+const shot = (
+  atSeconds: number,
+  rounds: number,
+  weapon: string,
+  hit: boolean,
+  flies = false,
+): CombatEvent => ({
   type: 'shotFired',
   tick: Math.round(atSeconds * 30),
   atSeconds,
@@ -55,6 +65,7 @@ const shot = (atSeconds: number, rounds: number, weapon: string, hit: boolean): 
   hitProbability: 0.2,
   hit,
   incapacitated: false,
+  arriveAt: flies ? atSeconds + 200 / 900 : Number.NaN,
 });
 
 const flat = () => 10;
@@ -98,6 +109,21 @@ describe('tracers', () => {
     layer.update(log, saw, 2.1, flat, eye);
     expect(layer.inFlight).toBe(0);
     layer.update(log, saw, 3.5, flat, eye);
+    expect(layer.inFlight).toBe(0);
+  });
+
+  it('flying in the battle’s time: the hit arrives with the battle’s, at 900 m/s, whatever the speed', () => {
+    const layer = createTracerLayer();
+    // A hit, fired at 1 s: 200 m to his body (he kneels, 0.7 m up; the muzzle 1.45 m) in 0.222 s.
+    const saw = [shot(1, 1, 'rifle', true, true)];
+    layer.update(log, saw, 1.111, flat, eye);
+    expect(layer.inFlight).toBe(1);
+    expect(heads(layer)[0]?.y).toBeCloseTo(100, 0);
+    // At ½× the same moment of the battle: the same place (faster, one burst in so many is drawn).
+    layer.update(log, saw, 1.111, flat, eye, 0.5);
+    expect(heads(layer)[0]?.y).toBeCloseTo(100, 0);
+    // Arrived (as the battle strikes him down): gone.
+    layer.update(log, saw, 1.23, flat, eye);
     expect(layer.inFlight).toBe(0);
   });
 

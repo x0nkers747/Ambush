@@ -100,6 +100,7 @@ const M2_AP = ammo({
   lethality: 0.3,
   nonPenetratingDamage: 0.02,
   vsInfantry: HMG_VS_INFANTRY,
+  velocityMps: 890,
 });
 
 const BALL_762 = (id: string, label: string) =>
@@ -115,6 +116,8 @@ const BALL_762 = (id: string, label: string) =>
     lethality: 0.1,
     nonPenetratingDamage: 0.005,
     vsInfantry: MMG_VS_INFANTRY,
+    // M80 from an M240 about 850 m/s, 57-N-323S from a PKT about 825.
+    velocityMps: 840,
   });
 
 const M829A1 = ammo({
@@ -188,6 +191,7 @@ const UBR6 = ammo({
   lethality: 0.4,
   nonPenetratingDamage: 0.1,
   vsInfantry: HMG_VS_INFANTRY,
+  velocityMps: 970,
 });
 
 const UOF8 = ammo({
@@ -199,6 +203,7 @@ const UOF8 = ammo({
   lethality: 0.2,
   nonPenetratingDamage: 0.15,
   vsInfantry: blast(0.6, 3, 0.35, 8, 1.2),
+  velocityMps: 960,
 });
 
 const M9M113 = ammo({

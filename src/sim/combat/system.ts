@@ -1431,12 +1431,41 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
     );
     hit = nextFloat(state.rng) < p;
     const struck = hit && nextFloat(state.rng) < vs.incapacitationProbabilityOnHit;
+    if (!hit) impact = missPoint(context, shot);
+    const arriveAt = arrivalOf(t, shot);
+    if (arriveAt !== null) {
+      // Its rounds fly: whom they strike down, and whom they suppress, when they arrive.
+      events.push({
+        type: 'vehicleFire',
+        tick,
+        atSeconds: t,
+        shooterId: shot.shooter.id,
+        shooter: shot.shooter.kind,
+        side: shot.side,
+        slot: shot.slot,
+        weapon: weapon.id,
+        ammo: ammo.id,
+        rounds: shot.rounds,
+        targetId: target.id,
+        target: 'soldier',
+        from: shot.from,
+        aimPoint: shot.aim,
+        rangeM: shot.rangeM,
+        hitProbability: p,
+        hit,
+        incapacitated: [],
+        missileId: null,
+        impactAt: arriveAt,
+        impact,
+      });
+      combat.shells.push(shellOf(shot, 'soldier', impact, struck, t, arriveAt));
+      return;
+    }
     if (struck && !shot.volley.down.has(soldier.id)) {
       down.push(soldier.id);
       if (member) member.stats.timesHit += 1;
       shot.volley.down.set(soldier.id, { victim: soldier, by: { id: shot.shooter.id }, force: -1 });
     }
-    if (!hit) impact = missPoint(context, shot);
   }
   events.push({
     type: 'vehicleFire',
@@ -1470,7 +1499,7 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
   }
 }
 
-/** When a shot's round arrives (a main gun's: range ÷ its velocity), or `null`: it strikes when fired. */
+/** When a shot's round arrives (range ÷ its velocity), or `null`: it strikes when fired. */
 function arrivalOf(t: number, shot: Shot): number | null {
   const v = shot.ammo.velocityMps;
   return v === undefined || shot.weapon.guided ? null : t + shot.rangeM / v;
@@ -1551,10 +1580,12 @@ function blastAt(
 }
 
 /**
- * Main guns' rounds arriving by now, in the order fired: a hit on a vehicle
- * is resolved against its armour (unless it is a wreck by now), a miss cues
- * its crew; a blast strikes and suppresses the soldiers round where it lands,
- * and the soldiers' force aimed at comes under fire.
+ * Rounds and bursts arriving by now (main guns', machine guns',
+ * autocannon's), in the order fired: a hit on a vehicle is resolved against
+ * its armour (unless it is a wreck by now), a miss cues its crew; a blast
+ * strikes and suppresses the soldiers round where it lands, a burst strikes
+ * down the soldier drawn when it was fired and suppresses round him; and the
+ * soldiers' force aimed at comes under fire.
  */
 function arriveShells(
   context: FofContext,
@@ -1597,8 +1628,17 @@ function arriveShells(
       continue;
     }
     const vs = ammo.vsInfantry;
-    if (!vs?.area) continue;
-    blastAt(context, vs.area, s.impact, s.targetId, s.shooterId, volley);
+    if (!vs) continue;
+    if (vs.area) blastAt(context, vs.area, s.impact, s.targetId, s.shooterId, volley);
+    else if (s.hit) {
+      // Direct fire: the soldier struck down when it was fired, unless he is down already.
+      const victim = soldierById(context, s.targetId);
+      const victimMember = memberOf(context, s.targetId);
+      if (victim?.status === 'active' && !volley.down.has(victim.id)) {
+        if (victimMember) victimMember.stats.timesHit += 1;
+        volley.down.set(victim.id, { victim, by: { id: s.shooterId }, force: -1 });
+      }
+    }
     suppressNear(
       context,
       { side: s.side, from: s.from, volley },

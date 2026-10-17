@@ -65,7 +65,9 @@ the whole battle afterwards.</p>
   <li><b>Fire.</b> Soldiers fire aimed bursts at their weapons' doctrinal rates, with finite
     ammunition and reloads. Each round's chance to hit depends on range, the target's
     posture and exposure, and whether the shooter is moving or suppressed. Fire at a last
-    known position suppresses but rarely hits. Fire team leaders fire M203 grenades.</li>
+    known position suppresses but rarely hits. Rounds fly at their real speed (about
+    900 m/s): a soldier hit falls, and those near are suppressed, when the burst arrives.
+    Fire team leaders fire M203 grenades.</li>
   <li><b>Suppression.</b> Rounds hitting or passing close build up suppression, which fades
     by half every 6 s. Suppressed soldiers fire less and less accurately; pinned soldiers
     go prone and stop firing.</li>
@@ -80,16 +82,18 @@ the whole battle afterwards.</p>
     meaningful effect, the threat the target poses, its value and the ammunition's cost.
     Turrets slew and lay before firing. A hit is resolved against the armour of the face
     it strikes (front, side, rear or top), and damage behind the armour can destroy the
-    vehicle or disable its mobility, weapons, sights or crew. Missiles fly to their target;
-    wire-guided ones need the gunner to keep it in sight.</li>
+    vehicle or disable its mobility, weapons, sights or crew. Shells fly at their muzzle
+    velocity and missiles at their flight speed, their hits landing when they arrive;
+    wire-guided missiles need the gunner to keep the target in sight.</li>
 </ul>
 
 <h3>Known limitations</h3>
 <ul>
   <li>Weapon, armour and detection values are representative approximations from open
     sources, not validated combat data.</li>
-  <li>Ballistics are abstract: a shot hits or misses by its probability. Gun rounds have no
-    flight time, and there are no ricochets.</li>
+  <li>Ballistics are abstract: whether a shot hits is decided by its probability when it
+    is fired (rounds fly at a constant speed, without drop or drag), there are no
+    ricochets, and grenades and anti-tank rockets strike the moment they are fired.</li>
   <li>Soldiers do not seek cover, flank on their own or choose firing positions. Infantry
     does not mount or dismount vehicles.</li>
   <li>Rifles and machine guns never engage vehicles. Vehicles neither block sight lines nor

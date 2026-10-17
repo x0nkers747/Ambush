@@ -101,7 +101,14 @@ describe('two squads meeting in the open', () => {
     expect(new Set(down.map((e) => e.soldierId)).size).toBe(down.length);
     const grenades = of(events, 'fofGrenade');
     for (const e of down) {
-      const shot = fire.find((f) => f.atSeconds === e.atSeconds && f.hitId === e.soldierId);
+      // A burst's soldier falls when its rounds arrive (the first decision after: every 0.1 s).
+      const shot = fire.find(
+        (f) =>
+          f.hitId === e.soldierId &&
+          f.incapacitated &&
+          e.atSeconds >= f.arriveAt - 1e-9 &&
+          e.atSeconds < f.arriveAt + 0.1 + 1e-9,
+      );
       const burst = grenades.find(
         (g) => g.atSeconds === e.atSeconds && g.incapacitated.includes(e.soldierId),
       );

@@ -343,6 +343,7 @@ describe('the grenade launcher', () => {
     let cache: {
       grenades: {
         e: FofGrenadeEvent;
+        seed: number;
         positions: Map<string, { x: number; y: number; side: string; status: string }>;
       }[];
       events: SimEvent[];
@@ -351,6 +352,7 @@ describe('the grenade launcher', () => {
       if (cache) return cache;
       const grenades: {
         e: FofGrenadeEvent;
+        seed: number;
         positions: Map<string, { x: number; y: number; side: string; status: string }>;
       }[] = [];
       const events: SimEvent[] = [];
@@ -369,7 +371,7 @@ describe('the grenade launcher', () => {
         events.push(
           ...play(run, 500, (stepped) => {
             for (const e of stepped)
-              if (e.type === 'fofGrenade') grenades.push({ e, positions: before });
+              if (e.type === 'fofGrenade') grenades.push({ e, seed, positions: before });
             before = snap();
           }),
         );
@@ -397,14 +399,16 @@ describe('the grenade launcher', () => {
       expect(e.rangeM).toBeLessThanOrEqual(350);
     }
     // Never two from one launcher within the least interval.
+    // (Each run's own: the same launcher in another seed's run is another.)
     const lastAt = new Map<string, number>();
-    for (const { e } of grenades) {
-      const before = lastAt.get(e.shooterId);
+    for (const { e, seed } of grenades) {
+      const key = `${String(seed)}:${e.shooterId}`;
+      const before = lastAt.get(key);
       if (before !== undefined && before < e.atSeconds)
         expect(e.atSeconds - before).toBeGreaterThanOrEqual(
           (area?.minSecondsBetweenShots ?? 0) - 1e-6,
         );
-      lastAt.set(e.shooterId, e.atSeconds);
+      lastAt.set(key, e.atSeconds);
     }
   }, 180_000);
 

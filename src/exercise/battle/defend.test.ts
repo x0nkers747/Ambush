@@ -154,24 +154,29 @@ describe('the defend order', { timeout: 300_000 }, () => {
     }
   });
 
-  it('fights from its position when attacked, never moving on; dug in, it loses fewer soldiers', () => {
+  it('fights from its position when attacked, never moving on; dug in, it is harder to hit', () => {
     // The game's 30 minutes to dig in: unprepared, it is about a fifth dug in when the attack comes.
-    let inOpen = 0;
-    let dugIn = 0;
+    // How hard it is to hit: the mean chance of the enemy's aimed bursts at it. (Its losses
+    // follow, but over a few seeds they vary too much to show it: over 30, 202 soldiers lost
+    // dug in against 223 unprepared.)
+    const fire = { open: { p: 0, n: 0 }, dug: { p: 0, n: 0 } };
     for (const seed of [1, 2, 3]) {
       for (const prepared of [0, 1800]) {
-        const { battle, blue } = run(spec(seed, { attack: true, prepared, gameDigIn: true }), 700);
+        const { blue, events } = run(spec(seed, { attack: true, prepared, gameDigIn: true }), 700);
         const after = blue.slice(blue.findIndex((e) => e.to === 'defending'));
         expect(after.some((e) => e.to === 'moving' || e.to === 'assaulting')).toBe(false);
         expect(after.some((e) => e.to === 'contact' || e.to === 'engaged')).toBe(true);
-        const down = battle.sim.state.soldiers.filter(
-          (s) => s.side === 'BLUEFOR' && s.status !== 'active',
-        ).length;
-        if (prepared === 0) inOpen += down;
-        else dugIn += down;
+        const at = prepared === 0 ? fire.open : fire.dug;
+        for (const e of events) {
+          if (e.type !== 'fofFire' || e.side !== 'OPFOR' || e.kind !== 'aimed') continue;
+          at.p += e.hitProbability;
+          at.n += 1;
+        }
       }
     }
-    expect(dugIn).toBeLessThan(inOpen);
+    expect(fire.open.n).toBeGreaterThan(100);
+    expect(fire.dug.n).toBeGreaterThan(100);
+    expect(fire.dug.p / fire.dug.n).toBeLessThan(0.85 * (fire.open.p / fire.open.n));
   });
 
   it('given another order, loses its dig-in', () => {

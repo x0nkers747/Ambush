@@ -23,6 +23,8 @@ export interface ShotFiredEvent {
   readonly hitProbability: number;
   readonly hit: boolean;
   readonly incapacitated: boolean;
+  /** When its rounds arrive (battle s; the target falls then). */
+  readonly arriveAt: number;
 }
 
 /** A grenade's burst, where it landed (the 3D view shows it). */
@@ -153,5 +155,6 @@ export function combatEventOf(event: SimEvent): CombatEvent | null {
     hitProbability: event.hitProbability,
     hit: event.hit,
     incapacitated: event.incapacitated,
+    arriveAt: event.arriveAt,
   };
 }

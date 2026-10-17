@@ -195,7 +195,10 @@ export interface FofFireEvent {
   readonly hitProbability: number;
   readonly hit: boolean;
   readonly hitId: SoldierId | null;
+  /** Whether it strikes `hitId` down: when it arrives (`soldierIncapacitated` then). */
   readonly incapacitated: boolean;
+  /** When its rounds arrive (s): its range over `SMALL_ARMS_VELOCITY_MPS`. */
+  readonly arriveAt: number;
 }
 
 /**

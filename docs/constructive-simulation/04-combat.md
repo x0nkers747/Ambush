@@ -150,8 +150,8 @@ keep up when play starts or the speed is changed. When it is below 95 % of
 the speed chosen (the battle is slower to simulate here), it is shown in
 brackets right of the time: `T+ 02:09.8 (4.8×)`. It used to be measured
 within a frame, which with the battle in its worker (stepped between frames)
-read as nothing. The 3D view's rounds fly at one speed on screen whatever
-this speed (combined-arms.md §11).
+read as nothing. The 3D view's rounds fly at their speed in the battle's
+time, so faster for a faster battle (combined-arms.md §11).
 
 ## 4. Performance on real ground
 

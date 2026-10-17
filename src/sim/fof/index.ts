@@ -42,6 +42,6 @@ export { inKillZone, killZoneCorners } from './ambush';
 export { hitProbabilityAt, type RangeProbability } from './hit-probability';
 export { armed, roundsLeft } from './weapons';
 export { recovered, spent } from './force';
-export { areaIncapacitation } from './fire';
+export { areaIncapacitation, SMALL_ARMS_VELOCITY_MPS } from './fire';
 export { DEFENCE_ARC_MIN_RAD } from './setup';
 export { defenceAzimuth, defenceFormation, hardGround, RING_FROM_RAD } from './defence';

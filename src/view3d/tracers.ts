@@ -15,6 +15,7 @@ import {
   Vector3,
 } from 'three';
 import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
+import { SMALL_ARMS_VELOCITY_MPS } from '#sim';
 
 // Tracers in the 3D view: every round of every burst fired (a battle's
 // `fofFire`, as the characters' shots) flies from the shooter's muzzle
@@ -23,16 +24,19 @@ import { emptyMotionSample, type CombatEvent, type MotionLog } from '#exercise';
 // and missiles (their smoke trails are the heavy effects'). Purely visual:
 // the battle resolves a burst as one event, and nothing here changes it.
 //
-// A round flies at the same speed on screen whatever the battle's speed
-// (`timeScale`: simulated seconds per real second): its age is the time
-// since it was fired, in real seconds. So at 32× a round crosses the screen
-// as it does at 1×, while the battle runs on. And as many are in the air: at
-// 32× the battle fires 32 times as many bursts a second, so one burst in 32
-// is drawn (`tracerShown`, by a hash of the burst). A main gun's round flies
-// as fast, its head four times the size. Each streak is a function of the
-// event, the clock and that speed (its scatter drawn from a hash of the
+// Rounds fly at their speed in the battle's time, as the battle has them: a
+// soldier's at `SMALL_ARMS_VELOCITY_MPS` (900 m/s), its burst's hit arriving
+// as the battle strikes its target down (`arriveAt`); a vehicle's machine
+// gun's, autocannon's or main gun's from firing until it arrives
+// (`impactAt`). At 1× a round is seen for as long as it flies (a third of a
+// second at 300 m); faster, for as much less. As many are in the air whatever
+// the speed: at 32× the battle fires 32 times as many bursts a second, so
+// one burst of small arms in 32 is drawn (`tracerShown`, by a hash of the
+// burst); every main gun's round, rocket and missile is. Each streak is a
+// function of the event and the clock (its scatter drawn from a hash of the
 // event), so the After-Action Review shows the same tracers at the same
-// moments, seeking or not.
+// moments, seeking or not. (Recordings from before rounds had a time of
+// flight, without one, fly at `TRACER_SPEED_MPS` on screen.)
 //
 // A main gun's round, a rocket and a missile (their heads four times the
 // size) fly at their own speed in the battle's time, as the simulation has
@@ -113,7 +117,7 @@ export function tracerShown(
  * a missile, or a round the battle flies (`impactAt`: a main gun's).
  */
 export function inBattleTime(kind: string, impactAt: number | null): boolean {
-  return kind === 'atgm' || kind === 'atRocket' || (kind === 'cannon' && impactAt !== null);
+  return kind === 'atgm' || kind === 'atRocket' || impactAt !== null;
 }
 
 /** Whether a weapon of `kind` fires tracers drawn here. */
@@ -121,9 +125,9 @@ export function firesTracers(kind: string): boolean {
   return TRACER_KINDS.has(kind);
 }
 
-/** Real seconds between the rounds of a burst: an automatic burst, or aimed shots. */
+/** Seconds between the rounds of a burst: an automatic burst, or aimed shots. */
 const roundSpacing = (weapon: string) => (weapon === 'automaticRifle' ? 0.075 : 0.18);
-/** A vehicle's burst: its rounds drawn, at most, and the real seconds between them. */
+/** A vehicle's burst: its rounds drawn, at most, and the seconds between them. */
 const HEAVY_BURST: Readonly<Record<string, { rounds: number; spacing: number }>> = {
   machineGun: { rounds: 12, spacing: 0.09 },
   autocannon: { rounds: 6, spacing: 0.2 },
@@ -314,14 +318,18 @@ export function createTracerLayer(
         if (since > WINDOW_S && seconds - e.atSeconds > GUIDED_WINDOW_S) break;
         if (e.type === 'heavyShot') {
           const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
-          if (inBattleTime(kind, e.impactAt)) {
-            // A main gun's round, a rocket or a missile: at its own speed in the battle's time.
-            const length = Math.hypot(
-              e.impact.x - e.from.x,
-              e.impact.y - e.from.y,
-              e.impact.z - e.from.z,
-            );
-            const [r, g, b] = COLOURS[e.side];
+          const length = Math.hypot(
+            e.impact.x - e.from.x,
+            e.impact.y - e.from.y,
+            e.impact.z - e.from.z,
+          );
+          const [r, g, b] = COLOURS[e.side];
+          const burst = HEAVY_BURST[kind];
+          if (!burst || kind === 'cannon') {
+            // A main gun's round, a rocket or a missile: one, at its own speed in the
+            // battle's time, every one drawn.
+            if (!inBattleTime(kind, e.impactAt) && !burst) continue;
+            const battle = inBattleTime(kind, e.impactAt);
             streak(
               e.from.x,
               e.from.y,
@@ -329,8 +337,10 @@ export function createTracerLayer(
               e.impact.x,
               e.impact.y,
               e.impact.z,
-              seconds - e.atSeconds,
-              guidedFlightSeconds(e.atSeconds, e.impactAt, length),
+              battle ? seconds - e.atSeconds : since,
+              battle
+                ? guidedFlightSeconds(e.atSeconds, e.impactAt, length)
+                : tracerFlightSeconds(length),
               r,
               g,
               b,
@@ -338,21 +348,19 @@ export function createTracerLayer(
             );
             continue;
           }
-          if (since > WINDOW_S) continue;
-          // A vehicle's gun (or a soldier's): from its muzzle to where the round landed.
-          const burst = HEAVY_BURST[kind];
-          if (!burst) continue;
-          const tick = Math.round(e.atSeconds * rate);
+          // A machine gun's or autocannon's burst, its rounds spaced as fired: in the
+          // battle's time when the battle flies it (else, from before, on screen); one
+          // burst in so many drawn at speed.
           if (!tracerShown(e.shooterId, e.tick, e.slot, scale)) continue;
-          const length = Math.hypot(
-            e.impact.x - e.from.x,
-            e.impact.y - e.from.y,
-            e.impact.z - e.from.z,
-          );
-          const flight = tracerFlightSeconds(length);
+          const battle = e.impactAt !== null;
+          const age0 = battle ? seconds - e.atSeconds : since;
+          const flight =
+            e.impactAt !== null
+              ? Math.max(1e-3, e.impactAt - e.atSeconds)
+              : tracerFlightSeconds(length);
           const rounds = Math.min(e.rounds, burst.rounds);
-          if (since > flight + rounds * burst.spacing) continue;
-          const [r, g, b] = COLOURS[e.side];
+          if (age0 > flight + rounds * burst.spacing) continue;
+          const tick = Math.round(e.atSeconds * rate);
           for (let k = 0; k < rounds; k += 1) {
             // A machine gun's misses spread a little round where the burst landed.
             const spread = kind === 'machineGun' && !(e.hit && k === 0) ? 4 : 0;
@@ -365,20 +373,25 @@ export function createTracerLayer(
               e.impact.x + ox,
               e.impact.y + oy,
               e.impact.z,
-              since - k * burst.spacing,
+              age0 - k * burst.spacing,
               flight,
               r,
               g,
               b,
-              kind === 'cannon',
             );
           }
           continue;
         }
-        if (e.type !== 'shotFired' || since > WINDOW_S) continue;
+        if (e.type !== 'shotFired') continue;
+        // In the battle's time, at the rounds' speed (a recording from before: on screen).
+        const flies = Number.isFinite(e.arriveAt);
+        const age0 = flies ? seconds - e.atSeconds : since;
+        const flightOf = (lengthM: number) =>
+          flies ? lengthM / SMALL_ARMS_VELOCITY_MPS : tracerFlightSeconds(lengthM);
         const spacing = roundSpacing(e.weaponProfileRef);
         // Long past: every round landed (a miss flies on to half again its range, and more).
-        if (since > tracerFlightSeconds(e.rangeM * 1.6 + 20) + e.rounds * spacing) continue;
+        if (age0 > flightOf(e.rangeM * 1.6 + 20) + e.rounds * spacing) continue;
+        if (!flies && since > WINDOW_S) continue;
         const tick = Math.round(e.atSeconds * rate);
         if (!tracerShown(e.shooterId, e.tick, e.weaponProfileRef, scale)) continue;
         const from = log.indexOf(e.shooterId);
@@ -403,7 +416,7 @@ export function createTracerLayer(
         const range = Math.max(1, Math.hypot(dx0, dy0));
         const [r, g, b] = COLOURS[e.shooterSide];
         for (let k = 0; k < e.rounds && n < CAPACITY; k += 1) {
-          const age = since - k * spacing;
+          const age = age0 - k * spacing;
           if (age < 0) continue;
           // Where this round goes: the target (the burst's hit, its first round), or scattered
           // round the aim point, flying on past it.
@@ -416,8 +429,9 @@ export function createTracerLayer(
           const ex = sx + dx0 * past - uy * side;
           const ey = sy + dy0 * past + ux * side;
           const ez = sz + (az - sz) * past + up;
-          const length = Math.hypot(ex - sx, ey - sy, ez - sz);
-          streak(sx, sy, sz, ex, ey, ez, age, tracerFlightSeconds(length), r, g, b);
+          // The hit: from the muzzle to his body as the battle has it, arriving with the hit.
+          const length = hit ? range : Math.hypot(ex - sx, ey - sy, ez - sz);
+          streak(sx, sy, sz, ex, ey, ez, age, flightOf(length), r, g, b);
         }
       }
       draw(n);

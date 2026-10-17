@@ -136,15 +136,16 @@ describe('a battle of several squads a side, each on its own plan', () => {
 
   it('carries out each squad’s orders in turn, through contact', () => {
     // B2: its move, through contact with O1, which breaks and falls back
-    // 500 m; B2 fights it at long range until its own ammunition runs low,
-    // breaking contact in turn (its move fails), then starts its withdrawal.
+    // 500 m; B2 fights it at long range until there is nothing left to
+    // engage, presses on to its destination (its move completes), then starts
+    // its withdrawal.
     const b2 = changes(events, 'B2');
     expect(b2.map((e) => `${e.orderId} ${e.to}`)).toEqual([
       'B2-SQD#1 active',
-      'B2-SQD#1 failed',
+      'B2-SQD#1 completed',
       'B2-SQD#2 active',
     ]);
-    expect(b2[1]?.reason).toBe('broke contact: ammunition low');
+    expect(b2[1]?.reason).toBe('destination reached');
     // O3: two moves, in turn.
     expect(ordersOf(battle, 'O3').map((o) => o.status)).toEqual(['completed', 'completed']);
     // The order is the intent; the phases are what the squad did meanwhile.

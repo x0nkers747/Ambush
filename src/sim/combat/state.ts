@@ -138,10 +138,11 @@ export interface MissileState {
 }
 
 /**
- * A main gun's round in flight (`AmmoSpec.velocityMps`): where it was drawn to
- * go when fired, and what it does when it arrives (`arriveAt`): a hit on a
- * vehicle is resolved against its armour then; a blast strikes the soldiers
- * round where it lands then.
+ * A round or burst in flight (`AmmoSpec.velocityMps`: a main gun's, a machine
+ * gun's, an autocannon's): where it was drawn to go when fired, and what it
+ * does when it arrives (`arriveAt`): a hit on a vehicle is resolved against
+ * its armour then; a blast strikes the soldiers round where it lands then; a
+ * burst at a soldier strikes him down then (if drawn), and suppresses.
  */
 export interface ShellState {
   readonly shooterId: string;
@@ -157,7 +158,7 @@ export interface ShellState {
   /** Where it lands. */
   readonly impact: { readonly x: number; readonly y: number; readonly z: number };
   readonly rangeM: number;
-  /** At a vehicle: whether it hits (drawn when fired). */
+  /** At a vehicle: whether it hits; at a soldier, direct fire: whether it strikes him down (drawn when fired). */
   readonly hit: boolean;
   readonly firedAt: number;
   readonly arriveAt: number;

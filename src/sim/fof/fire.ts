@@ -144,10 +144,22 @@ interface Aim {
   readonly victim: Soldier | null;
 }
 
-/** The bursts due at this decision, in soldier order, resolved as simultaneous. */
+/**
+ * The speed of soldiers' rounds (m/s): 5.56 and 7.62 mm, from an M4, M249,
+ * AK-74 or PKM, leave the muzzle at 825–915 m/s. A burst's rounds take its
+ * range over this to arrive (a third of a second at 300 m), and do what they
+ * do then (`arriveRounds`).
+ */
+export const SMALL_ARMS_VELOCITY_MPS = 900;
+
+/**
+ * The bursts due at this decision, in soldier order, resolved as
+ * simultaneous; first, the rounds fired earlier arriving by now.
+ */
 export function resolveFire(context: FofContext): void {
   const { fof, t, tick, events } = context;
   const volley: Volley = { suppression: new Map(), down: new Map() };
+  arriveRounds(context, volley);
   fof.soldiers.forEach((member) => {
     if (member.nextFireAt === null || member.nextFireAt > t + 1e-9) return;
     const shooter = soldierOf(context, member);
@@ -196,6 +208,12 @@ export function resolveFire(context: FofContext): void {
       (force.lastFiredUponAt === null || t - force.lastFiredUponAt > HOLD_FIRE_UNLESS_FIRED_UPON_S)
     ) {
       member.nextFireAt = t + 1;
+      return;
+    }
+    // Caught in an ambush, surprised: no fire until the surprise is over (not
+    // even falling back, which fires on the move without reacting first).
+    if (force.surprisedUntil !== null && t < force.surprisedUntil - 1e-9) {
+      member.nextFireAt = force.surprisedUntil;
       return;
     }
     // Pinned: no fire; look again shortly.
@@ -391,8 +409,12 @@ function shooterFactor(context: FofContext, member: FofSoldier): number {
 }
 
 /** The force a burst lands on reacts, and its soldier aimed at is counted. */
-function onTarget(context: FofContext, shooter: Soldier, aim: Aim): void {
-  const targetMember = context.fof.soldiers[context.memberIndex.get(aim.target.id) ?? -1];
+function onTarget(
+  context: FofContext,
+  shooter: Soldier,
+  aim: { readonly kind: 'aimed' | 'area'; readonly targetId: SoldierId },
+): void {
+  const targetMember = context.fof.soldiers[context.memberIndex.get(aim.targetId) ?? -1];
   if (targetMember && aim.kind === 'aimed') targetMember.stats.timesTargeted += 1;
   // The force fired on reacts to the fire, and learns roughly where it comes from.
   if (targetMember) underFire(context, targetMember.force, shooter);
@@ -479,6 +501,7 @@ function burst(
   const dx = aim.point.x - shooter.position.x;
   const dy = aim.point.y - shooter.position.y;
   if (dx !== 0 || dy !== 0) shooter.azimuth = azimuthOf(dx, dy);
+  const arriveAt = t + aim.rangeM / SMALL_ARMS_VELOCITY_MPS;
   events.push({
     type: 'fofFire',
     tick,
@@ -497,27 +520,64 @@ function burst(
     hit,
     hitId: hit && victim ? victim.id : null,
     incapacitated,
+    arriveAt,
   });
-  // Suppression where the burst lands.
-  suppressAround(
-    context,
-    volley,
-    member,
-    aim.kind === 'aimed' ? aim.target.position : aim.point,
-    aim.kind === 'aimed' ? aim.target.id : null,
-    weapon.suppressionPerBurst,
-    weapon.suppressionRadiusM,
-  );
   if (hit && victim) {
     const victimMember = fof.soldiers[context.memberIndex.get(victim.id) ?? -1];
     if (victimMember) victimMember.stats.timesHit += 1;
   }
-  if (incapacitated) volley.down.set(victim.id, { victim, by: shooter, force: member.force });
-  onTarget(context, shooter, aim);
+  // Where it lands, whom it suppresses and strikes down, and who comes under
+  // fire: when its rounds arrive (`arriveRounds`).
+  const impact = aim.kind === 'aimed' ? aim.target.position : aim.point;
+  fof.inFlight.push({
+    shooterId: shooter.id,
+    kind: aim.kind,
+    targetId: aim.target.id,
+    impact: { x: impact.x, y: impact.y },
+    downId: drawn && victim ? victim.id : null,
+    suppression: weapon.suppressionPerBurst,
+    radiusM: weapon.suppressionRadiusM,
+    arriveAt,
+  });
   // The burst that empties the feed starts the reload (or he is out).
   if (arm.loaded === 0 && !startReload(context, member, 0)) noteExhausted(context, member, 0);
   member.nextFireAt = t + nextInterval(context, member, weapon, mode, aim.kind);
   arm.readyAt = member.nextFireAt;
+}
+
+/**
+ * Bursts arriving by now, in the order fired: each suppresses round where it
+ * lands, strikes down the soldier drawn when it was fired (unless he is down
+ * already), and the force it lands on comes under fire. A burst from a
+ * soldier struck down since still arrives.
+ */
+function arriveRounds(context: FofContext, volley: Volley): void {
+  const { fof, t } = context;
+  if (fof.inFlight.length === 0) return;
+  const due = fof.inFlight.filter((r) => r.arriveAt <= t + 1e-9);
+  if (due.length === 0) return;
+  fof.inFlight = fof.inFlight.filter((r) => r.arriveAt > t + 1e-9);
+  for (const r of due) {
+    const member = fof.soldiers[context.memberIndex.get(r.shooterId) ?? -1];
+    if (!member) continue;
+    const shooter = soldierOf(context, member);
+    suppressAround(
+      context,
+      volley,
+      member,
+      r.impact,
+      r.kind === 'aimed' ? r.targetId : null,
+      r.suppression,
+      r.radiusM,
+    );
+    const victim =
+      r.downId === null
+        ? undefined
+        : context.state.soldiers[context.soldierIndex.get(r.downId) ?? -1];
+    if (victim?.status === 'active' && !volley.down.has(victim.id))
+      volley.down.set(victim.id, { victim, by: shooter, force: member.force });
+    onTarget(context, shooter, r);
+  }
 }
 
 /** Seconds to the soldier's next burst: his weapon's mode, drawn, slower for leaders, suppressed or area fire. */
@@ -671,7 +731,7 @@ function grenade(
     weapon.suppressionPerBurst,
     weapon.suppressionRadiusM,
   );
-  onTarget(context, shooter, aim);
+  onTarget(context, shooter, { kind: aim.kind, targetId: aim.target.id });
   const index = member.arms.indexOf(arm);
   if (arm.loaded === 0 && !startReload(context, member, index))
     noteExhausted(context, member, index);

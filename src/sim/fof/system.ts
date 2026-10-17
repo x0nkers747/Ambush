@@ -270,6 +270,7 @@ function createFofState(state: SimState, setup: FofSetup): FofState {
     soldiers,
     tracks: [],
     thresholds,
+    inFlight: [],
     stalemate: null,
     outcome: null,
   };

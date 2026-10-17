@@ -55,10 +55,10 @@ const gap = (run: FofRun) => {
 describe('actions on contact: attack', () => {
   for (const terrain of ['open', 'urban'] as const) {
     it(`${terrain}: returns fire, then assaults the enemy's believed position, closing under its own covering fire`, () => {
-      // Over seeds 1–3: every attack returns fire first and assaults; most close
-      // in (an attack can be broken before it has gone far).
+      // Over seeds 1–6: every attack returns fire first and assaults; two in three
+      // close in (an attack can be broken before it has gone far).
       let closing = 0;
-      for (const seed of [1, 2, 3]) {
+      for (const seed of [1, 2, 3, 4, 5, 6]) {
         const run = createFofRun(spec(terrain, seed, 'attack', 'continue'));
         const at: { assault: number | null } = { assault: null };
         let closest = Infinity;
@@ -102,8 +102,8 @@ describe('actions on contact: attack', () => {
         // Moving forward into contact.
         if (closest < (at.assault ?? 0) - 25) closing += 1;
       }
-      expect(closing).toBeGreaterThanOrEqual(2);
-    }, 300_000);
+      expect(closing).toBeGreaterThanOrEqual(4);
+    }, 600_000);
   }
 
   it('once the enemy is broken, the winner returns to its original movement order', () => {
