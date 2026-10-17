@@ -153,7 +153,7 @@ async function openBattlefield(
       put: (model, prepared) => store.putPrepared(id, model, prepared),
     },
     // Prepared now (not read back): the first opening on this browser.
-    (fraction) => task?.update(fraction, `Preparing the terrain of ${pkg.name}…`),
+    (fraction) => task?.update(fraction, `Preparing ${pkg.name}…`),
   );
   const opened = { ...pkg, terrain: shareTerrain(terrain), quality };
   // For the browser's performance tools: how long opening it took (prepared, or read back).
