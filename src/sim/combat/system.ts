@@ -75,6 +75,11 @@ export const COMBAT_TUNING = {
   inSightSeconds: 1.5,
   /** A confirmed target seen within this is followed while it stays in sight (s): its crew tracks it. */
   trackingSeconds: 15,
+  /**
+   * Tracking, a crew checks a target is still in sight once it was last seen
+   * this long ago (s): well inside `inSightSeconds`, so one in sight stays so.
+   */
+  trackRecheckSeconds: 0.5,
   /** A catastrophic kill burns this long (s). */
   burnSeconds: 150,
   /** A target that fired within this is more dangerous (threat × `firingThreatFactor`). */
@@ -155,8 +160,35 @@ export function combatOf(context: FofContext): CombatState | undefined {
       fired: 0,
     });
   }
-  context.state.combat = { thresholds: {}, antiTank, missiles: [], nextMissile: 1 };
+  context.state.combat = {
+    thresholds: drawThresholds(context),
+    antiTank,
+    missiles: [],
+    nextMissile: 1,
+  };
   return context.state.combat;
+}
+
+/**
+ * Every pair's detectability threshold where a vehicle is one of them, at
+ * the start, in a fixed order (each vehicle's crew: enemy soldiers, then
+ * enemy vehicles; then each soldier: enemy vehicles), as the soldiers' are
+ * (`FofState.thresholds`): so a pair that could not detect a target in full
+ * view is known before its sight line is traced (`beyondDetection`).
+ */
+function drawThresholds(context: FofContext): Record<string, number> {
+  const thresholds: Record<string, number> = {};
+  const vehicles = context.state.vehicles ?? [];
+  const soldiers = context.fof.soldiers.map((m) => soldierOf(context, m));
+  const draw = (observer: string, target: string) => {
+    thresholds[`${observer}>${target}`] = nextFloat(context.state.rng);
+  };
+  for (const v of vehicles) {
+    for (const s of soldiers) if (s.side !== v.side) draw(v.id, s.id);
+    for (const o of vehicles) if (o.side !== v.side) draw(v.id, o.id);
+  }
+  for (const s of soldiers) for (const v of vehicles) if (v.side !== s.side) draw(s.id, v.id);
+  return thresholds;
 }
 
 // --- Lookups -----------------------------------------------------------------------
@@ -218,8 +250,92 @@ function soldierAimPoint(context: FofContext, s: Soldier): Vec3 {
 
 const zsScratch: number[] = [];
 
-/** The share of a target's sample heights in clear sight from `eye`, × the light through vegetation. */
+/** A sight line's answer (`exposureFrom`), and what it was traced for. */
+interface Exposure {
+  ex: number;
+  ey: number;
+  ez: number;
+  ax: number;
+  ay: number;
+  ground: number;
+  heights: number[];
+  thermal: boolean;
+  seen: number;
+}
+
+// The sight lines of combined arms, remembered as the soldiers' are
+// (`sight-cache`): per observer and target, the answer and what it was traced
+// for (the eye, the target's place and heights, the sights); while those are
+// the same (the terrain does not change), it is exactly what tracing again
+// would give. Most of a battle's crews and targets stand still between looks.
+// Not simulation state: kept beside it, rebuilt by tracing after a restore.
+const exposures = new WeakMap<FofContext['fof'], Map<string, Exposure>>();
+
+function sameHeights(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * The share of a target's sample heights in clear sight from `eye`, × the
+ * light through vegetation, for observer–target pair `pair` (reused while
+ * nothing it depends on has changed).
+ */
 function exposureFrom(
+  context: FofContext,
+  pair: string,
+  eye: Vec3,
+  at: Vec2,
+  ground: number,
+  heights: readonly number[],
+  thermal: boolean,
+): number {
+  let memo = exposures.get(context.fof);
+  if (!memo) {
+    memo = new Map();
+    exposures.set(context.fof, memo);
+  }
+  const known = memo.get(pair);
+  if (
+    known?.ex === eye.x &&
+    known.ey === eye.y &&
+    known.ez === eye.z &&
+    known.ax === at.x &&
+    known.ay === at.y &&
+    known.ground === ground &&
+    known.thermal === thermal &&
+    sameHeights(known.heights, heights)
+  )
+    return known.seen;
+  const seen = traceExposure(context, eye, at, ground, heights, thermal);
+  if (known) {
+    known.ex = eye.x;
+    known.ey = eye.y;
+    known.ez = eye.z;
+    known.ax = at.x;
+    known.ay = at.y;
+    known.ground = ground;
+    known.heights = [...heights];
+    known.thermal = thermal;
+    known.seen = seen;
+  } else {
+    memo.set(pair, {
+      ex: eye.x,
+      ey: eye.y,
+      ez: eye.z,
+      ax: at.x,
+      ay: at.y,
+      ground,
+      heights: [...heights],
+      thermal,
+      seen,
+    });
+  }
+  return seen;
+}
+
+function traceExposure(
   context: FofContext,
   eye: Vec3,
   at: Vec2,
@@ -271,6 +387,7 @@ function vehicleSees(
     const tp = platformFor(catalog, target.vehicle);
     return exposureFrom(
       context,
+      `${v.id}>${target.id}`,
       eye,
       target.position,
       target.position.z,
@@ -283,6 +400,7 @@ function vehicleSees(
   const heights = context.setup.config.detection.targetSampleHeightsM[s.posture];
   return exposureFrom(
     context,
+    `${v.id}>${s.id}`,
     eye,
     s.position,
     surfaceHeightAt(context.world.terrain, s.position.x, s.position.y),
@@ -300,6 +418,7 @@ function soldierSeesVehicle(
 ): number {
   return exposureFrom(
     context,
+    `${s.id}>${v.id}`,
     soldierEye(context, s),
     v.position,
     v.position.z,
@@ -310,7 +429,7 @@ function soldierSeesVehicle(
 
 // --- Detection ---------------------------------------------------------------------
 
-/** The pair's detectability threshold (drawn when the pair is first looked at). */
+/** The pair's detectability threshold (`drawThresholds`; drawn now for a pair not drawn then). */
 function thresholdOf(
   context: FofContext,
   combat: CombatState,
@@ -324,6 +443,24 @@ function thresholdOf(
     combat.thresholds[key] = th;
   }
   return th;
+}
+
+/**
+ * Whether a target in full view could not be detected by the pair: its
+ * `pInf` in full view (the most it can be: `cyclesOnTarget` grows with the
+ * share in view) is below the pair's threshold (with a margin far above
+ * rounding). Then what is in view does not matter, and its sight line is not
+ * traced (most far targets, to a crew searching out to 3 km). A pair not
+ * drawn at the start: `false`.
+ */
+function beyondDetection(
+  combat: CombatState,
+  observer: string,
+  target: string,
+  pInfInFullView: number,
+): boolean {
+  const th = combat.thresholds[`${observer}>${target}`];
+  return th !== undefined && pInfInFullView < th - 1e-9;
 }
 
 /**
@@ -413,15 +550,24 @@ function soldiersLook(
       if (off > detection.regardHalfAngleDeg && !heard) continue;
       const attention =
         off <= detection.centralHalfAngleDeg || heard ? 1 : detection.peripheralFactor;
-      const seen = soldierSeesVehicle(context, catalog, observer, v);
-      if (seen <= 0) continue;
       const platform = platformFor(catalog, v);
       const dimension = Math.sqrt(platform.dimensions.heightM * platform.dimensions.widthM);
       const cue =
         (moving ? COMBAT_TUNING.engineCue : 1) *
         (vehicleFiredLately(context, v) ? detection.firingSignatureFactor : 1);
-      const sighting = { rangeM, visibleFraction: seen, transmission: 1, attention };
-      const cycles = cyclesOnTarget(sighting, dimension, detection, conditions, cue);
+      const cyclesInView = (visibleFraction: number) =>
+        cyclesOnTarget(
+          { rangeM, visibleFraction, transmission: 1, attention },
+          dimension,
+          detection,
+          conditions,
+          cue,
+        );
+      const full = ttpf(cyclesInView(1), detection.detectionCycles50);
+      if (beyondDetection(combat, observer.id, v.id, full)) continue;
+      const seen = soldierSeesVehicle(context, catalog, observer, v);
+      if (seen <= 0) continue;
+      const cycles = cyclesInView(seen);
       const pInf = ttpf(cycles, detection.detectionCycles50);
       const threshold = thresholdOf(context, combat, observer.id, v.id);
       if (pInf <= threshold) continue;
@@ -500,14 +646,30 @@ function vehiclesLook(
       const dy = target.position.y - v.position.y;
       const rangeM = Math.hypot(dx, dy);
       if (rangeM > maxRange || rangeM < 1e-6) return;
-      const seen = exposureFrom(context, eye, target.position, ground, heights, sensors.thermal);
-      if (seen <= 0) return;
-      const sighting = { rangeM, visibleFraction: seen, transmission: 1, attention: 1 };
-      const cycles =
-        cyclesOnTarget(sighting, dimension, detection, conditions, cue) *
+      const cyclesInView = (visibleFraction: number) =>
+        cyclesOnTarget(
+          { rangeM, visibleFraction, transmission: 1, attention: 1 },
+          dimension,
+          detection,
+          conditions,
+          cue,
+        ) *
         sensors.opticsFactor *
         (sensors.thermal ? 1.5 : 1) *
         eyes;
+      const full = ttpf(cyclesInView(1), detection.detectionCycles50);
+      if (beyondDetection(combat, v.id, target.id, full)) return;
+      const seen = exposureFrom(
+        context,
+        `${v.id}>${target.id}`,
+        eye,
+        target.position,
+        ground,
+        heights,
+        sensors.thermal,
+      );
+      if (seen <= 0) return;
+      const cycles = cyclesInView(seen);
       const pInf = ttpf(cycles, detection.detectionCycles50);
       const threshold = thresholdOf(context, combat, v.id, target.id);
       if (pInf <= threshold) return;
@@ -619,13 +781,20 @@ function ageVehicleTracks(context: FofContext, vehicles: readonly VehicleState[]
 /**
  * A crew follows the confirmed targets it has seen lately while they stay in
  * sight (a gunner on his target needs no new detection): seen now, a track
- * is current again where the target is.
+ * is current again where the target is. Each is checked once it was last
+ * seen `trackRecheckSeconds` ago, not every decision (its sight line is
+ * long: a quarter of a battle's time went on checking, ten times a second).
  */
 function keepTracking(context: FofContext, catalog: CombatCatalog, v: VehicleState): void {
   const t = context.t;
   for (const track of v.combat.tracks) {
     const age = t - track.lastSeenAt;
-    if (!track.confirmed || age <= 1e-9 || age > COMBAT_TUNING.trackingSeconds) continue;
+    if (
+      !track.confirmed ||
+      age < COMBAT_TUNING.trackRecheckSeconds - 1e-9 ||
+      age > COMBAT_TUNING.trackingSeconds
+    )
+      continue;
     const target = targetOf(context, track.target, track.targetId);
     if (!target || vehicleSees(context, catalog, v, target) <= 0) continue;
     track.lastSeenAt = t;

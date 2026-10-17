@@ -141,7 +141,8 @@ export interface MissileState {
 export interface CombatState {
   /**
    * Each observer–target pair's detectability threshold where a vehicle is
-   * one of them (`"observer>target"`), drawn when the pair is first looked at.
+   * one of them (`"observer>target"`), drawn at the start (a pair not drawn
+   * then, when first seen).
    */
   thresholds: Record<string, number>;
   antiTank: AntiTankState[];

@@ -109,11 +109,29 @@ detectable (a prone soldier far off, a tank at 2 km in haze) is searched for
 as before. Infantry looking at infantry is the force-on-force model's own,
 unchanged.
 
-A pair's detectability threshold is drawn from `SimState.rng` the first time
-the pair is looked at (`SimState.combat.thresholds`). No one engages what it
-has not detected; a crew keeps following a confirmed target while it stays in
-sight (tracking, `COMBAT_TUNING.trackingSeconds`), and a target that fires on
-it is detected at once (the flash, the impact).
+Each pair's detectability threshold is drawn from `SimState.rng` at the
+first decision, in a fixed order (`drawThresholds`: each vehicle's crew at
+enemy soldiers, then at enemy vehicles; then each soldier at enemy
+vehicles), as the soldiers' are (`SimState.combat.thresholds`). No one
+engages what it has not detected; a crew keeps following a confirmed target
+while it stays in sight (tracking, `COMBAT_TUNING.trackingSeconds`; checked
+once it was last seen half a second ago, inside the 1.5 s it stays in sight
+for), and a target that fires on it is detected at once (the flash, the
+impact).
+
+**Cost.** Sight lines are most of a battle's time; three things leave out the
+ones that cannot change anything:
+
+- a pair that could not detect its target in full view (its P∞ wholly in
+  view below its threshold) is not traced (`beyondDetection`): most far
+  targets of a crew searching out to 3 km;
+- a pair's answer is reused while the eye, the target's place and heights
+  and the sights are the same (`exposureFrom`, as the soldiers' `sight-cache`):
+  exactly what tracing again gives;
+- tracking checks each target every half-second, not every decision.
+
+On the Quantico combined-arms demo (300 soldiers, 19 vehicles) the heaviest
+fighting cost 26 ms a tick before, about 8 ms after.
 
 ## 6. Target and weapon selection
 
@@ -269,7 +287,8 @@ commands and checks every second's state hash. A battle without vehicles or
 anti-tank weapons makes no new draws and has no new state: it runs and hashes
 exactly as before. Recordings of battles with vehicles made before combined
 arms re-simulate under the new rules (the M113 now fights), so their hashes
-differ.
+differ; so do those made before the thresholds were drawn at the start
+(§5).
 
 ## 13. Scenarios
 
