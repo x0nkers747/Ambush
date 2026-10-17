@@ -47,6 +47,16 @@ export type RouteWaypoint = MapPoint & { readonly followRoads?: true };
 /** The vehicles a scenario can place: the catalog's platforms, in order. */
 export const VEHICLE_KINDS: readonly VehicleKind[] = VEHICLE_PLATFORMS.map((p) => p.id);
 
+/**
+ * The vehicles each side places in Scenario Setup: its own nation's. (The
+ * platforms are faction-independent; a scenario file may give either side
+ * any of them.)
+ */
+export const SIDE_VEHICLE_KINDS: Readonly<Record<Side, readonly VehicleKind[]>> = {
+  BLUEFOR: ['m113', 'm1a1'],
+  OPFOR: ['bmp2', 't72b'],
+};
+
 /** Each platform's name, by id. */
 export const VEHICLE_LABELS: Readonly<Record<string, string | undefined>> = Object.fromEntries(
   VEHICLE_PLATFORMS.map((p) => [p.id, p.name]),

@@ -80,7 +80,7 @@ Soldiers' anti-tank weapons are combat weapons too (`at4`, `rpg7`, `javelin`,
 squad's loadout (`SquadSpec.antiTank`): `none`; `rockets` (each fire team's
 rifleman an AT4 or an RPG-7, by side); `rocketsAndMissile` (and the first
 team's assistant automatic rifleman a Javelin or a 9K111). By default a squad
-carries rockets when the enemy has vehicles.
+carries rockets; they are carried only in a battle with vehicles.
 
 ## 5. Target classification and detection
 
@@ -185,13 +185,25 @@ out is a mission kill.
 Vehicles drive their routes as before (`src/sim/vehicles.ts`), with their
 platform's mobility (`vehicleTypeOf`): road, off-road and woods speeds,
 acceleration and braking, turning by speed and lateral grip, climbing losses.
-Tracked vehicles pivot on the spot; wheeled ones cannot, and turn no tighter
-than their radius. A route must be clear for the hull (`hullClear`): every leg,
-and both its sides at half the vehicle's width, clear of buildings and water;
-when the planned route is too narrow somewhere, the roads are tried; when
-neither is, the order fails ("no way there wide enough for the vehicle").
-An immobilized, destroyed or driverless vehicle stops where it is and its
-orders fail (`immobilized`, `destroyed`). Vehicles do not swim or ford.
+They steer straight for each point of their route and stop on their
+waypoint: never faster than lets them turn onto the point ahead (the arc
+through it, tangent to their heading, must be one they can drive), so they
+slow for bends and never circle a point inside their turning circle; a
+tracked vehicle facing well away from its point brakes and pivots on the spot.
+Wheeled vehicles cannot pivot, and turn no tighter than their radius. A
+route's kinks (a road's little jog, a junction's corner: a sharp turn on a
+leg under 12 m) are cut straight across where the hull fits.
+
+A route must be clear for the hull (`hullClear`): every leg, and both its
+sides at half the vehicle's width, clear of buildings and water; when the
+planned route is too narrow somewhere, the roads are tried; when neither is,
+the order fails ("no way there wide enough for the vehicle"). An
+immobilized, destroyed or driverless vehicle stops where it is and its orders
+fail (`immobilized`, `destroyed`). Vehicles do not swim or ford.
+
+A vehicle at rest (arrived, or without orders) turns its front, its strongest
+armour, toward the enemy: the nearest vehicle its crew has confirmed, else the
+nearest soldier. On the move its front is where it drives.
 
 ## 11. Views
 
@@ -239,10 +251,14 @@ differ.
 
 ## 13. Scenarios
 
-A scenario's vehicles (`PlannedVehicle.kind`) are any platform of the catalog,
-for either side, placed in Setup (one button per platform and side) and saved
-with the scenario; its squads may set their anti-tank weapons (Setup,
-"Anti-tank"). Both fields are optional and validated when a file loads: files
+A scenario's vehicles (`PlannedVehicle.kind`) are platforms of the catalog,
+placed in Setup and saved with the scenario: BLUEFOR places M113s and
+Abrams, OPFOR BMP-2s and T-72s (`SIDE_VEHICLE_KINDS`; a file may give either
+side any platform). Its squads choose their anti-tank weapons in Setup
+("Anti-tank": None, AT4 or AT4 + Javelin for BLUEFOR; None, RPG-7 or
+RPG-7 + 9K111 for OPFOR); by default rockets (AT4, RPG-7), carried only in a
+battle with vehicles. One unit of either side, a squad or a vehicle, is
+enough to play a scenario. Both fields are optional and validated when a file loads: files
 from before load unchanged (an M113 stays an M113; a squad without a loadout
 carries the default). An unknown platform is refused with its name.
 

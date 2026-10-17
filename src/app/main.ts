@@ -178,7 +178,7 @@ function previewData(pkg: BattlefieldPackage, battle: BattleScenarioDefinition):
     terrain: pkg.terrain,
     attribution: pkg.attribution,
     caption:
-      battle.squads.length === 0
+      battle.squads.length === 0 && (battle.vehicles ?? []).length === 0
         ? 'Open the battlefield to set up a scenario, or load one'
         : `Current scenario: ${scenarioSummary(battle)}`,
   };

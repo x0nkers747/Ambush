@@ -122,9 +122,8 @@ describe('Scenario Setup', () => {
         /^\d+ of 1st Squad's soldiers? (was|were) moved clear of the buildings\.$/,
       ),
     ]);
-    expect(p.issues()).toEqual([
-      expect.objectContaining({ message: 'Place at least one OPFOR squad.' }),
-    ]);
+    // One side alone may be played.
+    expect(p.issues()).toEqual([]);
   });
 
   it('refuses an edit with its reason and changes nothing', () => {
@@ -178,9 +177,9 @@ describe('Planning', () => {
 });
 
 describe('the stage gates', () => {
-  it('Setup needs both sides, and every squad placed validly', () => {
+  it('Setup needs one unit, and every squad placed validly', () => {
     const empty = planner('scenario', newBattleScenario(terrain, 'bf')).p;
-    expect(empty.rules.next('scenario')).toBe('Place at least one BLUEFOR squad.');
+    expect(empty.rules.next('scenario')).toBe('Place at least one unit.');
     const { p } = planner('scenario');
     expect(p.rules.next('scenario')).toBeNull();
     expect(p.rules.next('bluefor')).toBeNull();

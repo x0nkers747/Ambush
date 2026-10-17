@@ -9,6 +9,7 @@ export {
   type BattlefieldView3dOptions,
   type PointerHandler,
   type ViewFigures,
+  type ViewLoading,
 } from './view';
 export type { UnitMarker } from './unit-markers';
 export type { AnimationClock } from './characters/layer';

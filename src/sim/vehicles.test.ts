@@ -251,6 +251,39 @@ describe('vehicles', () => {
     expect(Math.hypot(v.position.x - 600, v.position.y - 900)).toBeLessThan(1.5);
   });
 
+  it.each(['m113', 'm1a1', 't72b', 'bmp2'])(
+    '%s: steers straight onto a waypoint close beside it and stops there, without circling it',
+    (kind) => {
+      // Moving, then a waypoint 6 m to its right and just behind: inside its turning circle.
+      const sim = createSimulation(
+        { seed: 1, tickRateHz: RATE },
+        scenario({
+          kind,
+          position: { x: 200, y: 600 },
+          destinations: [
+            { x: 200, y: 800 },
+            { x: 206, y: 797 },
+          ],
+        }),
+      );
+      let turned = 0;
+      let last: number | null = null;
+      const v = run(sim, 90, (s) => {
+        if (last !== null) {
+          let d = s.heading - last;
+          d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+          turned += Math.abs(d);
+        }
+        last = s.heading;
+      });
+      expect(v.orders.map((o) => o.status)).toEqual(['completed', 'completed']);
+      expect(Math.hypot(v.position.x - 206, v.position.y - 797)).toBeLessThan(1.5);
+      expect(v.speed).toBe(0);
+      // At most a half turn and a little to face it: never round and round.
+      expect(turned).toBeLessThan(1.3 * Math.PI);
+    },
+  );
+
   it('is deterministic', () => {
     const go = () => {
       const sim = createSimulation(

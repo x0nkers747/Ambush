@@ -322,8 +322,8 @@ export function createPlanner(o: PlannerOptions): Planner {
     return figuresMade;
   };
   const startFigures = (d: BattleScenarioDefinition): StartFigures => {
-    // No squads yet (a new battlefield): no figures; a battle needs a force.
-    if (d.squads.length === 0)
+    // Nothing placed yet (a new battlefield): no figures. (A vehicle alone is a battle.)
+    if (d.squads.length === 0 && vehiclesOf(d).length === 0)
       return {
         log: createMotionRecorder(BATTLE_TICK_RATE_HZ),
         weapons: {},

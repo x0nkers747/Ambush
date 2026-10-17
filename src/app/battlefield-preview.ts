@@ -1,5 +1,6 @@
 import type { TerrainDataset } from '#sim';
 import { busy, painted } from './busy';
+import { followViewLoading } from './view-loading';
 import { createTacticalMap, type MapEditor, type MapSurface, type TacticalMap } from '#view2d';
 import type { BattlefieldView3d, CameraPose } from '#view3d';
 import { saveScreenshot, screenshotName } from './screenshot';
@@ -220,9 +221,17 @@ export function createBattlefieldPreview(container: HTMLElement): BattlefieldPre
         // The first frame lays out the camera; then look where the 2D map did.
         const opened = view3d;
         requestAnimationFrame(() => {
-          task.done();
           if (view3d === opened && viewMode === '3d') carryFocus('3d');
         });
+        // The bar stays until the view is all in: ground, buildings, trees.
+        followViewLoading(
+          () => opened.loading(),
+          task,
+          () => {
+            task.done();
+          },
+          () => view3d === opened,
+        );
       })
       .catch((error: unknown) => {
         task.done();

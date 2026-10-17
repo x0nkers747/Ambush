@@ -1,4 +1,5 @@
 import { busy, painted, type BusyTask } from '../busy';
+import { followViewLoading } from '../view-loading';
 import { emptyMotionSample } from '#exercise';
 import {
   clearPlan,
@@ -13,7 +14,6 @@ import {
   setVehicleFacing,
   vehicleLabel,
   vehicleShortName,
-  VEHICLE_KINDS,
   vehiclesOf,
   type PlannedVehicle,
   formationsForOrganization,
@@ -32,6 +32,8 @@ import {
   setSquadFormation,
   setSquadAntiTank,
   ANTI_TANK_LOADOUTS,
+  DEFAULT_ANTI_TANK,
+  SIDE_VEHICLE_KINDS,
   type AntiTankLoadout,
   setSquadOrganization,
   SQUAD_ORGANIZATIONS,
@@ -142,20 +144,25 @@ import {
 // and its plan, the roster by force, and the scenario. Every edit goes
 // through the planner (planner.ts) and is saved as it is made.
 
-/** A squad's anti-tank weapons in words (docs/combined-arms.md §9). */
-const ANTI_TANK_TEXT: Readonly<Record<AntiTankLoadout | 'default', string>> = {
-  default: 'By default (rockets if the enemy has vehicles)',
-  none: 'None',
-  rockets: 'Rockets (AT4 / RPG-7)',
-  rocketsAndMissile: 'Rockets and a missile (Javelin / 9K111)',
+/** A squad's anti-tank weapons in words, by side (docs/combined-arms.md §9). */
+const ANTI_TANK_TEXT: Readonly<Record<Side, Readonly<Record<AntiTankLoadout, string>>>> = {
+  BLUEFOR: { none: 'None', rockets: 'AT4', rocketsAndMissile: 'AT4 + Javelin' },
+  OPFOR: { none: 'None', rockets: 'RPG-7', rocketsAndMissile: 'RPG-7 + 9K111' },
 };
-const antiTankOptions = (current: AntiTankLoadout | undefined): string =>
-  (['default', ...ANTI_TANK_LOADOUTS] as const)
-    .map(
-      (k) =>
-        `<option value="${k}"${(current ?? 'default') === k ? ' selected' : ''}>${escapeHtml(ANTI_TANK_TEXT[k])}</option>`,
-    )
-    .join('');
+const antiTankOptions = (side: Side, current: AntiTankLoadout | undefined): string =>
+  ANTI_TANK_LOADOUTS.map(
+    (k) =>
+      `<option value="${k}"${(current ?? DEFAULT_ANTI_TANK) === k ? ' selected' : ''}>${escapeHtml(ANTI_TANK_TEXT[side][k])}</option>`,
+  ).join('');
+
+/** What a click on the map does with each order tool. */
+const ORDER_HINTS: Readonly<Record<OrderKind, string>> = {
+  move: 'Click the terrain to add a MOVE order.',
+  attack: 'Click the terrain to add an ATTACK order.',
+  withdraw: 'Click the terrain to add a WITHDRAW order.',
+  ambush: 'Click the terrain at the position of the ambush, then click again to add a kill zone.',
+  defend: 'Click the terrain at the position to defend, and click again to set firing arcs.',
+};
 
 export interface BattlePageOptions {
   /** Shown in the header: the battlefield's name. */
@@ -673,8 +680,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         const opened = view3d;
         const pose = handedPose;
         handedPose = null;
+        // The bar stays until the view is all in: ground, buildings, trees, soldiers.
+        followViewLoading(
+          () => opened.loading(),
+          task,
+          () => {
+            task.done();
+          },
+          () => view3d === opened && !stopped,
+        );
         requestAnimationFrame(() => {
-          task.done();
           if (view3d !== opened || viewMode !== '3d') return;
           // From terrain selection's 3D camera, exactly; else where the 2D map looked.
           if (pose) opened.setCameraPose(pose);
@@ -1043,14 +1058,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   const orderTools = () =>
     `<div class="tool-grid order-tools" role="group" aria-label="Orders">
-      ${ORDER_KINDS.map((k) =>
-        toolButton(
-          { kind: 'order', order: k },
-          ORDER_LABELS[k],
-          `Give the selected squad ${ORDER_LABELS[k]} orders: each click on the map adds one`,
-          `order-${k}`,
-        ),
-      ).join('')}
+      ${(planner.selectedVehicle ? (['move'] as const) : ORDER_KINDS)
+        .map((k) =>
+          toolButton(
+            { kind: 'order', order: k },
+            ORDER_LABELS[k],
+            `Give the selected squad ${ORDER_LABELS[k]} orders: each click on the map adds one`,
+            `order-${k}`,
+          ),
+        )
+        .join('')}
       ${toolButton({ kind: 'select' }, 'Select', 'Select and drag squads and waypoints')}
     </div>`;
 
@@ -1095,14 +1112,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
                 side,
               ) => `<div class="tool-grid place-tools" role="group" aria-label="Place ${side} vehicles">
               <span class="place-side ${sideClass(side)}">${side}</span>
-              ${VEHICLE_KINDS.map((vehicle) =>
-                toolButton(
-                  { kind: 'placeVehicle', side, vehicle },
-                  vehicleShortName(vehicle),
-                  `Click the map to place a ${side} ${vehicleLabel(vehicle)}`,
-                  sideClass(side),
-                ),
-              ).join('')}
+              ${SIDE_VEHICLE_KINDS[side]
+                .map((vehicle) =>
+                  toolButton(
+                    { kind: 'placeVehicle', side, vehicle },
+                    vehicleShortName(vehicle),
+                    `Click the map to place a ${side} ${vehicleLabel(vehicle)}`,
+                    sideClass(side),
+                  ),
+                )
+                .join('')}
             </div>`,
             )
             .join('')}`;
@@ -1127,25 +1146,20 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const car = planner.selectedVehicle;
     if (t.kind === 'order' && car) {
       if (!planner.canRoute(car)) return 'Orders are given in Planning.';
-      if (t.order !== 'move') return `${car.name} is a vehicle: it only takes Move orders.`;
-      return `Click the map: ${car.name} drives there${planner.selection.orderIndex === null ? ', after its last waypoint' : `, after waypoint ${String(planner.selection.orderIndex + 1)}`}.`;
+      return t.order === 'move' ? ORDER_HINTS.move : 'Vehicles only take MOVE orders.';
     }
-    if (t.kind === 'sector') {
-      const index = planner.selection.orderIndex;
-      return selected && index !== null
-        ? `Click the map in the direction order ${String(index + 1)} defends toward: a 90° arc that way. Then drag the square on its arc to widen or narrow it, up to all round.`
+    if (t.kind === 'sector')
+      return selected && planner.selection.orderIndex !== null
+        ? 'Click the terrain to set firing arcs.'
         : 'Select a defend order first.';
-    }
-    if (t.kind === 'killZone') {
-      const index = planner.selection.orderIndex;
-      return selected && index !== null
-        ? `Click the map at the centre of order ${String(index + 1)}'s kill zone: a 50 m square, facing the ambush position. Then drag its corners to resize it.`
+    if (t.kind === 'killZone')
+      return selected && planner.selection.orderIndex !== null
+        ? 'Click the terrain to add a kill zone.'
         : 'Select an ambush order first.';
-    }
     if (t.kind === 'order') {
       if (!selected) return 'Select a squad first (click it, or pick it in the roster).';
       if (!planner.canPlan(selected)) return 'Orders are given in Planning.';
-      return `Click the map: ${selected.name} gets a${t.order === 'ambush' || t.order === 'attack' ? 'n' : ''} ${ORDER_LABELS[t.order]} order there${planner.selection.orderIndex === null ? ', after its last order' : `, after order ${String(planner.selection.orderIndex + 1)}`}.${t.order === 'ambush' ? ' That is the ambush position; the next click sets its kill zone.' : t.order === 'defend' ? ' That is the defensive position; the next click sets the direction it defends toward.' : ''}`;
+      return ORDER_HINTS[t.order];
     }
     if (planner.stage === 'scenario')
       return 'Place both sides’ squads and vehicles; drag them to move them, their knobs to turn them.';
@@ -1215,8 +1229,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         }</dd>
         <dt>Anti-tank</dt><dd>${
           placing
-            ? `<select data-act="anti-tank" aria-label="Anti-tank weapons">${antiTankOptions(s.antiTank)}</select>`
-            : escapeHtml(ANTI_TANK_TEXT[s.antiTank ?? 'default'])
+            ? `<select data-act="anti-tank" aria-label="Anti-tank weapons">${antiTankOptions(s.side, s.antiTank)}</select>`
+            : escapeHtml(ANTI_TANK_TEXT[s.side][s.antiTank ?? DEFAULT_ANTI_TANK])
         }</dd>
         <dt>Facing</dt><dd>${
           placing || planning
@@ -1238,6 +1252,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         issues,
         eye: (k) => viewshedButton(s, k),
         empty: 'No orders: it holds where it starts.',
+        // Orders are given in Planning: Setup shows none.
+        planHidden: planner.stage === 'scenario',
         extraButtons: placing
           ? '<button class="small danger" data-act="delete-squad">Delete squad</button>'
           : '',
@@ -1262,6 +1278,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     readonly eye: (k: number) => string;
     readonly empty: string;
     readonly extraButtons: string;
+    /** Only its buttons (Scenario Setup: no plan is made there). */
+    readonly planHidden?: boolean;
   }): string => {
     const { plan, editable } = p;
     const rows = plan
@@ -1303,12 +1321,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         </li>`;
       })
       .join('');
-    return `<h3>Plan${plan.length > 0 ? ` (${String(plan.length)} order${plan.length === 1 ? '' : 's'})` : ''}</h3>
+    const listed =
+      p.planHidden === true
+        ? ''
+        : `<h3>Plan${plan.length > 0 ? ` (${String(plan.length)} order${plan.length === 1 ? '' : 's'})` : ''}</h3>
       ${
         plan.length === 0
           ? `<p class="muted">${escapeHtml(p.empty)}${editable ? ' Pick an order and click the map.' : ''}</p>`
           : `<ol class="plan-list">${rows}</ol>`
-      }
+      }`;
+    return `${listed}
       <p class="buttons">
         ${editable && plan.length > 0 ? '<button class="small" data-act="clear-plan">Clear plan</button>' : ''}
         ${p.extraButtons}
@@ -1409,11 +1431,16 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         .filter((i) => i.orderIndex === null)
         .map((i) => `<p class="warn">${escapeHtml(i.message)}</p>`)
         .join('')}
-      <h3>Route${v.route.length > 0 ? ` (${String(v.route.length)} waypoint${v.route.length === 1 ? '' : 's'})` : ''}</h3>
+      ${
+        // Routes are given in Planning: Setup shows none.
+        planner.stage === 'scenario'
+          ? ''
+          : `<h3>Route${v.route.length > 0 ? ` (${String(v.route.length)} waypoint${v.route.length === 1 ? '' : 's'})` : ''}</h3>
       ${
         v.route.length === 0
           ? `<p class="muted">No route: it stays where it starts.${routing ? ' Pick Move and click the map.' : ''}</p>`
           : `<ol class="plan-list">${rows}</ol>`
+      }`
       }
       <p class="buttons">
         ${routing && v.route.length > 0 ? '<button class="small" data-act="vehicle-clear-route">Clear route</button>' : ''}
@@ -1908,10 +1935,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         if (s) planner.edit((d) => setSquadFormation(o.terrain, d, s.id, value));
         break;
       case 'anti-tank':
-        if (s)
-          planner.edit((d) =>
-            setSquadAntiTank(d, s.id, value === 'default' ? null : (value as AntiTankLoadout)),
-          );
+        if (s) planner.edit((d) => setSquadAntiTank(d, s.id, value as AntiTankLoadout));
         break;
       case 'facing':
         if (s) planner.edit((d) => setSquadFacing(o.terrain, d, s.id, Number(value)));
@@ -1987,15 +2011,26 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   // --- Keys ---------------------------------------------------------------
 
-  // No shortcut keys: Escape cancels (a dialog, a tool, a selection).
+  // Escape cancels (a dialog, a tool, a selection); in Scenario Setup, Delete
+  // deletes the squad or vehicle selected.
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape') return;
+    if (event.key !== 'Escape' && event.key !== 'Delete') return;
     if (
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLSelectElement ||
       event.target instanceof HTMLTextAreaElement
     )
       return;
+    if (event.key === 'Delete') {
+      if (planner.stage !== 'scenario' || !ui('confirm').hidden) return;
+      const car = planner.selectedVehicle;
+      const squad = planner.selectedSquad;
+      if (car) planner.removeVehicle(car.id);
+      else if (squad) planner.removeSquad(squad.id);
+      else return;
+      event.preventDefault();
+      return;
+    }
     if (!ui('confirm').hidden) {
       ui('confirm').hidden = true;
       return;

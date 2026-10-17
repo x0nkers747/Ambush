@@ -142,9 +142,31 @@ export interface PointerHandler {
   hover(screen: ScreenPoint): string;
 }
 
+/**
+ * How far the view has loaded, as it stands (docs/loading-overlay.md): each
+ * part that appears after the view itself, done or not. `done` once all are
+ * (or one failed: nothing more is coming).
+ */
+export interface ViewLoading {
+  /** The ground mesh (once the workers have compiled the terrain field). */
+  readonly ground: boolean;
+  /** Buildings, roads and the like, and the vegetation, in the scene. */
+  readonly features: boolean;
+  readonly vegetation: boolean;
+  /** The ground's material textures. */
+  readonly textures: boolean;
+  /** Ground tiles still awaited for this camera (0 once the finest near it are in). */
+  readonly tilesWaiting: number;
+  /** The soldiers' models, when there are soldiers to show (else `true`). */
+  readonly characters: boolean;
+  readonly done: boolean;
+}
+
 export interface BattlefieldView3d {
   /** The canvas the view draws into; the caller places it. */
   readonly canvas: HTMLCanvasElement;
+  /** How far it has loaded (for a progress bar until it is all in). */
+  loading(): ViewLoading;
   /** A transparent canvas for 2D overlays over the view, the same size; the caller places it above `canvas`. */
   readonly overlay: HTMLCanvasElement;
   /** Draws a frame. Call once per animation frame while shown. */
@@ -793,6 +815,28 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       const z = current.groundAt(point.x, -point.y) ?? current.apronZ;
       const nextTarget = new Vector3(point.x, z, -point.y);
       current.camera.setPose(nextTarget, nextTarget.clone().add(offset));
+    },
+    loading() {
+      const entry = current;
+      const failed = entry?.generation.stage === 'failed';
+      const ground = entry?.ground !== null && entry?.ground !== undefined;
+      const features = entry?.features !== null && entry?.features !== undefined;
+      const vegetation = entry?.vegetation !== null && entry?.vegetation !== undefined;
+      const tilesWaiting = entry?.ground?.stats.waiting ?? 0;
+      const wantsCharacters = (figuresOf?.()?.units.length ?? 0) > 0;
+      const charactersIn =
+        !characters || !wantsCharacters || characters.ready || characters.stats().failed !== null;
+      return {
+        ground,
+        features,
+        vegetation,
+        textures: texturesReady,
+        tilesWaiting,
+        characters: charactersIn,
+        done:
+          failed ||
+          (ground && features && vegetation && texturesReady && tilesWaiting === 0 && charactersIn),
+      };
     },
     get pointer() {
       return pointerGround;

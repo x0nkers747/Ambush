@@ -162,6 +162,8 @@ const PIVOT_FROM_RAD = (50 * Math.PI) / 180;
 /** Speed through a sharp bend (m/s), and the bend's angle from which it is sharp. */
 const BEND_SPEED = 3;
 const SHARP_BEND_RAD = (60 * Math.PI) / 180;
+/** The least speed it keeps while turning onto a point it can reach (m/s). */
+const MIN_TURN_SPEED = 0.6;
 
 /** The initial vehicles of a scenario, as state. */
 export function initialVehicles(
@@ -332,10 +334,15 @@ function startNext(v: VehicleState, terrain: TerrainDataset, type: VehicleType):
     for (const followRoads of tries) {
       const path = planPath(terrain, from, next.destination, { followRoads });
       if (!path.ok) continue;
-      const planned = widenTurns(terrain, from, [
-        ...path.turns.map((p) => ({ x: p.x, y: p.y })),
-        { ...next.destination },
-      ]);
+      const planned = smoothKinks(
+        terrain,
+        from,
+        widenTurns(terrain, from, [
+          ...path.turns.map((p) => ({ x: p.x, y: p.y })),
+          { ...next.destination },
+        ]),
+        type.width,
+      );
       if (routeClear(terrain, from, planned, type.width)) {
         route = planned;
         break;
@@ -375,6 +382,43 @@ function widenTurns(terrain: TerrainDataset, from: Vec2, route: Vec2[]): Vec2[] 
     if (n < 1e-6) continue;
     const q = { x: b.x + (nx / n) * CORNER_OFFSET_M, y: b.y + (ny / n) * CORNER_OFFSET_M };
     if (isSegmentWalkable(terrain, a, q) && isSegmentWalkable(terrain, q, c)) out[i] = q;
+  }
+  return out;
+}
+
+/** A kink this short (m) and this sharp (rad) is driven straight across when the hull fits. */
+const KINK_LEG_M = 12;
+const KINK_BEND_RAD = (40 * Math.PI) / 180;
+
+/**
+ * The route without its kinks: a turn on a short leg (a road's little jog, a
+ * junction's corner) that bends sharply, and that the hull can cut straight
+ * across, is left out, so the vehicle does not stop and pivot for it. The
+ * destination is always kept.
+ */
+function smoothKinks(
+  terrain: TerrainDataset,
+  from: Vec2,
+  route: readonly Vec2[],
+  width: number,
+): Vec2[] {
+  const out = route.map((p) => ({ ...p }));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < out.length - 1; i += 1) {
+      const a = out[i - 1] ?? from;
+      const b = out[i];
+      const c = out[i + 1];
+      if (!b || !c) continue;
+      const short =
+        Math.hypot(b.x - a.x, b.y - a.y) < KINK_LEG_M ||
+        Math.hypot(c.x - b.x, c.y - b.y) < KINK_LEG_M;
+      if (!short || bendAt(out, i, from) < KINK_BEND_RAD) continue;
+      if (!hullClear(terrain, a, c, width)) continue;
+      out.splice(i, 1);
+      changed = true;
+      break;
+    }
   }
   return out;
 }
@@ -483,6 +527,17 @@ function drive(
         // The ground's speed; slower while still turning toward the way on.
         wanted = groundSpeed(terrain, type, here.x, here.y, v.heading);
         if (Math.abs(error) > 0.35) wanted = Math.min(wanted, BEND_SPEED);
+        // No faster than lets it turn onto its point: the arc to it (through
+        // the point, tangent to its heading) must be one it can drive, so it
+        // never circles a point inside its turning circle.
+        const absError = Math.abs(error);
+        if (absError > 1e-3) {
+          const radius = toTarget / (2 * Math.sin(Math.min(absError, Math.PI / 2)));
+          const onArc = Math.min(radius * type.maxTurnRate, Math.sqrt(type.lateralAccel * radius));
+          wanted = Math.min(wanted, Math.max(MIN_TURN_SPEED, onArc));
+        }
+        // Tracked, facing well away: it brakes, turning, and pivots once stopped.
+        if (type.pivotRate > 0 && absError > PIVOT_FROM_RAD) wanted = 0;
         // Slow enough to take the next bend, and to stop at the end.
         const bend = last ? 0 : bendAt(ahead, v.routeIndex, here);
         if (bend > 0.2) {
@@ -492,6 +547,15 @@ function drive(
         }
         wanted = Math.min(wanted, Math.sqrt(2 * type.decel * 0.8 * Math.max(0, toEnd - 0.5)));
       }
+    }
+  } else if (v.speed < 0.3 && type.pivotRate > 0) {
+    // Arrived (or without orders): its front toward the enemy, its strongest armour.
+    const toward = enemyBearing(v);
+    if (toward !== null) {
+      let error = toward - v.heading;
+      error -= 2 * Math.PI * Math.round(error / (2 * Math.PI));
+      if (Math.abs(error) > FACE_ENEMY_TOLERANCE_RAD)
+        turn = Math.sign(error) * Math.min(Math.abs(error), type.pivotRate * dt);
     }
   }
   wanted *= driverFactor;
@@ -519,6 +583,27 @@ function advance(v: VehicleState, terrain: TerrainDataset, dt: number): void {
     } else v.speed = 0;
   }
   v.position.z = surfaceHeightAt(terrain, v.position.x, v.position.y);
+}
+
+/** A vehicle at rest turns to face the enemy when it is off by more than this (rad). */
+const FACE_ENEMY_TOLERANCE_RAD = (8 * Math.PI) / 180;
+
+/**
+ * The bearing of the enemy a vehicle should face: the nearest vehicle its
+ * crew has confirmed, else the nearest soldier, where last seen; `null`
+ * without any.
+ */
+function enemyBearing(v: VehicleState): number | null {
+  let best: { vehicle: boolean; d: number; x: number; y: number } | null = null;
+  for (const t of v.combat.tracks) {
+    if (!t.confirmed) continue;
+    const d = Math.hypot(t.lastKnown.x - v.position.x, t.lastKnown.y - v.position.y);
+    const vehicle = t.target === 'vehicle';
+    if (!best || (vehicle && !best.vehicle) || (vehicle === best.vehicle && d < best.d))
+      best = { vehicle, d, x: t.lastKnown.x, y: t.lastKnown.y };
+  }
+  if (!best || best.d < 1) return null;
+  return azimuthOf(best.x - v.position.x, best.y - v.position.y);
 }
 
 /** Ground cells of `GROUND_CELL_M`, remembered per terrain: 0 open, 1 woods, 2 a paved road, 3 a track. */

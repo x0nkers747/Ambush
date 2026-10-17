@@ -28,9 +28,8 @@ export function validateFofSetup(
     if (setup.forces.length !== 2) fail('needs exactly two forces');
     const [a, b] = setup.forces;
     if (a?.side === b?.side) fail('the two forces must be of opposite sides');
-  } else if (setup.forces.length === 0) {
-    fail('needs at least one force');
   }
+  // A battle (`manual`) may have no squad at all: its vehicles fight alone.
   const seen = new Set<string>();
   const forceIds = new Set<string>();
   for (const force of setup.forces) {

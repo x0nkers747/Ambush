@@ -213,17 +213,45 @@ describe('vehicles in a battle', () => {
     expect(events.some((e) => e.type === 'vehicleCondition' && e.to === 'destroyed')).toBe(true);
   });
 
-  it('carries rockets by default only when the enemy has vehicles', () => {
+  it('carries rockets by default, and only in a battle with vehicles', () => {
     const { squads } = battleScenario(TANK_DUEL, TERRAIN);
     const b = squads.find((s) => s.spec.id === 'BX');
     if (!b) throw new Error('no squad');
-    expect(antiTankLoadoutOf(squad('S', 'BLUEFOR', 0, 0, 0), TANK_DUEL)).toBe('rockets');
-    expect(antiTankLoadoutOf(squad('S', 'BLUEFOR', 0, 0, 0), { vehicles: [] })).toBe('none');
+    expect(antiTankLoadoutOf(squad('S', 'BLUEFOR', 0, 0, 0))).toBe('rockets');
+    expect(antiTankLoadoutOf(squad('S', 'OPFOR', 0, 0, 0, { antiTank: 'none' }))).toBe('none');
     const rockets = antiTankWeapons(b, 'rockets');
     expect(Object.values(rockets)).toEqual(['at4', 'at4', 'at4']);
-    // A battle without vehicles: no combat state, as before.
+    // A battle without vehicles: no anti-tank weapons and no combat state, as before.
     const plain = run({ seed: 1, tickRateHz: 30, squads: BYSTANDERS }, 5);
     expect(plain.battle.sim.state.combat).toBeUndefined();
+    const { scenario } = battleScenario({ seed: 1, tickRateHz: 30, squads: BYSTANDERS }, TERRAIN);
+    expect(scenario.fof?.forces.every((f) => f.antiTank === undefined)).toBe(true);
+  });
+
+  it('a vehicle at rest turns its front toward the enemy it sees; on the move it drives on', () => {
+    const battle = createBattle(
+      {
+        seed: 6,
+        tickRateHz: 30,
+        squads: BYSTANDERS,
+        vehicles: [
+          // Facing north, a T-72 off to the east; an M113 driving north past it.
+          vehicle('A1', 'm1a1', 'BLUEFOR', 0, 0, 0),
+          vehicle('M1', 'm113', 'BLUEFOR', -200, -300, 0, [{ x: -200, y: 300 }]),
+          vehicle('T1', 't72b', 'OPFOR', 1100, 0, 270),
+        ],
+      },
+      TERRAIN,
+    );
+    for (let i = 0; i < 12 * 30; i += 1) battle.step();
+    const a1 = battle.sim.state.vehicles?.find((v) => v.id === 'A1');
+    const m1 = battle.sim.state.vehicles?.find((v) => v.id === 'M1');
+    if (!a1 || !m1) throw new Error('no vehicles');
+    const deg = (rad: number) => (rad * 180) / Math.PI;
+    expect(a1.combat.tracks.some((t) => t.targetId === 'T1' && t.confirmed)).toBe(true);
+    expect(Math.abs(deg(a1.heading) - 90)).toBeLessThan(10);
+    // The M113 on its way keeps its heading for its waypoint.
+    expect(Math.min(deg(m1.heading), 360 - deg(m1.heading))).toBeLessThan(10);
   });
 
   it('an immobilized vehicle stops where it is and its orders fail', () => {

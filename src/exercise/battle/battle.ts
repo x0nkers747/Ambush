@@ -54,8 +54,8 @@ export interface SquadSpec {
   /**
    * Its anti-tank weapons (docs/combined-arms.md §9): `none`; `rockets` (each
    * fire team's rifleman an AT4 or RPG-7); `rocketsAndMissile` (and the first
-   * team's assistant automatic rifleman a Javelin or 9K111). Default: rockets
-   * when the enemy has vehicles, else none.
+   * team's assistant automatic rifleman a Javelin or 9K111). Default: rockets.
+   * (Carried only in a battle with vehicles: without, nothing changes.)
    */
   readonly antiTank?: AntiTankLoadout;
 }
@@ -67,13 +67,12 @@ export const ANTI_TANK_LOADOUTS: readonly AntiTankLoadout[] = [
   'rocketsAndMissile',
 ];
 
-/** The loadout a squad carries in a battle: its own, or by default rockets when the enemy has vehicles. */
-export function antiTankLoadoutOf(
-  spec: SquadSpec,
-  battle: Pick<BattleSpec, 'vehicles'>,
-): AntiTankLoadout {
-  if (spec.antiTank) return spec.antiTank;
-  return (battle.vehicles ?? []).some((v) => v.side !== spec.side) ? 'rockets' : 'none';
+/** A squad's anti-tank weapons unless it chooses others: rockets (AT4s, RPG-7s). */
+export const DEFAULT_ANTI_TANK: AntiTankLoadout = 'rockets';
+
+/** The loadout a squad carries in a battle: its own, or by default rockets. */
+export function antiTankLoadoutOf(spec: SquadSpec): AntiTankLoadout {
+  return spec.antiTank ?? DEFAULT_ANTI_TANK;
 }
 
 /** The anti-tank weapon (a `CombatWeaponSpec` id) of each soldier of a squad that carries one. */
@@ -276,7 +275,11 @@ export function battleScenario(
     return b.soldiers.map((m, k) => ({ ...m, position: cleared[k]?.position ?? m.position }));
   });
   const forces: FofForceSetup[] = built.map((b) => {
-    const antiTank = antiTankWeapons(b.squad, antiTankLoadoutOf(b.squad.spec, spec));
+    // Carried only against vehicles: a battle without them is as before.
+    const antiTank =
+      (spec.vehicles ?? []).length > 0
+        ? antiTankWeapons(b.squad, antiTankLoadoutOf(b.squad.spec))
+        : {};
     return {
       unitId: b.squad.unitId,
       side: b.squad.side,

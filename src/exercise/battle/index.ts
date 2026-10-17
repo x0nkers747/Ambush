@@ -18,6 +18,7 @@ export {
   type SquadSpec,
   ANTI_TANK_LOADOUTS,
   antiTankLoadoutOf,
+  DEFAULT_ANTI_TANK,
   antiTankWeapons,
   type AntiTankLoadout,
 } from './battle';
@@ -107,6 +108,7 @@ export {
   setVehicleFacing,
   setVehicleWaypointRoads,
   VEHICLE_KINDS,
+  SIDE_VEHICLE_KINDS,
   VEHICLE_LABELS,
   vehicleLabel,
   vehicleShortName,

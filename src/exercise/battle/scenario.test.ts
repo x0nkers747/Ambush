@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_FEATURES, pointProblem, rectangle, type SimEvent } from '#sim';
 import { labTerrain } from '../behavior-lab/run';
 import { createBattle, squadSoldierStarts } from './battle';
+import { addVehicle } from './vehicles';
 import {
   addOrder,
   addSquad,
@@ -248,9 +249,7 @@ describe('squads', () => {
     expect(turned.note).toMatch(
       /^\d+ of 1st Squad's soldiers? (was|were) moved clear of the buildings\.$/,
     );
-    expect(scenarioIssues(built, turned.definition)).toEqual([
-      expect.objectContaining({ message: 'Place at least one OPFOR squad.' }),
-    ]);
+    expect(scenarioIssues(built, turned.definition)).toEqual([]);
     const back = setSquadFacing(built, turned.definition, 'B1', 0);
     if (!back.ok) throw new Error(back.problem);
     expect(back.note).toBeUndefined();
@@ -333,9 +332,7 @@ describe('plans', () => {
     const inside = addOrder(built, d, 'O1', 'attack', { x: 200, y: 200 });
     if (!inside.ok) throw new Error(inside.problem);
     expect(inside.note).toMatch(/^The destination was moved \d+ m, clear of the buildings\.$/);
-    expect(scenarioIssues(built, inside.definition)).toEqual([
-      expect.objectContaining({ message: 'Place at least one BLUEFOR squad.' }),
-    ]);
+    expect(scenarioIssues(built, inside.definition)).toEqual([]);
     const dragged = moveOrder(built, inside.definition, 'O1', 0, { x: 195, y: 205 });
     if (!dragged.ok) throw new Error(dragged.problem);
     expect(dragged.note).toMatch(/moved/);
@@ -343,13 +340,15 @@ describe('plans', () => {
 });
 
 describe('what stops a scenario from being played', () => {
-  it('a side without a squad', () => {
-    const d = done(
-      addSquad(terrain, newBattleScenario(terrain, 'bf'), 'BLUEFOR', 'squad', { x: 0, y: 0 }),
-    );
-    expect(scenarioIssues(terrain, d).map((i) => i.message)).toEqual([
-      'Place at least one OPFOR squad.',
+  it('no unit at all: one of either side (a squad or a vehicle) is enough', () => {
+    const empty = newBattleScenario(terrain, 'bf');
+    expect(scenarioIssues(terrain, empty).map((i) => i.message)).toEqual([
+      'Place at least one unit.',
     ]);
+    const d = done(addSquad(terrain, empty, 'BLUEFOR', 'squad', { x: 0, y: 0 }));
+    expect(scenarioIssues(terrain, d)).toEqual([]);
+    const car = done(addVehicle(terrain, empty, 'OPFOR', { x: 0, y: 0 }, 180, 't72b'));
+    expect(scenarioIssues(terrain, car)).toEqual([]);
     expect(scenarioIssues(terrain, threeSquads())).toEqual([]);
   });
 

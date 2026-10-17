@@ -1342,7 +1342,7 @@ export function soldierStarts(
 }
 
 /**
- * What stops the scenario from being played: a side with no squad; a
+ * What stops the scenario from being played: no unit at all; a
  * soldier whose starting spot is in water, a building or off the map; a
  * destination that cannot be stood on or walked to from the previous one.
  * `paths` memoizes reachability between edits (keyed by its two points).
@@ -1353,14 +1353,10 @@ export function scenarioIssues(
   paths = new Map<string, string | null>(),
 ): ScenarioIssue[] {
   const issues: ScenarioIssue[] = [];
-  for (const side of ['BLUEFOR', 'OPFOR'] as const) {
-    if (!d.squads.some((s) => s.side === side))
-      issues.push({
-        squadId: null,
-        orderIndex: null,
-        message: `Place at least one ${side} squad.`,
-      });
-  }
+  // A battle needs something on the ground: one unit (a squad, a fire team,
+  // an element or a vehicle) of either side is enough to run it.
+  if (d.squads.length === 0 && vehiclesOf(d).length === 0)
+    issues.push({ squadId: null, orderIndex: null, message: 'Place at least one unit.' });
   const starts = soldierStarts(terrain, d);
   for (const squad of d.squads) {
     // Its centre is no soldier: only off the map is it a problem.

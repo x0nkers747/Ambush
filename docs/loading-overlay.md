@@ -11,13 +11,13 @@ overlay at once and waits for it to be drawn before starting.
 
 Where it appears:
 
-| What is loading                                                                            | Progress                                                       |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| A bundled battlefield fetched on a first visit (docs/bundled-battlefields.md)              | The download                                                   |
-| A battlefield opened or previewed: read back, or its terrain prepared on its first opening | The terrain preparation, band by band (`authoritativeTerrain`) |
-| The 3D view, on the battle page and in the terrain preview                                 | Unknown                                                        |
-| A battle starting (its worker preparing the battlefield before the first tick)             | Unknown                                                        |
-| A battle ended, until the review is open                                                   | Unknown                                                        |
+| What is loading                                                                                                                                                                                              | Progress                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| A bundled battlefield fetched on a first visit (docs/bundled-battlefields.md)                                                                                                                                | The download                                                                                                         |
+| A battlefield opened or previewed: read back, or its terrain prepared on its first opening                                                                                                                   | The terrain preparation, band by band (`authoritativeTerrain`)                                                       |
+| The 3D view, on the battle page and in the terrain preview, until it is all in: the ground, buildings and roads, trees, the ground's textures, the finest ground tiles near the camera, the soldiers' models | Each part as it arrives, and between them the time the last 3D view took in this browser (`src/app/view-loading.ts`) |
+| A battle starting (its worker preparing the battlefield before the first tick)                                                                                                                               | Unknown                                                                                                              |
+| A battle ended, until the review is open                                                                                                                                                                     | Unknown                                                                                                              |
 
 Loading a scenario whose battlefield must be generated again already shows a
 dialog (with Cancel): it now has the same progress bar, from the generation's
