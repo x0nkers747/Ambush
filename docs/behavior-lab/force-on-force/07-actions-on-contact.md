@@ -9,12 +9,12 @@ twenty minutes with almost no fire (§3).
 
 ## 1. The four actions on contact
 
-| Choice (UI)  | `ActionsOn` | On contact the squad…                                                                                                                                                                                                                                                                      |
-| ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Continue** | `continue`  | halts and fights from where it is. When it has had nothing to engage for `pressOnSeconds` (45 s: no aimed fire since contact, and it is not suppressed), it presses on toward its waypoint for 45 s, firing on the move at anything it sees, and does not halt again for the same contact. |
-| **Attack**   | `attack`    | shifts into its extended line (the squad's `line`, the fire team's `skirmishers`) and assaults the enemy by bounding elements; afterwards it carries on with its plan, or withdraws when spent.                                                                                            |
-| **Hold**     | `hold`      | halts, fights whatever it can see from there and waits indefinitely. Its order stays active; it moves only on a new order (or breaks contact if it becomes spent).                                                                                                                         |
-| **Avoid**    | `withdraw`  | falls back a short way from where it is at once, at any range it sees the enemy, then holds. It does not fire unless it has been fired upon in the last 60 s.                                                                                                                              |
+| Choice (UI)  | `ActionsOn` | On contact the squad…                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Continue** | `continue`  | halts and fights from where it is. When it has had nothing to engage for `pressOnSeconds` (45 s: no aimed fire since contact, and it is not suppressed), and no fire has come at it for 15 s, it presses on toward its waypoint for 45 s, firing on the move at anything it sees, and does not halt again for the same contact; fired upon, it halts at once and takes cover (prone, kneeling to see). Under fire it cannot return it stays down: it does not walk on upright under it. |
+| **Attack**   | `attack`    | shifts into its extended line (the squad's `line`, the fire team's `skirmishers`) and assaults the enemy by bounding elements; afterwards it carries on with its plan, or withdraws when spent.                                                                                                                                                                                                                                                                                         |
+| **Hold**     | `hold`      | halts, fights whatever it can see from there and waits indefinitely. Its order stays active; it moves only on a new order (or breaks contact if it becomes spent).                                                                                                                                                                                                                                                                                                                      |
+| **Avoid**    | `withdraw`  | falls back a short way from where it is at once, at any range it sees the enemy, then holds. It does not fire unless it has been fired upon in the last 60 s.                                                                                                                                                                                                                                                                                                                           |
 
 By default each order kind has its own: a Move continues, an Attack attacks, a
 Withdraw avoids. Changing an order's kind changes its actions on contact only
@@ -84,7 +84,10 @@ BLUEFOR's actions on contact varied and OPFOR on Continue.
   - **Hold** never moves on or assaults after contact, and its order stays active;
   - **Avoid** first withdraws, fires only after being fired upon, and never moves forward again;
   - **Attack** assaults, in at least two seeds, with a line formation;
-  - **Continue** presses on and does not halt again within 45 s;
+  - **Continue** presses on and does not halt again within 45 s, unless
+    fired upon (2026-10-17: a squad pressing on walked upright down a road
+    under an Abrams' fire; now it halts and goes to ground, and presses on
+    only after 15 s without fire);
   - no squad makes five phase changes within 2 s.
 
   They also check the scenario edits (defaults, kind changes, saving, older

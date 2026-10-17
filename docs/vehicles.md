@@ -126,7 +126,7 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
 
 ## 4. Limits
 
-- **No passengers.** No crew or infantry mount or dismount. It blocks no soldier (vehicles: Traffic, above).
+- **No passengers.** No crew or infantry mount or dismount. Soldiers keep out of its way and it out of theirs (Soldiers, above); vehicles: Traffic, above.
   Its combat: combined-arms.md §16.
 - **Steering.** It steers for a point a little way along its route (its
   speed × 0.7 s, 3–12 m ahead), not for the next turn itself: a road's jogs
@@ -145,6 +145,20 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
   road), the first clear of every stopped vehicle and of buildings and
   water; with none, it stops short. One beyond its destination is not in
   its way. (Without this a column bunched up, and drove through wrecks.)
+- **Soldiers.** A vehicle does not drive over soldiers (either side's).
+  The strip its hull sweeps along its way, up to 35 m ahead, is kept 1.5 m
+  clear of every soldier up: with one in it, its path is shifted sideways
+  (1.5 m steps, up to 9 m either way), the shift that clears them nearest
+  to where it is (so it holds one while it passes a column on the road,
+  and comes back once past), steered through a point 12 m ahead on the
+  shifted line, so it eases over smoothly; never across a building or
+  water. Near soldiers it goes at most 5 m/s; with no clear path it stops
+  short and waits. And whatever its path, it brakes to stop a metre short
+  of a soldier in the ground it would cover before it could stop, where he
+  is or where he is walking to within 1.5 s (turning, it sweeps ground off
+  its path). The soldiers step aside too (`behavior/system.ts`): one in a
+  vehicle's way, or about to be within 1.5 s, steps out of it, away from
+  its centreline, at up to 2.5 m/s.
 - **Routes.** The routes are soldiers' routes, widened by 3 m at each corner
   and checked clear for the hull's width (combined-arms.md §10), so a vehicle
   clears buildings but may brush small obstacles. A road's gentle bends (a

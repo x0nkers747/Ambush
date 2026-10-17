@@ -18,6 +18,7 @@ import {
   type TaskFrame,
 } from './slots';
 import type { AgentState, BehaviorState, TaskOutcome, TaskPhase, UnitTask } from './types';
+import { catalogOf, platformOf } from '../combat/registry';
 
 // The unit-movement system (docs/behavior-lab/03 §4.3, §8): runs each tick
 // before `moveSoldiers`, in fixed substeps of 1/substepHz s, so every tick
@@ -51,6 +52,90 @@ const target = slotTarget();
 const pushed = { x: 0, y: 0 };
 const NO_PUSH = Object.freeze({ x: 0, y: 0 });
 
+/** A vehicle as the soldiers keep out of its way: where it is, which way it faces and goes, its size. */
+interface VehicleFootprint {
+  readonly x: number;
+  readonly y: number;
+  /** Its heading (unit vector). */
+  readonly hx: number;
+  readonly hy: number;
+  /** Its velocity (m/s). */
+  readonly vx: number;
+  readonly vy: number;
+  readonly halfLength: number;
+  readonly halfWidth: number;
+}
+
+/** A soldier keeps this clear of a vehicle's hull (m). */
+const VEHICLE_SPACE_M = 1.2;
+/** He looks this far ahead (s) for a vehicle coming at him, and steps aside up to this fast (m/s). */
+const VEHICLE_HORIZON_S = 1.5;
+const STEP_ASIDE_SPEED = 2.5;
+
+/** The vehicles' footprints now (none destroyed is skipped: a wreck is in the way too). */
+function vehicleFootprints(state: SimState, world: SimWorld): VehicleFootprint[] {
+  const vehicles = state.vehicles;
+  if (!vehicles || vehicles.length === 0) return [];
+  const catalog = catalogOf(world);
+  return vehicles.map((v) => {
+    const size = platformOf(catalog, v.kind).dimensions;
+    const hx = Math.sin(v.heading);
+    const hy = Math.cos(v.heading);
+    return {
+      x: v.position.x,
+      y: v.position.y,
+      hx,
+      hy,
+      vx: hx * v.speed,
+      vy: hy * v.speed,
+      halfLength: size.lengthM / 2,
+      halfWidth: size.widthM / 2,
+    };
+  });
+}
+
+/**
+ * Adds to `push` the velocity stepping a soldier at `p`, going at `v`, out
+ * of the way of the vehicles: of each whose hull (with `VEHICLE_SPACE_M`
+ * round it) he is in, or will be within `VEHICLE_HORIZON_S` as both go on,
+ * he steps aside, away from its centreline (out of its path), the sooner the
+ * faster; one standing still he walks round as round an obstacle.
+ */
+function stepAside(
+  vehicles: readonly VehicleFootprint[],
+  p: { readonly x: number; readonly y: number },
+  v: { readonly x: number; readonly y: number },
+  push: { x: number; y: number },
+): void {
+  for (const car of vehicles) {
+    const reach = car.halfLength + VEHICLE_SPACE_M + 3 * VEHICLE_HORIZON_S * 4;
+    if (Math.abs(p.x - car.x) > reach || Math.abs(p.y - car.y) > reach) continue;
+    let w = 0;
+    let side = 0;
+    for (const tau of [0, 0.5, 1, 1.5]) {
+      if (tau > VEHICLE_HORIZON_S) break;
+      const qx = p.x + v.x * tau - (car.x + car.vx * tau);
+      const qy = p.y + v.y * tau - (car.y + car.vy * tau);
+      const along = qx * car.hx + qy * car.hy;
+      const across = qx * car.hy - qy * car.hx;
+      if (
+        Math.abs(along) < car.halfLength + VEHICLE_SPACE_M &&
+        Math.abs(across) < car.halfWidth + VEHICLE_SPACE_M
+      ) {
+        w = 1 - tau / (2 * VEHICLE_HORIZON_S);
+        // Away from its centreline, as he stands now (on it: to its right).
+        const now = (p.x - car.x) * car.hy - (p.y - car.y) * car.hx;
+        side = now >= 0 ? 1 : -1;
+        break;
+      }
+    }
+    if (w <= 0) continue;
+    // Its right is (hy, −hx).
+    push.x += car.hy * side * STEP_ASIDE_SPEED * w;
+    push.y += -car.hx * side * STEP_ASIDE_SPEED * w;
+  }
+}
+
 /** Moves every soldier steered by a unit task through the tick. */
 export function updateBehavior(
   state: SimState,
@@ -80,6 +165,8 @@ export function updateBehavior(
 
   const active = behavior.tasks.filter(isRunning);
   if (active.length === 0) return;
+  // The vehicles, as the soldiers step out of their way (where they are this tick).
+  const vehicles = vehicleFootprints(state, world);
 
   // Each task's agents (in soldier order), gathered once: agents change only between ticks.
   const members = active.map((task) => behavior.agents.filter((a) => a.taskId === task.id));
@@ -138,6 +225,7 @@ export function updateBehavior(
           crowd,
           index.get(soldier.id) ?? -1,
           tEnd,
+          vehicles,
         );
       }
     }
@@ -489,6 +577,7 @@ function stepAgent(
   crowd: Crowd,
   me: number,
   t: number,
+  vehicles: readonly VehicleFootprint[] = [],
 ): void {
   const { task } = frame;
   if (task.phase === 'settling' && agent.override === null) {
@@ -511,8 +600,12 @@ function stepAgent(
     }
   }
   keepDetour(agent, soldier, frame, world, params, t);
-  const push =
+  let push: { x: number; y: number } =
     me >= 0 ? separation(crowd, me, params.personalSpace, params.separationSpeed, pushed) : NO_PUSH;
+  if (vehicles.length > 0) {
+    if (push === NO_PUSH) push = { x: 0, y: 0 };
+    stepAside(vehicles, soldier.position, { x: agent.vx, y: agent.vy }, push);
+  }
   const wanted = desire(agent, soldier, frame, params, target, push);
   const { wx, wy } = wanted;
 

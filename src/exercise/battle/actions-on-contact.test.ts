@@ -144,7 +144,7 @@ describe('actions on contact', { timeout: 300_000 }, () => {
     expect(assaultFormationId('fireTeam')).toBe('usmc.fireTeam.skirmishers');
   });
 
-  it('continue: presses on through contact it cannot engage, without halting at once', () => {
+  it('continue: presses on through contact it cannot engage, halting again only when fired upon', () => {
     let pressed = 0;
     // Six fights: whether one comes to have nothing to engage depends on how it went before.
     for (const seed of [...SEEDS, 4, 5, 6]) {
@@ -153,9 +153,20 @@ describe('actions on contact', { timeout: 300_000 }, () => {
         const phases = f.phases.filter((e) => e.side === side);
         for (const e of phases.filter((x) => x.reason === 'nothing to engage: pressing on')) {
           pressed += 1;
-          // It does not halt for contact again while pressing on.
+          // It does not halt for contact again while pressing on, unless fired
+          // upon: then it takes cover, not walking on upright under fire.
           const halt = phases.find((x) => x.atSeconds > e.atSeconds && x.to === 'contact');
-          if (halt) expect(halt.atSeconds - e.atSeconds).toBeGreaterThanOrEqual(45 - 0.2);
+          if (halt && halt.atSeconds - e.atSeconds < 45 - 0.2)
+            expect(halt.reason).toBe('under fire');
+          // It pressed on only once no fire had come at it (the other squad's, the only one) for 15 s.
+          const fired = f.events.filter(
+            (x) =>
+              x.type === 'fofFire' &&
+              x.side !== side &&
+              x.atSeconds <= e.atSeconds &&
+              x.atSeconds > e.atSeconds - 15 + 0.2,
+          );
+          expect(fired).toEqual([]);
         }
       }
     }

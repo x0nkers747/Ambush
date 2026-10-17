@@ -4,7 +4,7 @@ import { azimuthOf, normalizeAzimuth, type Vec2 } from './geometry';
 import { isSegmentWalkable, OBSTACLE_CLEARANCE_M, planPath } from './navigation';
 import { pointInPolygon } from './polygon';
 import { roadNetwork, roadPointAt } from './road-network';
-import type { Side, SimState } from './state';
+import type { Side, SimState, Soldier } from './state';
 import { heightAt, isOnTerrain, type TerrainDataset } from './terrain';
 import type { SimWorld } from './world';
 import type { TickTime } from './movement';
@@ -273,14 +273,32 @@ export function updateVehicles(state: SimState, world: SimWorld, time: TickTime)
   if (!vehicles) return;
   const catalog = catalogOf(world);
   const types = vehicles.map((v) => typeOf(platformOf(catalog, v.kind)));
+  // The soldiers' velocities (those moving with their units), to see who is stepping into its way.
+  const walking = new Map<string, { readonly x: number; readonly y: number }>();
+  for (const a of state.behavior?.agents ?? [])
+    if (a.vx !== 0 || a.vy !== 0) walking.set(a.soldierId, { x: a.vx, y: a.vy });
   vehicles.forEach((v, i) => {
     const platform = platformOf(catalog, v.kind);
     const type = types[i] ?? typeOf(platform);
     slewMounts(platform, v.combat, time.dtSeconds);
     drive(v, world.terrain, type, time.dtSeconds, time.startSeconds, {
       speed: (wanted) => keepInterval(v, type, wanted, vehicles, types),
-      steer: (target, toEnd, leg) =>
-        bypass(v, type, world.terrain, target, toEnd, leg, vehicles, types),
+      steer: (target, toEnd, leg) => {
+        const round = bypass(v, type, world.terrain, target, toEnd, leg, vehicles, types);
+        // Round a stopped vehicle: the line to its way round is the way on.
+        const line = round.speed === Infinity ? leg : { from: v.position, to: round.target };
+        const clear = avoidSoldiers(
+          v,
+          type,
+          world.terrain,
+          round.target,
+          toEnd,
+          line,
+          state.soldiers,
+          walking,
+        );
+        return { target: clear.target, speed: Math.min(round.speed, clear.speed) };
+      },
     });
   });
 }
@@ -379,6 +397,124 @@ function bypass(
   }
   // No way round: it stops short.
   return { target, speed: 0 };
+}
+
+/** Soldiers this far ahead (m, from its front) are in its way if in its path. */
+const SOLDIERS_AHEAD_M = 35;
+/** It keeps this clear of a soldier (m, beyond its half-width). */
+const SOLDIER_CLEAR_M = 1.5;
+/** The sideways shifts of its path it tries (m), to either side, to pass soldiers. */
+const PATH_SHIFTS_M = [0, 1.5, 3, 4.5, 6, 7.5, 9];
+/** Passing soldiers, or near them, at most this fast (m/s); stopping, this short of one (m). */
+const PASSING_SOLDIERS_SPEED = 5;
+const SOLDIER_STOP_M = 4;
+/** It stops this short of a soldier in front of it, and so far beyond its sides (m). */
+const GUARD_MARGIN_M = 1;
+/** It looks this far ahead (s) at where soldiers are walking to. */
+const GUARD_LOOK_S = 1.5;
+/** A shifted path is steered along by a point this far ahead on it (m). */
+const SHIFT_AIM_M = 12;
+
+/**
+ * Where it steers (`target`) and how fast it may go, so as not to drive over
+ * soldiers (either side's): the strip its hull sweeps along its way on
+ * (`leg`), up to `SOLDIERS_AHEAD_M` ahead, kept clear of every soldier up. If
+ * one is in it, its path is shifted sideways, smoothly (the steering point
+ * moves; the vehicle eases over): of the shifts that clear them all and do
+ * not cross what cannot be crossed (buildings, water), the nearest to where
+ * it is now, so it holds a shift while it passes them and comes back once
+ * past. Near soldiers it slows; with no clear path it stops short of them
+ * and waits for them to move.
+ */
+function avoidSoldiers(
+  v: VehicleState,
+  type: VehicleType,
+  terrain: TerrainDataset,
+  target: Vec2,
+  /** How far it has yet to drive (m): soldiers beyond its destination are not in its way. */
+  toEnd: number,
+  leg: { readonly from: Vec2; readonly to: Vec2 },
+  soldiers: readonly Soldier[],
+  /** Soldiers' velocities by id (m/s; absent: standing). */
+  walking: ReadonlyMap<string, { readonly x: number; readonly y: number }> = new Map(),
+): { readonly target: Vec2; readonly speed: number } {
+  const wx = leg.to.x - leg.from.x;
+  const wy = leg.to.y - leg.from.y;
+  const wl = Math.hypot(wx, wy);
+  const fx = wl > 0.5 ? wx / wl : Math.sin(v.heading);
+  const fy = wl > 0.5 ? wy / wl : Math.cos(v.heading);
+  const rx = fy;
+  const ry = -fx;
+  const halfLength = type.length / 2;
+  const reach = Math.min(SOLDIERS_AHEAD_M, toEnd + halfLength);
+  // The soldiers by it or ahead: how far ahead of its centre, and where across the leg.
+  const near: { along: number; across: number }[] = [];
+  for (const s of soldiers) {
+    if (s.status !== 'active') continue;
+    const dx = s.position.x - v.position.x;
+    const dy = s.position.y - v.position.y;
+    const along = dx * fx + dy * fy;
+    if (along < -halfLength || along > halfLength + reach) continue;
+    if (Math.abs(dx * rx + dy * ry) > 12) continue;
+    near.push({
+      along,
+      across: (s.position.x - leg.from.x) * rx + (s.position.y - leg.from.y) * ry,
+    });
+  }
+  // Whatever its path, never onto a soldier: one in the ground it would
+  // cover, as it is heading now, before it could stop (where he is, or where
+  // he is walking to within `GUARD_LOOK_S`), and it brakes to stop short of
+  // him (turning, it sweeps ground off its path).
+  const hx = Math.sin(v.heading);
+  const hy = Math.cos(v.heading);
+  const stopping = (v.speed * v.speed) / (2 * type.decel);
+  let guard = Infinity;
+  for (const s of soldiers) {
+    if (s.status !== 'active') continue;
+    const step = walking.get(s.id);
+    for (const look of step ? [0, GUARD_LOOK_S] : [0]) {
+      const dx = s.position.x + (step?.x ?? 0) * look - v.position.x;
+      const dy = s.position.y + (step?.y ?? 0) * look - v.position.y;
+      const ahead = dx * hx + dy * hy;
+      if (ahead <= 0 || ahead > halfLength + stopping + GUARD_MARGIN_M + 2) continue;
+      if (Math.abs(dx * hy - dy * hx) > type.width / 2 + GUARD_MARGIN_M) continue;
+      const room = ahead - halfLength - GUARD_MARGIN_M;
+      guard = Math.min(guard, Math.sqrt(2 * type.decel * Math.max(0, room)));
+    }
+  }
+  if (near.length === 0) return { target, speed: guard };
+  const half = type.width / 2 + SOLDIER_CLEAR_M;
+  const here = (v.position.x - leg.from.x) * rx + (v.position.y - leg.from.y) * ry;
+  const clearAt = (shift: number) => near.every((n) => Math.abs(n.across - shift) >= half);
+  // Shifts that clear them all, the nearest to where it is first (then the smaller).
+  const shifts = PATH_SHIFTS_M.flatMap((m) => (m === 0 ? [0] : [m, -m])).sort(
+    (a, b) => Math.abs(a - here) - Math.abs(b - here) || Math.abs(a) - Math.abs(b),
+  );
+  for (const shift of shifts) {
+    if (!clearAt(shift)) continue;
+    // A point a little ahead on the shifted line (near: the shift steers it).
+    const ahead = Math.min(
+      SHIFT_AIM_M,
+      Math.hypot(target.x - v.position.x, target.y - v.position.y),
+    );
+    const moved = {
+      x: v.position.x + fx * ahead + rx * (shift - here),
+      y: v.position.y + fy * ahead + ry * (shift - here),
+    };
+    // Its own line, unshifted, needs no check; a shifted one must not cross a building or water.
+    if (shift !== 0 && !isSegmentWalkable(terrain, v.position, moved)) continue;
+    const passing = shift !== 0 || near.some((n) => Math.abs(n.across - shift) < half + 3);
+    return {
+      target: shift === 0 && Math.abs(here) < 0.5 ? target : moved,
+      speed: Math.min(guard, passing ? PASSING_SOLDIERS_SPEED : Infinity),
+    };
+  }
+  // No way past: it stops short of the nearest in its path.
+  const blocking = near
+    .filter((n) => Math.abs(n.across - here) < half && n.along > 0)
+    .reduce((m, n) => Math.min(m, n.along), Infinity);
+  const gap = blocking - halfLength - SOLDIER_STOP_M;
+  return { target, speed: Math.min(guard, Math.max(0, Math.min(PASSING_SOLDIERS_SPEED, gap / 2))) };
 }
 
 /**

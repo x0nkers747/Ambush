@@ -1062,15 +1062,21 @@ export function postureToSee(
   return lowest;
 }
 
+/** A force presses on only once no fire has come at it for this long (s). */
+const PRESS_ON_QUIET_S = 15;
+
 /**
  * Whether a force halted in contact has nothing it can engage: none of its
  * soldiers has fired at an enemy he could see for `pressOnSeconds` since it
- * halted, and it is not pinned down.
+ * halted, it is not pinned down, and no fire has come at it for
+ * `PRESS_ON_QUIET_S` (under fire it cannot return, it stays down).
  */
 function nothingToEngage(context: FofContext, force: FofForce): boolean {
   const { t, setup } = context;
   const since = Math.max(force.contactAt ?? -Infinity, force.lastAimedFireAt ?? -Infinity);
   if (t - since < setup.config.force.pressOnSeconds - 1e-9) return false;
+  if (force.lastFiredUponAt !== null && t - force.lastFiredUponAt < PRESS_ON_QUIET_S - 1e-9)
+    return false;
   return force.meanSuppression < setup.config.suppression.suppressedAt;
 }
 
@@ -1168,7 +1174,13 @@ export function underFire(
     );
     setLevel(context, track, from, null, null);
   }
-  if (pressingOn(context, own)) return;
+  // Pressing on, it is stopped by fire: it halts and takes cover (prone,
+  // kneeling to see), not walking on upright under it.
+  if (pressingOn(context, own)) {
+    own.pressOnUntil = null;
+    onContact(context, own, 'under fire');
+    return;
+  }
   if (own.phase === 'inAmbush') {
     springAmbush(context, own, activeOrder(own)?.killZone ?? null, 'ambush sprung: fired upon');
     return;

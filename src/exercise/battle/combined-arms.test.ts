@@ -419,3 +419,136 @@ describe('a fifth vehicle, with no change to the combat code', () => {
     expect(() => createSimulation({ tickRateHz: 30, seed: 13 }, scenario)).toThrow(/btr80/);
   });
 });
+
+describe('under fire it cannot return', () => {
+  it('a squad pressing on is stopped by fire: it takes cover, not walking on upright', () => {
+    // An OPFOR squad moving on (actions on contact: continue) toward an M113
+    // whose machine gun outranges every weapon it has.
+    const spec: BattleSpec = {
+      seed: 3,
+      tickRateHz: 30,
+      squads: [
+        BX,
+        squad('O1', 'OPFOR', 0, -200, 0, {
+          antiTank: 'none',
+          plan: [{ kind: 'move', destination: { x: 0, y: 900 }, actionsOn: 'continue' }],
+        }),
+      ],
+      vehicles: [vehicle('V1', 'm113', 'BLUEFOR', 0, 700, 180)],
+    };
+    const battle = createBattle(spec, TERRAIN);
+    /** When the M113 last fired at the squad. */
+    let firedAt = -Infinity;
+    let fired = 0;
+    let upright = 0;
+    for (let i = 0; i < 240 * 30; i += 1) {
+      const t = i / 30;
+      for (const e of battle.step())
+        if (e.type === 'vehicleFire' && e.targetId.startsWith('O1-')) {
+          firedAt = t;
+          fired += 1;
+        }
+      // From 3 s after a burst (time to react) to 10 s: everyone down.
+      if (t - firedAt < 3 || t - firedAt > 10) continue;
+      for (const s of battle.sim.state.soldiers)
+        if (s.id.startsWith('O1-') && s.status === 'active' && s.posture === 'standing')
+          upright += 1;
+    }
+    expect(fired).toBeGreaterThanOrEqual(5);
+    expect(upright).toBe(0);
+  });
+});
+
+describe('vehicles and soldiers', () => {
+  it('a vehicle does not drive over soldiers in its way: it passes a squad walking on its line, and arrives', () => {
+    // A squad walking north in file, and behind it, on the same line, an M113 of its side.
+    const spec: BattleSpec = {
+      seed: 5,
+      tickRateHz: 30,
+      squads: [
+        squad('B1', 'BLUEFOR', 0, -300, 0, {
+          antiTank: 'none',
+          formation: 'usmc.squad.column',
+          plan: [{ kind: 'move', destination: { x: 0, y: 500 } }],
+        }),
+        OX,
+      ],
+      vehicles: [vehicle('V1', 'm113', 'BLUEFOR', 0, -420, 0, [{ x: 0, y: 700 }])],
+    };
+    const battle = createBattle(spec, TERRAIN);
+    const m113 = VEHICLE_PLATFORMS.find((p) => p.id === 'm113');
+    const length = m113?.dimensions.lengthM ?? 5;
+    const width = m113?.dimensions.widthM ?? 3;
+    let under = 0;
+    let passed = false;
+    for (let i = 0; i < 200 * 30; i += 1) {
+      battle.step();
+      const v = battle.sim.state.vehicles?.[0];
+      if (!v) throw new Error('no vehicle');
+      const fx = Math.sin(v.heading);
+      const fy = Math.cos(v.heading);
+      for (const s of battle.sim.state.soldiers) {
+        if (!s.id.startsWith('B1-') || s.status !== 'active') continue;
+        const dx = s.position.x - v.position.x;
+        const dy = s.position.y - v.position.y;
+        // Under its hull (with a hand's breadth round it).
+        if (
+          Math.abs(dx * fx + dy * fy) < length / 2 + 0.2 &&
+          Math.abs(dx * fy - dy * fx) < width / 2 + 0.2
+        )
+          under += 1;
+      }
+      const lead = Math.max(
+        ...battle.sim.state.soldiers.filter((s) => s.id.startsWith('B1-')).map((s) => s.position.y),
+      );
+      if (v.position.y > lead + 10) passed = true;
+    }
+    expect(under).toBe(0);
+    // It went past them (round them), and on to its destination.
+    expect(passed).toBe(true);
+    const v = battle.sim.state.vehicles?.[0];
+    expect(v?.orders[0]?.status).toBe('completed');
+  });
+
+  it('nor over soldiers crossing its way: they step aside, it brakes', () => {
+    // A squad walking east across the line an M113 drives north along, as it comes.
+    const spec: BattleSpec = {
+      seed: 9,
+      tickRateHz: 30,
+      squads: [
+        squad('B1', 'BLUEFOR', -45, 0, 90, {
+          antiTank: 'none',
+          formation: 'usmc.squad.column',
+          plan: [{ kind: 'move', destination: { x: 200, y: 0 } }],
+        }),
+        OX,
+      ],
+      vehicles: [vehicle('V1', 'm113', 'BLUEFOR', 0, -240, 0, [{ x: 0, y: 300 }])],
+    };
+    const battle = createBattle(spec, TERRAIN);
+    const m113 = VEHICLE_PLATFORMS.find((p) => p.id === 'm113');
+    const length = m113?.dimensions.lengthM ?? 5;
+    const width = m113?.dimensions.widthM ?? 3;
+    let under = 0;
+    let closest = Infinity;
+    for (let i = 0; i < 150 * 30; i += 1) {
+      battle.step();
+      const v = battle.sim.state.vehicles?.[0];
+      if (!v) throw new Error('no vehicle');
+      const fx = Math.sin(v.heading);
+      const fy = Math.cos(v.heading);
+      for (const s of battle.sim.state.soldiers) {
+        if (!s.id.startsWith('B1-') || s.status !== 'active') continue;
+        const dx = s.position.x - v.position.x;
+        const dy = s.position.y - v.position.y;
+        closest = Math.min(closest, Math.hypot(dx, dy));
+        if (Math.abs(dx * fx + dy * fy) < length / 2 && Math.abs(dx * fy - dy * fx) < width / 2)
+          under += 1;
+      }
+    }
+    // They met (the squad crossed close in front of it), and none was under it.
+    expect(closest).toBeLessThan(8);
+    expect(under).toBe(0);
+    expect(battle.sim.state.vehicles?.[0]?.orders[0]?.status).toBe('completed');
+  });
+});
