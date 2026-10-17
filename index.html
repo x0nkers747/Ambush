@@ -1000,6 +1000,12 @@
         gap: 4px;
         cursor: pointer;
       }
+      /* A box right by its words (not the 110 px of other inputs). */
+      .battle .mapbar-check input {
+        width: auto;
+        margin: 0;
+        padding: 0;
+      }
 
       .battle .combat-clock {
         display: flex;
@@ -1008,8 +1014,13 @@
         margin-bottom: 8px;
       }
       .battle .combat-clock .clock {
-        flex: 1;
         font-size: 18px;
+      }
+      /* The speed actually kept, when slower than chosen: right of the time. */
+      .battle .combat-clock .clock-actual {
+        margin-right: auto;
+        color: #e0a63a;
+        font-size: 13px;
       }
       .battle .on-contact {
         display: grid;

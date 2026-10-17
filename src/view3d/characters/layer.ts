@@ -34,6 +34,11 @@ export interface AnimationClock {
    * finishes; positions stay where they were.
    */
   readonly ended?: boolean;
+  /**
+   * The battle's speed as drawn (simulated seconds per real second; default
+   * 1): rounds in flight are drawn at one speed on screen whatever it is.
+   */
+  readonly timeScale?: number;
 }
 
 /** A soldier this close to his fighting position (m) is in it. */

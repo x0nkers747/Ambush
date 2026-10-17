@@ -456,6 +456,7 @@ export async function startCombinedArmsRange(app: HTMLElement): Promise<void> {
           log,
           combatLog: s.session.combatLog,
           seconds: s.seconds,
+          timeScale: s.speed,
           units: st.soldiers.map((x) => ({
             id: x.id,
             affiliation: x.side === 'BLUEFOR' ? 'friendly' : 'enemy',

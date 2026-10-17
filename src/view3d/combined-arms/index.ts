@@ -23,6 +23,8 @@ export interface RangeFrame {
   readonly vehicles: readonly ViewVehicle[];
   /** The weapon each soldier fires, by id. */
   readonly weapons: Readonly<Record<string, string | null>>;
+  /** The run's speed (simulated seconds per real second; default 1): rounds fly at one speed on screen. */
+  readonly timeScale?: number;
 }
 
 export interface RangeScene {
@@ -46,10 +48,11 @@ export function createRangeScene(canvas: HTMLCanvasElement): RangeScene {
   const lab = createLabScene(canvas, HALF_M, ELEVATION_M);
   const vehicles = createVehicleLayer();
   const characters = createCharacterLayer(new URL('characters/', document.baseURI).href);
-  const tracers = createTracerLayer();
-  const impacts = createImpactLayer();
   const kinds = new Map(COMBAT_WEAPONS.map((w) => [w.id, w.kind as string]));
-  const heavy = createHeavyEffectsLayer((w) => kinds.get(w) ?? 'machineGun');
+  const kindOf = (w: string) => kinds.get(w) ?? 'machineGun';
+  const tracers = createTracerLayer(kindOf);
+  const impacts = createImpactLayer();
+  const heavy = createHeavyEffectsLayer(kindOf);
   lab.scene.add(vehicles.group, characters.group, tracers.group, impacts.group, heavy.group);
   const surfaceAt = (x: number, y: number) =>
     Math.abs(x) <= HALF_M && Math.abs(y) <= HALF_M ? ELEVATION_M : Number.NaN;
@@ -74,9 +77,9 @@ export function createRangeScene(canvas: HTMLCanvasElement): RangeScene {
           viewportHeightPx: height,
         });
       }
-      tracers.update(frame.log, frame.combatLog, frame.seconds, surfaceAt, eye);
+      tracers.update(frame.log, frame.combatLog, frame.seconds, surfaceAt, eye, frame.timeScale);
       impacts.update(frame.combatLog, frame.seconds, surfaceAt, eye);
-      heavy.update(frame.combatLog, frame.seconds, vehicles.wrecks, surfaceAt);
+      heavy.update(frame.combatLog, frame.seconds, vehicles.wrecks, surfaceAt, frame.timeScale);
       lab.render();
     },
     look(x, y, distance, pitchDeg, bearingDeg) {
@@ -100,7 +103,7 @@ export function createRangeScene(canvas: HTMLCanvasElement): RangeScene {
       };
     },
     stats() {
-      return { effects: heavy.drawn, charactersReady: characters.ready };
+      return { effects: heavy.drawn + tracers.inFlight, charactersReady: characters.ready };
     },
     dispose() {
       vehicles.dispose();

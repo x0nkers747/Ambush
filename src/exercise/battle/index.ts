@@ -118,3 +118,4 @@ export {
   type RouteWaypoint,
 } from './vehicles';
 export { RANGE_SCENARIOS, rangeTerrain, type RangeScenario } from './range-scenarios';
+export { squadRangeRings, vehicleRangeRings, type RangeRings } from './range-rings';

@@ -157,6 +157,13 @@ const ARRIVED_M = 1.5;
 const TURN_REACHED_M = 2.5;
 /** A soldier's route turns close round a corner: a vehicle's is pushed this much further out (m). */
 const CORNER_OFFSET_M = 3;
+/**
+ * A turn on a road's centreline bending less than this is no corner: it is
+ * driven as it is (pushed out, a road's gentle bends became a zig-zag).
+ */
+const ROAD_BEND_RAD = (25 * Math.PI) / 180;
+/** A turn this close (m) to a road's centreline is on the road. */
+const ON_CENTRELINE_M = 1;
 /** Facing further off than this from where it must go, nearly stopped, it pivots on the spot. */
 const PIVOT_FROM_RAD = (50 * Math.PI) / 180;
 /** Speed through a sharp bend (m/s), and the bend's angle from which it is sharp. */
@@ -363,7 +370,8 @@ function startNext(v: VehicleState, terrain: TerrainDataset, type: VehicleType):
 /**
  * The route's turns pushed out from the inside of each bend (where the corner
  * it turns round is) by `CORNER_OFFSET_M`, so the hull clears it; a turn is
- * left where it was if the push would take it, or the legs to it, into an obstacle.
+ * left where it was if the push would take it, or the legs to it, into an
+ * obstacle, or if it is a road's gentle bend (`ROAD_BEND_RAD`: no corner to clear).
  */
 function widenTurns(terrain: TerrainDataset, from: Vec2, route: Vec2[]): Vec2[] {
   const out = route.map((p) => ({ ...p }));
@@ -372,6 +380,11 @@ function widenTurns(terrain: TerrainDataset, from: Vec2, route: Vec2[]): Vec2[] 
     const b = out[i];
     const c = out[i + 1];
     if (!b || !c) continue;
+    if (
+      bendAt(route, i, from) < ROAD_BEND_RAD &&
+      (roadPointAt(terrain, b)?.distance ?? Infinity) <= ON_CENTRELINE_M
+    )
+      continue;
     const la = Math.hypot(b.x - a.x, b.y - a.y);
     const lc = Math.hypot(c.x - b.x, c.y - b.y);
     if (la < 1e-6 || lc < 1e-6) continue;

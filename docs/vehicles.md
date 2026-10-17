@@ -130,7 +130,10 @@ carrier the infantry cross over it (combined-arms.md §11). Its route is a dash-
   Its combat: combined-arms.md §16.
 - **Routes.** The routes are soldiers' routes, widened by 3 m at each corner
   and checked clear for the hull's width (combined-arms.md §10), so a vehicle
-  clears buildings but may brush small obstacles. Fences and
+  clears buildings but may brush small obstacles. A road's gentle bends (a
+  turn on its centreline bending less than 25°) are not corners: they are
+  driven as they are. (Each was pushed out 3 m, to alternate sides, and a
+  vehicle on a road zig-zagged along it.) Fences and
   single trees are not obstacles. Roads are followed only with Prefer roads.
 - **Speed.** Only the ground directly under the vehicle sets its speed.
 

@@ -224,11 +224,21 @@ angles, condition, immobilization and fire come from the motion log's
 articulation (per tick, interpolated), so a vehicle is posed the same live and
 in the review. Destroyed, it is charred, and a catastrophic kill of a
 vulnerable tank may throw its turret. Effects (`heavy-effects.ts`): muzzle
-flashes and blast smoke, rounds and tracers in flight, rockets and missiles
-with smoke trails, impacts (dust, flashes, sparks off armour), burning wrecks
-(flames, a column of smoke) and smouldering ones: all a function of the combat
-log, the clock and the articulation, in two pools of points (no objects per
-effect).
+flashes and blast smoke, rockets and missiles with smoke trails, impacts
+(dust, flashes, sparks off armour), burning wrecks (flames, a column of
+smoke) and smouldering ones: all a function of the combat log, the clock and
+the articulation, in two pools of points (no objects per effect).
+
+**Tracers** (`tracers.ts`): a vehicle's machine guns, autocannon and main gun
+fire the soldiers' tracers, a glowing streak 11 m long, red for BLUEFOR and
+green for OPFOR, flying at 640 m/s on screen; a main gun's round at a
+quarter of that (160 m/s), to be followed. Every round flies at that speed
+on screen whatever the battle's speed (½× to 32×): its age is counted in
+real seconds (the battle's seconds since it was fired over the speed the
+battle is drawn at), so at 32× a round crosses the screen as at 1×, while
+the battle runs on. A gun's impact (dust, sparks off armour) comes when its
+tracer lands. The review draws the same tracers at the same moment and
+speed, seeking or not.
 
 **2D** (`src/app/battle/map-editor.ts`, `combat-editor.ts`): the APP-6 symbol
 of its role (armour: the oval of tracks; mechanized infantry: the cross over

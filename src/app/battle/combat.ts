@@ -156,6 +156,8 @@ export function createCombat(o: CombatOptions): Combat {
   /** Orders given and not yet applied, with when each was given for (once known). */
   let queued: (QueuedOrder & { readonly given: () => number | null })[] = [];
   let achieved = 1;
+  /** The time drawn at the last frame, for the speed actually kept. */
+  let drawnBefore = 0;
 
   const byId = new Map(battle.squads.map((s) => [s.spec.id, s]));
   const statusOf = (id: string): SquadStatus | undefined => {
@@ -251,20 +253,26 @@ export function createCombat(o: CombatOptions): Combat {
       return Math.max(0, Math.min(clock, session.seconds - 1 / rate));
     },
     play() {
-      if (!ended) playing = true;
+      if (ended) return;
+      // Taken to keep up until it is seen not to.
+      if (!playing) {
+        achieved = speed;
+        drawnBefore = combat.renderSeconds;
+      }
+      playing = true;
     },
     pause() {
       playing = false;
     },
     setSpeed(next) {
       speed = next;
+      achieved = next;
     },
     get achievedSpeed() {
       return achieved;
     },
     frame(dtSeconds, budgetMs) {
       if (ended) return [];
-      const before = session.seconds;
       if (playing) {
         clock += Math.max(0, Math.min(dtSeconds, 0.25)) * speed;
         // Never run away from a battle that cannot keep up.
@@ -272,10 +280,14 @@ export function createCombat(o: CombatOptions): Combat {
       } else clock = Math.min(clock, session.seconds);
       const target = Math.ceil(clock * rate);
       const events = driver.advance(target, budgetMs ?? o.stepBudgetMs);
+      // The speed kept: how fast the time drawn moves on (the battle, simulated
+      // here or in its worker, may step between frames, or fall behind).
+      const drawn = combat.renderSeconds;
       if (playing && dtSeconds > 0) {
-        const rateNow = (session.seconds - before) / Math.min(dtSeconds, 0.25);
+        const rateNow = (drawn - drawnBefore) / Math.min(dtSeconds, 0.25);
         achieved += (rateNow - achieved) * Math.min(1, dtSeconds / 1.5);
       } else if (!playing) achieved = speed;
+      drawnBefore = drawn;
       if (queued.length > 0)
         queued = queued.filter((q) => {
           const tick = q.given();

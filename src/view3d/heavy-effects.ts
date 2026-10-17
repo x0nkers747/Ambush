@@ -9,25 +9,26 @@ import {
   type Blending,
 } from 'three';
 import type { CombatEvent, HeavyShotEvent } from '#exercise';
+import { firesTracers, tracerFlightSeconds } from './tracers';
 
 // The effects of combined arms in 3D (docs/combined-arms.md §11): muzzle
 // flashes and smoke, rounds and rockets in flight, missiles with their smoke
 // trails, impacts (dust, flashes, sparks on armour), and burning and smoking
-// wrecks. Purely visual, and a function of the combat log, the clock and the
-// vehicles' state in the motion log alone (every scatter from a hash of its
-// event), so the After-Action Review shows exactly what was seen live, at any
-// time it is moved to. Two pools of soft points (glowing, and smoke), filled
-// each frame: no objects per effect.
+// wrecks. Purely visual, and a function of the combat log, the clock, the
+// battle's speed and the vehicles' state in the motion log alone (every
+// scatter from a hash of its event), so the After-Action Review shows exactly
+// what was seen live, at any time it is moved to. Two pools of soft points
+// (glowing, and smoke), filled each frame: no objects per effect. A gun's
+// rounds (machine guns, autocannon, main guns) are the tracers' (tracers.ts),
+// flying at one speed on screen whatever the battle's: their impacts come
+// when the tracer lands.
 
 /** How far back the log is searched for effects still showing (s). */
 const WINDOW_S = 12;
 const CAPACITY = 6000;
 
-/** Visual speeds of rounds (m/s): fast enough to read as a shot, slow enough to be seen. */
+/** Visual speed of a rocket (m/s of the battle); a gun's rounds fly as tracers (tracers.ts). */
 const SPEED: Readonly<Record<string, number>> = {
-  cannon: 1500,
-  autocannon: 1000,
-  machineGun: 700,
   atRocket: 260,
 };
 
@@ -50,6 +51,8 @@ export interface HeavyEffectsLayer {
     seconds: number,
     wrecks: readonly Wreck[],
     surfaceAt: (x: number, y: number) => number,
+    /** The battle's speed (simulated seconds per real second), as the tracers are drawn at. */
+    timeScale?: number,
   ): void;
   /** Points drawn at the last update. */
   readonly drawn: number;
@@ -226,7 +229,10 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
     get drawn() {
       return drawn;
     },
-    update(combatLog, seconds, wrecks, surfaceAt) {
+    update(combatLog, seconds, wrecks, surfaceAt, timeScale = 1) {
+      const scale = Math.max(1e-6, timeScale);
+      // A gun's round lands when its tracer does (up to 30 real seconds: a main gun's, far off).
+      const window = Math.max(WINDOW_S, 30 * scale + WINDOW_S);
       glow.n = 0;
       smoke.n = 0;
       // The last event at or before now (the log is in time order), then back.
@@ -249,11 +255,15 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
         const e = combatLog[i];
         if (!e) continue;
         const age = seconds - e.atSeconds;
-        if (age > WINDOW_S) break;
+        if (age > window) break;
         if (e.type !== 'heavyShot') continue;
         const kind = e.missileId !== null ? 'atgm' : kindOf(e.weapon);
+        const tracer = e.missileId === null && firesTracers(kind);
         const key = `${e.shooterId}:${String(e.tick)}:${e.slot}`;
-        const { flight } = flightOf(e, kind);
+        const { flight: own, length } = flightOf(e, kind);
+        // A gun's round: as long as its tracer flies (simulated seconds).
+        const flight = tracer ? tracerFlightSeconds(length, kind) * scale : own;
+        if (age > flight + WINDOW_S) continue;
         const big = kind === 'cannon' || kind === 'atgm' || kind === 'atRocket';
         // The muzzle: a flash, and (a gun, a launcher) its blast's smoke.
         if (age < 0.12) {
@@ -281,55 +291,38 @@ export function createHeavyEffectsLayer(kindOf: WeaponKindOf): HeavyEffectsLayer
             );
           }
         }
-        // In flight: a machine gun's rounds as tracers, a gun's round, a rocket or a missile.
-        const rounds = kind === 'machineGun' ? Math.min(e.rounds, 12) : 1;
-        for (let k = 0; k < rounds; k += 1) {
-          const t = age - k * 0.09;
-          if (t < 0 || t > flight) continue;
+        // In flight: a rocket or a missile, with its smoke trail back to the launcher
+        // (a gun's rounds are the tracers').
+        if ((kind === 'atgm' || kind === 'atRocket') && age >= 0 && age <= flight) {
+          const t = age;
           const f = t / flight;
-          const miss = !e.hit && kind === 'machineGun' ? (hash(key, k, 11) - 0.5) * 4 : 0;
-          const x = e.from.x + (e.impact.x - e.from.x) * f + miss * f;
-          const y = e.from.y + (e.impact.y - e.from.y) * f + miss * f * 0.5;
-          const z = e.from.z + (e.impact.z - e.from.z) * f;
-          const [r, g, b] = e.side === 'BLUEFOR' ? [1, 0.3, 0.15] : [0.35, 1, 0.35];
-          if (kind === 'atgm' || kind === 'atRocket') {
-            add(glow, x, y, z, 1.4, 1, 0.75, 0.35, 1);
-            // Its smoke trail, back to the launcher.
-            for (let s = 1; s <= 30; s += 1) {
-              const back = t - s * 0.08;
-              if (back < 0) break;
-              const fb = back / flight;
-              const fade = 1 - (t - back) / 2.6;
-              add(
-                smoke,
-                e.from.x + (e.impact.x - e.from.x) * fb,
-                e.from.y + (e.impact.y - e.from.y) * fb,
-                e.from.z + (e.impact.z - e.from.z) * fb + (t - back) * 0.3,
-                0.9 + (t - back) * 1.2,
-                0.85,
-                0.85,
-                0.82,
-                0.45 * fade,
-              );
-            }
-          } else {
-            const head = kind === 'cannon' ? 1.6 : kind === 'autocannon' ? 0.9 : 0.55;
-            add(glow, x, y, z, head, r, g, b, 1);
-            // A short streak behind it.
-            for (let s = 1; s <= 3; s += 1) {
-              const fb = Math.max(0, f - (s * 6) / Math.max(1, flightOf(e, kind).length));
-              add(
-                glow,
-                e.from.x + (e.impact.x - e.from.x) * fb,
-                e.from.y + (e.impact.y - e.from.y) * fb,
-                e.from.z + (e.impact.z - e.from.z) * fb,
-                head * 0.7,
-                r,
-                g,
-                b,
-                0.7 - s * 0.18,
-              );
-            }
+          add(
+            glow,
+            e.from.x + (e.impact.x - e.from.x) * f,
+            e.from.y + (e.impact.y - e.from.y) * f,
+            e.from.z + (e.impact.z - e.from.z) * f,
+            1.4,
+            1,
+            0.75,
+            0.35,
+            1,
+          );
+          for (let s = 1; s <= 30; s += 1) {
+            const back = t - s * 0.08;
+            if (back < 0) break;
+            const fb = back / flight;
+            const fade = 1 - (t - back) / 2.6;
+            add(
+              smoke,
+              e.from.x + (e.impact.x - e.from.x) * fb,
+              e.from.y + (e.impact.y - e.from.y) * fb,
+              e.from.z + (e.impact.z - e.from.z) * fb + (t - back) * 0.3,
+              0.9 + (t - back) * 1.2,
+              0.85,
+              0.85,
+              0.82,
+              0.45 * fade,
+            );
           }
         }
         // Where it lands: a round when it arrives; a missile when the log says it did.

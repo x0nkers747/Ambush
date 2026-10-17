@@ -14,7 +14,9 @@ import {
   type BattleEdit,
   type BattleScenarioDefinition,
 } from '#exercise/battle';
+import { slowerSpeed } from './combat-panel';
 import { createCombat } from './combat';
+import { createLocalDriver, type DriverFactory } from './driver';
 import { BATTLE_TICK_RATE_HZ } from './planner';
 import { createBattleSession, HASH_EVERY_SECOND_MAX_SOLDIERS, KEYFRAME_SECONDS } from './session';
 
@@ -72,6 +74,65 @@ describe('the clock', () => {
     expect(c.session.seconds - 2.35).toBeGreaterThanOrEqual(0);
     expect(c.session.seconds - 2.35).toBeLessThan(1 / BATTLE_TICK_RATE_HZ);
     expect(c.renderSeconds).toBeLessThanOrEqual(c.session.seconds);
+  });
+});
+
+describe('the speed actually kept', () => {
+  /**
+   * A battle slower to simulate than the clock, stepped as a worker steps it:
+   * a frame asks for ticks, and one tick is stepped between frames.
+   */
+  /** What the worker does between frames (nothing: the battle steps in the frame). */
+  const nothing = () => undefined;
+  let between: () => void = nothing;
+  const slowWorker: DriverFactory = (spec, replay) => {
+    const local = createLocalDriver(terrain)(spec, replay);
+    let wanted = 0;
+    between = () => {
+      if (local.run.tick < wanted) local.advance(local.run.tick + 1);
+    };
+    return {
+      ...local,
+      advance(tick) {
+        wanted = tick;
+        return [];
+      },
+    };
+  };
+  const run = (driver: DriverFactory | undefined, speed: 8 | 32, seconds: number) => {
+    between = nothing;
+    const c = createCombat({
+      terrain,
+      definition: scenario(),
+      notify: nothing,
+      stepBudgetMs: Infinity,
+      ...(driver ? { driver } : {}),
+    });
+    c.setSpeed(speed);
+    c.play();
+    // At 60 frames a second.
+    for (let k = 0; k < seconds * 60; k += 1) {
+      c.frame(1 / 60);
+      between();
+    }
+    return c;
+  };
+
+  it('is the speed chosen when the battle keeps up: nothing shown', () => {
+    const c = run(undefined, 8, 4);
+    expect(c.achievedSpeed).toBeCloseTo(8, 0);
+    expect(slowerSpeed(c)).toBeNull();
+  });
+
+  it('is measured from the time drawn, also when a worker steps the battle between frames', () => {
+    // One tick (1/30 s) a frame, 60 frames a second: 2× kept of the 32× chosen
+    // (taken to keep up at first, it is seen not to within seconds).
+    const c = run(slowWorker, 32, 10);
+    expect(c.achievedSpeed).toBeGreaterThan(1.8);
+    expect(c.achievedSpeed).toBeLessThan(2.2);
+    expect(slowerSpeed(c)).toBeCloseTo(c.achievedSpeed, 9);
+    c.pause();
+    expect(slowerSpeed(c)).toBeNull();
   });
 });
 

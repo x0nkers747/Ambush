@@ -12,7 +12,7 @@
 | ---------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1. Terrain             | `#select/<id>` | Choose or generate a battlefield. The preview shows the terrain alone (no squads or markers). A scenario loaded here opens at once in Setup. |
 | 2. Scenario Setup      | `#setup/<id>`  | Place and turn both sides' squads and vehicles. No orders.                                                                                   |
-| 3. Planning            | `#plan/<id>`   | Give both sides' squads, and the vehicles, their orders. OPFOR can be hidden with Show OPFOR.                                                |
+| 3. Planning            | `#plan/<id>`   | Give both sides' squads, and the vehicles, their orders. OPFOR can be hidden with Show OPFOR (the map bar, docs/range-rings.md §3).          |
 | 4. Combat              | —              | Milestone C. The stage opens once the plans are valid, and says what comes next.                                                             |
 | 5. After-Action Review | —              | Milestone D.                                                                                                                                 |
 

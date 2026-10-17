@@ -4,6 +4,8 @@ import {
   deleteOrder,
   killZoneSpec,
   moveKillZone,
+  squadRangeRings,
+  vehicleRangeRings,
   moveOrder,
   plannedOrderOf,
   resizeDefendArc,
@@ -29,11 +31,14 @@ import { vehicleActivity, type SquadStatus, type VehicleStatus } from './status'
 import {
   arcHandle,
   defenceSector,
+  drawRangeRings,
   drawRoute,
   facingHandle,
   killZone,
   OUTLINE,
   ring,
+  ringsShown,
+  type MapShow,
   SIDE_COLORS,
   unitSymbol,
   pxPerMetre,
@@ -162,7 +167,11 @@ export function createCombatMapEditor(
   ui: CombatUi,
   notify: (message: string) => void,
   organizationOf: (squadId: string) => 'squad' | 'fireTeam' | 'element3',
+  /** What the map bar shows: OPFOR, the waypoints, the range rings. */
+  show: MapShow,
 ): MapEditor {
+  /** Whether a side's units are drawn (and can be picked): OPFOR's only when shown. */
+  const shown = (u: { readonly side: string }) => show.showOpfor || u.side === 'BLUEFOR';
   let project: ((p: Vec2) => Vec2) | null = null;
   const sample = emptyMotionSample();
   const articulation = emptyArticulation();
@@ -210,10 +219,11 @@ export function createCombatMapEditor(
     const at = project;
     if (!c || !at) return null;
     const near = (p: Vec2, r: number) => Math.hypot(p.x - screen.x, p.y - screen.y) <= r;
-    const squads = c.squads();
+    const squads = c.squads().filter(shown);
     for (const s of squads) if (near(at(s.centre), SQUAD_HIT_PX)) return s;
     const where = positions(c);
     for (const s of c.battle.squads) {
+      if (!shown(s)) continue;
       for (const id of s.soldierIds) {
         const p = where.get(id);
         if (p?.active && near(at(p), SOLDIER_HIT_PX))
@@ -228,7 +238,7 @@ export function createCombatMapEditor(
     const c = combat();
     const at = project;
     if (!c || !at) return null;
-    const vehicles = c.vehicles();
+    const vehicles = c.vehicles().filter(shown);
     if (vehicles.length === 0) return null;
     const where = positions(c);
     for (const v of vehicles) {
@@ -329,9 +339,10 @@ export function createCombatMapEditor(
   const planHitAt = (screen: Vec2): PlanHit | null => {
     const c = combat();
     const at = project;
-    if (!c?.edit || !at) return null;
+    // Hidden waypoints cannot be picked.
+    if (!c?.edit || !at || show.hideWaypoints) return null;
     const near = (p: Vec2, r: number) => Math.hypot(p.x - screen.x, p.y - screen.y) <= r;
-    const squads = c.squads().filter((s) => s.up > 0);
+    const squads = c.squads().filter((s) => s.up > 0 && shown(s));
     const selected = squads.find((s) => s.id === ui.selected);
     if (selected && ui.selectedOrder !== null) {
       const index = ui.selectedOrder;
@@ -364,7 +375,7 @@ export function createCombatMapEditor(
           return { kind: 'waypoint', squadId: s.id, index: k };
       }
     }
-    const vehicles = c.vehicles();
+    const vehicles = c.vehicles().filter(shown);
     const car = vehicles.find((v) => v.id === ui.selected);
     for (const v of car ? [car, ...vehicles.filter((x) => x !== car)] : vehicles) {
       const route = c.edit.vehicleRoute(v.id);
@@ -531,7 +542,30 @@ export function createCombatMapEditor(
       const c = combat();
       if (!c) return;
       const where = positions(c);
-      const squads = c.squads();
+      const squads = c.squads().filter(shown);
+      const vehicles = c.vehicles().filter(shown);
+      // Range rings under everything: round each squad still fighting, and each vehicle not destroyed.
+      for (const s of squads) {
+        if (s.up === 0 || !ringsShown(show, s.id)) continue;
+        const spec = c.battle.squads.find((b) => b.spec.id === s.id)?.spec;
+        drawRangeRings(
+          ctx,
+          toScreen,
+          s.centre,
+          squadRangeRings(s.side, organizationOf(s.id), spec?.antiTank),
+          s.side,
+        );
+      }
+      for (const v of vehicles) {
+        if (v.condition === 'destroyed' || !ringsShown(show, v.id)) continue;
+        drawRangeRings(
+          ctx,
+          toScreen,
+          where.get(v.id) ?? v.position,
+          vehicleRangeRings(v.kind),
+          v.side,
+        );
+      }
       ctx.save();
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
@@ -543,7 +577,8 @@ export function createCombatMapEditor(
       const ordered = [...squads].sort(
         (a, b) => Number(a.id === ui.selected) - Number(b.id === ui.selected),
       );
-      const plans = new Map(ordered.map((s) => [s.id, planNow(c, s)]));
+      // Hiding waypoints: no plans drawn (their sectors, kill zones, routes and waypoints).
+      const plans = new Map((show.hideWaypoints ? [] : ordered).map((s) => [s.id, planNow(c, s)]));
       const editable = c.edit !== undefined;
       for (const s of ordered) {
         if (s.up === 0) continue;
@@ -739,6 +774,7 @@ export function createCombatMapEditor(
 
       // Soldiers: active as dots, casualties as small grey crosses.
       for (const s of c.battle.squads) {
+        if (!shown(s)) continue;
         const selected = s.spec.id === ui.selected;
         for (const id of s.soldierIds) {
           const m = where.get(id);
@@ -766,7 +802,7 @@ export function createCombatMapEditor(
       }
 
       // Vehicles: where each still drives, its symbol where it is, and its state.
-      for (const v of c.vehicles()) {
+      for (const v of show.hideWaypoints ? [] : vehicles) {
         const isSelected = v.id === ui.selected;
         const at = where.get(v.id) ?? v.position;
         const color = SIDE_COLORS[v.side];
@@ -784,7 +820,7 @@ export function createCombatMapEditor(
           });
         }
       }
-      for (const v of c.vehicles()) {
+      for (const v of vehicles) {
         const isSelected = v.id === ui.selected;
         const ground = where.get(v.id) ?? v.position;
         const heading = where.get(v.id)?.azimuth ?? v.heading;

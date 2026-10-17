@@ -40,7 +40,9 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     `<button class="tool${kind ? ` order-${kind}` : ''}" data-ctool="${kind ?? 'select'}" aria-pressed="${String(ui.tool === kind)}" title="${label}">${label}</button>`;
   return `<div class="combat-clock">
       <span class="clock" data-ui="combat-clock"></span>
+      <span class="clock-actual" data-ui="combat-actual" title="The speed the battle is actually running at: slower to simulate here than the speed chosen"></span>
       <button class="action" data-cact="play" title="Play or pause">${c.playing ? 'Pause' : 'Play'}</button>
+      <button class="action" data-cact="restart" title="Restart the battle from the start, as planned (orders given during it are lost)">Restart</button>
     </div>
     <div class="speed" role="group" aria-label="Simulation speed">${speeds}</div>
     <h3>New orders</h3>
@@ -52,14 +54,34 @@ export function combatToolsHtml(c: Combat, ui: CombatUi): string {
     </div>`;
 }
 
-/** What the battle is doing, when it needs saying: starting, slower than chosen, or ended. */
+/** What the battle is doing, when it needs saying: starting, or ended. */
 export function combatHint(c: Combat): string {
   if (c.ended) return 'The battle has ended.';
   // The worker first prepares the battlefield (its navigation, sight lines): a moment.
   if (c.playing && c.session.tick === 0) return 'Starting the battle…';
-  return c.playing && c.achievedSpeed >= 0.5 && c.achievedSpeed < 0.8 * c.speed
-    ? `Running at ${c.achievedSpeed.toFixed(0)}×: the battle is slower to simulate than ${String(c.speed)}× here.`
-    : '';
+  return '';
+}
+
+/** Below this share of the speed chosen, the speed actually kept is shown. */
+const SLOWER_SHARE = 0.95;
+
+/**
+ * The speed the battle actually keeps (simulated seconds per second), when
+ * playing well below the speed chosen because it is slower to simulate
+ * here; `null` when it keeps up (or is paused, starting or ended).
+ */
+export function slowerSpeed(
+  c: Pick<Combat, 'playing' | 'ended' | 'speed' | 'achievedSpeed' | 'session'>,
+): number | null {
+  if (!c.playing || c.ended || c.session.tick === 0) return null;
+  return c.achievedSpeed < SLOWER_SHARE * c.speed ? c.achievedSpeed : null;
+}
+
+/** The rate the battle's clock is drawn at (simulated seconds per second): the speed actually kept. */
+export function playbackRate(
+  c: Pick<Combat, 'playing' | 'ended' | 'speed' | 'achievedSpeed' | 'session'>,
+): number {
+  return slowerSpeed(c) ?? c.speed;
 }
 
 const statusClass: Readonly<Record<string, string>> = {
@@ -79,7 +101,11 @@ export function combatStatusRowsHtml(s: SquadStatus): string {
       ${ammunitionHtml(s)}`;
 }
 
-export function combatSquadHtml(s: SquadStatus | undefined): string {
+export function combatSquadHtml(
+  s: SquadStatus | undefined,
+  /** Buttons for its head (its range rings), if any. */
+  headButtons: (s: SquadStatus) => string = () => '',
+): string {
   if (!s) return '<p class="muted">No squad selected. Click one on the map or in the roster.</p>';
   const history = s.orders
     .slice(-8)
@@ -97,6 +123,7 @@ export function combatSquadHtml(s: SquadStatus | undefined): string {
   return `<div class="squad-head ${sideClass(s.side)}">
       <span class="side-badge">${s.side}</span>
       <span class="squad-name">${escapeHtml(s.name)}</span>
+      ${headButtons(s)}
     </div>
     <dl class="kv">
       <dt>State</dt><dd><span class="phase-${s.phase}">${escapeHtml(s.activity.word)}</span><span class="muted"> · ${escapeHtml(s.activity.why)}</span></dd>
@@ -184,13 +211,19 @@ export function vehicleDiagnosticsHtml(
 }
 
 /** The selected vehicle's state, diagnostics and route (docs/vehicles.md). */
-export function combatVehicleHtml(v: VehicleStatus, names?: ReadonlyMap<string, string>): string {
+export function combatVehicleHtml(
+  v: VehicleStatus,
+  names?: ReadonlyMap<string, string>,
+  /** Buttons for its head (its range rings), if any. */
+  headButtons = '',
+): string {
   const route = v.route
     .map((d) => `<li>Move to ${String(Math.round(d.x))} E, ${String(Math.round(d.y))} N</li>`)
     .join('');
   return `<div class="squad-head ${sideClass(v.side)}">
       <span class="side-badge">${v.side}</span>
       <span class="squad-name">${escapeHtml(v.name)}</span>
+      ${headButtons}
     </div>
     ${vehicleDiagnosticsHtml(v, names)}
     <h3>Route</h3>

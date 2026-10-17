@@ -1,7 +1,10 @@
 import {
   killZoneSpec,
   ORDER_LABELS,
+  squadRangeRings,
+  vehicleRangeRings,
   vehiclesOf,
+  type RangeRings,
   type PlannedSector,
   type PlannedVehicle,
   type ScenarioSquad,
@@ -85,28 +88,44 @@ type Hit =
   | { readonly kind: 'vehicleKnob'; readonly vehicle: PlannedVehicle }
   | { readonly kind: 'vehicleWaypoint'; readonly vehicle: PlannedVehicle; readonly index: number };
 
-export interface BattleMapEditor extends MapEditor {
-  /** Whether OPFOR is drawn (and can be picked) while BLUEFOR plans. */
+/**
+ * What the map shows (the map bar's boxes, and each unit's range rings
+ * button), shared by the planner's map and the battle's (Sim, review).
+ */
+export interface MapShow {
+  /** Whether OPFOR is drawn (and can be picked). */
   showOpfor: boolean;
+  /** Whether waypoints and routes are hidden (their sectors and kill zones too): units alone. */
+  hideWaypoints: boolean;
+  /** Whether the range rings turned on are shown ("Range rings" on the map bar). */
+  rangeRings: boolean;
+  /** The squads and vehicles (by id) whose range rings are turned on. */
+  readonly ringed: Set<string>;
 }
+
+export function createMapShow(): MapShow {
+  return { showOpfor: true, hideWaypoints: false, rangeRings: true, ringed: new Set() };
+}
+
+/** Whether a unit's range rings are drawn. */
+export const ringsShown = (show: MapShow, id: string): boolean =>
+  show.rangeRings && show.ringed.has(id);
+
+export type BattleMapEditor = MapEditor;
 
 const toVec = (p: { east: number; north: number }): Vec2 => ({ x: p.east, y: p.north });
 
-export function createBattleMapEditor(planner: Planner): BattleMapEditor {
+export function createBattleMapEditor(planner: Planner, show: MapShow): BattleMapEditor {
   /** The projection of the view drawn last: the one the pointer is over. */
   let project: ((p: Vec2) => Vec2) | null = null;
   /** Whether that view is the 3D view (vehicles' symbols drawn above them). */
   let perspective = false;
   let drag: Hit | null = null;
 
-  const visible = (s: ScenarioSquad) =>
-    editor.showOpfor || planner.stage !== 'bluefor' || s.side === 'BLUEFOR';
+  const visible = (s: { readonly side: Side }) => show.showOpfor || s.side === 'BLUEFOR';
   const squads = () => planner.definition.squads.filter(visible);
 
-  const vehiclesShown = () =>
-    vehiclesOf(planner.definition).filter(
-      (v) => editor.showOpfor || planner.stage !== 'bluefor' || v.side === 'BLUEFOR',
-    );
+  const vehiclesShown = () => vehiclesOf(planner.definition).filter(visible);
 
   /** The facing knob of the selected squad, on screen, when it can be turned. */
   const knobOf = (s: ScenarioSquad, at: (p: Vec2) => Vec2): Vec2 | null => {
@@ -132,7 +151,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       if (knob && near(knob, KNOB_HIT_PX)) return { kind: 'vehicleKnob', vehicle: selected };
     }
     const ordered = selected ? [selected, ...list.filter((v) => v.id !== selected.id)] : list;
-    for (const v of ordered) {
+    for (const v of show.hideWaypoints ? [] : ordered) {
       for (let k = v.route.length - 1; k >= 0; k -= 1) {
         const p = v.route[k];
         if (p && near(at(toVec(p)), WAYPOINT_HIT_PX))
@@ -157,7 +176,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     const list = squads();
     // The selected squad's handles first, then waypoints, then squads.
     const selected = planner.selectedSquad;
-    if (selected && visible(selected)) {
+    if (selected && visible(selected) && !show.hideWaypoints) {
       const knob = knobOf(selected, at);
       if (knob && near(knob, KNOB_HIT_PX)) return { kind: 'knob', squad: selected };
       // The selected defend order's arc handle.
@@ -183,7 +202,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
       }
     }
     const ordered = selected ? [selected, ...list.filter((s) => s !== selected)] : list;
-    for (const s of ordered) {
+    for (const s of show.hideWaypoints ? [] : ordered) {
       for (let k = s.plan.length - 1; k >= 0; k -= 1) {
         const order = s.plan[k];
         if (order && near(at(toVec(order.destination)), WAYPOINT_HIT_PX))
@@ -203,7 +222,6 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
   };
 
   const editor: BattleMapEditor = {
-    showOpfor: true,
     press(_point, screen, button) {
       const hit = hitAt(screen);
       if (!hit) return false;
@@ -268,7 +286,20 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
     draw(ctx, toScreen, inPerspective = false) {
       project = toScreen;
       perspective = inPerspective;
-      drawBattle(ctx, planner, toScreen, squads(), (s) => knobOf(s, toScreen));
+      // Range rings under everything: round each squad's and vehicle's start.
+      for (const s of squads())
+        if (ringsShown(show, s.id))
+          drawRangeRings(
+            ctx,
+            toScreen,
+            toVec(s.position),
+            squadRangeRings(s.side, s.organization, s.antiTank),
+            s.side,
+          );
+      for (const v of vehiclesShown())
+        if (ringsShown(show, v.id))
+          drawRangeRings(ctx, toScreen, toVec(v.position), vehicleRangeRings(v.kind), v.side);
+      drawBattle(ctx, planner, toScreen, squads(), (s) => knobOf(s, toScreen), show.hideWaypoints);
       drawVehicles(
         ctx,
         planner,
@@ -276,6 +307,7 @@ export function createBattleMapEditor(planner: Planner): BattleMapEditor {
         vehiclesShown(),
         (v) => vehicleKnobOf(v, toScreen),
         inPerspective,
+        show.hideWaypoints,
       );
     },
   };
@@ -404,13 +436,14 @@ function drawVehicles(
   vehicles: readonly PlannedVehicle[],
   knobOf: (v: PlannedVehicle) => Vec2 | null,
   perspective: boolean,
+  hideWaypoints: boolean,
 ): void {
   const issues = planner.issues();
   const selection = planner.selection;
   ctx.save();
   ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
   ctx.textBaseline = 'middle';
-  for (const v of vehicles) {
+  for (const v of hideWaypoints ? [] : vehicles) {
     const isSelected = selection.vehicleId === v.id;
     const color = SIDE_COLORS[v.side];
     if (v.route.length > 0) {
@@ -685,10 +718,13 @@ function drawBattle(
   at: (p: Vec2) => Vec2,
   squads: readonly ScenarioSquad[],
   knobOf: (s: ScenarioSquad) => Vec2 | null,
+  hideWaypoints: boolean,
 ): void {
   const issues = planner.issues();
   const selected = planner.selection;
   const shown = new Set(squads.map((s) => s.id));
+  // Hiding waypoints: the plans are not drawn (their sectors, kill zones, routes, waypoints).
+  const planned = hideWaypoints ? [] : squads;
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
@@ -696,7 +732,7 @@ function drawBattle(
   ctx.textBaseline = 'middle';
 
   // Plans under everything else; the selected squad's last, on top.
-  const order = [...squads].sort(
+  const order = [...planned].sort(
     (a, b) => Number(a.id === selected.squadId) - Number(b.id === selected.squadId),
   );
   // Sectors of defend orders, and kill zones of ambush orders, under the routes.
@@ -766,8 +802,11 @@ function drawBattle(
     ctx.stroke();
   }
 
-  // Squad symbols, facing ticks and names.
-  for (const s of order) {
+  // Squad symbols, facing ticks and names; the selected squad's on top.
+  const symbols = [...squads].sort(
+    (a, b) => Number(a.id === selected.squadId) - Number(b.id === selected.squadId),
+  );
+  for (const s of symbols) {
     const isSelected = s.id === selected.squadId;
     const c = at(toVec(s.position));
     const issue = issues.some((i) => i.squadId === s.id && i.orderIndex === null);
@@ -1019,6 +1058,82 @@ export function killZone(
       ctx.rect(p.x - 4.5, p.y - 4.5, 9, 9);
       ctx.fill();
       ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/** Points round a range ring (enough that a 3D view drapes it on the ground). */
+const RING_POINTS = 120;
+
+/**
+ * A unit's range rings round `centre` (map metres), in its side's colour,
+ * through the view's projection (2D, or draped on the 3D ground), each
+ * labelled at its north: the effective range solid, the furthest it fires
+ * dashed, how far it sees dotted.
+ */
+export function drawRangeRings(
+  ctx: CanvasRenderingContext2D,
+  at: (p: Vec2) => Vec2,
+  centre: Vec2,
+  rings: RangeRings,
+  side: Side,
+): void {
+  const color = SIDE_COLORS[side];
+  const kinds = [
+    { m: rings.detectionM, dash: [2, 5], width: 1.5, label: 'Detection' },
+    { m: rings.maxM, dash: [9, 6], width: 1.5, label: 'Max range' },
+    { m: rings.effectiveM, dash: [], width: 2, label: 'Effective' },
+  ];
+  ctx.save();
+  ctx.font = '600 10px system-ui, "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineJoin = 'round';
+  for (const [i, k] of kinds.entries()) {
+    if (!(k.m > 0)) continue;
+    // Rings of the same range: one label for them all, on the last drawn (on top).
+    if (kinds.slice(i + 1).some((o) => o.m === k.m)) continue;
+    const label = kinds
+      .filter((o) => o.m === k.m)
+      .map((o) => o.label)
+      .join(' · ');
+    const points: Vec2[] = [];
+    for (let i = 0; i <= RING_POINTS; i += 1) {
+      const a = (i / RING_POINTS) * 2 * Math.PI;
+      points.push(at({ x: centre.x + Math.sin(a) * k.m, y: centre.y + Math.cos(a) * k.m }));
+    }
+    ctx.setLineDash(k.dash);
+    for (const [width, stroke, alpha] of [
+      [k.width + 2, OUTLINE, 0.45],
+      [k.width, color, 0.9],
+    ] as const) {
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = width;
+      ctx.strokeStyle = stroke;
+      ctx.beginPath();
+      // A point not drawable (behind a 3D camera) breaks the ring there.
+      let open = false;
+      for (const p of points) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+          open = false;
+          continue;
+        }
+        if (open) ctx.lineTo(p.x, p.y);
+        else ctx.moveTo(p.x, p.y);
+        open = true;
+      }
+      ctx.stroke();
+    }
+    const top = points[0];
+    if (top && Number.isFinite(top.x) && Number.isFinite(top.y)) {
+      const text = `${label} ${k.m.toLocaleString('en-GB')} m`;
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = OUTLINE;
+      ctx.strokeText(text, top.x, top.y - 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, top.x, top.y - 2);
     }
   }
   ctx.restore();

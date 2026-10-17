@@ -226,6 +226,32 @@ describe('vehicles', () => {
     expect(Math.hypot(v.position.x - 300, v.position.y - 1150)).toBeLessThan(1.5);
   });
 
+  it('drives a road with gentle bends straight along it, not zig-zagging', () => {
+    // The road along y = 500 made of short pieces, each bending a few degrees.
+    const centerline = Array.from({ length: 40 }, (_, i) => ({
+      x: 20 + i * 50,
+      y: 500 + (i % 2 === 0 ? 0 : 2),
+    }));
+    const base = scenario({
+      position: { x: 300, y: 480 },
+      destinations: [{ x: 1700, y: 501, followRoads: true }],
+    });
+    const terrain = createSyntheticTerrain(
+      { originX: 0, originY: 0, cellSize: 50, columns: 41, rows: 41 },
+      flatElevation(10),
+      { ...FEATURES, roads: [{ id: 'road', roadClass: 'paved', centerline, widthMeters: 7 }] },
+    );
+    const sim = createSimulation({ seed: 1, tickRateHz: RATE }, { ...base, terrain });
+    let off = 0;
+    const v = run(sim, 240, (s) => {
+      if (s.position.x > 400 && s.position.x < 1600)
+        off = Math.max(off, Math.abs(s.position.y - 501));
+    });
+    // Within the road's own wobble of its centre (pushed out at each bend, it was 3 m off).
+    expect(off).toBeLessThan(1.6);
+    expect(v.orders[0]?.status).toBe('completed');
+  });
+
   it('replaces or appends to its orders by command', () => {
     const sim = createSimulation(
       { seed: 1, tickRateHz: RATE },

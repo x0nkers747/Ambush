@@ -17,6 +17,7 @@ so nothing vanishes while the worker sets the battle up.
 | Control                                      | Effect                                                                                                                                                                                |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Play / Pause                                 | Runs or stops the clock                                                                                                                                                               |
+| Restart                                      | After asking: the battle starts again from T+ 0, from the scenario as planned (orders and route changes given during it are lost); its speed, and play or pause, kept                 |
 | ½× to 32×                                    | Speed                                                                                                                                                                                 |
 | Click a squad or vehicle (map, 3D or roster) | Select it, either side                                                                                                                                                                |
 | Click a waypoint                             | Select its order                                                                                                                                                                      |
@@ -143,6 +144,15 @@ The clock moves by real time × speed while playing, never by more than
 steps whole ticks up to the clock, for at most 30 ms per frame. The time
 drawn is never ahead of the battle.
 
+**The speed actually kept** (`Combat.achievedSpeed`) is how fast the time
+drawn moves on, per real second, smoothed over about 1.5 s; it is taken to
+keep up when play starts or the speed is changed. When it is below 95 % of
+the speed chosen (the battle is slower to simulate here), it is shown in
+brackets right of the time: `T+ 02:09.8 (4.8×)`. It used to be measured
+within a frame, which with the battle in its worker (stepped between frames)
+read as nothing. The 3D view's rounds fly at one speed on screen whatever
+this speed (combined-arms.md §11).
+
 ## 4. Performance on real ground
 
 On a real battlefield, movement first cost about 10 ms per tick for four
@@ -210,5 +220,5 @@ world is the same in both (same terrain, same fingerprint).
 **On Quantico, with 12 squads:** 60 fps in 2D and 3D at every speed. The
 battle runs as fast as one core can simulate it, about 10–13× real time
 (2.9 ms per tick, most of it detection's sight lines). The panel gives the
-speed achieved when it is less than the speed asked. A 400-second battle is
+speed actually kept when it is less than the speed asked. A 400-second battle is
 replayed and verified in the worker in about 50 s.

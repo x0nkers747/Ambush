@@ -112,8 +112,10 @@ import {
   vehicleDiagnosticsHtml,
   combatStatusRowsHtml,
   combatToolsHtml,
+  playbackRate,
+  slowerSpeed,
 } from './combat-panel';
-import { createBattleMapEditor } from './map-editor';
+import { createBattleMapEditor, createMapShow } from './map-editor';
 import {
   createPlanner,
   SECOND_CLICK,
@@ -221,6 +223,13 @@ const ROAD_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="
 const roadsButton = (act: string, k: number, on: boolean, editable: boolean): string =>
   `<button class="small roads-toggle" data-act="${act}" data-index="${String(k)}" aria-pressed="${String(on)}"${editable ? '' : ' disabled'} title="Prefer roads: ${on ? 'on' : 'off'}. On, it goes to the nearest road, along the roads (a squad in column), and off them to the waypoint, when the roads help" aria-label="Prefer roads">${ROAD_ICON}</button>`;
 
+/** Three rings round a dot, in `currentColor`, for the range rings toggles. */
+const RINGS_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10" stroke-dasharray="2 2.5"/><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/></svg>`;
+
+/** A squad's or vehicle's range rings toggle (lit in its side's colour when on). */
+const ringsButton = (id: string, side: Side, on: boolean): string =>
+  `<button class="small vs-toggle rings-toggle ${side === 'BLUEFOR' ? 'blue' : 'red'}" data-act="range-rings" data-unit="${escapeHtml(id)}" aria-pressed="${String(on)}" title="Range rings: ${on ? 'on' : 'off'}. How far it sees (dotted), the furthest it fires (dashed), and its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all" aria-label="Range rings">${RINGS_ICON}</button>`;
+
 /** An eye, in `currentColor`, for the viewshed toggles. */
 const EYE_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 
@@ -230,6 +239,7 @@ const HELP_HTML = `<dl class="kv help">
   <dt>Drag</dt><dd>A waypoint to move its destination</dd>
   <dt>Right-click</dt><dd>A waypoint to delete its order</dd>
   <dt>Esc</dt><dd>Back to the Select tool; again, clears the selection</dd>
+  <dt>Rings</dt><dd>Turns a squad's or vehicle's range rings on or off (the rings button in its panel): how far it sees (dotted), the furthest it fires (dashed), its main weapon's maximum effective range (solid). The Range rings box on the map bar shows or hides them all</dd>
   <dt>Eye</dt><dd>Turns the viewshed of a squad (from its start) or waypoint on or off: what its soldiers can see, all round to 1,200 m. BLUEFOR's are light blue, OPFOR's light red, ground both see purple; any number can be on. The Viewsheds box on the map bar shows or hides them all</dd>
 </dl>
 <p class="hint">Orders: <b>Move</b> goes to the destination, halting to fight on contact and carrying on;
@@ -256,11 +266,17 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       <span class="pointer" data-ui="pointer"></span>
       <span class="spacer"></span>
       <span class="mapbar-tool" data-ui="viewshed-status"></span>
+      <label class="mapbar-check" data-ui="rings-toggle" title="Show or hide every range ring turned on (each squad's or vehicle's rings button, in its panel)">
+        <input type="checkbox" data-ui="show-rings" checked> Range rings
+      </label>
       <label class="mapbar-check" data-ui="viewshed-toggle" title="Show or hide every viewshed turned on (each squad's start or waypoint: its eye in the squad panel)">
         <input type="checkbox" data-ui="show-viewshed" checked> Viewsheds
       </label>
-      <label class="mapbar-check" data-ui="opfor-toggle" title="Show the OPFOR squads and their plans">
+      <label class="mapbar-check" data-ui="opfor-toggle" title="Show the OPFOR squads and vehicles, and their plans">
         <input type="checkbox" data-ui="show-opfor" checked> Show OPFOR
+      </label>
+      <label class="mapbar-check" data-ui="waypoints-toggle" title="Hide every waypoint and route (with defences' sectors and ambushes' kill zones), in 2D and 3D: only the units are shown">
+        <input type="checkbox" data-ui="hide-waypoints"> Hide waypoints
       </label>
       <span class="mapbar-tool" data-ui="tool-label"></span>
       <div class="view-toggle" role="group" aria-label="Map view">
@@ -340,7 +356,9 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     save: o.save,
     notify,
   });
-  const editor = createBattleMapEditor(planner);
+  /** What the map shows (the map bar's boxes, each unit's range rings), in every stage. */
+  const show = createMapShow();
+  const editor = createBattleMapEditor(planner, show);
 
   /** The viewsheds turned on ("Viewsheds", below); declared first, as the map draws them. */
   const viewshed = {
@@ -442,6 +460,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     combatUi,
     notify,
     (id) => planner.squad(id)?.organization ?? 'squad',
+    show,
   );
   const current = (): MapEditor => (display() ? combatEditor : editor);
   /** The map's editor: the planner's, or in Combat and the review, the battle's. */
@@ -541,6 +560,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         combatLog: c.session.combatLog,
         seconds: c.renderSeconds,
         ended: c.ended,
+        timeScale: playbackRate(c),
       };
     const r = inReview();
     if (r)
@@ -550,6 +570,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
         combatLog: r.replay.combatLog,
         seconds: r.seconds,
         ended: false,
+        timeScale: r.speed as number,
       };
     return null;
   };
@@ -565,7 +586,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       // Where each soldier is at the time drawn (the motion log: the battle may run on elsewhere).
       const tick = Math.floor(c.seconds * c.log.tickRateHz);
       const units: UnitMarker[] = c.battle.squads.flatMap((squad) =>
-        squad.soldierIds.map((id) => {
+        (show.showOpfor || squad.side === 'BLUEFOR' ? squad.soldierIds : []).map((id) => {
           c.log.read(c.log.indexOf(id), tick, figureSample);
           return {
             id: soldierId(id),
@@ -582,20 +603,27 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
       const squads = inCombat()?.squads() ?? inReview()?.squads() ?? [];
       return {
         units,
-        clock: { log: c.log, combatLog: c.combatLog, seconds: c.seconds, ended: c.ended },
+        clock: {
+          log: c.log,
+          combatLog: c.combatLog,
+          seconds: c.seconds,
+          ended: c.ended,
+          timeScale: c.timeScale,
+        },
         weapons: combatWeapons.weapons,
         earthworks: squads.flatMap((s) => s.earthworks),
-        vehicles: (inCombat()?.vehicles() ?? inReview()?.vehicles() ?? []).map((v) => ({
-          id: v.id,
-          side: v.side,
-          kind: v.kind,
-        })),
+        vehicles: (inCombat()?.vehicles() ?? inReview()?.vehicles() ?? [])
+          .filter((v) => show.showOpfor || v.side === 'BLUEFOR')
+          .map((v) => ({
+            id: v.id,
+            side: v.side,
+            kind: v.kind,
+          })),
       };
     }
     const f = planner.figures();
     const selected = planner.selection.squadId;
-    const hidden = (side: Side) =>
-      side === 'OPFOR' && planner.stage === 'bluefor' && !editor.showOpfor;
+    const hidden = (side: Side) => side === 'OPFOR' && !show.showOpfor;
     const units: UnitMarker[] = f.soldiers
       .filter((s) => !hidden(s.side))
       .map((s) => ({
@@ -757,16 +785,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     const at = pin.orderIndex === null ? s?.position : s?.plan[pin.orderIndex]?.destination;
     return at ? { x: at.east, y: at.north } : null;
   }
-  /** The viewsheds to show now: planning, shown, and OPFOR's unless OPFOR is hidden. */
+  /**
+   * The viewsheds to show now (in every stage: those turned on in Setup and
+   * Planning), if shown, and OPFOR's unless OPFOR is hidden.
+   */
   const shownPins = (): readonly ViewshedPin[] => {
-    const stage = planner.stage;
-    if ((stage !== 'scenario' && stage !== 'bluefor') || !showViewshed.checked) return [];
+    if (!showViewshed.checked) return [];
     return planner
       .viewsheds()
-      .filter(
-        (p) =>
-          stage !== 'bluefor' || showOpfor.checked || planner.squad(p.squadId)?.side !== 'OPFOR',
-      );
+      .filter((p) => showOpfor.checked || planner.squad(p.squadId)?.side !== 'OPFOR');
   };
   const pinKey = (p: ViewshedPin) => `${p.squadId}|${String(p.orderIndex)}`;
   /** As far as a layer's viewshed is ready (the first look, then each refinement), working on it if `work`. */
@@ -797,10 +824,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     return best;
   };
   const updateViewshed = () => {
-    const stage = planner.stage;
-    const planning = (stage === 'scenario' || stage === 'bluefor') && showViewshed.checked;
-    // Planning with viewsheds shown: the workers start now, before any is turned on.
-    if (planning && !viewshed.service) {
+    // Viewsheds shown: the workers start now, before any is turned on.
+    if (showViewshed.checked && !viewshed.service) {
       viewshed.service = createViewshedService(o.terrain);
       viewshed.service.warmUp();
     }
@@ -861,7 +886,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (viewshed.layers.size === 0) service?.cancel();
     showComposed();
     setText(ui('viewshed-status'), viewshed.pending ? 'Working out viewsheds…' : '');
-    ui('viewshed-toggle').hidden = stage !== 'scenario' && stage !== 'bluefor';
   };
   /** Composes the layers' results again when any has changed, and gives them to a new 3D view. */
   const showComposed = () => {
@@ -909,11 +933,39 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     }
   }
 
+  /** The map bar's boxes: they change what the map shows, and the panels with it. */
+  const shownChanged = (box: HTMLInputElement) => {
+    box.blur();
+    lastVersion = -1;
+    combatPanelsAt = -Infinity;
+    reviewPanelsAt = -Infinity;
+  };
   const showOpfor = ui('show-opfor') as HTMLInputElement;
   showOpfor.addEventListener('change', () => {
-    editor.showOpfor = showOpfor.checked;
-    lastVersion = -1;
+    show.showOpfor = showOpfor.checked;
+    shownChanged(showOpfor);
   });
+  const showRings = ui('show-rings') as HTMLInputElement;
+  showRings.addEventListener('change', () => {
+    show.rangeRings = showRings.checked;
+    shownChanged(showRings);
+  });
+  const hideWaypoints = ui('hide-waypoints') as HTMLInputElement;
+  hideWaypoints.addEventListener('change', () => {
+    show.hideWaypoints = hideWaypoints.checked;
+    shownChanged(hideWaypoints);
+  });
+  /** A squad's or vehicle's range rings, on or off. */
+  const toggleRings = (id: string) => {
+    if (show.ringed.has(id)) show.ringed.delete(id);
+    else show.ringed.add(id);
+    // Turning one on shows them all again.
+    if (show.ringed.has(id) && !showRings.checked) {
+      showRings.checked = true;
+      show.rangeRings = true;
+    }
+    shownChanged(showRings);
+  };
 
   // --- Stages -------------------------------------------------------------
 
@@ -969,6 +1021,40 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     planner.setStage(target);
     if (target === 'scenario' || target === 'bluefor') o.setAddress(target);
     lastVersion = -1;
+  };
+  /**
+   * Restarts the battle (after asking): fought again from the start, from the
+   * scenario as planned; orders and route changes given during it are lost.
+   */
+  const restartCombat = (c: Combat) => {
+    if (c.ended) return;
+    const wasPlaying = c.playing;
+    c.pause();
+    confirm({
+      message: `Restart the battle from the start? It goes back to T+ 00:00.0, as planned: orders and route changes given during it are lost.`,
+      action: 'Restart',
+      onConfirm: () => {
+        if (combat !== c) return;
+        const speed = c.speed;
+        c.dispose();
+        combat = createCombat({
+          terrain: o.terrain,
+          definition: planner.definition,
+          notify,
+          driver: battleDriver(),
+        });
+        combat.setSpeed(speed);
+        if (wasPlaying) combat.play();
+        combatUi.selectedOrder = null;
+        combatUi.tool = null;
+        combatUi.ambush = null;
+        combatUi.second = null;
+        lastFrameMs = null;
+        combatPanelsAt = -Infinity;
+        notify('The battle restarts from the start.');
+      },
+    });
+    if (wasPlaying) notify('Paused. Restart the battle, or Cancel to go on.');
   };
   /** Ends the battle (after asking) and opens the review. */
   const endCombat = () => {
@@ -1230,7 +1316,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input class="squad-name" data-act="rename" value="${escapeHtml(s.name)}" aria-label="Squad name" maxlength="40">`
             : `<span class="squad-name">${escapeHtml(s.name)}</span>`
         }
-        ${viewshedButton(s, null)}
+        ${ringsButton(s.id, s.side, show.ringed.has(s.id))}${viewshedButton(s, null)}
       </div>
       <dl class="kv">
         <dt>Organization</dt><dd>${
@@ -1373,6 +1459,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     return `<div class="squad-head ${sideClass(v.side)}">
         <span class="side-badge">${v.side}</span>
         <span class="squad-name">${escapeHtml(v.name)}</span>
+        ${ringsButton(v.id, v.side, show.ringed.has(v.id))}
       </div>
       ${vehicleDiagnosticsHtml(v, new Map(c.vehicles().map((x) => [x.id, x.name])))}
       <h3>Route${route.length > 0 ? ` (${String(route.length)} waypoint${route.length === 1 ? '' : 's'})` : ''}</h3>
@@ -1394,6 +1481,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     return `<div class="squad-head ${sideClass(s.side)}">
         <span class="side-badge">${s.side}</span>
         <span class="squad-name">${escapeHtml(s.name)}</span>
+        ${ringsButton(s.id, s.side, show.ringed.has(s.id))}
       </div>
       <dl class="kv">${combatStatusRowsHtml(s)}</dl>
       ${planSectionHtml({
@@ -1433,6 +1521,7 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
             ? `<input class="squad-name" data-act="vehicle-rename" value="${escapeHtml(v.name)}" aria-label="Vehicle name" maxlength="40">`
             : `<span class="squad-name">${escapeHtml(v.name)}</span>`
         }
+        ${ringsButton(v.id, v.side, show.ringed.has(v.id))}
       </div>
       <dl class="kv">
         <dt>Type</dt><dd>${escapeHtml(vehicleLabel(v.kind))}</dd>
@@ -1561,7 +1650,8 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     else if (cact === 'play') {
       if (c.playing) c.pause();
       else c.play();
-    } else if (cact === 'centre') {
+    } else if (cact === 'restart') restartCombat(c);
+    else if (cact === 'centre') {
       const s = c.squad(combatUi.selected);
       const v = c.vehicle(combatUi.selected);
       if (s) centreOn(s.centre);
@@ -1789,6 +1879,11 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
 
   aside.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    const rings = target.closest<HTMLElement>('[data-act="range-rings"]');
+    if (rings?.dataset['unit']) {
+      toggleRings(rings.dataset['unit']);
+      return;
+    }
     if (combatClick(target, event.detail)) return;
     if (reviewClick(target, event.detail)) return;
     if (inCombat()) {
@@ -2107,7 +2202,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     if (planner.version === lastVersion) return;
     lastVersion = planner.version;
     app.dataset['stage'] = stage;
-    ui('opfor-toggle').hidden = stage !== 'bluefor';
     ui('new-scenario').hidden = stage !== 'scenario';
     setText(
       ui('tools-title'),
@@ -2158,12 +2252,15 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const updateCombatPanels = (c: Combat) => {
     const clock = app.querySelector<HTMLElement>('[data-ui="combat-clock"]');
     if (clock) setText(clock, clockText(c.renderSeconds));
+    // The speed actually kept, when well below the speed chosen.
+    const actual = app.querySelector<HTMLElement>('[data-ui="combat-actual"]');
+    const slower = slowerSpeed(c);
+    if (actual) setText(actual, slower === null ? '' : `(${slower.toFixed(1)}×)`);
     const now = performance.now();
     if (now - combatPanelsAt < 150 && lastVersion === planner.version) return;
     combatPanelsAt = now;
     lastVersion = planner.version;
     app.dataset['stage'] = planner.stage;
-    ui('opfor-toggle').hidden = true;
     setText(ui('tools-title'), STAGE_NAMES[planner.stage]);
     setHtml(ui('tools'), toolsHtml());
     setText(ui('tool-hint'), planner.stage === 'combat' ? combatHint(c) : '');
@@ -2199,7 +2296,6 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
   const updateReviewPanels = (r: Review) => {
     if (!reviewToolsShown) {
       app.dataset['stage'] = planner.stage;
-      ui('opfor-toggle').hidden = true;
       setText(ui('tools-title'), STAGE_NAMES.aar);
       setText(ui('tool-hint'), '');
       setText(ui('tool-label'), '');
@@ -2257,8 +2353,14 @@ export function startBattlePage(app: HTMLElement, o: BattlePageOptions): () => v
     setHtml(
       ui('squad'),
       car
-        ? combatVehicleHtml(car, new Map(r.vehicles().map((x) => [x.id, x.name])))
-        : combatSquadHtml(r.squad(combatUi.selected)) + phasesHtml(r, combatUi.selected),
+        ? combatVehicleHtml(
+            car,
+            new Map(r.vehicles().map((x) => [x.id, x.name])),
+            ringsButton(car.id, car.side, show.ringed.has(car.id)),
+          )
+        : combatSquadHtml(r.squad(combatUi.selected), (s) =>
+            ringsButton(s.id, s.side, show.ringed.has(s.id)),
+          ) + phasesHtml(r, combatUi.selected),
     );
     setHtml(ui('roster'), combatRosterHtml(r, combatUi));
     setHtml(ui('events'), combatEventsHtml(reviewDisplay(r), 60, true));

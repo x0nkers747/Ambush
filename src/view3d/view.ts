@@ -376,11 +376,12 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
   const vehicles = createVehicleLayer();
   scene.add(vehicles.group);
   scene.add(impacts.group);
-  const tracers = createTracerLayer();
+  const weaponKinds = new Map(COMBAT_WEAPONS.map((w) => [w.id, w.kind as string]));
+  const weaponKindOf = (w: string) => weaponKinds.get(w) ?? 'machineGun';
+  const tracers = createTracerLayer(weaponKindOf);
   scene.add(tracers.group);
   // Combined arms' fire, missiles, impacts and burning wrecks (docs/combined-arms.md §11).
-  const weaponKinds = new Map(COMBAT_WEAPONS.map((w) => [w.id, w.kind as string]));
-  const heavy = createHeavyEffectsLayer((w) => weaponKinds.get(w) ?? 'machineGun');
+  const heavy = createHeavyEffectsLayer(weaponKindOf);
   scene.add(heavy.group);
   const aftermath = createAftermath();
   /** A stand-in crowd for measuring (`ambushBenchCharacters`), replacing the soldiers while set. */
@@ -911,14 +912,23 @@ export function createBattlefieldView3d(o: BattlefieldView3dOptions): Battlefiel
       // Tracers and grenade explosions, on the battle's clock.
       if (figures && !bench) {
         impacts.update(figures.clock.combatLog, figures.clock.seconds, surfaceAt, eye.position);
+        // Rounds fly at one speed on screen, whatever the battle's.
+        const timeScale = figures.clock.timeScale ?? 1;
         tracers.update(
           figures.clock.log,
           figures.clock.combatLog,
           figures.clock.seconds,
           surfaceAt,
           eye.position,
+          timeScale,
         );
-        heavy.update(figures.clock.combatLog, figures.clock.seconds, vehicles.wrecks, surfaceAt);
+        heavy.update(
+          figures.clock.combatLog,
+          figures.clock.seconds,
+          vehicles.wrecks,
+          surfaceAt,
+          timeScale,
+        );
       } else {
         impacts.update([], 0, surfaceAt, eye.position);
         tracers.update(NO_SOLDIERS.log, [], 0, surfaceAt, eye.position);
