@@ -75,6 +75,16 @@ dig-in `d` (0–1) scales four things for its soldiers, linearly from 1 in the o
 These come on top of posture. A prone soldier fully dug in is about a tenth as
 likely to be hit as one standing in the open (0.3 × 0.35).
 
+**From behind.** A position protects toward its front: its parapet, its
+sandbags face his share of the sector (the way his position faces, recorded
+as he digs). Against fire from within 60° of that, `d` is his full dig-in;
+from more than 120° off it (behind him), none, as in the open; between,
+less and less (half at 90°, from the flank). This is the hit chance of aimed
+and area fire, a blast's fragments, and the suppression fire puts on him,
+from soldiers and vehicles alike, by where the fire comes from (the shooter,
+or the burst); detection is not changed (`dugInFrom`, `fof/defence.ts`).
+Attacked from the rear, a defence is as exposed as a squad in the open.
+
 In the simulation the soldiers stay prone: a soldier standing in a trench about
 1.2 m deep has his eyes and his head and shoulders about where a prone soldier's
 are. In the 3D view he is drawn standing in his position (below).

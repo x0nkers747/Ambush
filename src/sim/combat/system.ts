@@ -5,7 +5,7 @@ import { nextFloat } from '../rng';
 import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
 import type { VehicleState } from '../vehicles';
-import { dugInFactor, effectiveDugIn } from '../fof/defence';
+import { dugInFactor, dugInFrom, effectiveDugIn } from '../fof/defence';
 import {
   chanceIn,
   confidenceAt,
@@ -1216,7 +1216,10 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
       const pk =
         areaIncapacitation(area, d) *
         (s.posture === 'prone' ? area.proneFactor : 1) *
-        dugInFactor(effectiveDugIn(force ?? null), context.setup.config.force.dugInHitFactor);
+        dugInFactor(
+          dugInFrom(force ?? null, s, { x: ix, y: iy }),
+          context.setup.config.force.dugInHitFactor,
+        );
       if (s.id === soldier.id) p = pk;
       if (nextFloat(state.rng) < pk && !shot.volley.down.has(s.id)) {
         down.push(s.id);
@@ -1237,7 +1240,10 @@ function shoot(context: FofContext, combat: CombatState, shot: Shot): void {
       1,
       base *
         fire.postureHitMultipliers[soldier.posture] *
-        dugInFactor(effectiveDugIn(force ?? null), context.setup.config.force.dugInHitFactor) *
+        dugInFactor(
+          dugInFrom(force ?? null, soldier, shot.from),
+          context.setup.config.force.dugInHitFactor,
+        ) *
         shot.accuracy,
     );
     hit = nextFloat(state.rng) < p;
@@ -1312,7 +1318,7 @@ function suppressNear(
     if (share <= 0) continue;
     const prone = s.posture === 'prone' ? setup.config.suppression.proneSuppressionFactor : 1;
     const dug = dugInFactor(
-      effectiveDugIn(fof.forces[enemy.force] ?? null),
+      dugInFrom(fof.forces[enemy.force] ?? null, s, shot.from),
       setup.config.force.dugInSuppressionFactor,
     );
     shot.volley.suppression.set(

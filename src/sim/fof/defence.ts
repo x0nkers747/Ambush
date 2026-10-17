@@ -261,5 +261,39 @@ export function effectiveDugIn(force: FofForce | null | undefined): number {
   }
 }
 
+/**
+ * A fighting position (its parapet, its sandbags) protects fully against
+ * fire from within this of the way it faces (rad), not at all from beyond
+ * this (from behind); between, less and less.
+ */
+const POSITION_FRONT_RAD = Math.PI / 3;
+const POSITION_REAR_RAD = (2 * Math.PI) / 3;
+
+/**
+ * How far a soldier is dug in against fire from `from` (0–1): his force's
+ * dig-in (`effectiveDugIn`) from the front of his fighting position (within
+ * 60° of the way it faces, his share of the sector), none from behind (more
+ * than 120° off it), less and less between; attacked from the rear, a
+ * defender is as exposed as in the open. Before his position is recorded
+ * (still deploying), or fire from where he is (a blast on him), as dug in.
+ */
+export function dugInFrom(
+  force: FofForce | null | undefined,
+  soldier: { readonly id: string; readonly position: Vec2 },
+  from: Vec2,
+): number {
+  const dug = effectiveDugIn(force);
+  if (dug <= 0 || !force) return dug;
+  const work = force.earthworks.find((w) => w.soldierId === soldier.id);
+  const dx = from.x - soldier.position.x;
+  const dy = from.y - soldier.position.y;
+  if (!work || (dx === 0 && dy === 0)) return dug;
+  let off = azimuthOf(dx, dy) - work.azimuth;
+  off = Math.abs(off - 2 * Math.PI * Math.round(off / (2 * Math.PI)));
+  if (off <= POSITION_FRONT_RAD) return dug;
+  if (off >= POSITION_REAR_RAD) return 0;
+  return (dug * (POSITION_REAR_RAD - off)) / (POSITION_REAR_RAD - POSITION_FRONT_RAD);
+}
+
 /** A factor that is 1 in the open and `full` fully dug in, linear between. */
 export const dugInFactor = (dugIn: number, full: number): number => 1 - dugIn * (1 - full);

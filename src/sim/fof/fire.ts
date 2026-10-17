@@ -6,7 +6,7 @@ import { sightLineTracer } from '../sight-tracer';
 import type { Soldier, SoldierId } from '../state';
 import type { AreaEffect, FofWeapon } from './config';
 import { ambushSectors } from './ambush';
-import { dugInFactor, effectiveDugIn } from './defence';
+import { dugInFactor, dugInFrom } from './defence';
 import { enter, firingOnTheMove, pressingOn, underFire } from './force';
 import { sightBetween } from './sight-cache';
 import type { FofContext } from './system';
@@ -72,11 +72,17 @@ function pointInSight(context: FofContext, shooter: Soldier, p: Vec2): boolean {
   });
 }
 
-/** A soldier's chance of being hit, dug in (docs/behavior-lab/force-on-force/09): 1 in the open. */
-function dugInHit(context: FofContext, target: Soldier): number {
+/**
+ * A soldier's chance of being hit, dug in (docs/behavior-lab/force-on-force/09),
+ * by fire from `from`: 1 in the open, or from behind his position.
+ */
+function dugInHit(context: FofContext, target: Soldier, from: Vec2): number {
   const member = context.fof.soldiers[context.memberIndex.get(target.id) ?? -1];
   const force = member ? context.fof.forces[member.force] : undefined;
-  return dugInFactor(effectiveDugIn(force ?? null), context.setup.config.force.dugInHitFactor);
+  return dugInFactor(
+    dugInFrom(force ?? null, target, from),
+    context.setup.config.force.dugInHitFactor,
+  );
 }
 
 /** A round's hit probability is never raised by an ambush's steady fire beyond this. */
@@ -313,7 +319,7 @@ function aimedTarget(
     const base =
       hitProbabilityAt(weapon, range) *
       context.setup.config.fire.postureHitMultipliers[target.posture] *
-      dugInHit(context, target) *
+      dugInHit(context, target, shooter.position) *
       seen *
       shooterFactor(context, member);
     // An ambush's steady fire, in its first moments.
@@ -367,7 +373,7 @@ function areaTarget(
     near && seen > 0
       ? hitProbabilityAt(weapon, best.range) *
         setup.config.fire.postureHitMultipliers[near.posture] *
-        dugInHit(context, near) *
+        dugInHit(context, near, shooter.position) *
         setup.config.fire.areaFireHitFactor *
         seen *
         shooterFactor(context, member)
@@ -418,6 +424,8 @@ function suppressAround(
   radiusM: number,
 ): void {
   const { fof, setup } = context;
+  // The fire comes from the shooter (a position protects only toward its front).
+  const from = soldierOf(context, member).position;
   for (const enemy of fof.soldiers) {
     if (!hostile(fof, member, enemy)) continue;
     const s = soldierOf(context, enemy);
@@ -428,7 +436,7 @@ function suppressAround(
     const prone = s.posture === 'prone' ? setup.config.suppression.proneSuppressionFactor : 1;
     // Dug in, less suppressed.
     const dug = dugInFactor(
-      effectiveDugIn(fof.forces[enemy.force] ?? null),
+      dugInFrom(fof.forces[enemy.force] ?? null, s, from),
       setup.config.force.dugInSuppressionFactor,
     );
     volley.suppression.set(
@@ -631,7 +639,7 @@ function grenade(
     const p =
       areaIncapacitation(area, d) *
       (s.posture === 'prone' ? area.proneFactor : 1) *
-      dugInHit(context, s);
+      dugInHit(context, s, impact);
     if (nextFloat(state.rng) < p && !volley.down.has(s.id)) {
       casualties.push(s.id);
       other.stats.timesHit += 1;
